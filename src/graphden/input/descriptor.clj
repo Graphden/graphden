@@ -148,12 +148,16 @@
     (input/input-contract descriptor)))
 
 
+(defn find-node
+  "Find a resolved descriptor node by identity, or nil if the path is absent."
+  [descriptor path]
+  (reduce (fn [node id] (some #(when (= id (:id %)) %) (:fields node))) descriptor path))
+
+
 (defn node-at
   "Read a resolved descriptor node by stable field-ID path."
   [descriptor path]
-  (reduce (fn [node id]
-            (or (some #(when (= id (:id %)) %) (:fields node))
-                (context/reject! :unknown-field {:path path}))) descriptor path))
+  (or (find-node descriptor path) (context/reject! :unknown-field {:path path})))
 
 
 (defn- record-body

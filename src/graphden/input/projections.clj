@@ -33,12 +33,12 @@
 
 (defn- reject-value-cycles!
   [graph routes]
-  (let [all (entries graph)
+  (let [all (into (entries graph) (map #(vector (:from %) {})) (:input-routes graph))
         projection-edges (into {} (map (fn [{:keys [from source]}]
                                          [from (source-bindings all source)])) routes)
         edges (reduce (fn [edges {:keys [from to]}]
                         (update edges from (fnil into #{})
-                                (keys (get-in graph [:scopes (second to) :bindings]))))
+                                (filter #(= to (first %)) (keys all))))
                       projection-edges (:dependencies graph))
         roots (reverse (sort-by context/address-sort-key (keys edges)))]
     (loop [pending (mapv #(vector % false) roots) active #{} visited #{}]
@@ -70,11 +70,16 @@
                                   :actual-type (descriptor/read-type-at source-contract (second source))
                                   :required? (or (empty? (second address)) (:required target))}))))
                      (sort-by (comp context/address-sort-key key) (entries graph)))]
-    (reject-value-cycles! graph routes)
-    (reduce (fn [result {:keys [from source actual-type]}]
-              (assoc-in result [:scopes (second (first from)) :bindings from :reference]
-                        {:mode :projection :actual-type actual-type :source source}))
-            (assoc graph :projections routes) routes)))
+    (let [input-routes (mapv (fn [{:keys [source] :as route}]
+                               (assoc route :actual-type
+                                      (descriptor/read-type-at (contract-at graph (first source)) (second source))))
+                             (:input-routes graph))
+          graph (assoc graph :input-routes input-routes)]
+      (reject-value-cycles! graph (concat routes input-routes))
+      (reduce (fn [result {:keys [from source actual-type]}]
+                (assoc-in result [:scopes (second (first from)) :bindings from :reference]
+                          {:mode :projection :actual-type actual-type :source source}))
+              (assoc graph :projections routes) routes))))
 
 
 (defn- required-sources
@@ -96,7 +101,7 @@
    ancestors. Existing source occupancy still wins. Chained routes propagate
    demand without marking an unrelated reference use required."
   [graph]
-  (let [demands (group-by (comp second first) (required-sources (:projections graph)))
+  (let [demands (group-by (comp second first) (required-sources (concat (:projections graph) (:input-routes graph))))
         scopes (into {}
                      (map (fn [[path node]]
                             (let [contract (reduce (fn [contract [_ field-path]]
@@ -107,9 +112,13 @@
                                                              contract (range 1 (inc (count field-path)))))
                                                    (:configured-contract node) (get demands path))
                                   scope [(:fn-id graph) path]
-                                  remaining (input/remaining-input contract (:bindings node) scope)]
+                                  remaining (input/remaining-input contract (:bindings node) scope)
+                                  visible? (fn [field-path]
+                                             (not-any? (fn [[hidden-scope hidden-path]]
+                                                         (and (= scope hidden-scope) (prefix? hidden-path field-path)))
+                                                       (:hidden-input-addresses graph)))]
                               [path (assoc node :remaining-contract (:descriptor remaining)
-                                           :required-addresses (mapv #(vector scope %) (:missing remaining)))])))
+                                           :required-addresses (into [] (comp (filter visible?) (map #(vector scope %))) (:missing remaining)))])))
                      (:scopes graph))]
     (assoc graph :scopes scopes
            :required-addresses (into [] (mapcat (comp :required-addresses val))

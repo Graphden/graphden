@@ -2,12 +2,14 @@
   "Offline structural analysis with explicit checker and closure coverage.
    Never evaluates references, reconstructs flat :args, or mutates registries."
   (:require
+    [graphden.input.captures :as captures]
     [graphden.input.checking :as checking]
     [graphden.input.context :as context]
     [graphden.input.core :as input]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.metadata :as metadata]
+    [graphden.input.obligations :as obligations]
     [graphden.input.projections :as projections]
     [graphden.input.rows :as rows]
     [graphden.input.scopes :as scopes]
@@ -109,7 +111,7 @@
                                        (when (= :deferred (:status proof))
                                          {:code (:reason proof) :address address})))
                                (concat (:proofs checked)
-                                       (map (fn [[id proof]] [[scope [:metadata id]] proof]) (:proofs policy))))]
+                                       (map (fn [[_ proof]] [(:address proof) proof]) (:proofs policy))))]
          {:fn-id fn-id :declared-contract declared :configured-contract contract :declaration-order declaration-order
           :scoped-rows (filterv #(seq (:scope-path %)) owned)
           :effective-contract (when (empty? closure-gaps) (substitute-node contract (:substitution checked)))
@@ -130,9 +132,10 @@
 (defn analyze-effective-input
   "Resolve value-producing reference uses into a derived scope graph. Each
    occurrence retains the shared target declaration and binding-ID use path.
-   Scoped overlays are checked against target occupancy. Callable capture
-   routing and recursive cycles remain explicit incomplete coverage; identity
-   references never traverse their target. This is an offline analysis API."
+   Scoped overlays are checked against target occupancy. Callable captures and
+   projections retain explicit routes; identity references never traverse their
+   target. Runtime obligations are separate from incomplete coverage. No graph
+   execution or signature publication occurs in this offline API."
   ([ctx fn-id] (analyze-effective-input ctx fn-id {}))
   ([ctx fn-id options]
    (context/call-with-types
@@ -143,6 +146,10 @@
              (fn [target scope overlays]
                (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))
            (projections/prepare)
+           (projections/apply-demands)
+           (as-> graph (captures/prepare ctx graph))
+           (projections/prepare)
            (checking/check-graph (:check-expression options))
            (projections/apply-demands)
+           (obligations/separate)
            (as-> graph (assoc graph :public-input (surface/project ctx graph))))))))

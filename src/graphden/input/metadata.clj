@@ -75,5 +75,5 @@
           (-> result
               (assoc :contract (descriptor/update-node contract path (constantly updated))
                      :substitution (:substitution proof))
-              (cond-> (:type-override-fn-id row) (assoc-in [:proofs (:id row)] proof)))))
+              (cond-> (:type-override-fn-id row) (assoc-in [:proofs (:id row)] (assoc proof :address [scope path] :binding-id (:id row)))))))
       {:contract contract :substitution {} :proofs {}} ordered)))

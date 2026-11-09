@@ -85,9 +85,27 @@ through these routes before invoking the existing syntax/algebra. It cannot
 rebind a reference result or an occupied child. This API is separate from source
 `:bind`; source parsing continues to use authored declarations.
 
-This implementation does not yet complete callable capture routing or runtime
-execution. Unsupported callable routes retain diagnostics
-and incomplete coverage. Wrapped identity or
+Callable parameters and captures use the shared runtime selection rules:
+authored `lambda-params []` captures everything, structural names take priority,
+and positional inference must be unambiguous. `:closures` describes invocation
+parameter routes and captures. `:input-routes` contains derived source-cell
+aliases, including stable-identity inputs forwarded through value refs. These
+are not new binding rows. Hidden invocation/captured addresses remain in the
+declared contract and disappear only from external remaining inputs.
+
+Implicit lexical routing requires the same full field-ID path in an enclosing
+use scope. Same-name fields with distinct origins remain distinct. Legacy
+name-fallback captures must be lowered to explicit projections using migration
+origins; the migrator must report unresolved cases rather than silently exposing
+new free inputs. The conformance fixture covers both the native distinction and
+the explicit projection that restores the legacy connection.
+
+A `:checked` graph has completed supported analysis, not necessarily validated
+all runtime values. Deferred checks are explicit `:obligations` with stable
+scope/path/kind identities and `:field-read` or `:container-materialization`
+triggers. A compiler must consume a supported obligation or refuse it; a container
+obligation cannot eagerly force unrelated fields when one field is read.
+Runtime execution and signature publication are not activated by this API. Wrapped identity or
 callable policies that lack an adapter are diagnosed rather than evaluated in
 the wrong mode. Reference cycles are rejected; they are never treated as empty input. A locally empty remaining record is not proof that the graph is
 ready. Public activation requires the remaining analyzer and runtime work.

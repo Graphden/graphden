@@ -33,8 +33,9 @@
 (defn analyze
   "analyze-node receives [target-fn-id [root-fn-id use-path] overlay-rows].
    The returned declared/remaining contracts remain per scope. Required
-   addresses aggregate only evaluated value/producer uses; unresolved callable
-   routing and cycles prevent complete coverage rather than guessing inputs."
+   addresses initially aggregate evaluated and callable uses. The capture pass
+   partitions callable inputs next. Cycles reject under the graph DAG invariant;
+   unresolved reference modes remain explicit incomplete coverage."
   [root-fn-id analyze-node]
   (let [nodes (volatile! {})
         edges (volatile! [])
@@ -58,13 +59,11 @@
                     (when-not (= :identity mode)
                       (vswap! edges conj edge))
                     (cond
-                      (contains? #{:value :callable-producer} mode)
+                      (contains? #{:value :callable-producer :graph-callable} mode)
                       (if (contains? (conj ancestors target) ref-id)
                         (context/reject! :reference-cycle {:address address :target-fn-id ref-id})
                         (visit ref-id child-path (overlays-for (:scoped-rows node) binding-id)
                                (conj ancestors target)))
-                      (= :graph-callable mode)
-                      (vswap! gaps conj {:code :capture-routing-required :address address})
                       (= :unresolved mode)
                       (vswap! gaps conj {:code :reference-mode-required :address address}))))))]
       (visit root-fn-id [] [] #{})

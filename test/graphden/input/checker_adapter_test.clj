@@ -104,3 +104,42 @@
                                    :expression-kind "projection" :projection-scope-path [] :projection-path [source]}}})]
     (is (thrown? clojure.lang.ExceptionInfo
           (analysis/analyze-effective-input ctx owner {:check-expression check/check-input-binding})))))
+
+
+(defn- refinement-context
+  [container?]
+  (let [[owner root scalar field binding] (repeatedly 5 random-uuid)
+        integer (:int (ids/primitive-fn-ids))
+        ctx (context/build-context
+              {:fns {owner {:input-type-fn-id root}}
+               :type-bodies (if container?
+                              {root [:refine {:value :int} [:present :value]]}
+                              {scalar [:refine :int [:> 0]]})
+               :members {root [{:slot-id field :position 0}]}
+               :fields {field {:id field :name "value" :required true
+                               :type-fn-id (if container? integer scalar)}}
+               :bindings {binding {:id binding :fn-id owner :scope-path [] :target-path [field]
+                                   :expression-kind "value" :value-present true :value 1}}})]
+    {:context ctx :owner owner :field field}))
+
+
+(deftest checked-analysis-keeps-scalar-and-container-runtime-boundaries-explicit-test
+  (doseq [[container? kind trigger] [[false :value-type :field-read]
+                                     [true :container-type :container-materialization]]]
+    (let [{:keys [owner field context]} (refinement-context container?)
+          result (analysis/analyze-effective-input context owner {:check-expression check/check-input-binding})
+          obligation (first (:obligations result))]
+      (is (= :checked (:status result)))
+      (is (= 1 (count (:obligations result))))
+      (is (= [[owner []] (if container? [] [field])] (:address obligation)))
+      (is (= kind (:kind obligation)))
+      (is (= trigger (:trigger obligation)))
+      (is (true? (get-in result [:coverage :runtime-validation-required]))))))
+
+
+(deftest supported-runtime-obligations-do-not-hide-a-missing-checker-test
+  (let [{:keys [owner context]} (refinement-context true)
+        result (analysis/analyze-effective-input context owner)]
+    (is (= :incomplete (:status result)))
+    (is (some #(= :type-checker-required (:code %)) (:diagnostics result)))
+    (is (= :container-materialization (:trigger (first (:obligations result)))))))

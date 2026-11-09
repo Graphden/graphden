@@ -26,7 +26,8 @@
   fields)
 
 
-(defn- surface-root
+(defn input-at-scope
+  "Residual presentation for one use, retaining source addresses and kinds."
   [graph scope-path]
   (let [scope [(:fn-id graph) scope-path]
         node (get-in graph [:scopes scope-path :remaining-contract])
@@ -39,11 +40,12 @@
                   (contains? (:hidden-input-addresses graph) address) nil
                   (= :bound (:state node))
                   (when (and edge (get-in graph [:scopes (second (:to edge))]))
-                    (let [child (surface-root graph (second (:to edge)))]
+                    (let [child (input-at-scope graph (second (:to edge)))]
                       (when (seq (:fields child))
                         {:kind :reference-inputs :name (:name node)
                          :input-scope (:to edge) :result-address address :result-type (:type node)
                          :reference-binding-id (:binding-id edge) :target-fn-id (:target-fn-id edge)
+                         :reference-mode (:mode edge)
                          :required (boolean (some :required-now? (:fields child)))
                          :required-now? (boolean (some :required-now? (:fields child)))
                          :type (:type child) :fields (:fields child)})))
@@ -59,7 +61,8 @@
                                                      (or (nil? fields)
                                                          (and (= (count fields) (count (:fields node)))
                                                               (every? #(= :input-field (:kind %)) fields))))}]
-                    (cond-> route fields (assoc :fields fields))))))]
+                    (when-not (and (seq (:fields node)) (empty? fields))
+                      (cond-> route fields (assoc :fields fields)))))))]
       (or (visit node []) {:kind :input-record :type {} :fields []}))))
 
 
@@ -80,7 +83,7 @@
   (context/call-with-types
     ctx
     (fn []
-      (let [root (surface-root graph [])]
+      (let [root (input-at-scope graph [])]
         {:snapshot-id (:snapshot-id ctx) :fn-id (:fn-id graph) :root root
          :routes (route-ledger root)
          :scope-contracts (into {} (map (fn [[path node]]

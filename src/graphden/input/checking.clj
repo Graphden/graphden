@@ -13,7 +13,7 @@
   (cond
     (= :unresolved (:mode reference))
     {:status :deferred :reason (:reason reference) :substitution substitution}
-    (= :graph-callable (:mode reference))
+    (and (= :graph-callable (:mode reference)) (not (:capture-resolved? reference)))
     {:status :deferred :reason :capture-analysis-required :substitution substitution}
     (nil? check-expression)
     {:status :deferred :reason :type-checker-required :substitution substitution}
@@ -99,6 +99,15 @@
                                               (:type (descriptor/node-at (:configured-contract node)
                                                                          (second address)))))
                                      (sort-by (comp context/address-sort-key key) (:bindings node))))) nodes)
+        entries (into entries
+                      (map (fn [{:keys [from source actual-type]}]
+                             {:address from
+                              :expected-type (:type (descriptor/node-at
+                                                      (get-in graph [:scopes (second (first from)) :configured-contract])
+                                                      (second from)))
+                              :expression {:kind :projection :scope (first source) :path (second source)}
+                              :reference {:mode :capture :actual-type actual-type}}))
+                      (:input-routes graph))
         first-pass (check-entries entries check-expression initial)
         final-pass (check-entries entries check-expression (:substitution first-pass))
         solution (:substitution final-pass)
@@ -108,6 +117,9 @@
                           (proof-diagnostics proofs))]
     (assoc graph :substitution solution :proofs proofs :diagnostics diagnostics
            :projections (mapv #(update % :actual-type (partial types/resolve solution)) (:projections graph))
+           :input-routes (mapv #(update % :actual-type (partial types/resolve solution)) (:input-routes graph))
+           :closures (into {} (map (fn [[address plan]]
+                                     [address (update plan :callable-type (partial types/resolve solution))])) (:closures graph))
            :scopes (into {} (map (fn [[path node]] [path (resolve-node node solution proofs)])) nodes)
            :status (if (empty? diagnostics) :checked :incomplete)
            :coverage (assoc (:coverage graph) :recursive-availability

@@ -286,22 +286,39 @@ async function openVersionHistory(page) {
     assert(lensView.recentHidden === true, 'the Recent trail hides while the ✕ lens owns the tree');
     assert(lensView.rowMarked, 'the tree row carries ✕1 under the lens');
     // The Runs tab of the (still selected) fn lists the unresolved failure.
-    // The cache behind the failed lens re-primes after the run; the tab's
-    // partial reads storage directly, so it shows the row as soon as the
-    // audit row landed — re-open until it does.
+    // History loads after the run shell and its value forms. Reopening every
+    // two seconds cancels that pipeline before history can arrive (the live
+    // failure needed 2.2s). Keep one host alive within the same total 25s budget.
     await page.waitForSelector('[data-insp-tab="stats"]', {timeout: 15000});
-    let failText = '';
-    for (let i = 0; i < 10; i++) {
-      await page.evaluate(() => document.querySelector('[data-insp-tab="stats"]').click());
-      await waitUntil(page, () => /Malformed JSON/i.test(
-        document.querySelector('#gd-insp-runs .execute-history-failures')?.textContent || ''),
-      null, 2000);
-      failText = await page.evaluate(() =>
-        document.querySelector('#gd-insp-runs .execute-history-failures')?.textContent || '');
-      if (/Malformed JSON/i.test(failText)) break;
-      await page.evaluate(() => document.querySelector('[data-insp-tab="overview"]')?.click());
-      await page.waitForTimeout(500);
+    const historyFnId = await page.evaluate(() => document.getElementById('gd-inspector')?.dataset.fnId);
+    assert(!!historyFnId, 'Runs history has a selected function identity');
+    const historyStarted = Date.now();
+    const historyResponse = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return response.request().method() === 'GET' && url.pathname === '/partials/execute-history'
+        && url.searchParams.get('fn-id') === historyFnId;
+    }, {timeout: 25000}).then(response => response.status(), () => null);
+    await page.evaluate(() => document.querySelector('[data-insp-tab="stats"]').click());
+    const historyStatus = await historyResponse;
+    const remaining = 25000 - (Date.now() - historyStarted);
+    if (remaining > 0) {
+      await waitUntil(page, fnId => document.getElementById('gd-inspector')?.dataset.fnId === fnId
+        && /Malformed JSON/i.test(document.querySelector('#gd-insp-runs .execute-history-failures')?.textContent || ''),
+      historyFnId, remaining);
     }
+    const failText = await page.evaluate(() =>
+      document.querySelector('#gd-insp-runs .execute-history-failures')?.textContent || '');
+    if (historyStatus !== 200 || !/Malformed JSON/i.test(failText)) {
+      const state = await page.evaluate(fnId => ({
+        selectedMatches: document.getElementById('gd-inspector')?.dataset.fnId === fnId,
+        tab: document.querySelector('[data-insp-tab][aria-selected="true"]')?.dataset.inspTab,
+        formReady: !!document.querySelector('.execute-popover.visible'),
+        historyError: !!document.querySelector('#gd-insp-runs .execute-history-error'),
+      }), historyFnId);
+      console.error('Runs history readiness:', JSON.stringify({status: historyStatus,
+        elapsedMs: Date.now() - historyStarted, ...state}));
+    }
+    assert(historyStatus === 200, 'the selected function history request completed successfully');
     assert(/Malformed JSON/i.test(failText),
       'the Runs tab lists the unresolved failure with its message (got: ' + failText.slice(0, 160) + ')');
     const dismissBtn = await page.evaluate(() => {

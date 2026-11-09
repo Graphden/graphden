@@ -45,7 +45,7 @@
     :identity {:op :literal :value (:fn-id expression)}
     :projection {:op :read :source (:source reference)}
     (:value :callable-producer)
-    (let [dependency (filter #(= address (:from %)) (:dependencies analysis))]
+    (let [dependency (get (::dependencies analysis) address)]
       (when-not (= 1 (count dependency))
         (reject! :dependency-mismatch {:address address :binding-id binding-id}))
       (let [{:keys [to target-fn-id]} (first dependency)]
@@ -124,7 +124,8 @@
    Free leaves remain parameters; unsupported closures/obligations fail closed."
   [analysis {:keys [snapshot-id implementations target-names]}]
   (checked-plan! analysis snapshot-id)
-  (let [root (:root-scope analysis)
+  (let [analysis (assoc analysis ::dependencies (group-by :from (:dependencies analysis)))
+        root (:root-scope analysis)
         routes (group-by :from (:input-routes analysis))
         _ (doseq [[address entries] routes]
             (when-not (= 1 (count entries)) (reject! :duplicate-input-route {:address address})))

@@ -129,11 +129,16 @@ thunk exactly once, so an Atom, Delay or marked callable returned by a reference
 is passed through unchanged. Nested structured records remain lookup views.
 Optional absence, explicit nil and false are distinct. No default is invented.
 
-Memo keys are built without field reads. Known eager literal/parameter values
-retain value equality, with their field guard type. A computed occurrence is
-identified by its authored binding ID, target and transitive input keys. Its
-fresh runtime cell address is not a call specialization: otherwise two uses of
-one named parent containing its own reference would repeat the parent's effect.
+Memo keys are built without field reads, relative to the target being memoized.
+Known eager literal/parameter values retain value equality, with their field
+guard type. Computations inside that target's scope subtree use authored binding
+ID, target and transitive input keys. Their fresh cell addresses are not a call
+specialization: otherwise two uses of one named parent containing its own
+reference would repeat the parent's effect. Computed captures outside the target
+subtree use the actual source cell's invocation-local identity. Replacing that
+identity with only an authored binding ID would reuse a stale capture when two
+root executions share a request cache. A child's capture can therefore be local
+to its parent's memo key and external to its own key.
 Scoped overrides change actual input keys; the use path is not a blanket cache
 partition. The fixture refuses unknown/lazy input key shapes or inputs exceeding
 the eager-data admission budget instead of silently replacing equality with a

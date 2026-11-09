@@ -54,30 +54,33 @@
 (defn- legacy-closure
   "Independent legacy compilation over the same FLAT declarations. Never
    shares a runtime context or memo with the canonical compiler under test."
-  [definitions functions]
-  (let [{:keys [context]} (fixture/model definitions :root)
-        graph {:fns (into (mapv (fn [[name id]] {:id id :name (clojure.core/name name)})
-                                (ids/primitive-fn-ids)) (vals (:fns context)))
-               :slots (vec (vals (:fields context)))
-               :fn-slots (vec (mapcat (fn [[fn-id row]]
-                                        (map #(assoc % :id (random-uuid) :fn-id fn-id)
-                                             (get-in context [:members (:input-type-fn-id row)]))) (:fns context)))
-               :bindings (mapv #(assoc % :slot-id (first (:target-path %))) (vals (:bindings context)))
-               :list-items []}
-        lookup (assoc (lookups/build-lookups graph) :base-fns functions)
-        registry (atom {})]
-    (letfn [(build
-              [owner]
-              (let [id (fixture/id owner)]
-                (or (get @registry id)
-                    (let [children (into {} (keep (fn [expression]
-                                                    (when-let [target (:ref expression)]
-                                                      [(fixture/id target) (build target)])))
-                                         (vals (get-in definitions [owner :bindings])))
-                          closure (eager/compile-fn id lookup children)]
-                      (swap! registry assoc id closure)
-                      closure))))]
-      (build :root))))
+  ([definitions functions] (legacy-closure definitions functions {}))
+  ([definitions functions {:keys [extra-bindings extra-refs]}]
+   (let [{:keys [context]} (fixture/model definitions :root)
+         graph {:fns (into (mapv (fn [[name id]] {:id id :name (clojure.core/name name)})
+                                 (ids/primitive-fn-ids)) (vals (:fns context)))
+                :slots (vec (vals (:fields context)))
+                :fn-slots (vec (mapcat (fn [[fn-id row]]
+                                         (map #(assoc % :id (random-uuid) :fn-id fn-id)
+                                              (get-in context [:members (:input-type-fn-id row)]))) (:fns context)))
+                :bindings (into (mapv #(assoc % :slot-id (first (:target-path %))) (vals (:bindings context)))
+                                extra-bindings)
+                :list-items []}
+         lookup (assoc (lookups/build-lookups graph) :base-fns functions)
+         registry (atom {})]
+     (letfn [(build
+               [owner]
+               (let [id (fixture/id owner)]
+                 (or (get @registry id)
+                     (let [children (into {} (keep (fn [expression]
+                                                     (when-let [target (:ref expression)]
+                                                       [(fixture/id target) (build target)])))
+                                          (concat (vals (get-in definitions [owner :bindings]))
+                                                  (map #(hash-map :ref %) (get extra-refs owner))))
+                           closure (eager/compile-fn id lookup children)]
+                       (swap! registry assoc id closure)
+                       closure))))]
+       (build :root)))))
 
 
 (defn- invoke
@@ -312,3 +315,44 @@
                                                              definitions {:root pair :child (fn [_ _] (swap! reads inc) "one")})})]
     (is (= ["one" "one"] (invoke closure)))
     (is (= 1 @reads))))
+
+
+(defn- captured-computation-closure
+  [definitions functions]
+  (let [{:keys [context]} (fixture/model definitions :root)
+        row {:id (fixture/id :capture) :fn-id (fixture/id :root)
+             :scope-path [(fixture/id :child-use)]
+             :target-path (fixture/field-path :child [:source])
+             :expression-kind "projection" :projection-scope-path []
+             :projection-path (fixture/field-path :root [:source])}
+        context (assoc-in context [:bindings (:id row)] row)
+        plan (analysis/analyze-effective-input context (fixture/id :root)
+                                               {:check-expression (requiring-resolve 'graphden.types.check/check-input-binding)})
+        implementations (-> (fixture/implementations definitions functions)
+                            (assoc-in [(fixture/id :root) :argument-paths] {:x (fixture/field-path :root [:x])})
+                            (assoc-in [(fixture/id :root) :root-entry :args] {:x :int}))]
+    (compile/compile-checked plan {:context context :implementations implementations})))
+
+
+(deftest computed-capture-does-not-reuse-an-earlier-invocation-in-request-cache
+  (let [definitions {:root {:input {:source :int :x :int} :return :int
+                            :bindings {[:source] {:ref :source} [:x] {:ref :child :id :child-use}}}
+                     :child {:input {:source :int} :return :int}
+                     :source {:input {} :return :int}}
+        old-compiler (fn [definitions functions]
+                       (legacy-closure
+                         (-> definitions (update-in [:root :input] dissoc :source)
+                             (update-in [:root :bindings] dissoc [:source])) functions
+                         {:extra-refs {:root [:source]}
+                          :extra-bindings [{:id (fixture/id :legacy-env) :fn-id (fixture/id :root)
+                                            :slot-id (first (fixture/field-path :child [:source]))
+                                            :ref-fn-id (fixture/id :source)}]}))
+        run (fn [compiler]
+              (let [reads (atom 0)
+                    closure (compiler definitions {:root echo
+                                                   :child (fn [args _] (runtime/resolve-arg args :source))
+                                                   :source (fn [_ _] (swap! reads inc))})]
+                (binding [eager/*request-call-cache* (java.util.HashMap.)
+                          eager/*always-fresh-fn-ids* (atom #{(fixture/id :source)})]
+                  [[(invoke closure) (invoke closure)] @reads])))]
+    (is (= [[1 2] 2] (run old-compiler) (run captured-computation-closure)))))

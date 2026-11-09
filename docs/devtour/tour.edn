@@ -782,6 +782,11 @@
            preserve unread fields and pass actual values through the outer-thunk base ABI once.
            Dependencies reuse the existing memo, effect, cancellation and trace machinery.
            Production legacy lowering stays active until the canonical compiler covers all kinds."}
+    {:ns graphden.input.memo :defn scope-keys
+     :say "Builds nonforcing memo inputs relative to each target scope. Local authored computations
+           share provenance across repeated named uses; computed captures outside the target keep
+           their invocation-local source cell identity. Known literals retain value equality,
+           preventing both repeated local effects and stale captures across request-cache reuse."}
     {:ns graphden.input.capture :defn safe-value?
      :say "Admits bounded eager data before optional trace serialization. Deferred map views,
            lazy sequences and unknown objects fail closed without a value read; capture therefore

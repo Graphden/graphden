@@ -52,7 +52,7 @@
              "^test/graphden/input/module_test\\.clj$" "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  {:name "structured-input-ir-selftest" :bb "structured-input-ir-test" :timeout 30000 :group :infra :stage :affected
   :relevant ["^src/graphden/input/" "^src/graphden/types/" "^src/graphden/packages/records/ids\\.clj$"
-             "^test/graphden/input/(?:ir_test|capture_test|compiler_fixture)\\.clj$"
+             "^test/graphden/input/(?:ir_test|capture_test|memo_test|compiler_fixture)\\.clj$"
              "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  ;; `^bb\.edn$` in every check whose SCAN SET is defined by its `bb`
  ;; task body (a narrowed glob there would otherwise skip the very

@@ -14,7 +14,7 @@ after: web, layout
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
 :LINE: 459
-:MINS: 6.6
+:MINS: 7.0
 :END:
 
 Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first requests the namespace tree to determine [[file:glossary.org::#term/auth][authentication]] state. Boot exposes Explorer navigation as soon as the tree arrives; metadata keeps editing fenced while selected subtrees and layouts load. Card sizing waits for fresh types locally, and services annotate the Explorer in the background. Mutation refreshes retain the full fence; gdWaitForGraphReady never means only tree-ready. A 401 opens sign-in. See the [[file:../../../docs/EDITOR_MODULES.md][module map]].

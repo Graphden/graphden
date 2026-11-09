@@ -508,10 +508,15 @@ async function initGraph({progressive = false} = {}) {
     const tree = await entResp.json();
     if (!current()) return;
     let navigation = Promise.resolve();
+    let emptyRender = Promise.resolve();
     const navigateHash = () => {
       const hash = window.location.hash.slice(1);
       if (typeof gdRouteSurfaceHash === 'function' && gdRouteSurfaceHash(decodeURIComponent(hash))) return Promise.resolve();
-      return hash ? selectFnByName(decodeURIComponent(hash), false) : Promise.resolve();
+      if (hash) return selectFnByName(decodeURIComponent(hash), false);
+      // Reset cancelled any clearing render started by a selected-fn delete.
+      // Replace it even without a hash; null selection needs no layout request.
+      emptyRender = Promise.resolve(renderGraph(false));
+      return emptyRender;
     };
     if (boot) {
       if (!await installGraphShell(tree, null, () => {}, authEpoch, typesEpoch)) return;
@@ -556,6 +561,8 @@ async function initGraph({progressive = false} = {}) {
       // annotations; layout waits locally for types before sizing its nodes.
       updateEntityList(graphData);
       syncProgressiveGraphFence();
+      // This fallback does not go through the tracked selection navigation.
+      await emptyRender;
       if (typeof gdWaitForSelectionRender === 'function') await gdWaitForSelectionRender();
       else await navigation;
     } else {

@@ -9,6 +9,7 @@
     [graphden.input.metadata :as metadata]
     [graphden.input.rows :as rows]
     [graphden.input.scopes :as scopes]
+    [graphden.input.variables :as variables]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.reference :as reference]))
@@ -30,7 +31,11 @@
         expression (expression-of row)
         dispatch (case (:kind expression)
                    :ref (if (contains? (:fns ctx) (:fn-id expression))
-                          (reference/classify expected (get-in ctx [:signatures (:fn-id expression)]))
+                          (reference/classify
+                            expected
+                            (variables/signature-in-scope
+                              [(first scope) (conj (second scope) (:id row))]
+                              (get-in ctx [:signatures (:fn-id expression)])))
                           {:mode :unresolved :reason :missing-ref-target})
                    :value (if (:resolver-fn-id row)
                             {:mode :unresolved :reason :resolver-analysis-required}
@@ -79,9 +84,7 @@
 
 (defn- substitute-node
   [node substitution]
-  (cond-> (update node :type #(types/resolve substitution %))
-    (:fields node) (update :fields #(mapv (fn [field] (substitute-node field substitution)) %))
-    (:alternatives node) (update :alternatives #(mapv (partial types/resolve substitution) %))))
+  (variables/map-descriptor-types (partial types/resolve substitution) node))
 
 
 (defn analyze-input
@@ -103,7 +106,7 @@
                                                  :origin-fn-id (or (:origin-fn-id %) (:fn-id %))))
                          (concat (map #(assoc % :origin-use-path (second scope)) bindings) additional-rows))
              local (filterv #(empty? (:scope-path %)) owned)
-             policy (metadata/apply-overlays ctx declared local
+             policy (metadata/apply-overlays ctx (variables/descriptor-in-scope scope declared) local
                                              {:scope scope :declaration-order declaration-order
                                               :check-expression check-expression})
              contract (:contract policy)

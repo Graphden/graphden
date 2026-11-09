@@ -4,6 +4,7 @@
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.inheritance :as inheritance]
+    [graphden.input.variables :as variables]
     [graphden.types.core :as types]))
 
 
@@ -32,7 +33,7 @@
 (defn- narrow-type
   [ctx node row scope check-expression substitution]
   (if-let [type-id (:type-override-fn-id row)]
-    (let [override (descriptor/resolve-descriptor ctx type-id)
+    (let [override (variables/descriptor-in-scope scope (descriptor/resolve-descriptor ctx type-id))
           expected (types/resolve substitution (:type node))
           actual (:type override)
           address [scope (:target-path row)]

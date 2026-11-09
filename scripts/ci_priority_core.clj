@@ -102,7 +102,7 @@
                                         (when (= 1 (count paths)) [identifier (first paths)])))
                              owners)
          selector-consumers (reduce (fn [acc path]
-                                      (reduce (fn [a selector] (update a selector (fnil conj #{}) path))
+                                      (reduce (fn [a css-selector] (update a css-selector (fnil conj #{}) path))
                                               acc (browser-selectors (get sources path))))
                                     {} browser)
          reverse-graph (reduce-kv
@@ -116,8 +116,8 @@
                          {} sources)
          reverse-graph (reduce
                          (fn [graph path]
-                           (reduce (fn [g selector]
-                                     (let [consumers (get selector-consumers selector)]
+                           (reduce (fn [g css-selector]
+                                     (let [consumers (get selector-consumers css-selector)]
                                        (if (<= (count consumers) 15)
                                          (update g path (fnil into #{}) consumers)
                                          g)))

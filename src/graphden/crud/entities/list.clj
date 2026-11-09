@@ -701,7 +701,7 @@
    its selected IDs. The callback cannot observe context, implementations,
    bindings, delays or hidden rows. Metadata is captured before invocation;
    cache replacement during selection cannot change the projected cohort."
-  [ctx selector namespaces? capped?]
+  [ctx select-facts namespaces? capped?]
   (let [{:keys [base namespaces role-of rev-index rich-snapshot diag-counts]} (env ctx)
         visible (tctx/apply-graph-read-filter
                   (cond-> base namespaces? (assoc :namespaces @namespaces)))
@@ -715,7 +715,7 @@
         rev @rev-index
         _ @rich-snapshot
         _ @diag-counts
-        selected (selector facts)
+        selected (select-facts facts)
         ids (:ids selected)]
     (when-not (and (map? selected) (sequential? ids)
                    (boolean? (:truncated? selected))

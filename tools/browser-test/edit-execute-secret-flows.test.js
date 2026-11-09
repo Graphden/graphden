@@ -13,7 +13,7 @@ async function openRunsFor(page, fnNameHash) {
   await page.goto('about:blank');
   await page.goto(BASE + '/#' + fnNameHash);
   await page.waitForFunction(
-    () => graphReady() && !!document.querySelector('button.more-actions-trigger') && !graph.animating,
+    () => graphReady() && gdGraphEditsReady() && !!document.querySelector('button.more-actions-trigger') && !graph.animating,
     null, {timeout: 30000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   await page.waitForSelector('.row-actions-popover button', {timeout: 30000});

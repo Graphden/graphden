@@ -76,7 +76,9 @@ async function openVersionHistory(page) {
 
     const parentTrigger = '.node-overlay[data-fn-name="tutorial-versioned"] '
       + '.ancestor-line[data-level="1"] button.more-actions-trigger';
-    await page.waitForSelector(parentTrigger, {timeout: 30000});
+    await page.waitForFunction(selector => gdGraphEditsReady()
+      && !!document.querySelector(selector)?.getClientRects().length,
+    parentTrigger, {timeout: 30000});
     await page.evaluate((selector) => document.querySelector(selector)
       .dispatchEvent(new MouseEvent('mousedown', {bubbles: true})), parentTrigger);
     await page.waitForSelector('.row-actions-popover [data-action="add-mi-parent"]',

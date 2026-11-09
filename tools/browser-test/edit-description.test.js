@@ -66,7 +66,7 @@ async function cleanup(page) {
     // ===================================================================
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#app.' + FN_NAME);
     await page.waitForFunction(
-      () => graphReady()
+      () => graphReady() && gdGraphEditsReady()
             && !!document.querySelector('button.more-actions-trigger')
             && !graph.animating,
       null,

@@ -68,17 +68,11 @@ const {
       const arrow = target?.querySelector('.ns-arrow');
       return arrow && /▼/.test(arrow.textContent || '');
     }, NS_NAME, {timeout: 5000, polling: 100});
-    // Find-and-click in ONE poll: the tree rebuilds when the expanded
-    // namespace's fns land, and a one-shot lookup could miss the row.
-    await page.waitForFunction((name) => {
-      const headers = Array.from(document.querySelectorAll('.ns-header'));
-      const target = headers.find(
-        (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
-      const plus = target?.querySelector('.ns-plus-btn');
-      if (!plus) return false;
-      plus.click();
-      return true;
-    }, NS_NAME, {timeout: 15000, polling: 100});
+    // The namespace exists before the create refresh releases its actions.
+    // A locator follows rebuilt rows and waits for the real action to unlock.
+    const namespace = page.locator('.ns-header[data-ns-path="' + NS_NAME + '"]');
+    await namespace.evaluate(row => row.scrollIntoView({block: 'center'}));
+    await namespace.locator('.ns-plus-btn').click({timeout: 15000});
     await page.waitForSelector('.create-menu', {timeout: 5000});
     await page.click('.create-menu-item[data-type="fn"]');
     await submitInlineRow(page, FN_NAME);

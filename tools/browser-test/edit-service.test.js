@@ -34,7 +34,7 @@ async function openRowActionsPopover(page, fnHash) {
   // the animation queue to drain before clicking, otherwise playwright's
   // stability autowait can race.
   await page.waitForFunction(
-    () => graphReady()
+    () => graphReady() && gdGraphEditsReady()
           && !!document.querySelector('button.more-actions-trigger')
           && !graph.animating,
     null,

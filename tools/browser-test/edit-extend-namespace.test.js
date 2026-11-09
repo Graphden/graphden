@@ -46,6 +46,7 @@ async function cleanup(page) {
 // nothing — `ov` undefined, a TypeError, a red gate.
 async function pickCardAction(page, ownerName, action) {
   await page.waitForFunction((name) => {
+    if (!gdGraphEditsReady()) return false;
     const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
       o.textContent.trim().startsWith(name)
       && o.querySelector('button.more-actions-trigger'));

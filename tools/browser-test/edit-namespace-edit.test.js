@@ -74,11 +74,7 @@ async function cleanup(page) {
     // Phase A: click ✎ on the ns row → inline input mounted, pre-
     // filled with current name.
     // ===================================================================
-    await page.evaluate((name) => {
-      const target = Array.from(document.querySelectorAll('.ns-header'))
-        .find((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
-      target?.querySelector('.ns-edit-btn')?.click();
-    }, INITIAL_NAME);
+    await page.locator('.ns-header[data-ns-path="' + INITIAL_NAME + '"] .ns-edit-btn').click({timeout: 15000});
     await page.waitForSelector('.inline-input-row', {timeout: 5000});
     const renameForm = await page.evaluate(() => ({
       value: document.querySelector('.inline-input-row .inline-input')?.value,
@@ -117,11 +113,8 @@ async function cleanup(page) {
     // Phase C: click × on the renamed ns → confirm() auto-accepted →
     // DELETE → sidebar drops the row.
     // ===================================================================
-    await page.evaluate((name) => {
-      const target = Array.from(document.querySelectorAll('.ns-header'))
-        .find((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
-      target?.querySelector('.ns-delete-btn')?.click();
-    }, RENAMED);
+    // A renamed row can appear before its save refresh releases editing.
+    await page.locator('.ns-header[data-ns-path="' + RENAMED + '"] .ns-delete-btn').click({timeout: 15000});
     // Delete triggers `initGraph` which re-fetches the full graph
     // (5 MB JSON) — JSON.parse + sidebar rebuild can exceed 15s under
     // e2e suite load. Bump to 25s.

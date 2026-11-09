@@ -18,7 +18,7 @@
               (priority/runtime-first changed)))))
 
 
-(deftest broad-dependencies-leave-a-real-second-wave
+(deftest broad-dependencies-retain-every-affected-candidate
   (let [changed #{"src/graphden/versioning/storage/resolution.clj"
                   "resources/packages/app/editor-branches/fns.edn"
                   "resources/packages/app/editor/editor-branch-context.js"}
@@ -26,16 +26,17 @@
                 :integration ["graphden.crud.branches-graph-test"]}
         plan (priority/plan changed manual)]
     (is (> (count (priority/integration-first changed)) 20))
-    (is (= (+ (count (first (priority/integration-layers changed))) 20)
-           (count (:integration plan)))
-        "all direct consumers precede the bounded transitive wave")
+    (is (= (set (priority/integration-first changed))
+           (set (:integration plan)))
+        "all affected namespaces precede the unrelated remainder")
     (is (= "graphden.crud.branches-graph-test" (first (:integration plan))))
-    (is (= 21 (count (:browser plan)))
-        "the manual choice is additional to the bounded automatic wave")
+    (is (= (set (concat (:browser manual) (priority/browser-first changed)))
+           (set (:browser plan)))
+        "manual choices and every automatic candidate run early")
     (is (= "edit-fn-versions-restore.test.js" (first (:browser plan))))
     (is (= "edit-account-menu-graph.test.js" (second (:browser plan)))
         "direct editor consumers precede broad package and API matches")
-    (is (> (count (priority/browser-order changed)) (count (:browser plan))))
+    (is (<= (count (:browser plan)) (count (priority/browser-order changed))))
     (is (= (count (:integration plan))
            (count (distinct (:integration plan)))))))
 
@@ -103,26 +104,26 @@
            [#{"src/demo/source.clj"} nil]
            [paths nil]])]
     (is (= [["demo.direct-24-test"] ["demo.deep-14-test"] changed
-            (vec (butlast direct)) indirect (subvec deep 0 10)]
+            (vec (butlast direct)) indirect (vec (butlast deep))]
            (:integration-layers mixed))
-        "manual order and dedup survive; only the deeper namespaces spend the limit")
+        "manual order and dedup survive across every dependency layer")
     (is (= (vec (concat changed direct indirect deep)) all)
         "the complete dependency roster stays unbounded")
     (is (= (mapcat identity (:integration-layers mixed)) (:integration mixed)))
     (is (= (count (:integration mixed)) (count (distinct (:integration mixed)))))
-    (is (= [direct indirect (subvec deep 0 10)] (:integration-layers source-only))
+    (is (= [direct indirect deep] (:integration-layers source-only))
         "source-only changes start at actual distance one, with no changed-test layer")
     (is (= [changed] (:integration-layers test-only))
         "all directly changed tests remain early even without source changes")))
 
 
-(deftest missing-nearby-test-layers-do-not-promote-deeper-consumers
+(deftest missing-nearby-test-layers-retain-every-deeper-consumer
   (let [[{:keys [plan all]}]
         (fixture-priority-plans [[#{"src/demo/no_direct.clj"} nil]])
         indirect (fixture-test-names "indirect" 10)
         deep (fixture-test-names "deep" 15)]
-    (is (= [indirect (subvec deep 0 10)] (:integration-layers plan))
-        "the first visible layer is distance two, so the shared limit applies")
+    (is (= [indirect deep] (:integration-layers plan))
+        "distance still orders the wave without truncating its deeper layer")
     (is (= (vec (concat indirect deep)) all))))
 
 
@@ -132,6 +133,77 @@
             [[#{"resources/packages/demo/module/fns.edn"} nil]
              [#{"resources/packages/demo/module/impls.clj"} nil]])]
     (is (= (fixture-test-names "changed" 25) (:integration plan)))))
+
+
+(defn- fixture-browser-plans
+  [requests]
+  (let [dir (fs/create-temp-dir {:prefix "priority-browser-wave-"})
+        scripts (str (fs/absolutize "scripts"))
+        files (into {"tools/browser-test/narrow.js" "module.exports = {};"
+                     "tools/browser-test/broad.js" "module.exports = {};"
+                     "tools/browser-test/edit-narrow.test.js" "require('./narrow');"
+                     "tools/browser-test/edit-unrelated.test.js" "void 0;"}
+                    (for [n (range 30)]
+                      [(format "tools/browser-test/edit-broad-%02d.test.js" n)
+                       "require('./broad');"]))]
+    (try
+      (doseq [[path body] files]
+        (let [file (fs/path dir path)]
+          (fs/create-dirs (fs/parent file))
+          (spit (str file) body)))
+      (let [result (p/shell {:dir (str dir) :out :string :err :string :continue true}
+                            "bb" "-cp" scripts "-e"
+                            (str "(require '[ci-priority-core :as p]) "
+                                 "(prn (mapv (fn [[changed encoded]] "
+                                 "(let [manual (p/manual-hints encoded)] "
+                                 "{:early (:browser (p/plan changed manual)) "
+                                 ":all (p/browser-order changed (:browser manual))})) "
+                                 (pr-str requests) "))"))]
+        (when-not (zero? (:exit result))
+          (throw (ex-info "Browser priority fixture process failed" result)))
+        (edn/read-string (:out result)))
+      (finally (fs/delete-tree dir)))))
+
+
+(deftest browser-wave-size-follows-affected-files-without-a-fixed-limit
+  (let [narrow #{"tools/browser-test/narrow.js"}
+        broad (conj narrow "tools/browser-test/broad.js")
+        tests (mapv #(format "edit-broad-%02d.test.js" %) (range 30))
+        changed-tests (set (map #(str "tools/browser-test/" %) tests))
+        [small large unrelated direct manual :as results]
+        (fixture-browser-plans
+          [[narrow nil] [broad nil]
+           [(into narrow (map #(str "docs/unrelated-" % ".md") (range 100))) nil]
+           [changed-tests nil]
+           [broad (str "browser:edit-broad-29.test.js,browser:edit-unrelated.test.js,"
+                       "browser:edit-broad-29.test.js")]])]
+    (is (= ["edit-narrow.test.js"] (:early small)))
+    (is (= (into #{"edit-narrow.test.js"} tests) (set (:early large))))
+    (is (= (:early small) (:early unrelated))
+        "unrelated paths do not inflate the affected wave")
+    (is (= tests (:early direct)) "every directly changed browser file runs early")
+    (is (= ["edit-broad-29.test.js" "edit-unrelated.test.js"]
+           (subvec (:early manual) 0 2)))
+    (doseq [{:keys [early all]} results]
+      (let [tail (remove (set early) all)]
+        (is (= (frequencies (:all small)) (frequencies all)))
+        (is (= early (vec (take (count early) all))))
+        (is (= (count early) (count (distinct early))))
+        (is (= all (vec (concat early tail)))
+            "the early wave and its exact complement execute every file once")))))
+
+
+(deftest broad-tutorial-changes-keep-execution-and-ui-contracts-early
+  (let [changed (into #{"tools/browser-test/tutorial-tour-helpers.js"
+                        "resources/packages/app/ui-tutorial-catalog/fns.edn"}
+                      (map str (fs/glob "tools/browser-test" "edit-tutorial-tour*.test.js")))
+        early (:browser (priority/plan changed))
+        all (priority/browser-order changed)]
+    (is (> (count early) 20))
+    (doseq [file ["edit-execution-contracts.test.js" "edit-ui-components.test.js"]]
+      (is (some #{file} early) file))
+    (is (= all (vec (concat early (remove (set early) all)))))
+    (is (= (frequencies (priority/browser-order nil)) (frequencies all)))))
 
 
 (deftest changed-browser-test-runs-first-but-unknown-editor-keeps-all
@@ -233,8 +305,8 @@
     (is (< (count early) 20) "the concrete helper has a narrow API fanout")
     (is (= (frequencies (priority/browser-order nil)) (frequencies ordered))))
   (let [changed #{"src/graphden/executor/defbase.clj"}]
-    (is (<= (count (:browser (priority/plan changed))) 20)
-        "a common backend dependency retains the automatic early-wave bound"))
+    (is (= (priority/browser-first changed) (:browser (priority/plan changed)))
+        "a common backend dependency retains its complete affected wave"))
   (is (= [] (priority/browser-first #{"src/graphden/no_such_file.clj"}))))
 
 
@@ -245,7 +317,7 @@
                   "edit-ui-components-selective.test.js" "edit-server-call.test.js"]]
       (is (some #{file} early) file))
     (is (not-any? #{"edit-ui-graph-theme.test.js" "edit-undo.test.js"} early))
-    (is (<= (count early) 20))
+    (is (= (priority/browser-first changed) early))
     (is (= (frequencies (priority/browser-order nil))
            (frequencies (priority/browser-order changed))))))
 

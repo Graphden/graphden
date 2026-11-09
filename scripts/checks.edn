@@ -39,6 +39,8 @@
   :relevant ["^scripts/native_inventory(?:_test)?\\.clj$" "^\\.clj-kondo/" "^deps\\.edn$" "^bb\\.edn$"]}
  {:name "structured-input-inventory-selftest" :bb "structured-input-inventory-test" :timeout 30000 :group :infra :stage :affected
   :relevant ["^scripts/structured_input_inventory(?:_test)?\\.clj$" "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ {:name "structured-input-cst-selftest" :bb "structured-input-cst-test" :timeout 30000 :group :infra :stage :affected
+  :relevant ["^scripts/structured_input_(?:cst(?:_test)?|inventory)\\.clj$" "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  ;; `^bb\.edn$` in every check whose SCAN SET is defined by its `bb`
  ;; task body (a narrowed glob there would otherwise skip the very
  ;; check the edit changed); `^\.cljstyle$` because the extensionless

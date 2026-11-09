@@ -1,0 +1,165 @@
+(ns structured-input-cst-test
+  "Run with bb scripts/structured_input_cst_test.clj; no JVM or filesystem writes."
+  (:require
+    [clojure.edn :as edn]
+    [clojure.string :as str]
+    [clojure.test :refer [deftest is run-tests testing]]
+    [structured-input-cst :as cst])
+  (:import
+    (java.security
+      MessageDigest)))
+
+
+(defn- request
+  [& operations]
+  {:namespace "demo.main" :operations (vec operations)})
+
+
+(defn- wrap-value
+  [definition path]
+  {:op :wrap-value :definition definition :path path})
+
+
+(defn- reason
+  [f]
+  (try (f) nil (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))
+
+
+(deftest rename-preserves-declaration-style-test
+  (let [source "; module\n{:namespace \"demo.main\", :fns\n [{:name :base\n   :args ; owned declaration comment\n   {:x {:type :any :value {:args 9 :input 2}}}}]} ; end\n"
+        patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}))
+        expected (str/replace source ":args ; owned" ":input ; owned")]
+    (is (= expected (:target-text patch)))
+    (is (= {:status :applied :text expected} (cst/apply-text patch source)))
+    (is (= {:x {:type :any :value {:args 9 :input 2}}}
+           (get-in (edn/read-string expected) [:fns 0 :input])))))
+
+
+(deftest wrapping-preserves-literal-bytes-and-reserved-keys-test
+  (let [payload "{:args {:x :some-ref} ; payload, not a definition\n     :parent :fake :bind {:configure [:value :keyword]}\n     :input \"first\nsecond\"}"
+        source (str "{:namespace \"demo.main\" :fns\n [{:name :child :parent :const\n   :args {:payload ; before value\n   " payload " ; after value\n          :untouched {:value {:args 7}}}}]}")
+        patch (cst/plan source (request (wrap-value :child [:args :payload])))
+        expected (str/replace source payload (str "[:value " payload "]"))]
+    (is (= expected (:target-text patch)))
+    (is (= [:value (edn/read-string payload)]
+           (get-in (edn/read-string expected) [:fns 0 :args :payload])))
+    (is (= {:value {:args 7}} (get-in (edn/read-string expected) [:fns 0 :args :untouched])))))
+
+
+(deftest crlf-unicode-and-multiline-string-bytes-test
+  (let [source "; 🐱\r\n{:namespace \"demo.main\" :fns [{:name :base :description \"🐱\" :args {:x \"one\r\ntwo\"}}]}\r\n"
+        patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}
+                                        (wrap-value :base [:args :x])))
+        expected (-> source
+                     (str/replace ":args" ":input")
+                     (str/replace "\"one\r\ntwo\"" "[:value \"one\r\ntwo\"]"))]
+    (is (= expected (:target-text patch)))
+    (is (= [:value "one\r\ntwo"] (get-in (edn/read-string expected) [:fns 0 :input :x])))
+    (is (= {:status :already-applied :text expected} (cst/apply-text patch expected)))))
+
+
+(deftest exact-namespace-and-top-level-definition-scope-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :child :args {:x {:name :child :args {:x 2}}}}]}"
+        patch (cst/plan source (request (wrap-value :child [:args :x])))
+        other-source (str/replace source "demo.main" "other.main")]
+    (is (= [:value {:name :child :args {:x 2}}]
+           (get-in (edn/read-string (:target-text patch)) [:fns 0 :args :x])))
+    (is (= :invalid-module (reason #(cst/plan other-source (request (wrap-value :child [:args :x]))))))
+    (is (= :checksum-mismatch (reason #(cst/apply-text patch other-source))))
+    (is (= "other.main" (:namespace (cst/plan other-source
+                                              {:namespace "other.main"
+                                               :operations [(wrap-value :child [:args :x])]}))))))
+
+
+(deftest unknown-and-duplicate-definitions-refuse-test
+  (testing "Duplicate top-level names refuse even when another definition is selected"
+    (is (= :duplicate-definition
+           (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :a} {:name :a} {:name :b :args {:x 1}}]}"
+                              (request (wrap-value :b [:args :x])))))))
+  (testing "Unknown and unnamed definitions refuse"
+    (is (= :missing-definition
+           (reason #(cst/plan "{:namespace \"demo.main\" :fns []}"
+                              (request (wrap-value :absent [:args :x]))))))
+    (is (= :unnamed-definition
+           (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:args {:x 1}}]}" (request)))))))
+
+
+(deftest missing-and-non-map-paths-refuse-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :base :args {:x [1 2]}}]}"]
+    (is (= :missing-path (reason #(cst/plan source (request (wrap-value :base [:args :missing]))))))
+    (is (= :non-map-path (reason #(cst/plan source (request (wrap-value :base [:args :x :value]))))))
+    (is (= :invalid-argument-path (reason #(cst/plan source (request (wrap-value :base [:description]))))))))
+
+
+(deftest duplicate-keys-and-unsafe-reader-forms-refuse-test
+  (doseq [source ["{:namespace \"demo.main\" :fns [{:name :base :args {:x 1 :x 2}}]}"
+                  "{:namespace \"demo.main\" :fns []} {:extra true}"
+                  "#=(throw (Exception. \"must never execute\"))"
+                  "#unknown {:namespace \"demo.main\" :fns []}"]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot read inventory EDN"
+          (cst/plan source (request))))))
+
+
+(deftest conflicting-operations-refuse-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :base :args {:x {:value 2}}}]}"
+        wrap (wrap-value :base [:args :x])]
+    (is (= :overlapping-operations (reason #(cst/plan source (request wrap wrap)))))
+    (is (= :overlapping-operations
+           (reason #(cst/plan source (request wrap (wrap-value :base [:args :x :value]))))))))
+
+
+(deftest reader-discard-at-structural-boundary-refuses-test
+  (doseq [source ["{:namespace \"demo.main\" :fns [{:name :base #_:ignored :args {:x 1}}]}"
+                  "; leading\n{:namespace \"demo.main\" :fns [#_{:name :base :args {:x :discarded}} {:name :base :args {:x :live}}]} ; trailing\n"
+                  "{:namespace \"demo.main\" :fns [{:name :base :args {:x 1}} #_{:name :other}]}"]]
+    (is (= :unsupported-reader-discard
+           (reason #(cst/plan source (request (wrap-value :base [:args :x]))))))))
+
+
+(deftest rename-requires-unambiguous-base-declaration-test
+  (testing "Both old and new keys refuse"
+    (is (= :existing-input
+           (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :base :args {} :input {}}]}"
+                              (request {:op :rename-input :definition :base :path [:args]}))))))
+  (testing "Compositions and other paths refuse"
+    (is (= :not-base-declaration
+           (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :child :parent :p :args {}}]}"
+                              (request {:op :rename-input :definition :child :path [:args]})))))
+    (is (= :invalid-rename-path
+           (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :base :args {:x {}}}]}"
+                              (request {:op :rename-input :definition :base :path [:args :x]})))))))
+
+
+(deftest checksum-bound-idempotent-application-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :base :args {:x nil}}]}"
+        patch (cst/plan source (request (wrap-value :base [:args :x])))
+        applied (cst/apply-text patch source)]
+    (is (= [:value nil] (get-in (edn/read-string (:text applied)) [:fns 0 :args :x])))
+    (is (= {:status :already-applied :text (:text applied)} (cst/apply-text patch (:text applied))))
+    (is (= :checksum-mismatch (reason #(cst/apply-text patch (str source "\n")))))
+    (is (= :checksum-mismatch (reason #(cst/apply-text patch (str (:text applied) "\n")))))
+    (is (= :invalid-plan (reason #(cst/apply-text (update patch :target-text str "\n") source))))))
+
+
+(deftest unsupported-moves-and-unknown-operations-refuse-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :base :args {:x 1}}]}"]
+    (is (= :unsupported-comment-safe-move
+           (reason #(cst/plan source (request {:op :move-args-entry :definition :base
+                                               :path [:args :x] :destination [:bind :x]})))))
+    (is (= :unknown-operation
+           (reason #(cst/plan source (request {:op :guess :definition :base :path [:args]})))))))
+
+
+(deftest recomputed-target-checksum-does-not-bypass-edit-consistency-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :base :args {:x 1}}]}"
+        patch (cst/plan source (request (wrap-value :base [:args :x])))
+        target (str/replace (:target-text patch) "demo.main" "tampered.main")
+        digest (.digest (MessageDigest/getInstance "SHA-256") (.getBytes ^String target "UTF-8"))
+        tampered (assoc patch :target-text target
+                        :target-sha256 (apply str (map #(format "%02x" (bit-and % 255)) digest)))]
+    (is (= :invalid-plan (reason #(cst/apply-text tampered source))))
+    (is (= :invalid-plan (reason #(cst/apply-text tampered target))))))
+
+
+(let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
+  (when (pos? (+ fail error)) (System/exit 1)))

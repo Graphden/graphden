@@ -142,13 +142,13 @@ Separates nonforcing cell identity from the map's normal value equality and hash
 :PROPERTIES:
 :CUSTOM_ID: types/lower-checked
 :FILE: src/graphden/input/ir.clj
-:LINE: 112
+:LINE: 119
 :MINS: 2.8
 :END:
 
 Lowers the checked fixture subset into address-keyed execution operations. Snapshot and checker coverage must agree; unsupported closures or consumption obligations reject. Base implementation and argument-ID paths are explicit caller-resolved provenance, not inferred from the input contract alone.
 
-- source :: [[file:../../../src/graphden/input/ir.clj::(defn lower-checked][src/graphden/input/ir.clj:112]]
+- source :: [[file:../../../src/graphden/input/ir.clj::(defn lower-checked][src/graphden/input/ir.clj:119]]
 
 * 12. compile-checked
 :PROPERTIES:

@@ -78,5 +78,7 @@
   [definitions functions]
   (into {} (map (fn [[owner impl]]
                   [(id owner) {:base-fn-id (id owner) :impl impl
+                               :root-entry {:name owner :args (get-in definitions [owner :input])
+                                            :return (get-in definitions [owner :return])}
                                :argument-paths (into {} (map (fn [name] [name (field-path owner [name])]))
                                                      (keys (get-in definitions [owner :input])))}])) functions))

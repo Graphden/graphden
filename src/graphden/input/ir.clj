@@ -78,14 +78,21 @@
 
 
 (defn- implementation!
-  [expressions scope {:keys [base-fn-id impl argument-paths] :as implementation}]
+  [expressions scope {:keys [base-fn-id impl argument-paths root-entry] :as implementation}]
   (when-not (and (uuid? base-fn-id) (fn? impl) (map? argument-paths)
-                 (every? keyword? (keys argument-paths)))
+                 (every? keyword? (keys argument-paths))
+                 (map? root-entry) (map? (:args root-entry)) (contains? root-entry :return))
     (reject! :resolved-implementation-required {:scope scope}))
+  (when-not (= (set (keys argument-paths)) (set (keys (:args root-entry))))
+    (reject! :implementation-abi-mismatch {:scope scope}))
+  (when (:compile-time-value? root-entry)
+    (reject! :compile-time-value-compilation-required {:scope scope}))
+  (when (seq (:lazy-seq-args root-entry))
+    (reject! :lazy-sequence-abi-required {:scope scope}))
   (doseq [[_ path] argument-paths]
     (when-not (and (vector? path) (contains? expressions [scope path]))
       (reject! :implementation-path-missing {:scope scope :path path})))
-  (select-keys implementation [:base-fn-id :impl :argument-paths]))
+  (select-keys implementation [:base-fn-id :impl :argument-paths :root-entry]))
 
 
 (defn- references!
@@ -111,7 +118,8 @@
 
 (defn lower-checked
   "Lower supported checked scopes. :implementations maps target UUIDs to an
-   explicitly resolved {:base-fn-id :impl :argument-paths {ABI-name UUID-path}}.
+   explicitly resolved {:base-fn-id :impl :root-entry frozen-rich-signature
+   :argument-paths {ABI-name UUID-path}}. Special base ABIs fail closed.
    Context checking does not discover a composed function's base output.
    Free leaves remain parameters; unsupported closures/obligations fail closed."
   [analysis {:keys [snapshot-id implementations target-names]}]

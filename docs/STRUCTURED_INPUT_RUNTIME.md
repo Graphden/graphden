@@ -95,12 +95,15 @@ and an explicit resolved base implementation table:
 {:context frozen-context
  :implementations {target-id {:base-fn-id base-id
                               :impl resolved-base-function
+                              :root-entry frozen-rich-signature
                               :argument-paths {:base-argument [field-id]}}}}
 ```
 
 Input analysis does not resolve a composed function's base implementation.
 The caller supplies that mapping; public field renames do not change the base
-ABI. The fixture closure is installed only in a test registry and called via
+ABI. The frozen root entry's argument names must match the ABI paths.
+`:compile-time-value?` and nonempty `:lazy-seq-args` require separate lowering
+and are explicitly rejected. The fixture closure is installed only in a test registry and called via
 `compile-runtime/execute`. It uses that entry point's authorization, effect and
 cancellation boundaries. Dependencies enter the existing `call-with-cache`
 through `compile-eager/invoke-compiled`, preserving its tracing, always-fresh

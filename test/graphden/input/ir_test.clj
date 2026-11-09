@@ -47,3 +47,18 @@
     (is (= :runtime-obligations-required (code (assoc-in model [:analysis :obligations] [{:kind :value-type}]))))
     (is (= :runtime-obligations-required (code (assoc-in model [:analysis :scopes [] :obligations] [{}]))))
     (is (= :closure-compilation-required (code (assoc-in model [:analysis :closures] {:x {}}))))))
+
+
+(deftest special-base-semantics-and-missing-abi-provenance-reject
+  (let [{:keys [analysis context]} (structural-model)
+        impls (fixture/implementations definitions {:root (fn [_ _]) :child (fn [_ _])})
+        target (fixture/id :child)
+        code (fn [impls]
+               (try (ir/lower-checked analysis {:snapshot-id (:snapshot-id context) :implementations impls})
+                    (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    (is (= :resolved-implementation-required (code (update-in impls [target] dissoc :root-entry))))
+    (is (= :implementation-abi-mismatch (code (assoc-in impls [target :argument-paths] {}))))
+    (is (= :compile-time-value-compilation-required
+           (code (assoc-in impls [target :root-entry :compile-time-value?] true))))
+    (is (= :lazy-sequence-abi-required
+           (code (assoc-in impls [target :root-entry :lazy-seq-args] #{:x}))))))

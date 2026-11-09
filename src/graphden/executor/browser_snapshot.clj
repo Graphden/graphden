@@ -70,37 +70,58 @@
 
 
 (defn- capture-policy-for
-  ([rich signatures]
-   (capture-policy-for rich signatures (shapes/markers-snapshot)))
-  ([rich signatures current-flags]
-   (binding [types/*type-aliases-override* (atom {})
-             types/*alias-view* nil
-             shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
-             registry/*rich-types-override* (atom rich)
-             registry/*per-org-rich-override* (atom {})]
-     (try
-       {:rich rich
-        :classes (into {}
-                       (map (fn [[id signature]]
-                              (let [frozen (provenance/checked-marker-flags id signature)
-                                    original (if (and (nil? frozen)
-                                                      (provenance/checker-stamp-present? signature))
-                                               :unknown
-                                               (signature-class id signature (or frozen {})))]
-                                [id (if (= :unknown original)
-                                      :unknown
-                                      (let [current (signature-class id signature current-flags)]
-                                        (if (or (= :unknown current) (= :plain original))
-                                          current original)))])))
-                       signatures)}
-       (catch Exception _ (reject! :policy-capture-failed {}))))))
+  [rich signatures current-flags]
+  (binding [types/*type-aliases-override* (atom {})
+            types/*alias-view* nil
+            shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
+            registry/*rich-types-override* (atom rich)
+            registry/*per-org-rich-override* (atom {})]
+    (try
+      {:rich rich
+       :classes (into {}
+                      (map (fn [[id signature]]
+                             (let [frozen (provenance/checked-marker-flags id signature)
+                                   original (if (and (nil? frozen)
+                                                     (provenance/checker-stamp-present? signature))
+                                              :unknown
+                                              (signature-class id signature (or frozen {})))]
+                               [id (if (= :unknown original)
+                                     :unknown
+                                     (let [current (signature-class id signature current-flags)]
+                                       (if (or (= :unknown current) (= :plain original))
+                                         current original)))])))
+                      signatures)}
+      (catch Exception _ (reject! :policy-capture-failed {})))))
+
+
+(defonce ^:private captured-policy
+  ;; One immutable input pair, including signature metadata by identity.
+  ;; Only pure marker classification is retained, never source or ACL checks.
+  (atom nil))
 
 
 (defn capture-policy
   "Freeze visibility before source reads. Custom markers require a checker
-   witness; frozen flags authorize while the current view can only veto."
+   witness; frozen flags authorize while the current view can only veto.
+   Concurrent captures of the same immutable inputs share one classification."
   [rich]
-  (capture-policy-for rich (:by-id rich)))
+  (let [flags (shapes/markers-snapshot)
+        entry (locking captured-policy
+                (let [cached @captured-policy]
+                  (if (and (identical? rich (:rich cached))
+                           (identical? flags (:flags cached)))
+                    cached
+                    (let [entry {:rich rich :flags flags
+                                 :policy (delay (capture-policy-for rich (:by-id rich) flags))}]
+                      (reset! captured-policy entry)
+                      entry))))]
+    ;; Compute outside the cache lock; another source can proceed independently.
+    ;; A failed computation must not poison this input pair for later requests.
+    (try
+      @(:policy entry)
+      (catch Throwable error
+        (compare-and-set! captured-policy entry nil)
+        (throw error)))))
 
 
 (defn capture-context-policy

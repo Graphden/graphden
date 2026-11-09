@@ -215,6 +215,7 @@ function positionDescriptionTooltipAt(el, clientX, clientY) {
 // in-memory copy of the entity so subsequent tooltip opens reflect the
 // new description without a graph refetch.
 function enterDescriptionEditMode() {
+  if (window.gdGraphEditsReady?.() === false) return;
   const el = descriptionTooltipEl;
   const content = descriptionTooltipContent;
   if (!el || !content?.entityType || !content.entityId) return;
@@ -353,6 +354,7 @@ async function readServerError(response) {
  * empty fields.
  */
 async function saveEntityDescription(entityType, entityId, description) {
+  if (window.gdGraphEditsReady?.() === false) return {ok: false, reason: 'Editor metadata is loading.'};
   if (!entityType || !entityId) {
     return {ok: false, reason: 'This item has no id to save against.'};
   }

@@ -94,16 +94,17 @@ const _nsFetchInFlight = new Map();
 async function loadNamespaceFns(nsId) {
   const key = nsId || '';
   const authEpoch = _graphAuthEpoch;
+  const graphEpoch = _subtreeResetEpoch;
   if (_loadedNamespaceIds.has(key)) return;
   if (_nsFetchInFlight.has(key)) return _nsFetchInFlight.get(key);
   const p = (async () => {
     const url = API.api_graph_entities + '?scope=namespace'
       + (nsId ? '&namespace-id=' + encodeURIComponent(nsId) : '');
     const r = await fetch(url);
-    if (authEpoch !== _graphAuthEpoch) return;
+    if (authEpoch !== _graphAuthEpoch || graphEpoch !== _subtreeResetEpoch) return;
     if (!r.ok) throw new Error('loadNamespaceFns HTTP ' + r.status);
     const payload = await r.json();
-    if (authEpoch !== _graphAuthEpoch) return;
+    if (authEpoch !== _graphAuthEpoch || graphEpoch !== _subtreeResetEpoch) return;
     mergeKnownFns(payload.fns);
     _loadedNamespaceIds.add(key);
     syncKnownFnsIntoGraph();
@@ -121,11 +122,12 @@ async function searchFns(q) {
   const needle = (q || '').trim();
   if (!needle) return { fns: [], truncated: false };
   const authEpoch = _graphAuthEpoch;
+  const graphEpoch = _subtreeResetEpoch;
   const r = await fetch(API.api_graph_entities + '?scope=search&q=' + encodeURIComponent(needle));
-  if (authEpoch !== _graphAuthEpoch) return {fns: [], truncated: false};
+  if (authEpoch !== _graphAuthEpoch || graphEpoch !== _subtreeResetEpoch) return {fns: [], truncated: false};
   if (!r.ok) throw new Error('searchFns HTTP ' + r.status);
   const payload = await r.json();
-  if (authEpoch !== _graphAuthEpoch) return {fns: [], truncated: false};
+  if (authEpoch !== _graphAuthEpoch || graphEpoch !== _subtreeResetEpoch) return {fns: [], truncated: false};
   mergeKnownFns(payload.fns);
   syncKnownFnsIntoGraph();
   return { fns: payload.fns || [], truncated: !!payload['truncated?'] };
@@ -264,7 +266,34 @@ function graphShellFromTree(tree) {
 // still-expanded namespaces on its next render, and ensureSubtreeFor
 // re-primes the selected fn.
 function graphTypeGeneration() { return _subtreeResetEpoch; }
-function graphTypesReady() { return _typesReadyEpoch === _subtreeResetEpoch && _subtreeRootId != null; }
+function graphTypesReady() {
+  return _typesReadyEpoch === _subtreeResetEpoch && _subtreeRootId != null
+    && (typeof selectedFnId === 'undefined' || selectedFnId == null || _subtreeRootId === selectedFnId);
+}
+
+// Only boot/auth loads opt into progressive navigation. Mutation refreshes
+// retain the complete interaction fence. Metadata readiness is separate from
+// a painted tree, and failed metadata never certifies editing.
+let _progressiveGraph = null;
+function gdGraphEditsReady() { return _graphRefreshDepth === 0 && (!_progressiveGraph || _progressiveGraph.ready); }
+function gdWaitForGraphMetadata() { return _progressiveGraph?.metadata || Promise.resolve(true); }
+window.gdGraphEditsReady = gdGraphEditsReady;
+window.gdWaitForGraphMetadata = gdWaitForGraphMetadata;
+
+function syncProgressiveGraphFence() {
+  const pending = _progressiveGraph && !gdGraphEditsReady();
+  for (const el of document.querySelectorAll?.('#entity-list .ns-row-actions') || []) el.inert = !!pending;
+  if (pending && _progressiveGraph.treeReady) {
+    const prior = _graphRefreshLocked.find(({el}) => el.id === 'entity-list'
+      || el === document.getElementById('entity-list'));
+    if (prior) {
+      prior.el.inert = prior.inert;
+      prior.el.setAttribute('aria-busy', 'false');
+    }
+  }
+}
+window.gdSyncProgressiveGraphFence = syncProgressiveGraphFence;
+
 
 // A mutation refresh temporarily has no usable lookups: resetGraphCaches()
 // invalidates them before the replacement tree/subtree arrive. Keep the old
@@ -275,7 +304,7 @@ function graphTypesReady() { return _typesReadyEpoch === _subtreeResetEpoch && _
 let _graphRefreshDepth = 0;
 let _graphRefreshLocked = [];
 function beginGraphRefresh() {
-  if (++_graphRefreshDepth === 1) {
+  if (++_graphRefreshDepth === 1 && _graphRefreshLocked.length === 0) {
     _graphRefreshLocked = ['graph-container', 'gd-inspector', 'entity-list']
       .map((id) => document.getElementById(id))
       .filter(Boolean)
@@ -286,17 +315,23 @@ function beginGraphRefresh() {
         return prior;
       });
   }
+  for (const {el} of _graphRefreshLocked) {
+    el.inert = true;
+    el.setAttribute('aria-busy', 'true');
+  }
   let ended = false;
   return () => {
     if (ended) return;
     ended = true;
     if (--_graphRefreshDepth !== 0) return;
+    if (!gdGraphEditsReady()) { syncProgressiveGraphFence(); return; }
     for (const {el, inert, busy} of _graphRefreshLocked) {
       el.inert = inert;
       if (busy === null) el.removeAttribute('aria-busy');
       else el.setAttribute('aria-busy', busy);
     }
     _graphRefreshLocked = [];
+    syncProgressiveGraphFence();
     window.dispatchEvent(new Event('gd-graph-ready'));
   };
 }
@@ -305,13 +340,20 @@ function beginGraphRefresh() {
 // follow-up refresh is still replacing the graph shell. Keep its inverse
 // behind that refresh so the two reloads cannot install out of order.
 function gdWaitForGraphReady() {
-  if (_graphRefreshDepth === 0) return Promise.resolve();
+  if (_graphRefreshDepth === 0 && gdGraphEditsReady()) return Promise.resolve();
   return new Promise((resolve) => window.addEventListener('gd-graph-ready', resolve, {once: true}));
 }
 window.gdWaitForGraphReady = gdWaitForGraphReady;
 
 function resetGraphCaches() {
+  if (_progressiveGraph) _progressiveGraph.finish(false);
+  _progressiveGraph = null;
+  if (typeof gdInvalidateNavigation === 'function') gdInvalidateNavigation();
+  if (typeof invalidateGraphRender === 'function') invalidateGraphRender();
   if (typeof hideAllInlineHosts === 'function') hideAllInlineHosts();
+  if (typeof hideRowActionsPopover === 'function') hideRowActionsPopover();
+  if (typeof hideDescriptionTooltip === 'function') hideDescriptionTooltip(true);
+  if (typeof closeChildCreateMenu === 'function') closeChildCreateMenu();
   for (const chip of document.querySelectorAll?.('.arg-type-chip[role="button"]') || []) {
     chip.setAttribute('aria-disabled', 'true');
     chip.setAttribute('tabindex', '-1');
@@ -321,6 +363,7 @@ function resetGraphCaches() {
   _subtreeEpoch += 1;
   _subtreeResetEpoch += 1;
   _subtreeFetchInFlight.clear();
+  _nsFetchInFlight.clear();
   _knownFns = new Map();
   _loadedNamespaceIds = new Set();
 }
@@ -363,6 +406,19 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch, 
   // never refetched (the edit-sidebar-filter flake: `initGraph` on top of a
   // still-settling boot, 2026-09-19).
   syncKnownFnsIntoGraph();
+  // The row-actions popover HTML bakes the fn's name, description and the
+  // ⚙ Service blocked reason — all of which a reload can have changed.
+  if (typeof _rowActionsHtmlCache !== 'undefined') _rowActionsHtmlCache.clear();
+  // The type panels' "Used by N" counts change with the same writes.
+  if (typeof typeUsagesCache !== 'undefined') typeUsagesCache.clear();
+  // Resolve the secret-leaf base-fn id once so isSecretFn() stays
+  // synchronous without a full-fns mirror to scan.
+  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
+  if (typeResp) await installGraphTypes(typeResp, onTypesUnparseable, authEpoch, typesEpoch);
+  return authEpoch === _graphAuthEpoch && typesEpoch === _subtreeResetEpoch;
+}
+
+async function installGraphTypes(typeResp, onTypesUnparseable, authEpoch, typesEpoch) {
   if (typeResp?.ok) {
     try {
       const parsed = await typeResp.json();
@@ -378,16 +434,10 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch, 
     // otherwise accumulate for the whole session.
     if (typeof _rowActionsUseSiteArgs !== 'undefined') _rowActionsUseSiteArgs.clear();
   }
-  // The row-actions popover HTML bakes the fn's name, description and the
-  // ⚙ Service blocked reason — all of which a reload can have changed.
-  if (typeof _rowActionsHtmlCache !== 'undefined') _rowActionsHtmlCache.clear();
-  // The type panels' "Used by N" counts change with the same writes.
-  if (typeof typeUsagesCache !== 'undefined') typeUsagesCache.clear();
-  // Resolve the secret-leaf base-fn id once so isSecretFn() stays
-  // synchronous without a full-fns mirror to scan.
-  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
-  return authEpoch === _graphAuthEpoch;
+  return authEpoch === _graphAuthEpoch && typesEpoch === _subtreeResetEpoch
+    && _typesReadyEpoch === typesEpoch;
 }
+
 
 // Repaint the Explorer from the installed shell. A graph write can change
 // who uses what / the views saved in the graph — drop the graph-views cache
@@ -406,102 +456,112 @@ function repaintExplorer() {
 /**
  * Initialize the graph editor
  */
-async function initGraph() {
+async function initGraph({progressive = false} = {}) {
   const endRefresh = beginGraphRefresh();
   try {
-  const authEpoch = _graphAuthEpoch;
-  // Load the namespace tree + the rich-type registry in parallel. Types feed
-  // the in-place edit popovers' "Expected: <type>" hints, so they need to be
-  // ready before the user opens any editor.
-  //
-  // /api/services is loaded eagerly too — auth-required, so anonymous
-  // visitors see no service badges (loadServicesEager swallows the 401
-  // silently). Cheap and primed before the first overlay render.
-  //
-  // `?scope=tree` — namespaces + counts only. Fn leaves load lazily per
-  // expanded namespace; per-fn slots/bindings load via ensureSubtreeFor().
-  resetGraphCaches();
-  const typesEpoch = _subtreeResetEpoch;
-  // Tree first, alone: on an auth-gated deployment an anonymous boot
-  // used to fire all four fetches and paint FOUR red 401s into the
-  // console before the sign-in prompt. The tree's status answers the
-  // auth question for everyone — only when it isn't 401 do the three
-  // secondary fetches go out (in parallel; they start on the tree's
-  // response headers, so the authed path pays ~one RTT).
-  let entResp;
-  try { entResp = await fetch(API.api_graph_entities + '?scope=tree'); }
-  catch (error) {
-    if (authEpoch !== _graphAuthEpoch) return;
-    throw error;
-  }
-  if (authEpoch !== _graphAuthEpoch) return;
-  const [typeResp, vkResp] = (entResp.status === 401)
-    ? [null, null]
-    : await Promise.all([
-        fetch(API.api_types).catch(() => null),
-        fetch(API.api_value_kinds).catch(() => null),
-        (typeof loadServicesEager === 'function')
-          ? loadServicesEager().catch(() => null)
-          : null,
-      ]);
-  if (authEpoch !== _graphAuthEpoch) return;
-  // Auth wall (B3): the graph view is login-gated when auth is active, so an
-  // unauthenticated (or stale-token) boot gets 401 here — send the user to
-  // sign in instead of dying into the red fatal banner. `openAuthPopover`
-  // picks the surface: the accounts addon's /login page when the boot probe
-  // found it (awaited — it may still be in flight), else the admin-password
-  // popover.
-  if (entResp.status === 401) {
-    clearAuthPassword(); // whatever we sent (or didn't) doesn't authenticate
-    if (window.gdAccountsReady) await window.gdAccountsReady;
-    if (typeof graphdenAccountsMode === 'function' && graphdenAccountsMode()) {
-      const next = location.pathname + location.search + location.hash;
-      location.href = '/login?next=' + encodeURIComponent(next);
-    } else if (typeof openAuthPopover === 'function') {
-      void openAuthPopover('Sign in to use the editor'); // fire-and-forget; fields mount async
+    const authEpoch = _graphAuthEpoch;
+    resetGraphCaches();
+    const typesEpoch = _subtreeResetEpoch;
+    const current = () => authEpoch === _graphAuthEpoch && typesEpoch === _subtreeResetEpoch;
+    const boot = progressive ? {ready: false, treeReady: false} : null;
+    if (boot) {
+      boot.metadata = new Promise(resolve => { boot.finish = resolve; });
+      _progressiveGraph = boot;
     }
-    return;
-  }
-  const tree = await entResp.json();
-  if (authEpoch !== _graphAuthEpoch) return;
-  if (vkResp?.ok) {
-    try {
-      const parsed = await vkResp.json();
-      if (authEpoch !== _graphAuthEpoch) return;
-      VALUE_KINDS = parsed;
-    } catch (err) {
-      console.error(API.api_value_kinds + ' JSON parse failed — type-picker may be incomplete', err);
-      VALUE_KINDS = [];
+    // The tree remains the auth gate: an anonymous boot issues no metadata or
+    // service requests. Start secondaries at the headers, paint at the body.
+    const entResp = await fetch(API.api_graph_entities + '?scope=tree');
+    if (!current()) return;
+    if (entResp.status === 401) {
+      clearAuthPassword();
+      if (window.gdAccountsReady) await window.gdAccountsReady;
+      if (!current()) return;
+      if (typeof graphdenAccountsMode === 'function' && graphdenAccountsMode()) {
+        const next = location.pathname + location.search + location.hash;
+        location.href = '/login?next=' + encodeURIComponent(next);
+      } else if (typeof openAuthPopover === 'function') {
+        void openAuthPopover('Sign in to use the editor');
+      }
+      return;
     }
-  }
-  const installed = await installGraphShell(tree, typeResp, (err) => {
-    console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
-    richTypes = {};
-  }, authEpoch, typesEpoch);
-  if (!installed) return;
-  repaintExplorer();
-  // Proactive plan-usage badge — the fn count just (re)loaded, so refresh it
-  // after every graph mutation (create / delete / rename all call initGraph).
-  if (typeof refreshQuotaBadge === 'function') refreshQuotaBadge();
-  // First-load hash navigation: `#fn-name` in the URL (bookmark,
-  // shared link, page reload) must select the fn — `hashchange` /
-  // `popstate` only fire on AFTER-load changes, not the initial
-  // load. Without this, opening /#app.server.web-server (or any
-  // hashed URL) leaves the canvas blank until the user clicks the
-  // sidebar. Awaited so `await initGraph()` returns with the hashed
-  // fn's subtree loaded (its slots/bindings/closure), not still in
-  // flight — callers read `lookups.fnMap` right after.
-  const hash = window.location.hash.slice(1);
-  if (typeof gdRouteSurfaceHash === 'function' && gdRouteSurfaceHash(decodeURIComponent(hash))) {
-    // `#@settings` / `#@organization` / … — a surface deep link, no fn to select.
-  } else if (hash) {
-    await selectFnByName(decodeURIComponent(hash), false);
-  }
+    if (!entResp.ok) throw new Error('Graph tree HTTP ' + entResp.status);
+    const metadata = Promise.all([
+      fetch(API.api_types).catch(() => null),
+      fetch(API.api_value_kinds).catch(() => null),
+    ]);
+    // Services annotate the tree independently; they never certify editing.
+    if (typeof loadServicesEager === 'function') {
+      void loadServicesEager().then(() => {
+        if (!current() || !graphData) return;
+        updateEntityList(graphData);
+        // Canvas badges consume the cache on their next ordinary render;
+        // rebuilding overlays here would destroy an editor opened meanwhile.
+      }).catch(() => {});
+    }
+    const tree = await entResp.json();
+    if (!current()) return;
+    let navigation = Promise.resolve();
+    const navigateHash = () => {
+      const hash = window.location.hash.slice(1);
+      if (typeof gdRouteSurfaceHash === 'function' && gdRouteSurfaceHash(decodeURIComponent(hash))) return Promise.resolve();
+      return hash ? selectFnByName(decodeURIComponent(hash), false) : Promise.resolve();
+    };
+    if (boot) {
+      if (!await installGraphShell(tree, null, () => {}, authEpoch, typesEpoch)) return;
+      boot.treeReady = true;
+      repaintExplorer();
+      syncProgressiveGraphFence();
+      window.dispatchEvent(new Event('gd-explorer-ready'));
+      navigation = navigateHash();
+      // Observe early failures immediately while metadata is still in flight.
+      navigation.catch(() => {});
+    }
+    const [typeResp, vkResp] = await (boot
+      ? Promise.race([metadata, boot.metadata.then(() => [null, null])]) : metadata);
+    if (!current()) return;
+    let kindsReady = false;
+    if (vkResp?.ok) {
+      try {
+        const parsed = await vkResp.json();
+        if (!current()) return;
+        VALUE_KINDS = parsed;
+        kindsReady = true;
+      } catch (err) {
+        if (!current()) return;
+        console.error(API.api_value_kinds + ' JSON parse failed', err);
+        VALUE_KINDS = [];
+      }
+    }
+    const onBadTypes = err => {
+      console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
+      richTypes = {};
+    };
+    if (boot) {
+      const typesReady = await installGraphTypes(typeResp, onBadTypes, authEpoch, typesEpoch);
+      if (!current()) return;
+      if (!typesReady || !kindsReady) {
+        boot.finish(false);
+        throw new Error('Editor metadata unavailable; navigation remains available');
+      }
+      boot.ready = true;
+      boot.finish(true);
+      // The shell/subtree installed during navigation stay intact. Repaint
+      // annotations; layout waits locally for types before sizing its nodes.
+      repaintExplorer();
+      syncProgressiveGraphFence();
+      await navigation;
+      if (typeof gdWaitForSelectionRender === 'function') await gdWaitForSelectionRender();
+    } else {
+      if (!await installGraphShell(tree, typeResp, onBadTypes, authEpoch, typesEpoch)) return;
+      repaintExplorer();
+      await navigateHash();
+    }
+    if (!current()) return;
+    if (typeof refreshQuotaBadge === 'function') refreshQuotaBadge();
   } finally {
     endRefresh();
   }
 }
-
 
 // Re-fetch the graph state after a mutation (e.g. POST /api/secrets
 // → new fn-def + binding appear in the graph). Callable from
@@ -624,7 +684,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // outage, 5xx, branch-router error) shows a user-visible error in the
   // header instead of leaving the editor silently broken with just an
   // uncaught-promise message in DevTools.
-  initGraph().then(() => {
+  initGraph({progressive: true}).then(() => {
     // Interactive tutorial (?tutorial=NN or a mid-lesson resume) — only
     // once the graph is loaded, since its step checks read graphData.
     if (typeof maybeStartTutorial === 'function') maybeStartTutorial();

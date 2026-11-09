@@ -351,6 +351,8 @@ function calculateNodeSize(nodeData) {
  *   - layout: Map nodeId -> {x, y, width, height, row, col}
  */
 async function fetchBackendLayout() {
+  const rootId = selectedFnId;
+  const generation = typeof graphTypeGeneration === 'function' ? graphTypeGeneration() : null;
   if (!selectedFnId) {
     return { nodes: [], edges: [], layout: new Map() };
   }
@@ -388,6 +390,10 @@ async function fetchBackendLayout() {
     }
 
     const data = await response.json();
+    // Dispatch layout immediately, but size cards only against this boot's
+    // fresh types. This avoids a second layout request when metadata arrives.
+    if (typeof gdWaitForGraphMetadata === 'function' && !await gdWaitForGraphMetadata()) return null;
+    if (rootId !== selectedFnId || (generation != null && generation !== graphTypeGeneration())) return null;
 
     // Handle different naming conventions: 'grid-pos' (Clojure kebab-case)
     const gridPos = data['grid-pos'] || data.gridPos || {};

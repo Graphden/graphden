@@ -91,7 +91,7 @@ async function probeAccountsAuth({ refreshGraph = true } = {}) {
     // probe that changes the account must reload the graph, while an unchanged
     // account can refresh affordances without repeating tree/type requests.
     if (refreshGraph && accountsAuthed && typeof initGraph === 'function' && changed) {
-      void initGraph().catch(() => {});
+      void initGraph({progressive: true}).catch(() => {});
     } else if (accountsAuthed && typeof updateEntityList === 'function'
         && typeof graphData !== 'undefined' && graphData) {
       try { updateEntityList(graphData); } catch (_) {}
@@ -540,7 +540,7 @@ async function submitAuth() {
       setAuthPassword(pw);
       closeAuthPopover();
       if (typeof graphData !== 'undefined' && graphData === null && typeof initGraph === 'function') {
-        void initGraph().catch((error) => console.error('Editor initialization after sign-in failed', error));
+        void initGraph({progressive: true}).catch((error) => console.error('Editor initialization after sign-in failed', error));
       }
     } else if (response.status === 401) {
       if (err) { err.textContent = 'Wrong password.'; err.classList.remove('hidden'); }

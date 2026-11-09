@@ -13,6 +13,7 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.capabilities :as capabilities]
+    [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.bindings :as bindings]
     [graphden.storage.remote.core :as remote]
@@ -66,7 +67,7 @@
          #'components/assert-current-policy! (fn [_] nil)
          #'execution/run (fn [_ thunk] (thunk))
          #'recheck/call-with-ctx-slices (fn [_ thunk] (thunk))
-         (ns-resolve 'graphden.executor.browser-server 'read-only-context) (fn [ctx _ _] ctx)
+         #'eager/compile-all (fn [_] {})
          #'runtime/execute (fn [& _]
                              (tick :execute)
                              (@after-execute)

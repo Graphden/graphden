@@ -60,6 +60,7 @@
    `storage.protocol.config/*query-timeout-ms*` (default: 30s);
    `get-query-timeout-seconds` converts it for JDBC."
   (:require
+    [graphden.input.access :as input-access]
     [graphden.schema.fields.types :as ft]
     [graphden.storage.protocol.codec :as codec]
     [graphden.storage.protocol.config :as config]
@@ -523,6 +524,7 @@
      the slot. Centralised here so every storage backend picks it up
      without each call-site having to remember."
   [entity-name data]
+  (input-access/assert-write! entity-name data)
   (cond-> data
     (and (= entity-name :binding)
          (contains? data :value)

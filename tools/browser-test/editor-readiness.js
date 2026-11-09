@@ -9,8 +9,14 @@ async function waitForEditorReady(page, {allowAuthWall = false, timeout = 60000}
   }
   await page.waitForFunction(allowWall => {
     if (allowWall && /^\/(?:login|register)(?:\/|$)/.test(location.pathname)) return true;
+    if (allowWall && typeof isAuthenticated === 'function' && !isAuthenticated()) {
+      const popover = document.getElementById('auth-popover');
+      const input = popover?.querySelector('#auth-password-input');
+      if (popover && !popover.classList.contains('hidden') && popover.getClientRects().length
+          && input && !input.disabled && !input.closest('[inert]')) return true;
+    }
     return typeof gdGraphEditsReady === 'function' && gdGraphEditsReady()
-      && ((typeof graphData !== 'undefined' && !!graphData) || allowWall);
+      && typeof graphData !== 'undefined' && !!graphData;
   }, allowAuthWall, {timeout});
 }
 

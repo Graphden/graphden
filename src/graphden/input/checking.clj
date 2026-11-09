@@ -38,8 +38,10 @@
 (defn- join-solutions
   [left right]
   (let [joined (reduce-kv (fn [solution variable rich]
-                            (or (types/unify variable rich solution)
-                                (context/reject! :incompatible-input-substitutions {})))
+                            (let [next (types/unify variable rich solution)]
+                              (if (types/fail? next)
+                                (context/reject! :incompatible-input-substitutions {})
+                                next)))
                           left (execution/value-substitutions right))]
     (or (execution/merge-constraints joined right)
         (context/reject! :incompatible-execution-substitutions {}))))

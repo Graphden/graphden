@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
+    [graphden.input.descriptor :as descriptor]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -78,3 +79,17 @@
           error (try (analysis/analyze-effective-input cyclic owner)
                      (catch clojure.lang.ExceptionInfo e e))]
       (is (= :projection-cycle (:code (ex-data error)))))))
+
+
+(deftest view-projection-obeys-the-frozen-marker-policy-test
+  (doseq [hidden? [false true]]
+    (let [id (random-uuid)
+          ctx (context/build-context {:markers {:ui-view {:hide-result? hidden?}}})
+          node {:type [:ui-view {:name :text}]
+                :fields [{:id id :name :name :type :text :required true}]}]
+      (context/call-with-types
+        ctx
+        (fn []
+          (is (= (if hidden? [:ui-view :text] :text) (descriptor/read-type-at node [id])))
+          (is (= [:ui-view {:name :text}] (:type node)))
+          (is (= [:ui-view {:name :text}] (descriptor/read-type-at node []))))))))

@@ -25,6 +25,19 @@
        (number? (:duration-ms proof)) (<= 0 (:duration-ms proof))))
 
 
+(defn stage-proof-source
+  "Missing or contradictory provenance cannot silently become a local pass."
+  [receipt id]
+  (let [source (get-in receipt [:sources id])
+        proof (get-in receipt [:proof id])]
+    (cond
+      (and (= :passed (get-in receipt [:status id]))
+           (= :hosted-integration source)
+           (valid-external-proof? proof (:sha receipt))) :hosted-integration
+      (and (= :passed (get-in receipt [:status id])) (= :local source) (nil? proof)) :local
+      :else :unknown)))
+
+
 (defn valid-receipt?
   [receipt kind]
   (let [{:keys [schema roster status sha]} receipt]
@@ -57,7 +70,12 @@
 (defn credited
   [prior sha roster]
   (if (exact-credit? prior sha roster)
-    (set (for [id roster :when (= :passed (get-in prior [:status id]))] id))
+    (set (for [id roster
+               :when (and (= :passed (get-in prior [:status id]))
+                          (or (not= "stages" (:kind prior))
+                              (not (#{"priority" "integration"} id))
+                              (not= :unknown (stage-proof-source prior id))))]
+           id))
     #{}))
 
 
@@ -159,6 +177,7 @@
                       candidates)))
          state (atom {:schema 1 :kind kind :sha sha :roster ordered
                       :status (zipmap ordered (map #(if (contains? passed %) :passed :pending) ordered))
+                      :sources (select-keys (:sources prior) passed)
                       :proof (select-keys (:proof prior) passed)})]
      (when-not (valid-receipt? @state kind)
        (throw (ex-info "Invalid current progress receipt" {:kind kind})))
@@ -172,9 +191,25 @@
     (when-not (and (contains? (:status @state) id) (statuses status))
       (throw (ex-info "Unknown progress check/status" {:id id :status status})))
     (swap! state (fn [receipt]
-                   (cond-> (assoc-in receipt [:status id] status)
-                     (not= :passed status) (update :proof dissoc id))))
+                   (cond-> (-> receipt (assoc-in [:status id] status) (update :proof dissoc id))
+                     (= :passed status) (assoc-in [:sources id] :local)
+                     (not= :passed status) (update :sources dissoc id))))
     (report/write-atomic! path @state)))
+
+
+(defn mark-hosted-passed!
+  "Publish stage success and its exact hosted proof in one atomic write."
+  [{:keys [path state]} id proof]
+  (locking state
+    (when-not (and (= "stages" (:kind @state)) (#{"priority" "integration"} id)
+                   (contains? (:status @state) id)
+                   (valid-external-proof? proof (:sha @state)))
+      (throw (ex-info "Cannot credit stage without exact hosted proof" {:id id})))
+    (let [receipt (-> @state (assoc-in [:status id] :passed)
+                      (assoc-in [:sources id] :hosted-integration)
+                      (assoc-in [:proof id] proof))]
+      (report/write-atomic! path receipt)
+      (reset! state receipt))))
 
 
 (defn mark-proof!

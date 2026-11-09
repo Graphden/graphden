@@ -1861,15 +1861,18 @@ gate_suites() {
             REMOTE_CREDIT_STAGE=1
             [ "$stage" != priority ] || LOCAL_INTEGRATION="$MANUAL_INTEGRATION"
           else reused=0; fi
-        elif [ "$stage" = priority ]; then LOCAL_INTEGRATION="$PRIORITY_INTEGRATION"
+        elif [ "$proof_source" = local ]; then
+          [ "$stage" != priority ] || LOCAL_INTEGRATION="$PRIORITY_INTEGRATION"
+        else reused=0
         fi
       fi
     fi
     if [ "$reused" = 1 ]; then
-      (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
       if [ "$REMOTE_CREDIT_STAGE" = 1 ]; then
-        (cd "$wt" && bb scripts/ci_resume_cli.clj proof stages "$GRAPHDEN_RESUME_OUT.stages.edn" \
+        (cd "$wt" && bb scripts/ci_resume_cli.clj mark-hosted-passed stages "$GRAPHDEN_RESUME_OUT.stages.edn" \
           "$stage" "$GRAPHDEN_RESUME_OUT.remote-proof.edn") || return 1
+      else
+        (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
       fi
       echo "  ✓ resumed $stage from exact-candidate checkpoint"
       continue
@@ -1915,10 +1918,11 @@ gate_suites() {
       echo "WTQ_FAILED_STAGE=$stage"
       return 1
     fi
-    (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
     if [ "$REMOTE_CREDIT_STAGE" = 1 ]; then
-      (cd "$wt" && bb scripts/ci_resume_cli.clj proof stages "$GRAPHDEN_RESUME_OUT.stages.edn" \
+      (cd "$wt" && bb scripts/ci_resume_cli.clj mark-hosted-passed stages "$GRAPHDEN_RESUME_OUT.stages.edn" \
         "$stage" "$GRAPHDEN_RESUME_OUT.remote-proof.edn") || return 1
+    else
+      (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
     fi
     case "$stage" in integration|fleet) pending_browser_headroom=1 ;; esac
   done

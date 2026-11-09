@@ -758,6 +758,20 @@
            definition keys fail during the entire package closure's preflight, before any impl
            executes. Absent/version-1 headers still use legacy semantics; same-named argument
            fields and literal map keys remain ordinary data."}
+    {:ns graphden.input.runtime :defn field-cell
+     :say "Allocates one invocation-local field occurrence using the executor's existing once
+           thunk. Repeated and concurrent reads share its result or failure. Literal values use
+           a separate constructor so callable values and dictionaries remain opaque."}
+    {:ns graphden.input.runtime :defn record-view
+     :say "The isolated JVM foundation exposes explicit cells through an ordinary persistent map
+           contract. Lookup reads one field; lazy map entries keep keys and shape queries from
+           reading values. Equality, hashing and serialization are value consumers. This view
+           is not yet wired into the production compiler or browser interpreter."}
+    {:ns graphden.input.runtime :defn cache-token
+     :say "Separates nonforcing cell identity from the map's normal value equality and hash.
+           Metadata changes keep the token; persistent edits preserve untouched cells. Compiler
+           integration must retain existing sharing for ordinary value-equal inputs and never
+           let diagnostic value capture force deferred fields merely to describe a result."}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

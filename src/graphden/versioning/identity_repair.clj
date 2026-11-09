@@ -323,6 +323,14 @@
     @n))
 
 
+(defn- owned-rows
+  "Keep owner IN queries well below PostgreSQL's statement parameter limit.
+   Empty owner sets perform no reads."
+  [storage entity owner-field owner-ids]
+  (mapcat #(sp/query-entities storage entity {owner-field (set %)})
+          (partition-all 256 owner-ids)))
+
+
 (defn purge-fn-subgraph!
   "Remove `fn-id`'s whole owned subgraph at the base plane: its
    bindings (+ their list-items and version rows), fn-slots (+
@@ -343,8 +351,7 @@
          own-bindings (sp/query-entities base :binding {:fn-id fn-id})
          own-binding-ids (into #{} (map :id) own-bindings)
          by-binding (fn [entity key-field]
-                      (when (seq own-binding-ids)
-                        (sp/query-entities base entity {key-field own-binding-ids})))]
+                      (owned-rows base entity key-field own-binding-ids))]
      (zap! :binding-list-item-version
            (by-binding :binding-list-item-version :binding-id))
      (zap! :binding-list-item (by-binding :binding-list-item :binding-id))
@@ -353,8 +360,7 @@
      (let [own-fn-slots (sp/query-entities base :fn-slot {:fn-id fn-id})
            own-fs-ids (into #{} (map :id) own-fn-slots)]
        (zap! :fn-slot-version
-             (when (seq own-fs-ids)
-               (sp/query-entities base :fn-slot-version {:fn-slot-id own-fs-ids})))
+             (owned-rows base :fn-slot-version :fn-slot-id own-fs-ids))
        (zap! :fn-slot own-fn-slots))
      (zap! :fn-version (sp/query-entities base :fn-version {:fn-id fn-id}))
      (zap! :fn [{:id fn-id}])

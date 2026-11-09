@@ -13,6 +13,7 @@ unset WTQ_FIRST_STAGE WTQ_FIRST_TESTS WTQ_RESUME_FROM
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source <(sed -n '/^run_scoped_ci_gate() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^remote_proof_cloud_dir() {/,/^}/p' "$SCRIPT_DIR/wt")
+source <(sed -n '/^remote_integration_runtime_eligible() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^remote_proof_eligible() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^start_remote_integration_proof() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^credit_remote_integration() {/,/^}/p' "$SCRIPT_DIR/wt")
@@ -87,6 +88,9 @@ bb() {
       [ "${FAIL_E2E:-0}" != 1 ] ;;
     test-visual) echo visual >> "$TEST_LOG"; [ "${FAIL_VISUAL:-0}" != 1 ] ;;
     test-integration)
+      if [ -n "${INTEGRATION_ROSTER_LOG:-}" ]; then
+        printf 'only=%s exclude=%s\n' "${GRAPHDEN_INTEGRATION_ONLY:-}" "${GRAPHDEN_INTEGRATION_EXCLUDE:-}" >> "$INTEGRATION_ROSTER_LOG"
+      fi
       if [ -n "${GRAPHDEN_INTEGRATION_ONLY:-}" ]; then echo integration-early >> "$TEST_LOG"
       elif [ -n "${GRAPHDEN_INTEGRATION_EXCLUDE:-}" ]; then echo integration-rest >> "$TEST_LOG"
       else echo integration >> "$TEST_LOG"; fi
@@ -235,13 +239,68 @@ CASE_VISUAL=0
 (
   WTQ_REMOTE_INTEGRATION_PROOF=1
   start_remote_integration_proof() { echo remote-start >> "$TEST_LOG"; }
-  credit_remote_integration() { echo remote-check >> "$TEST_LOG"; [ "${REMOTE_OK:-0}" = 1 ]; }
+  credit_remote_integration() {
+    echo remote-check >> "$TEST_LOG"
+    [ "${REMOTE_OK:-0}" = 1 ] || return 1
+    printf '%s\n' '{:schema 1 :sha "0000000000000000000000000000000000000001" :status :green :source :hosted-integration :ref "refs/heads/release-proof/0000000000000000000000000000000000000001" :run-id 42 :request-id "11111111-1111-1111-1111-111111111111" :exit 0 :duration-ms 1 :coverage {:suite :integration :scope :full}}' > "$GRAPHDEN_RESUME_OUT.remote-proof.edn"
+  }
   REMOTE_OK=1
   run_case
   assert_events 'expect,ci,verify,uber,build,image,remote-start,e2e,remote-check'
   REMOTE_OK=0
   run_case
   assert_events 'expect,ci,verify,uber,build,image,remote-start,e2e,remote-check,integration'
+  REMOTE_OK=1
+  TEST_PRIORITY_INTEGRATION=auto.ns
+  WTQ_REPORT_TS=remote-related
+  run_case
+  assert_events 'expect,ci,verify,uber,build,image,remote-start,remote-check,e2e,remote-check'
+  [ "$(bb scripts/ci_resume_cli.clj proof-source stages "$LOG_DIR/_train-$WTQ_REPORT_TS.stages.edn" priority)" = hosted-integration ]
+  # An exact interrupted resume retains provenance and revalidates both phases.
+  WTQ_RESUME_FROM="$LOG_DIR/_train-$WTQ_REPORT_TS"
+  WTQ_REUSE_FROM="$WTQ_RESUME_FROM"
+  WTQ_REPORT_TS=remote-resumed
+  run_case
+  assert_events 'expect,ci,verify,remote-check,remote-check'
+  REMOTE_OK=0
+  WTQ_REPORT_TS=remote-resumed-offline
+  INTEGRATION_ROSTER_LOG="$TEST_DIR/resumed-remote-rosters"
+  : > "$INTEGRATION_ROSTER_LOG"
+  run_case
+  grep -qx integration-early "$TEST_LOG"
+  grep -qx integration-rest "$TEST_LOG"
+  [ "$(head -1 "$INTEGRATION_ROSTER_LOG")" = 'only=auto.ns exclude=' ]
+  [ "$(tail -1 "$INTEGRATION_ROSTER_LOG")" = 'only= exclude=auto.ns' ]
+  unset WTQ_REUSE_FROM WTQ_RESUME_FROM
+  REMOTE_OK=1
+  CASE_VISUAL=1 CASE_FLEET=1
+  WTQ_REPORT_TS=remote-not-other-stages
+  run_case
+  for required in ci uber build image e2e visual fleet; do grep -qx "$required" "$TEST_LOG"; done
+  CASE_VISUAL=0 CASE_FLEET=0
+
+  # Manual integration remains local. A revoked automatic proof must not make
+  # the tail exclude automatic namespaces that never ran locally.
+  WTQ_FIRST_TESTS=integration:manual.ns
+  TEST_PRIORITY_INTEGRATION=$'manual.ns\nauto.ns'
+  WTQ_REPORT_TS=remote-manual
+  INTEGRATION_ROSTER_LOG="$TEST_DIR/remote-rosters"
+  : > "$INTEGRATION_ROSTER_LOG"
+  run_case
+  assert_events 'expect,ci,verify,uber,build,image,remote-start,integration-early,remote-check,remote-check,headroom,e2e'
+  [ "$(cat "$INTEGRATION_ROSTER_LOG")" = 'only=manual.ns exclude=' ]
+  credit_remote_integration() {
+    echo remote-check >> "$TEST_LOG"
+    # Dynamic local from the real run_gate_stage shell function.
+    # shellcheck disable=SC2154
+    [ "$stage" = priority ] || return 1
+    printf '%s\n' '{:schema 1 :sha "0000000000000000000000000000000000000001" :status :green :source :hosted-integration :ref "refs/heads/release-proof/0000000000000000000000000000000000000001" :run-id 42 :request-id "11111111-1111-1111-1111-111111111111" :exit 0 :duration-ms 1 :coverage {:suite :integration :scope :full}}' > "$GRAPHDEN_RESUME_OUT.remote-proof.edn"
+  }
+  WTQ_REPORT_TS=remote-revoked
+  : > "$INTEGRATION_ROSTER_LOG"
+  run_case
+  assert_events 'expect,ci,verify,uber,build,image,remote-start,integration-early,remote-check,remote-check,integration-rest,headroom,e2e'
+  [ "$(tail -1 "$INTEGRATION_ROSTER_LOG")" = 'only= exclude=manual.ns' ]
 )
 
 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=0
@@ -554,16 +613,35 @@ unset FAIL_DISK
 # alone never grants credit: the release helper must reverify it successfully.
 (
   mkdir -p "$TEST_DIR/cloud/scripts" "$TEST_DIR/cloud/target/core-proof-early" "$TEST_DIR/bin" "$TEST_DIR/.github/workflows"
-  : > "$TEST_DIR/cloud/scripts/core_proof_early.clj"
+  mkdir -p "$TEST_DIR/jdk/bin"
+  printf '%s\n' '#!/bin/sh' 'exit 99' > "$TEST_DIR/jdk/bin/java"
+  chmod +x "$TEST_DIR/jdk/bin/java"
+  printf '%s\n' 'JAVA_VERSION="21.0.1"' > "$TEST_DIR/jdk/release"
+  export JAVA_HOME="$TEST_DIR/jdk" PATH="$TEST_DIR/jdk/bin:$PATH"
+  unset JAVA_CMD JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS CLJ_JVM_OPTS KAOCHA_PARALLELISM
+  unset GRAPHDEN_TEST_PG_JDBC_URL GRAPHDEN_TEST_PG_USERNAME GRAPHDEN_TEST_PG_PASSWORD
+  remote_integration_runtime_eligible
+  printf '%s\n' 'JAVA_VERSION="11.0.1"' > "$TEST_DIR/jdk/release"
+  if remote_integration_runtime_eligible; then exit 1; fi
+  printf '%s\n' 'JAVA_VERSION="21.0.1"' > "$TEST_DIR/jdk/release"
+  for incompatible in JAVA_CMD JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS CLJ_JVM_OPTS KAOCHA_PARALLELISM GRAPHDEN_TEST_PG_JDBC_URL; do
+    if (export "$incompatible=fixture"; remote_integration_runtime_eligible); then exit 1; fi
+  done
+  if (unset JAVA_HOME; remote_integration_runtime_eligible); then exit 1; fi
+  printf '%s\n' '--verify-only' > "$TEST_DIR/cloud/scripts/core_proof_early.clj"
   printf '%s\n' '"integration (testcontainers)"' > "$TEST_DIR/cloud/scripts/release_core.clj"
   printf '%s\n' 'run: bb test-integration' > "$TEST_DIR/.github/workflows/checks.yml"
   cat > "$TEST_DIR/bin/bb" <<'EOF'
 #!/usr/bin/env bash
+if [ "$1" != scripts/core_proof_early.clj ]; then exec "$REAL_BB" "$@"; fi
 printf '%s\n' "$*" > "$FAKE_PROOF_ARGS"
 [ "${FAKE_REMOVE_RECEIPT:-0}" != 1 ] || rm -f "$FAKE_RECEIPT_PATH"
+cat "$FAKE_RECEIPT_PATH"
 exit "$FAKE_PROOF_RC"
 EOF
   chmod +x "$TEST_DIR/bin/bb"
+  REAL_BB="$(type -P bb)"
+  export REAL_BB
   export PATH="$TEST_DIR/bin:$PATH" WTQ_REMOTE_INTEGRATION_PROOF=1
   export FAKE_PROOF_ARGS="$TEST_DIR/proof-args" FAKE_PROOF_RC=0
   WTQ_PROOF_CLOUD_DIR="$TEST_DIR/cloud"
@@ -571,16 +649,17 @@ EOF
   NEED_INTEGRATION=1
   sha=0000000000000000000000000000000000000001
   receipt="$WTQ_PROOF_CLOUD_DIR/target/core-proof-early/$sha.edn"
+  export FAKE_RECEIPT_PATH="$receipt"
   (
     bb() { printf '%s\n' "$*" > "$TEST_DIR/start-args"; }
     start_remote_integration_proof "$TEST_DIR" "$sha" "$sha" > /dev/null
     wait
   )
   [ "$(cat "$TEST_DIR/start-args")" = "core-proof-early $sha $TEST_DIR" ]
-  printf '{:schema 1 :sha "%s" :status :green :run-id 42}\n' "$sha" > "$receipt"
+  printf '{:schema 1 :sha "%s" :ref "refs/heads/release-proof/%s" :status :green :source :hosted-integration :run-id 42 :request-id "11111111-1111-1111-1111-111111111111" :exit 0 :duration-ms 1 :coverage {:suite :integration :scope :full}}\n' "$sha" "$sha" > "$receipt"
   credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null
   [ -f "$GRAPHDEN_RESUME_OUT.remote-proof.edn" ]
-  [ "$(cat "$FAKE_PROOF_ARGS")" = "core-proof-early $sha $TEST_DIR" ]
+  [ "$(cat "$FAKE_PROOF_ARGS")" = "scripts/core_proof_early.clj $sha $TEST_DIR --verify-only" ]
   rm -f "$GRAPHDEN_RESUME_OUT.remote-proof.edn"
   FAKE_PROOF_RC=1
   if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
@@ -590,8 +669,11 @@ EOF
   if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
   [ ! -e "$GRAPHDEN_RESUME_OUT.remote-proof.edn" ]
   FAKE_REMOVE_RECEIPT=0
-  printf '{:schema 1 :sha "%s" :status :green :run-id 42}\n' "$sha" > "$receipt"
+  printf '{:schema 1 :sha "%s" :ref "refs/heads/release-proof/%s" :status :green :source :hosted-integration :run-id 42 :request-id "11111111-1111-1111-1111-111111111111" :exit 0 :duration-ms 1 :coverage {:suite :integration :scope :full}}\n' "$sha" "$sha" > "$receipt"
   sed -i 's/:green/:running/' "$receipt"
+  if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
+  printf '{:schema 1 :sha "%s" :ref "refs/heads/release-proof/%s" :status :green :source :hosted-integration :run-id 42 :request-id "11111111-1111-1111-1111-111111111111" :exit 0 :duration-ms 1 :coverage {:suite :integration :scope :full}}\n' "$sha" "$sha" > "$receipt"
+  : > "$TEST_DIR/cloud/scripts/core_proof_early.clj"
   if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
   git() { [ "$3" = diff ] && return 1; printf '%s\n' "$sha"; }
   if remote_proof_eligible "$TEST_DIR" "$sha" "$sha"; then exit 1; fi

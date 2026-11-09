@@ -54,13 +54,32 @@ stops only for a real decision that is yours.
   (next section).
 - **Optional exact-SHA integration proof pilot.** Set
   `WTQ_REMOTE_INTEGRATION_PROOF=1` on `bb wt merge` to dispatch the sibling
-  `graphden-cloud` release proof when the E2E stage starts. GitHub CI then runs
+  `graphden-cloud` release proof when the related-test stage starts (or the
+  E2E stage when there are no related integration tests). GitHub CI then runs
   beside the local browser suite. At the integration stage WTQ accepts only a
   completed green proof reverified against GitHub for the assembled SHA,
   dispatch identity and full required-job roster; a changed `checks.yml`,
   absent sibling checkout/token, pending or refused proof runs the ordinary
-  local `bb test-integration`. The gate writes a separate
-  `_train-<ts>.remote-proof.edn` only after verification. A remote candidate
+  local `bb test-integration`. Automatic related integration and the remaining
+  integration stage each reverify an already green proof with the sibling's
+  `core-proof-early --verify-only` mode; they never wait for CI to finish.
+  Manual `--first-test=integration:...` namespaces still execute locally.
+  Missing support for that mode falls back locally. Use `WTQ_PROOF_CLOUD_DIR`
+  to select a paired cloud checkout; its `target/core-proof-early/` owns the
+  receipts. Each HTTP request is bounded at 10 seconds and the whole recheck
+  at 60 seconds. The gate writes a separate
+  `_train-<ts>.remote-proof.edn` only after verification and records its source
+  in the stage receipt. Exact-candidate resume revalidates hosted evidence.
+  If the proof stops verifying before the tail, that fallback includes any
+  automatic namespaces previously covered only remotely. Local browser,
+  visual, fleet, image and CI checks retain their independent requirements.
+  The proof certifies the hosted Java 21 integration environment, not a second
+  JDK compatibility matrix. Reuse requires an explicit Java 21 `JAVA_HOME`
+  whose executable matches `java` on `PATH`; an incompatible `JAVA_CMD`, JVM
+  option overrides, parallelism override or external PostgreSQL settings
+  refuse reuse. For example, select your installed JDK without changing the
+  system default: `JAVA_HOME=/path/to/jdk21 PATH=/path/to/jdk21/bin:$PATH
+  WTQ_REMOTE_INTEGRATION_PROOF=1 bb wt merge`. A remote candidate
   ref may remain after a red train; clean it with `bb core-proof-early
   <sha> <core-checkout> --cleanup` after its run is terminal.
 - **Every agent gets its own instance.** `bb wt up` raises a private stack

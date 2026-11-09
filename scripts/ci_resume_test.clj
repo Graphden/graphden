@@ -16,6 +16,35 @@
   {:schema 1 :kind "checks" :sha sha :roster roster :status (zipmap roster states)})
 
 
+(deftest external-integration-proof-has-exact-identity-and-full-scope
+  (let [proof {:schema 1 :sha sha :ref (str "refs/heads/release-proof/" sha)
+               :source :hosted-integration :status :green :run-id 42
+               :request-id "11111111-1111-1111-1111-111111111111"
+               :exit 0 :duration-ms 12 :coverage {:suite :integration :scope :full}}]
+    (is (resume/valid-external-proof? proof sha))
+    (doseq [bad [nil (assoc proof :sha "other") (assoc proof :ref "other")
+                 (assoc proof :source :local) (assoc proof :status :running)
+                 (assoc proof :run-id nil) (assoc proof :request-id "other")
+                 (assoc proof :exit 1) (assoc proof :duration-ms -1)
+                 (assoc proof :coverage {:suite :integration :scope :related})]]
+      (is (not (resume/valid-external-proof? bad sha))))
+    (let [dir (fs/create-temp-dir)
+          path (str (fs/path dir "stages.edn"))
+          roster ["ci" "build" "priority" "integration"]
+          prior {:schema 1 :kind "stages" :sha sha :roster roster
+                 :status (zipmap roster (repeat :passed)) :proof {"priority" proof}}]
+      (try
+        (is (= proof (get-in @(-> (resume/begin! path "stages" sha roster prior true) :state)
+                             [:proof "priority"])))
+        (let [run (resume/begin! path "stages" sha roster prior true)]
+          (resume/mark! run "priority" :running)
+          (resume/mark! run "priority" :passed)
+          (is (nil? (get-in @(:state run) [:proof "priority"]))
+              "a local rerun cannot inherit the old hosted proof"))
+        (is (empty? (:proof @(-> (resume/begin! path "stages" sha roster prior false) :state))))
+        (finally (fs/delete-tree dir))))))
+
+
 (deftest failed-unrun-then-passed-with-full-current-roster
   (let [old (hint ["a" "b" "c" "d" "e"] [:passed :passed :failed :pending :pending])]
     (is (= ["c" "d" "e" "a" "b"] (resume/order (:roster old) old)))

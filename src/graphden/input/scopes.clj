@@ -7,7 +7,8 @@
 (defn- reference-entries
   [node]
   (->> (:bindings node) vals
-       (filter #(= :ref (get-in % [:expression :kind])))
+       (filter #(or (= :ref (get-in % [:expression :kind]))
+                    (get-in % [:expression :resolver-fn-id])))
        (sort-by (comp str :binding-id))))
 
 
@@ -52,14 +53,14 @@
                 (vswap! nodes assoc path (dissoc node :scoped-rows))
                 (doseq [{:keys [address binding-id expression reference]} entries]
                   (let [mode (:mode reference)
-                        ref-id (:fn-id expression)
+                        ref-id (or (:resolver-fn-id expression) (:fn-id expression))
                         child-path (conj path binding-id)
                         edge {:from address :to [root-fn-id child-path]
                               :binding-id binding-id :target-fn-id ref-id :mode mode}]
                     (when-not (= :identity mode)
                       (vswap! edges conj edge))
                     (cond
-                      (contains? #{:value :callable-producer :graph-callable} mode)
+                      (contains? #{:value :callable-producer :graph-callable :resolved-value} mode)
                       (if (contains? (conj ancestors target) ref-id)
                         (context/reject! :reference-cycle {:address address :target-fn-id ref-id})
                         (visit ref-id child-path (overlays-for (:scoped-rows node) binding-id)

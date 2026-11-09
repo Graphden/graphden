@@ -80,6 +80,16 @@ Identity `fn-ref` edges import neither target inputs nor evaluation dependencies
 The shared `types.reference/call-site-contract` preserves the existing checker's
 capture type/effect projection, including authored `lambda-params []`.
 
+Stored-value resolver annotations remain a distinct `:resolved-value` operation.
+Their output is never reclassified as identity or an implicit graph callable.
+`:resolver-arguments` records the stored literal at the resolver's single
+effective parameter address; this is a derived literal source, not a read of
+the destination's computed result. A zero-parameter resolver ignores the value;
+multiple effective parameters are rejected. Resolver scopes establish lexical
+boundaries: internal references can capture resolver inputs, but never ambient
+caller fields. Argument and result types pass through the same checker. The
+compiler must explicitly support this operation before executing such a plan.
+
 Projections carry typed source addresses across use scopes. Required projections
 activate their source paths, including optional record ancestors; source
 occupancy and chained routes remain visible. The existing marker propagator

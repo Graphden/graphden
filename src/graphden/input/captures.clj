@@ -3,6 +3,7 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.resolvers :as resolvers]
     [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
     [graphden.types.core :as types]
@@ -11,11 +12,16 @@
 
 (defn- source-address
   [graph [[owner use-path] field-path]]
-  (some (fn [length]
-          (let [parent (subvec use-path 0 length)
-                contract (get-in graph [:scopes parent :configured-contract])]
-            (when (descriptor/find-node contract field-path) [[owner parent] field-path])))
-        (range (dec (count use-path)) -1 -1)))
+  (let [boundary (reduce max 0 (keep (fn [path]
+                                       (when (and (<= (count path) (count use-path))
+                                                  (= path (subvec use-path 0 (count path))))
+                                         (count path)))
+                                     (:lexical-boundaries graph)))]
+    (some (fn [length]
+            (let [parent (subvec use-path 0 length)
+                  contract (get-in graph [:scopes parent :configured-contract])]
+              (when (descriptor/find-node contract field-path) [[owner parent] field-path])))
+          (range (dec (count use-path)) (dec boundary) -1))))
 
 
 (defn- direct-routes
@@ -90,19 +96,21 @@
 
 (defn- apply-edge
   [ctx graph {:keys [from to binding-id mode] :as edge}]
-  (let [fields (:fields (surface/input-at-scope graph (second to)))]
-    (if (= :graph-callable mode)
-      (let [{:keys [captures hidden callable-type] :as plan} (callable-plan ctx graph edge fields)]
-        (-> graph
-            (update :input-routes into captures)
-            (update :hidden-input-addresses into (into hidden (map :from captures)))
-            (assoc-in [:closures from] (dissoc plan :hidden))
-            (update-in [:scopes (second (first from)) :bindings from :reference]
-                       assoc :capture-resolved? true :callable-type callable-type)))
-      (let [routes (into [] (mapcat #(lexical-routes graph % :dependency-input binding-id)) fields)]
-        (-> graph
-            (update :input-routes into routes)
-            (update :hidden-input-addresses into (map :from routes)))))))
+  (if (= :resolved-value mode)
+    (resolvers/bind-argument graph edge)
+    (let [fields (:fields (surface/input-at-scope graph (second to)))]
+      (if (= :graph-callable mode)
+        (let [{:keys [captures hidden callable-type] :as plan} (callable-plan ctx graph edge fields)]
+          (-> graph
+              (update :input-routes into captures)
+              (update :hidden-input-addresses into (into hidden (map :from captures)))
+              (assoc-in [:closures from] (dissoc plan :hidden))
+              (update-in [:scopes (second (first from)) :bindings from :reference]
+                         assoc :capture-resolved? true :callable-type callable-type)))
+        (let [routes (into [] (mapcat #(lexical-routes graph % :dependency-input binding-id)) fields)]
+          (-> graph
+              (update :input-routes into routes)
+              (update :hidden-input-addresses into (map :from routes))))))))
 
 
 (defn prepare
@@ -112,6 +120,6 @@
    display name is never evidence of shared identity."
   [ctx graph]
   (reduce (partial apply-edge ctx)
-          (assoc graph :input-routes [] :closures {} :hidden-input-addresses #{})
+          (assoc graph :input-routes [] :closures {} :resolver-arguments {} :hidden-input-addresses #{})
           (sort-by (fn [{:keys [to from]}] [(- (count (second to))) (context/address-sort-key from)])
-                   (filter #(contains? #{:value :callable-producer :graph-callable} (:mode %)) (:dependencies graph)))))
+                   (filter #(contains? #{:value :callable-producer :graph-callable :resolved-value} (:mode %)) (:dependencies graph)))))

@@ -20,8 +20,9 @@
     :else
     (check-expression {:address address :expected expected-type
                        :actual (or (:callable-type reference) (:actual-type reference))
-                       :expression (if (= :identity (:mode reference))
-                                     {:kind :value :value (:fn-id expression)}
+                       :expression (case (:mode reference)
+                                     :identity {:kind :value :value (:fn-id expression)}
+                                     :resolved-value {:kind :ref :fn-id (:resolver-fn-id expression)}
                                      expression)
                        :substitution substitution})))
 
@@ -113,6 +114,12 @@
                               :expression {:kind :projection :scope (first source) :path (second source)}
                               :reference {:mode :capture :actual-type actual-type}}))
                       (:input-routes graph))
+        entries (into entries
+                      (map (fn [[address {:keys [value actual-type expected-type]}]]
+                             {:address address :expected-type expected-type
+                              :expression {:kind :value :value value}
+                              :reference {:mode :literal :actual-type actual-type}}))
+                      (:resolver-arguments graph))
         first-pass (check-entries entries check-expression initial)
         final-pass (check-entries entries check-expression (:substitution first-pass))
         solution (:substitution final-pass)
@@ -123,6 +130,9 @@
     (assoc graph :substitution solution :proofs proofs :diagnostics diagnostics
            :projections (mapv #(update % :actual-type (partial types/resolve solution)) (:projections graph))
            :input-routes (mapv #(update % :actual-type (partial types/resolve solution)) (:input-routes graph))
+           :resolver-arguments (update-vals (:resolver-arguments graph)
+                                            #(-> % (update :expected-type (partial types/resolve solution))
+                                                 (update :actual-type (partial types/resolve solution))))
            :closures (into {} (map (fn [[address plan]]
                                      [address (update plan :callable-type (partial types/resolve solution))])) (:closures graph))
            :scopes (into {} (map (fn [[path node]] [path (resolve-node node solution proofs)])) nodes)

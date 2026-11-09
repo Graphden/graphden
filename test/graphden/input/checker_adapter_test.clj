@@ -73,7 +73,27 @@
     (is (= [] (:dependencies refined)))
     (is (thrown? clojure.lang.ExceptionInfo
           (analyze (assoc-in ctx [:type-bodies identity-type]
-                            [:refine :fn-ref [:in [(random-uuid)]]]))))))
+                             [:refine :fn-ref [:in [(random-uuid)]]]))))))
+
+
+(deftest resolver-checks-input-and-result-separately-through-the-existing-checker-test
+  (let [[owner resolver root input result path edge secret] (repeatedly 8 random-uuid)
+        text (:text (ids/primitive-fn-ids))
+        ctx (context/build-context
+              {:fns {owner {:input-type-fn-id root} resolver {:input-type-fn-id input}}
+               :type-bodies {secret [:secret :text]}
+               :signatures {resolver {:return [:secret :text] :args {:path :text} :effects #{:network}}}
+               :members {root [{:slot-id result :position 0}] input [{:slot-id path :position 0}]}
+               :fields {result {:id result :name "result" :type-fn-id secret :required true}
+                        path {:id path :name "path" :type-fn-id text :required true}}
+               :bindings {edge {:id edge :fn-id owner :scope-path [] :target-path [result]
+                                :expression-kind "value" :value-present true :value "secret/path"
+                                :resolver-fn-id resolver}}})
+        analyze #(analysis/analyze-effective-input % owner {:check-expression check/check-input-binding})]
+    (is (= :checked (:status (analyze ctx))))
+    (is (= [] (:required-addresses (analyze ctx))))
+    (is (thrown? clojure.lang.ExceptionInfo (analyze (assoc-in ctx [:bindings edge :value] 7))))
+    (is (thrown? clojure.lang.ExceptionInfo (analyze (assoc-in ctx [:fields result :type-fn-id] text))))))
 
 
 (deftest structured-literal-uses-the-existing-directional-checker-test

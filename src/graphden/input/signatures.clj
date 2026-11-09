@@ -64,7 +64,7 @@
     (case mode
       :literal {:type actual :value (:value expression) :value-present true :effects #{}}
       :identity {:type :fn-ref :value (:fn-id expression) :value-present true :effects #{}}
-      (:value :callable-producer :graph-callable)
+      (:value :callable-producer :graph-callable :resolved-value)
       (do
         (when-not (and target-scope signature (set? (:effects signature)))
           (context/reject! :reference-signature-required {:address address}))
@@ -103,8 +103,18 @@
                                          (when-let [source (get routes [scope prefix])]
                                            [prefix source])))
                                      (range (count path) -1 -1))
+                        resolved (some (fn [length]
+                                         (let [prefix (subvec path 0 length)]
+                                           (when-let [argument (get-in graph [:resolver-arguments [scope prefix]])]
+                                             [prefix argument])))
+                                       (range (count path) -1 -1))
                         result
                         (cond
+                          resolved
+                          (let [[prefix argument] resolved]
+                            (project-fact {:type (:actual-type argument) :value (:value argument)
+                                           :value-present true :effects #{}}
+                                          (subvec (names-at contract path) (count prefix))))
                           bound
                           (let [[prefix entry] bound
                                 source (get-in entry [:reference :source])
@@ -133,8 +143,8 @@
                     result)))]
       (let [facts (into {} (map (fn [[argument path]] [argument (fact [scope path] #{})])) argument-paths)]
         {:bindings-info (into {} (map (fn [[argument info]]
-                                       [argument (assoc (dissoc info :effects :free?)
-                                                        :address [scope (get argument-paths argument)])])) facts)
+                                        [argument (assoc (dissoc info :effects :free?)
+                                                         :address [scope (get argument-paths argument)])])) facts)
          :argument-effects (update-vals facts :effects)
          :free-arguments (into #{} (keep (fn [[argument info]] (when (:free? info) argument))) facts)}))))
 

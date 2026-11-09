@@ -11,6 +11,7 @@
     [graphden.input.metadata :as metadata]
     [graphden.input.obligations :as obligations]
     [graphden.input.projections :as projections]
+    [graphden.input.resolvers :as resolvers]
     [graphden.input.rows :as rows]
     [graphden.input.scopes :as scopes]
     [graphden.input.surface :as surface]
@@ -23,7 +24,8 @@
 (defn- expression-of
   [row scope]
   (case (:expression-kind row)
-    "value" {:kind :value :value (:value row)}
+    "value" (cond-> {:kind :value :value (:value row)}
+              (:resolver-fn-id row) (assoc :resolver-fn-id (:resolver-fn-id row)))
     "ref" {:kind :ref :fn-id (:ref-fn-id row)}
     "projection" {:kind :projection :scope [(first scope) (into (or (:origin-use-path row) []) (:projection-scope-path row))]
                   :path (:projection-path row)}))
@@ -42,8 +44,13 @@
                               [(first scope) (conj (second scope) (:id row))]
                               (get-in ctx [:signatures (:fn-id expression)])))
                           {:mode :unresolved :reason :missing-ref-target})
-                   :value (if (:resolver-fn-id row)
-                            {:mode :unresolved :reason :resolver-analysis-required}
+                   :value (if-let [target (:resolver-fn-id row)]
+                            (let [signature (variables/signature-in-scope
+                                              [(first scope) (conj (second scope) (:id row))]
+                                              (get-in ctx [:signatures target]))]
+                              (if (and (contains? (:fns ctx) target) (:return signature))
+                                {:mode :resolved-value :actual-type (:return signature)}
+                                {:mode :unresolved :reason :missing-resolver-signature}))
                             {:mode :literal :actual-type (literals/classify-literal (:value expression))})
                    :projection {:mode :unresolved :reason :projection-analysis-required})]
     {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
@@ -100,7 +107,7 @@
              obligations (container-obligations (:descriptor remaining) scope [])
              closure-gaps (cond-> []
                             (some #(seq (:scope-path %)) owned) (conj :scoped-analysis-required)
-                            (some #(contains? #{:value :callable-producer :graph-callable}
+                            (some #(contains? #{:value :callable-producer :graph-callable :resolved-value}
                                               (get-in % [:reference :mode])) entries)
                             (conj :reference-availability-required))
              diagnostics (into (into (cond-> (mapv #(hash-map :code %) closure-gaps)
@@ -147,6 +154,7 @@
                (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))
            (projections/prepare)
            (projections/apply-demands)
+           (resolvers/mark-boundaries)
            (as-> graph (captures/prepare ctx graph))
            (projections/prepare)
            (checking/check-graph (:check-expression options))

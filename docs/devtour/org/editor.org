@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~191 min
+[[file:index.org][index]] · ~192 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -405,7 +405,7 @@ Runs the selected root HOF's tutorial catalogue callback over browser-local disp
 :CUSTOM_ID: editor/openTutorialMenu
 :FILE: resources/packages/app/editor/editor-tour-picker.js
 :LINE: 347
-:MINS: 17.1
+:MINS: 17.7
 :END:
 
 Owns the tutorial catalogue's local reading history, requirement checks, stable filter and Read/Unmark controls. The root callback filters lessons and partitions adjacent chapter runs after filtering; native actions recheck membership and context. Root replacement retires pending fetches, painted rows and the render receipt.

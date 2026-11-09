@@ -201,20 +201,40 @@ function makeWorld(opts) {
 // --- the reading history ----------------------------------------------------
 
 (async () => {
-  await test('service catalogue waits for quota before deciding plan support', async () => {
-    for (const supported of [true, false]) {
-      const w = makeWorld({lessons: {lessons: [{id: '36', title: 'Services', steps: [{}], requires: 'services'}]}});
+  await test('slow or failed quota restricts only the service lesson', async () => {
+    for (const outcome of ['dedicated', 'unsupported', 'failed', 'rejected', 'closed', 'auth-changed']) {
+      const w = makeWorld({lessons: {lessons: [
+        {id: '01', title: 'First fn', steps: [{}]},
+        {id: '36', title: 'Services', steps: [{}], requires: 'services'},
+      ]}});
       let release;
       let known = false;
-      w.ctx.gdWaitForServicePlan = () => new Promise(resolve => { release = () => { known = true; resolve(true); }; });
-      w.ctx.gdServicesManageable = () => known && supported;
-      const opening = w.ctx.openTutorialMenu();
-      for (let i = 0; i < 30 && !release; i++) await Promise.resolve();
-      assert(!w.pop.classList.contains('gd-tour-visible'), 'pending quota does not display a false plan restriction');
+      w.ctx.gdWaitForServicePlan = () => new Promise((resolve, reject) => { release = () => {
+        known = true;
+        if (outcome === 'rejected') reject(new Error('quota offline'));
+        else resolve(outcome !== 'failed');
+      }; });
+      w.ctx.gdServicesManageable = () => known && outcome === 'dedicated';
+      await w.ctx.openTutorialMenu();
+      assert(w.pop.classList.contains('gd-tour-visible') && !w.row('01').querySelector('button').disabled,
+        'nonservice lesson remains available while quota is pending');
+      assert(w.row('36').querySelector('button').disabled
+        && w.row('36').querySelector('button').title === 'Checking service plan…',
+      'pending quota has a local loading reason, not a plan restriction');
+      if (outcome === 'closed') w.ctx.gdTourCatalogClose();
+      if (outcome === 'auth-changed') w.ctx.dispatchEvent(new Event('gd-auth-changed'));
       release();
-      await opening;
-      assert(w.row('36').querySelector('button').disabled === !supported,
-        supported ? 'dedicated plan enables the service lesson' : 'known unsupported plan keeps the lesson restricted');
+      await new Promise(resolve => setImmediate(resolve));
+      if (outcome === 'closed' || outcome === 'auth-changed') {
+        assert(!w.pop.classList.contains('gd-tour-visible'), 'late plan cannot revive a retired catalogue');
+        continue;
+      }
+      assert(!w.row('01').querySelector('button').disabled, 'quota outcome never disables an independent lesson');
+      assert(w.row('36').querySelector('button').disabled === (outcome !== 'dedicated'),
+        'only a confirmed dedicated plan enables the service lesson');
+      const title = w.row('36').querySelector('button').title;
+      if (outcome === 'failed' || outcome === 'rejected') assert(title === 'Service plan unavailable', 'quota failure has a local metadata error');
+      if (outcome === 'unsupported') assert(title.includes('dedicated plan'), 'known unsupported plan retains its real restriction');
     }
   });
   await test('the history records the edition finished, and an empty one is no key at all', () => {

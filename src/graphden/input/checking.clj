@@ -20,7 +20,10 @@
     :else
     (check-expression {:address address :expected expected-type
                        :actual (or (:callable-type reference) (:actual-type reference))
-                       :expression expression :substitution substitution})))
+                       :expression (if (= :identity (:mode reference))
+                                     {:kind :value :value (:fn-id expression)}
+                                     expression)
+                       :substitution substitution})))
 
 
 (defn check-entries

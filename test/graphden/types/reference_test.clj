@@ -40,8 +40,20 @@
         (doseq [source [:test/Identity [:refine :fn-ref [:not= nil]]]]
           (let [expected (types/resolve-alias source)]
             (is (types/well-formed? expected))
-            (is (= {:mode :unresolved :reason :wrapped-identity-policy}
+            (is (= {:mode :identity :actual-type :fn-ref}
                    (reference/classify expected target)))))))))
+
+
+(deftest marker-callable-dispatch-retains-invocation-result-policy-test
+  (let [expected [:secret [:fn {:item :text} :bool #{}]]
+        target {:args {:item :text} :return :bool :effects #{}}]
+    (is (= :graph-callable (:mode (reference/classify expected target))))
+    (is (= [:fn {:item :text} [:secret :bool] #{} :unknown]
+           (reference/expected-callable expected)))
+    (is (= :callable-producer
+           (:mode (reference/classify expected (assoc target :return [:fn {:item :text} :bool #{}])))))
+    (is (= :unresolved
+           (:mode (reference/classify [:refine [:fn {:item :text} :bool] [:not= nil]] target))))))
 
 
 (deftest authored-empty-call-site-partition-captures-structural-name-test

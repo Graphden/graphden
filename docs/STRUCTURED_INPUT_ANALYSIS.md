@@ -122,7 +122,10 @@ all runtime values. Deferred checks are explicit `:obligations` with stable
 scope/path/kind identities and `:field-read` or `:container-materialization`
 triggers. A compiler must consume a supported obligation or refuse it; a container
 obligation cannot eagerly force unrelated fields when one field is read.
-Runtime execution and signature publication are not activated by this API. Wrapped identity or
-callable policies that lack an adapter are diagnosed rather than evaluated in
-the wrong mode. Reference cycles are rejected; they are never treated as empty input. A locally empty remaining record is not proof that the graph is
+Runtime execution and signature publication are not activated by this API.
+Marked and refined identity inputs remain identity edges; the checker receives
+their target UUID as a known value for policy validation. Marked callable inputs
+use the existing invocation-signature projection. Refined callable policies
+without a supported proof remain explicit diagnostics, never value evaluation.
+Reference cycles are rejected; they are never treated as empty input. A locally empty remaining record is not proof that the graph is
 ready. Public activation requires the remaining analyzer and runtime work.

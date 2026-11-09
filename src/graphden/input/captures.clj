@@ -64,7 +64,7 @@
 (defn- callable-plan
   [ctx graph {:keys [from to binding-id target-fn-id]} fields]
   (let [entry (get-in graph [:scopes (second (first from)) :bindings from])
-        expected (:expected-type entry)
+        expected (reference/expected-callable (:expected-type entry))
         lexical (into [] (mapcat #(lexical-routes graph % :capture binding-id)) fields)
         params (reference/select-call-site-params
                  {:structural-names (when (types/fn-type? expected) (keys (types/fn-args expected)))

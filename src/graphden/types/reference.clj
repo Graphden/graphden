@@ -33,6 +33,16 @@
     :else expected))
 
 
+(defn expected-callable
+  "Invocation shape of a callable input, preserving the existing marker
+   projection. A refined callable needs its own policy proof, not unwrapping."
+  [expected]
+  (or (types/callable-signature expected)
+      (when (= :fn expected) :fn)
+      (when (types/marker-type? expected)
+        (expected-callable (types/marker-inner expected)))))
+
+
 (defn classify
   "expected and target-info must belong to the same resolved type snapshot.
    Identity edges need no target signature. Callable producers evaluate their
@@ -41,14 +51,13 @@
   (let [ret (:return target-info)
         base (dispatch-base expected)]
     (cond
-      (= :fn-ref expected) {:mode :identity :actual-type :fn-ref}
-      (= :fn-ref base) {:mode :unresolved :reason :wrapped-identity-policy}
+      (= :fn-ref base) {:mode :identity :actual-type :fn-ref}
       (types/union-type? base) {:mode :unresolved :reason :ambiguous-reference-mode}
-      (and (not= base expected) (types/callable-type? base))
-      {:mode :unresolved :reason :wrapped-callable-policy}
+      (and (types/callable-type? base) (nil? (expected-callable expected)))
+      {:mode :unresolved :reason :refined-callable-policy}
       (nil? target-info) {:mode :unresolved :reason :missing-target-signature}
       (nil? ret) {:mode :unresolved :reason :missing-target-return}
-      (not (types/callable-type? expected)) {:mode :value :actual-type ret}
+      (nil? (expected-callable expected)) {:mode :value :actual-type ret}
       (produces-callable? ret)
       {:mode :callable-producer :actual-type ret :callable-type (types/callable-signature ret)}
       :else

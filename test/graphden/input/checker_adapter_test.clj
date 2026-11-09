@@ -54,6 +54,28 @@
     (is (= :deferred (get-in result [:argument-proofs :value :status])))))
 
 
+(deftest wrapped-identity-checks-the-target-id-without-an-execution-dependency-test
+  (let [[owner root field edge target identity-type] (repeatedly 6 random-uuid)
+        ctx (context/build-context
+              {:fns {owner {:input-type-fn-id root} target {:name "not-evaluated"}}
+               :type-bodies {identity-type [:secret :fn-ref]}
+               :members {root [{:slot-id field :position 0}]}
+               :fields {field {:id field :name "handler" :required true :type-fn-id identity-type}}
+               :bindings {edge {:id edge :fn-id owner :scope-path [] :target-path [field]
+                                :expression-kind "ref" :ref-fn-id target}}})
+        analyze #(analysis/analyze-effective-input % owner {:check-expression check/check-input-binding})
+        marked (analyze ctx)
+        refined (analyze (assoc-in ctx [:type-bodies identity-type] [:refine :fn-ref [:not= nil]]))]
+    (is (= :checked (:status marked)))
+    (is (= [] (:dependencies marked)))
+    (is (= #{[]} (set (keys (:scopes marked)))))
+    (is (= :checked (:status refined)))
+    (is (= [] (:dependencies refined)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (analyze (assoc-in ctx [:type-bodies identity-type]
+                            [:refine :fn-ref [:in [(random-uuid)]]]))))))
+
+
 (deftest structured-literal-uses-the-existing-directional-checker-test
   (let [input {:address [[(random-uuid) []] [(random-uuid)]]
                :expected :int :actual :int :expression {:kind :value :value 12}}]

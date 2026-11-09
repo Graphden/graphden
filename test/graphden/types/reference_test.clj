@@ -42,3 +42,22 @@
             (is (types/well-formed? expected))
             (is (= {:mode :unresolved :reason :wrapped-identity-policy}
                    (reference/classify expected target)))))))))
+
+
+(deftest authored-empty-call-site-partition-captures-structural-name-test
+  (let [expected [:fn {:item :int} :bool #{}]
+        actual [:fn {:item :int :config :text} :bool #{:db} #{:jvm-server}]
+        info {:lambda-params [] :arg-effects {:item #{:db}}}]
+    (is (= [:fn {:item :int} :bool #{} #{:jvm-server}]
+           (reference/call-site-contract expected actual info)))
+    (is (= [:fn {:item :int} :bool #{:db} #{:jvm-server}]
+           (reference/call-site-contract expected actual {})))))
+
+
+(deftest authored-call-site-names-survive-positional-type-projection-test
+  (let [expected [:fn {:item :int} :bool :any]
+        actual [:fn {:value :int :config :text} :bool :any :unknown]]
+    (is (= [:fn {:value :int} :bool :any :unknown]
+           (reference/call-site-contract expected actual {:lambda-params [:value]})))
+    (is (= [:fn {} :bool :any :unknown]
+           (reference/call-site-contract [:fn {} :bool :any] actual {})))))

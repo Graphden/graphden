@@ -40,6 +40,9 @@ function showServiceError(el, anchorEl, message) {
 // to matter, and we don't want a stale entry to misrepresent
 // enabled?/restart-policy.
 let servicesCache = null;
+let _serviceAuthEpoch = 0;
+let _serviceCacheRequest = 0;
+let _tenantPlanRequest = 0;
 
 
 function ensureServicePopoverEl() {
@@ -144,15 +147,19 @@ function presentServicePopover(el, anchorEl) {
 let _tenantPlanTier; // undefined = not primed; null = public/single-tenant; slug otherwise
 
 async function primeTenantPlan() {
-  _tenantPlanTier = null;
-  if (typeof API !== 'object' || typeof API.api_orgs_quota === 'undefined') return;
-  try {
-    const r = await authFetch(API.api_orgs_quota, { method: 'GET' });
-    if (r?.ok) {
-      const q = await r.json();
-      _tenantPlanTier = q?.plan || null; // null body ≡ public org
-    }
-  } catch (_) { /* leave null → platform path; a quota blip must not break services */ }
+  const request = ++_tenantPlanRequest;
+  const epoch = _serviceAuthEpoch;
+  const session = serviceSessionKey();
+  let tier = null;
+  if (typeof API === 'object' && typeof API.api_orgs_quota !== 'undefined') {
+    try {
+      const r = await authFetch(API.api_orgs_quota, {method: 'GET'});
+      if (r?.ok) tier = (await r.json())?.plan || null;
+    } catch (_) { /* the current session retains the platform fallback */ }
+  }
+  if (request !== _tenantPlanRequest || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()) return false;
+  _tenantPlanTier = tier;
+  return true;
 }
 
 // A real tenant (org ≠ public) — its services live under `:org-id`, reachable
@@ -193,8 +200,12 @@ async function fetchServices() {
 // (`getServiceForFnId` for the badge, `loadAllServiceFnIds` for the
 // sidebar filter) see the freshest data without a duplicate roundtrip.
 async function refreshServicesCache(context) {
+  const request = ++_serviceCacheRequest;
+  const epoch = _serviceAuthEpoch;
+  const session = serviceSessionKey();
   const cache = await fetchServices();
-  if (context && !serviceContextCurrent(context)) return null;
+  if (request !== _serviceCacheRequest || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()
+      || (context && !serviceContextCurrent(context))) return null;
   servicesCache = cache;
   return servicesCache;
 }
@@ -300,7 +311,9 @@ async function loadServicesEager() {
   // Prime the plan tier BEFORE the first services fetch so `fetchServices`
   // routes to the tenant vs platform list endpoint correctly (a real tenant's
   // `/api/services` would 403).
-  await primeTenantPlan();
+  const epoch = _serviceAuthEpoch;
+  const session = serviceSessionKey();
+  if (!await primeTenantPlan() || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()) return;
   await refreshServicesCache();
 }
 
@@ -498,6 +511,7 @@ function showTenantPopoverBody(el, anchorEl, bodyHtml) {
 
 
 async function showServicePopover(fnEntity, anchorEl) {
+  if (window.gdGraphEditsReady?.() === false) return;
   if (!fnEntity || !anchorEl) return;
   const el = ensureServicePopoverEl();
   if (serviceInstanceTimer !== null) clearTimeout(serviceInstanceTimer);
@@ -669,6 +683,10 @@ installPopoverDismiss({
 
 
 window.addEventListener?.('gd-auth-changed', () => {
+  _serviceAuthEpoch++;
+  _serviceCacheRequest++;
+  _tenantPlanRequest++;
+  _tenantPlanTier = undefined;
   hideServicePopover();
   servicesCache = null;
 });

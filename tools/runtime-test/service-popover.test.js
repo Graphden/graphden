@@ -235,6 +235,45 @@ const popover = (doc) => doc.querySelector('.service-popover');
     assert(popover(t.doc).textContent.includes('latest'), 'reopening same UUID ignores old response');
   }
 
+  console.log(' background service metadata stays within its session and latest request');
+  {
+    const t = boot();
+    let release;
+    t.ctx.authFetch = () => new Promise(resolve => { release = resolve; });
+    const old = t.ctx.refreshServicesCache();
+    t.seen['gd-auth-changed']();
+    release({ok: true, json: async () => ({services: [{id: 'old-org'}]})});
+    await old;
+    assert(vm.runInContext('servicesCache === null', t.ctx), 'auth invalidation rejects an old background service cache');
+  }
+  {
+    const t = boot();
+    const releases = [];
+    t.ctx.authFetch = () => new Promise(resolve => releases.push(resolve));
+    const old = t.ctx.refreshServicesCache();
+    const latest = t.ctx.refreshServicesCache();
+    releases[1]({ok: true, json: async () => ({services: [{id: 'latest'}]})});
+    await latest;
+    releases[0]({ok: true, json: async () => ({services: [{id: 'old'}]})});
+    await old;
+    assert(vm.runInContext('servicesCache.services[0].id === "latest"', t.ctx), 'late prior refresh cannot replace latest services');
+  }
+  for (const change of ['authorization', 'org', 'branch']) {
+    const t = boot();
+    t.ctx.API.api_orgs_quota = '/api/orgs/quota';
+    let release;
+    const urls = [];
+    t.ctx.authFetch = url => { urls.push(url); return new Promise(resolve => { release = resolve; }); };
+    const loading = t.ctx.loadServicesEager();
+    if (change === 'authorization') t.seen['gd-auth-changed']();
+    if (change === 'org') t.ctx.graphdenCurrentOrg = 'org-b';
+    if (change === 'branch') t.seen.branch = 'prod';
+    release({ok: true, json: async () => ({plan: 'dedicated'})});
+    await loading;
+    assert(vm.runInContext('_tenantPlanTier === undefined', t.ctx), change + ' rejects obsolete tenant plan');
+    assert(urls.length === 1, change + ' cannot continue into a service request using obsolete tier');
+  }
+
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }
   console.log(`✓ ${passes} passed`);
 })();

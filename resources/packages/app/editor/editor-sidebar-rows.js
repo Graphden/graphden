@@ -67,6 +67,7 @@ function buildFnItem(fn, level = 1) {
   // not containers.
   const actions = document.createElement('span');
   actions.className = 'ns-row-actions';
+  actions.inert = window.gdGraphEditsReady?.() === false;
   if (typeof buildFnRowButtons === 'function') {
     buildFnRowButtons(actions, fn.id, fn.displayName);
   }
@@ -165,6 +166,7 @@ function renderNsNode(container, name, node, path, searchMode) {
   // left of the `i`.
   const actions = document.createElement('span');
   actions.className = 'ns-row-actions';
+  actions.inert = window.gdGraphEditsReady?.() === false;
   header.appendChild(actions);
   if (node?.nsId && typeof buildNsRowButtons === 'function') {
     buildNsRowButtons(actions, node.nsId, nsPath);

@@ -744,6 +744,20 @@
            It retains rich declarations and binding origins, while reporting unsupported list,
            rename, ref-scope and policy forms as explicit blockers. A completed report does not
            prove runtime equivalence or authorize dropping an unsupported definition."}
+    {:ns graphden.input.module :defn parse-module-v2
+     :say "Reads an explicitly versioned source module with caller-resolved declarations and
+           namespace contexts. It retains authored input metadata and origin ledgers, returning
+           validated input-binding rows without registry or storage writes. Partial required
+           fields are legal; structural validation does not prove types or graph readiness."}
+    {:ns graphden.input.module :defn emit-module-v2
+     :say "Exports offline definitions using the same declared descriptors and identity callbacks.
+           Re-parsing detects changed binding origins or declaration context. Rich declarations
+           remain intact; source formatting and comments belong to the separate CST writer."}
+    {:ns graphden.input.format :defn require-legacy!
+     :say "Keeps format 2 outside the production loader. Unsupported headers and mixed structured
+           definition keys fail during the entire package closure's preflight, before any impl
+           executes. Absent/version-1 headers still use legacy semantics; same-named argument
+           fields and literal map keys remain ordinary data."}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

@@ -91,8 +91,12 @@ unambiguous, explicit expression operators use tagged vector forms:
         :options [:value {:value 1 :ref "ordinary data"}]}}
 ```
 
-These forms are a transition grammar contract, not syntax accepted by the
-current package loader in stage 1. Literal maps/vectors have an explicit
+These forms are a transition grammar contract. The standalone
+`graphden.input.syntax` parser/exporter supports value/ref expressions and
+partial maps against a supplied resolved descriptor; it is not yet connected
+to the production package loader. Bare scalars (including keywords) are
+literals; references always use `[:ref name]`. Callers supply a frozen
+reference index and a binding-identity function to preserve existing origins. Literal maps/vectors have an explicit
 value wrapper; a parser must not infer ref meaning from literal contents.
 The semantic migrator preserves existing literal maps as whole values and
 distinguishes declarations, defaults, narrowing, renames and actual binds.

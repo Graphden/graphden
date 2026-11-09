@@ -71,6 +71,23 @@
                                                :operations [(wrap-value :child [:args :x])]}))))))
 
 
+(deftest namespace-less-modules-preserve-absence-test
+  (doseq [source ["{:fns [{:name :base :args {:x 1}}]}"
+                  "{:namespace nil :fns [{:name :base :args {:x 1}}]}"]]
+    (let [patch (cst/plan source {:namespace nil :operations [(wrap-value :base [:args :x])]})]
+      (is (= (str/replace source ":x 1" ":x [:value 1]") (:target-text patch)))
+      (is (= :invalid-module (reason #(cst/plan source (request (wrap-value :base [:args :x])))))))))
+
+
+(deftest tabs-before-node-do-not-shift-source-spans-test
+  (let [source "\t{:namespace\t\"demo.main\" :fns [{:name :base\t:args {\t:x\t42}}]}\n"
+        patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}
+                                        (wrap-value :base [:args :x])))
+        expected (-> source (str/replace ":args" ":input") (str/replace "42" "[:value 42]"))]
+    (is (= expected (:target-text patch)))
+    (is (= {:status :applied :text expected} (cst/apply-text patch source)))))
+
+
 (deftest unknown-and-duplicate-definitions-refuse-test
   (testing "Duplicate top-level names refuse even when another definition is selected"
     (is (= :duplicate-definition
@@ -128,6 +145,13 @@
     (is (= :invalid-rename-path
            (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :base :args {:x {}}}]}"
                               (request {:op :rename-input :definition :base :path [:args :x]})))))))
+
+
+(deftest rename-refuses-type-row-markers-test
+  (doseq [marker [:type :refine :list :union :map :tuple :variant :fn-type :marker]]
+    (let [source (pr-str {:namespace "demo.main" :fns [{:name :row marker :any :args {}}]})]
+      (is (= :not-base-declaration
+             (reason #(cst/plan source (request {:op :rename-input :definition :row :path [:args]}))))))))
 
 
 (deftest checksum-bound-idempotent-application-test

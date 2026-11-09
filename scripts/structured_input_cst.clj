@@ -51,7 +51,7 @@
 (defn- module-definitions
   [source namespace]
   (let [module (inventory/read-edn "<CST source>" source)]
-    (when-not (and (map? module) (string? namespace) (= namespace (:namespace module))
+    (when-not (and (map? module) (or (nil? namespace) (string? namespace)) (= namespace (:namespace module))
                    (vector? (:fns module)) (every? map? (:fns module)))
       (refuse :invalid-module {:namespace namespace}))
     (let [names (map :name (:fns module))]
@@ -97,7 +97,8 @@
       (do
         (when-not (= [:args] path)
           (refuse :invalid-rename-path {:path path}))
-        (when (or (key-loc loc :parent) (key-loc loc :parents))
+        (when (some #(key-loc loc %)
+                    [:parent :parents :type :refine :list :union :map :tuple :variant :fn-type :marker])
           (refuse :not-base-declaration {:definition definition}))
         (when (key-loc loc :input)
           (refuse :existing-input {:definition definition}))
@@ -150,7 +151,7 @@
 
 
 (defn plan
-  "Plan edits against one exact source string. Request: {:namespace STRING
+  "Plan edits against one exact source string. Request: {:namespace STRING-OR-NIL
    :operations [{:op :rename-input|:wrap-value :definition KEYWORD :path VECTOR}]}.
    Paths contain map keys and address the ORIGINAL definition. Rename requires
    [:args]; wrap requires an explicit path below :args. Overlaps refuse.

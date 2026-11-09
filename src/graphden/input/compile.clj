@@ -26,7 +26,7 @@
                      #(into {} (map (fn [[address type]] [address (validator/build type)]))
                             (merge (into {} (map (fn [address]
                                                    [address (get-in plan [:expressions address :type])]))
-                                         (:parameters plan))
+                                         (into (:parameters plan) (:invocation-parameters plan)))
                                    (:value-obligations plan))))]
     (fn [supplied ctx]
       (let [ctx (eager/invocation-context ctx)

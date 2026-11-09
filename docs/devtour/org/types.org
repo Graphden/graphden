@@ -7,7 +7,7 @@ Type expressions, compatibility, inference, and secret markings.
 
 after: executor
 
-[[file:index.org][index]] · ~124 min
+[[file:index.org][index]] · ~125 min
 
 * 1. bind-input
 :PROPERTIES:
@@ -142,13 +142,13 @@ Separates nonforcing cell identity from the map's normal value equality and hash
 :PROPERTIES:
 :CUSTOM_ID: types/lower-checked
 :FILE: src/graphden/input/ir.clj
-:LINE: 119
-:MINS: 2.9
+:LINE: 157
+:MINS: 3.2
 :END:
 
 Lowers the checked fixture subset into address-keyed execution operations. Snapshot and checker coverage must agree; unsupported closures or consumption obligations reject. Base implementation and argument-ID paths are explicit caller-resolved provenance, not inferred from the input contract alone.
 
-- source :: [[file:../../../src/graphden/input/ir.clj::(defn lower-checked][src/graphden/input/ir.clj:119]]
+- source :: [[file:../../../src/graphden/input/ir.clj::(defn lower-checked][src/graphden/input/ir.clj:157]]
 
 * 12. compile-checked
 :PROPERTIES:
@@ -166,13 +166,13 @@ Builds a fixture closure for the existing execute entry point. Invocation-local 
 :PROPERTIES:
 :CUSTOM_ID: types/scope-keys
 :FILE: src/graphden/input/memo.clj
-:LINE: 15
-:MINS: 3.1
+:LINE: 10
+:MINS: 3.2
 :END:
 
 Builds nonforcing memo inputs relative to each target scope. Local authored computations share provenance across repeated named uses; computed captures outside the target keep their invocation-local source cell identity. Known literals retain value equality, preventing both repeated local effects and stale captures across request-cache reuse.
 
-- source :: [[file:../../../src/graphden/input/memo.clj::(defn scope-keys][src/graphden/input/memo.clj:15]]
+- source :: [[file:../../../src/graphden/input/memo.clj::(defn scope-keys][src/graphden/input/memo.clj:10]]
 
 * 14. safe-value?
 :PROPERTIES:

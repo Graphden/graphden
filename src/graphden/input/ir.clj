@@ -1,6 +1,10 @@
 (ns graphden.input.ir
   "Pure lowering of a checked input plan for the fixture compiler. This is
-   an internal execution IR, not authoring syntax or a production entry point.")
+   an internal execution IR, not authoring syntax or a production entry point."
+  (:require
+    [clojure.set :as set]
+    [graphden.input.address :as address]
+    [graphden.input.descriptor :as descriptor]))
 
 
 (defn reject!
@@ -16,9 +20,7 @@
                          [:recursive-availability :type-checker]))
     (reject! :unchecked-plan {}))
   (when-not (and snapshot-id (= snapshot-id (get-in analysis [:public-input :snapshot-id])))
-    (reject! :snapshot-mismatch {}))
-  (when (seq (:closures analysis))
-    (reject! :closure-compilation-required {})))
+    (reject! :snapshot-mismatch {})))
 
 
 (defn- value-obligations
@@ -44,7 +46,7 @@
     :literal {:op :literal :value (:value expression)}
     :identity {:op :literal :value (:fn-id expression)}
     :projection {:op :read :source (:source reference)}
-    (:value :callable-producer)
+    (:value :callable-producer :graph-callable)
     (let [dependency (get (::dependencies analysis) address)]
       (when-not (= 1 (count dependency))
         (reject! :dependency-mismatch {:address address :binding-id binding-id}))
@@ -53,7 +55,10 @@
                        (= target-fn-id (:fn-id expression)
                           (get-in analysis [:scopes (second to) :fn-id])))
           (reject! :dependency-target-mismatch {:address address}))
-        {:op :invoke :scope to :target-id target-fn-id :binding-id binding-id}))
+        (when (and (= :graph-callable (:mode reference)) (not (:capture-resolved? reference)))
+          (reject! :closure-capture-plan-required {:address address}))
+        {:op (if (= :graph-callable (:mode reference)) :closure :invoke)
+         :scope to :target-id target-fn-id :binding-id binding-id}))
     (reject! :reference-mode-required {:address address :mode (:mode reference)})))
 
 
@@ -109,11 +114,44 @@
                 (reject! :expression-cycle {:address address}))
               (when-not (contains? @done address)
                 (let [{:keys [op source scope fields]} (get expressions address)
-                      children (case op :read [source] :invoke [[scope []]]
+                      children (case op :read [source] (:invoke :closure) [[scope []]]
                                      :record (mapv second fields) [])]
                   (doseq [child children] (visit child (conj pending address)))
                   (vswap! done conj address))))]
       (doseq [address (keys expressions)] (visit address #{})))))
+
+
+(defn- closure-plans
+  [analysis expressions]
+  (let [plans (:closures analysis)]
+    (doseq [[address expression] expressions]
+      (when (and (= :closure (:op expression)) (not (contains? plans address)))
+        (reject! :closure-capture-plan-required {:address address})))
+    (into {}
+          (map (fn [[address {:keys [parameters call-sites external-captures] :as plan}]]
+                 (when-not (and (= :closure (get-in expressions [address :op]))
+                                (vector? parameters) (every? keyword? parameters)
+                                (= (count parameters) (count (set parameters))))
+                   (reject! :invalid-closure-plan {:address address}))
+                 (doseq [{:keys [target value-path parameter]} call-sites]
+                   (when (seq value-path)
+                     (reject! :nested-call-site-projection-required {:address target}))
+                   (when-not (and (contains? (set parameters) parameter)
+                                  (= :supplied (get-in expressions [target :op])))
+                     (reject! :invalid-call-site-route {:address target})))
+                 (let [scope (get-in expressions [address :scope])
+                       required? (fn [[scope path]]
+                                   (:required-now? (descriptor/node-at
+                                                     (get-in analysis [:scopes (second scope) :remaining-contract]) path)))]
+                   [address (assoc plan
+                                   :scope scope
+                                   :owned-addresses (filterv #(address/within-scope? scope (first %))
+                                                             (keys expressions))
+                                   :owned-scopes (mapv #(vector (first scope) %)
+                                                       (filter #(address/within-scope? scope [(first scope) %])
+                                                               (keys (:scopes analysis))))
+                                   :required-parameters (into #{} (comp (map :target) (filter required?)) call-sites)
+                                   :retained-addresses (set (map :target external-captures)))]))) plans)))
 
 
 (defn lower-checked
@@ -121,7 +159,7 @@
    explicitly resolved {:base-fn-id :impl :root-entry frozen-rich-signature
    :argument-paths {ABI-name UUID-path}}. Special base ABIs fail closed.
    Context checking does not discover a composed function's base output.
-   Free leaves remain parameters; unsupported closures/obligations fail closed."
+   Free leaves remain parameters; unsupported call-site shapes/obligations fail closed."
   [analysis {:keys [snapshot-id implementations target-names]}]
   (checked-plan! analysis snapshot-id)
   (let [analysis (assoc analysis ::dependencies (group-by :from (:dependencies analysis)))
@@ -133,6 +171,10 @@
         expressions (into {} (mapcat (fn [[use-path node]]
                                        (lower-tree analysis routes [(first root) use-path]
                                                    (:configured-contract node) []))) (:scopes analysis))
+        closures (closure-plans analysis expressions)
+        invocation-parameters (into #{} (mapcat #(map :target (:call-sites %))) (vals closures))
+        parameters (into #{} (keep (fn [[address expression]]
+                                     (when (= :supplied (:op expression)) address))) expressions)
         scopes (into {} (map (fn [[use-path node]]
                                (let [scope [(first root) use-path]]
                                  [scope (assoc (implementation! expressions scope
@@ -148,6 +190,6 @@
     (references! expressions)
     {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
      :required-addresses (set (:required-addresses analysis))
+     :closures closures :invocation-parameters invocation-parameters
      :value-obligations (value-obligations analysis expressions)
-     :parameters (into #{} (keep (fn [[address expression]]
-                                   (when (= :supplied (:op expression)) address))) expressions)}))
+     :parameters (set/difference parameters invocation-parameters)}))

@@ -1,5 +1,13 @@
 # Structured input runtime foundation
 
+This continuation contains an **unverified closure prototype**. It lowers
+scalar graph-callable parameters, retains enclosing capture cells and allocates
+a fresh body subtree on each invocation through the existing tagged-callable
+ABI. Only pure routing tests have run for this continuation; native closure
+execution, differential behavior and list delivery remain unfinished. The
+previous fixture compiler checkpoint has separate native evidence. None of
+this activates the production structured-input compiler.
+
 `graphden.input.runtime` is an isolated JVM foundation. The production
 compiler still builds legacy arguments. The isolated checked-plan fixture
 compiler below uses these views without activating a package format. Native

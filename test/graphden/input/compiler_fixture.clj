@@ -52,7 +52,7 @@
    (model definitions root (requiring-resolve 'graphden.types.check/check-input-binding)))
   ([definitions root checker]
    (let [snapshot (reduce-kv
-                    (fn [out owner {:keys [input return optional bindings]}]
+                    (fn [out owner {:keys [input return optional bindings] :as definition}]
                       (let [records (type-records owner [] input optional)
                             rows (map (fn [[path expression]]
                                         (merge {:id (id (or (:id expression) [owner :binding path]))
@@ -61,8 +61,9 @@
                                                  {:expression-kind "ref" :ref-fn-id (id (:ref expression))}
                                                  {:expression-kind "value" :value-present true :value (:value expression)}))) bindings)]
                         (-> out
-                            (assoc-in [:fns (id owner)] {:id (id owner) :name (name owner)
-                                                         :input-type-fn-id (id [owner :type []])})
+                            (assoc-in [:fns (id owner)] (merge {:id (id owner) :name (name owner)
+                                                                :input-type-fn-id (id [owner :type []])}
+                                                               (select-keys definition [:lambda-params])))
                             (assoc-in [:signatures (id owner)] {:args input :return return :effects #{}})
                             (update :fields merge (:fields records))
                             (update :members merge (:members records))

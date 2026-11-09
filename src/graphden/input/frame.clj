@@ -5,14 +5,15 @@
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.runtime :as runtime]
+    [graphden.input.invocation :as invocation]
     [graphden.input.ir :as ir]
     [graphden.input.memo :as memo]
     [graphden.input.runtime :as input]))
 
 
 (defn- presence
-  [expressions supplied root]
-  (let [result (volatile! {})]
+  [expressions supplied root {:keys [known addresses]}]
+  (let [result (volatile! known)]
     (letfn [(present?
               [address]
               (if-let [entry (find @result address)]
@@ -26,7 +27,7 @@
                               true)]
                   (vswap! result assoc address found)
                   found)))]
-      (doseq [address (keys expressions)] (present? address))
+      (doseq [address addresses] (present? address))
       @result)))
 
 
@@ -50,6 +51,23 @@
     (impl (legacy-arguments frame scope argument-paths) ctx)))
 
 
+(declare ^:private build-frame)
+
+
+(defn- invoke-closure
+  [parent address ctx lambda-args]
+  (executor/check-cancel!)
+  (let [plan (get-in parent [:ir :closures address])
+        ctx (eager/invocation-context ctx)
+        supplied (invocation/supplied-values (:supplied parent) plan lambda-args)
+        frame (build-frame (:ir parent) (:validators parent) supplied ctx
+                           {:parent parent :addresses (:owned-addresses plan) :scopes (:owned-scopes plan)
+                            :required (:required-parameters plan) :retained (:retained-addresses plan)})]
+    ;; A HOF body is a fresh invocation, not another call-cache entry. Only
+    ;; its ordinary nested references use the shared memo seam.
+    (invoke-scope frame (:scope plan) ctx)))
+
+
 (defn- resolve-expression
   [frame address ctx]
   (let [{:keys [op value source fields scope target-id]} (get-in frame [:ir :expressions address])]
@@ -61,31 +79,42 @@
                 (into {} (keep (fn [[name child]]
                                  (when (get-in frame [:present child])
                                    [name (get-in frame [:cells child])])) fields)))
+      :closure (eager/tagged-callable target-id (get-in frame [:ir :closures address :parameters])
+                                      #(invoke-closure frame address ctx %))
       :invoke (let [{:keys [base-fn-id argument-paths name]} (get-in frame [:ir :scopes scope])]
                 (executor/check-cancel!)
                 (eager/invoke-compiled
                   {:target-id target-id :name name :specialization [base-fn-id argument-paths]
                    :input-key (get-in frame [:input-keys scope])}
-                  #(invoke-scope frame scope %) ctx)))))
+                  #(invoke-scope frame scope %) (eager/invocation-context ctx))))))
+
+
+(defn- build-frame
+  [ir validators supplied ctx {:keys [parent addresses scopes required retained]}]
+  (let [retained (or retained #{})
+        known (merge (apply dissoc (:present parent) addresses) (select-keys (:present parent) retained))
+        present (presence (:expressions ir) supplied (:root-scope ir) {:known known :addresses addresses})
+        missing (filterv #(not (get present %)) required)]
+    (when (seq missing) (ir/reject! :missing-required-input {:addresses missing}))
+    (let [frozen (volatile! nil)
+          cells (into (or (:cells parent) {}) (map (fn [address]
+                                                     [address (input/field-cell
+                                                                #(let [value (resolve-expression @frozen address ctx)]
+                                                                   (if-let [check (get validators address)] (check value) value)))]))
+                      (remove retained addresses))
+          frame {:ir ir :validators validators :supplied supplied :present present :cells cells}
+          frame (assoc frame :input-keys (merge (:input-keys parent) (memo/scope-keys frame scopes)))]
+      (vreset! frozen frame)
+      frame)))
 
 
 (defn instantiate
-  "Allocate a complete frame before exposing any resolver. Forward reads
-   observe the frozen cell table. Memo keys never dereference those cells."
+  "Allocate a complete root frame before exposing a resolver. Closure calls
+   allocate only their owned subtree and retain enclosing captured cells."
   [ir validators supplied ctx]
   (when-not (map? supplied) (ir/reject! :address-map-required {}))
   (when (some #(not (contains? (:parameters ir) %)) (keys supplied))
     (ir/reject! :unknown-supplied-address {}))
-  (let [present (presence (:expressions ir) supplied (:root-scope ir))
-        missing (filterv #(not (get present %)) (:required-addresses ir))]
-    (when (seq missing) (ir/reject! :missing-required-input {:addresses missing}))
-    (let [frozen (volatile! nil)
-          cells (into {} (map (fn [address]
-                                [address (input/field-cell
-                                           #(let [value (resolve-expression @frozen address ctx)]
-                                              (if-let [check (get validators address)] (check value) value)))]))
-                      (keys (:expressions ir)))
-          frame {:ir ir :validators validators :supplied supplied :present present :cells cells}
-          frame (assoc frame :input-keys (memo/scope-keys frame))]
-      (vreset! frozen frame)
-      frame)))
+  (build-frame ir validators supplied ctx
+               {:addresses (keys (:expressions ir)) :scopes (keys (:scopes ir))
+                :required (:required-addresses ir)}))

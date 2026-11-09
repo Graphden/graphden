@@ -46,7 +46,7 @@
     (is (= :snapshot-mismatch (code (assoc-in model [:context :snapshot-id] (random-uuid)))))
     (is (= :runtime-obligations-required (code (assoc-in model [:analysis :obligations] [{:kind :value-type}]))))
     (is (= :runtime-obligations-required (code (assoc-in model [:analysis :scopes [] :obligations] [{}]))))
-    (is (= :closure-compilation-required (code (assoc-in model [:analysis :closures] {:x {}}))))))
+    (is (= :invalid-closure-plan (code (assoc-in model [:analysis :closures] {:x {}}))))))
 
 
 (deftest special-base-semantics-and-missing-abi-provenance-reject

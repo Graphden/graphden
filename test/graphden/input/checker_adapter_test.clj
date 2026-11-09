@@ -4,6 +4,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
+    [graphden.input.inference-test :as inference-test]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]))
 
@@ -94,6 +95,18 @@
     (is (= [] (:required-addresses (analyze ctx))))
     (is (thrown? clojure.lang.ExceptionInfo (analyze (assoc-in ctx [:bindings edge :value] 7))))
     (is (thrown? clojure.lang.ExceptionInfo (analyze (assoc-in ctx [:fields result :type-fn-id] text))))))
+
+
+(deftest shared-engine-infers-callable-producer-before-reference-checking-test
+  (let [{:keys [owner result value a context options]} (inference-test/callable-fixture)
+        graph (analysis/analyze-effective-input
+                context owner
+                (assoc options :infer-signature check/infer-input-signature :check-expression check/check-input-binding))]
+    (is (= :checked (:status graph)))
+    (is (true? (get-in graph [:coverage :signatures])))
+    (is (= :callable-producer (get-in graph [:scopes [] :bindings [[owner []] [result]] :reference :mode])))
+    (is (= :graph-callable (get-in graph [:scopes [a] :bindings [[owner [a]] [value]] :reference :mode])))
+    (is (= [] (:required-addresses graph)))))
 
 
 (deftest structured-literal-uses-the-existing-directional-checker-test

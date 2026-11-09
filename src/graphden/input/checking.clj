@@ -39,7 +39,8 @@
           {:substitution substitution :proofs {}} entries))
 
 
-(defn- join-solutions
+(defn merge-solutions
+  "Join independently derived facts through the existing value/effect solvers."
   [left right]
   (let [joined (reduce-kv (fn [solution variable rich]
                             (let [next (types/unify variable rich solution)]
@@ -87,6 +88,8 @@
                                            [address (resolve-entry resolve-type entry)])) %))
         (cond-> (:effective-contract node)
           (update :effective-contract #(variables/map-descriptor-types resolve-type %)))
+        (cond-> (:signature node)
+          (update :signature #(variables/resolve-signature solution %)))
         (assoc :substitution solution :proofs node-proofs :diagnostics diagnostics
                :status (if (empty? diagnostics) :checked :incomplete)))))
 
@@ -97,7 +100,7 @@
    without introducing another type engine. Literal payloads stay opaque."
   [graph check-expression]
   (let [nodes (sort-by (comp (partial mapv str) key) (:scopes graph))
-        initial (reduce join-solutions {} (map (comp :substitution val) nodes))
+        initial (reduce merge-solutions {} (map (comp :substitution val) nodes))
         entries (into []
                       (mapcat (fn [[_ node]]
                                 (map (fn [[address entry]]
@@ -125,8 +128,9 @@
         solution (:substitution final-pass)
         proofs (:proofs final-pass)
         old-proofs (into {} (mapcat (comp :proofs val)) nodes)
-        diagnostics (into (filterv (partial retained-diagnostic? old-proofs) (:diagnostics graph))
-                          (proof-diagnostics proofs))]
+        diagnostics (mapv #(cond-> % (:expected-type %) (update :expected-type (partial types/resolve solution)))
+                          (into (filterv (partial retained-diagnostic? old-proofs) (:diagnostics graph))
+                                (proof-diagnostics proofs)))]
     (assoc graph :substitution solution :proofs proofs :diagnostics diagnostics
            :projections (mapv #(update % :actual-type (partial types/resolve solution)) (:projections graph))
            :input-routes (mapv #(update % :actual-type (partial types/resolve solution)) (:input-routes graph))

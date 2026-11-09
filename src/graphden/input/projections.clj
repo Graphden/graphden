@@ -31,7 +31,9 @@
                            (or (prefix? path other-path) (prefix? other-path path))) address))) all))
 
 
-(defn- reject-value-cycles!
+(defn value-dependencies
+  "Binding dependency addresses, including explicit and lexical cell routes.
+   Used by cycle validation and signature ordering; never evaluates a value."
   [graph routes]
   (let [all (into (entries graph) (map #(vector (:from %) {})) (:input-routes graph))
         projection-edges (into {} (map (fn [{:keys [from source]}]
@@ -39,19 +41,26 @@
         edges (reduce (fn [edges {:keys [from to]}]
                         (update edges from (fnil into #{})
                                 (filter #(= to (first %)) (keys all))))
-                      projection-edges (:dependencies graph))
-        roots (reverse (sort-by context/address-sort-key (keys edges)))]
-    (loop [pending (mapv #(vector % false) roots) active #{} visited #{}]
-      (when-let [[address exit?] (peek pending)]
+                      projection-edges (:dependencies graph))]
+    edges))
+
+
+(defn value-order
+  "Dependency-first order without recursive stack growth. Cycles reject."
+  [edges]
+  (let [roots (reverse (sort-by context/address-sort-key (keys edges)))]
+    (loop [pending (mapv #(vector % false) roots) active #{} visited #{} result []]
+      (if-let [[address exit?] (peek pending)]
         (cond
-          exit? (recur (pop pending) (disj active address) (conj visited address))
-          (contains? visited address) (recur (pop pending) active visited)
+          exit? (recur (pop pending) (disj active address) (conj visited address) (conj result address))
+          (contains? visited address) (recur (pop pending) active visited result)
           (contains? active address) (context/reject! :projection-cycle {:address address})
           :else
           (recur (into (conj (pop pending) [address true])
                        (map #(vector % false))
                        (reverse (sort-by context/address-sort-key (get edges address))))
-                 (conj active address) visited))))))
+                 (conj active address) visited result))
+        result))))
 
 
 (defn prepare
@@ -75,7 +84,7 @@
                                       (descriptor/read-type-at (contract-at graph (first source)) (second source))))
                              (:input-routes graph))
           graph (assoc graph :input-routes input-routes)]
-      (reject-value-cycles! graph (concat routes input-routes))
+      (value-order (value-dependencies graph (concat routes input-routes)))
       (reduce (fn [result {:keys [from source actual-type]}]
                 (assoc-in result [:scopes (second (first from)) :bindings from :reference]
                           {:mode :projection :actual-type actual-type :source source}))

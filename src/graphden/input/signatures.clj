@@ -5,8 +5,10 @@
     [clojure.string :as str]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
-    [graphden.types.core :as types])
+    [graphden.types.core :as types]
+    [graphden.types.reference :as reference])
   (:import
     (java.nio.charset
       StandardCharsets)
@@ -56,10 +58,21 @@
 
 
 (defn- reference-fact
-  [graph {:keys [address expression reference]}]
+  [graph {:keys [address expression reference dispatch-type expected-type]}]
   (let [mode (:mode reference)
         target-scope (:to (first (filter #(= address (:from %)) (:dependencies graph))))
         signature (get-in graph [:scopes (second target-scope) :signature])
+        reference (cond
+                    (= :resolved-value mode) (assoc reference :actual-type (:return signature))
+                    (and signature (= :ref (:kind expression)) (not (:capture-resolved? reference)))
+                    (reference/classify (or dispatch-type expected-type) signature)
+                    :else reference)
+        mode (:mode reference)
+        expected-callable (reference/expected-callable (or dispatch-type expected-type))
+        reference (cond-> reference
+                    (and (= :graph-callable mode) (not (:capture-resolved? reference))
+                         (types/fn-type? expected-callable))
+                    (update :actual-type #(reference/call-site-contract expected-callable % signature)))
         actual (or (:callable-type reference) (:actual-type reference))]
     (case mode
       :literal {:type actual :value (:value expression) :value-present true :effects #{}}
@@ -170,7 +183,7 @@
    existing-engine callback. The implementation descriptor is shared with the
    compiler; :impl is never read or invoked. Returned substitutions/proofs must
    join graph checking before this signature can be called checked."
-  [ctx graph scope {:keys [base-fn-id root-entry argument-paths]} infer-signature]
+  [ctx graph scope {:keys [base-fn-id root-entry argument-paths] :as implementation} infer-signature]
   (when-not (and (uuid? base-fn-id) (map? root-entry) (:return root-entry)
                  (fn? infer-signature))
     (context/reject! :signature-provider-required {:scope scope}))
@@ -190,9 +203,14 @@
         signature (-> result
                       (dissoc :substitution :argument-proofs)
                       (assoc :primary-parent (or (:name root-entry) base-fn-id)
-                             :resolved-bindings (:bindings-info facts)))]
+                             :resolved-bindings (:bindings-info facts)
+                             :args (into {} (map (juxt :name :type))
+                                         (:fields (surface/input-at-scope graph (second scope)))))
+                      (cond-> (contains? declaration :lambda-params)
+                        (assoc :lambda-params (:lambda-params declaration))))]
     (when-not (and (:return signature) (set? (:effects signature))
                    (map? (:substitution result)) (map? (:argument-proofs result)))
       (context/reject! :invalid-signature-result {:scope scope}))
-    {:signature signature :substitution (:substitution result)
+    {:signature signature :signature-source (select-keys implementation [:base-fn-id :root-entry :argument-paths])
+     :substitution (:substitution result)
      :argument-proofs (:argument-proofs result)}))

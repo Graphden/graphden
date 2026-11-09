@@ -97,4 +97,6 @@
     (is (= base (get-in @seen [:signature-view :by-name :identity])))
     (is (= (get-in @seen [:root-entry :args :value]) (get-in @seen [:root-entry :return])))
     (is (not= 'a (get-in @seen [:root-entry :return])))
-    (is (not (contains? @seen :impl)))))
+    (is (not (contains? @seen :impl)))
+    (is (= 'a (get-in result [:signature-source :root-entry :return])))
+    (is (not (contains? (:signature-source result) :impl)))))

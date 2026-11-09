@@ -7,6 +7,7 @@
     [graphden.input.context :as context]
     [graphden.input.core :as input]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.inference :as inference]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.metadata :as metadata]
     [graphden.input.obligations :as obligations]
@@ -55,7 +56,7 @@
                    :projection {:mode :unresolved :reason :projection-analysis-required})]
     {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
      :expression expression
-     :expected-type expected :reference dispatch}))
+     :dispatch-type expected :expected-type expected :reference dispatch}))
 
 
 (defn- container-obligations
@@ -80,7 +81,7 @@
    recursive availability. Missing required fields and incomplete checking
    are separate outputs. All effective/residual values remain recomputable."
   ([ctx fn-id] (analyze-input ctx fn-id {}))
-  ([ctx fn-id {:keys [check-expression scope additional-rows]}]
+  ([ctx fn-id {:keys [check-expression scope additional-rows defer-reference-checks?]}]
    (context/call-with-types
      ctx
      (fn []
@@ -103,7 +104,11 @@
              ;; rejected even when they carry equal literal values.
              _ (rows/state local)
              remaining (input/remaining-input contract state scope)
-             checked (checking/check-entries entries check-expression (:substitution policy))
+             checked (checking/check-entries
+                       (if defer-reference-checks?
+                         (filter #(contains? #{:literal :identity} (get-in % [:reference :mode])) entries)
+                         entries)
+                       check-expression (:substitution policy))
              obligations (container-obligations (:descriptor remaining) scope [])
              closure-gaps (cond-> []
                             (some #(seq (:scope-path %)) owned) (conj :scoped-analysis-required)
@@ -145,19 +150,24 @@
    execution or signature publication occurs in this offline API."
   ([ctx fn-id] (analyze-effective-input ctx fn-id {}))
   ([ctx fn-id options]
-   (context/call-with-types
-     ctx
-     (fn []
-       (-> (scopes/analyze
-             fn-id
-             (fn [target scope overlays]
-               (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))
-           (projections/prepare)
-           (projections/apply-demands)
-           (resolvers/mark-boundaries)
-           (as-> graph (captures/prepare ctx graph))
-           (projections/prepare)
-           (checking/check-graph (:check-expression options))
-           (projections/apply-demands)
-           (obligations/separate)
-           (as-> graph (assoc graph :public-input (surface/project ctx graph))))))))
+   (let [infer? (some? (:infer-signature options))
+         ctx (if infer? (inference/with-root-signatures ctx (:implementations options)) ctx)]
+     (context/call-with-types
+       ctx
+       (fn []
+         (-> (scopes/analyze
+               fn-id
+               (fn [target scope overlays]
+                 (analyze-input ctx target (assoc options :scope scope :additional-rows overlays
+                                                  :defer-reference-checks? infer?))))
+             (projections/prepare)
+             (projections/apply-demands)
+             (as-> graph (if infer?
+                           (inference/analyze ctx graph options)
+                           (captures/prepare ctx (assoc-in (resolvers/mark-boundaries graph)
+                                                           [:coverage :signatures] false))))
+             (projections/prepare)
+             (checking/check-graph (:check-expression options))
+             (projections/apply-demands)
+             (obligations/separate)
+             (as-> graph (assoc graph :public-input (surface/project ctx graph)))))))))

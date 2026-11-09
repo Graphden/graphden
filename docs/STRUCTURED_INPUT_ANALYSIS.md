@@ -14,7 +14,7 @@ policy in its snapshot identity; a function row version alone is insufficient.
 There is no shared analysis cache yet. Contexts without an explicit snapshot ID
 receive a fresh context token; callers must not reuse it for changed snapshot data.
 
-The separate `signatures/infer-use` adapter feeds canonical scoped facts into
+The `signatures/infer-use` adapter feeds canonical scoped facts into
 `types.check/infer-input-signature`. It requires explicit implementation
 provenance: `{:base-fn-id UUID :root-entry frozen-entry :argument-paths
 {ABI-key [field-ID ...]}}`. These paths also serve the compiler; implementation
@@ -28,8 +28,21 @@ Existing return rules can read other rich signatures. The adapter therefore
 binds both global and tenant registry views to isolated snapshot data. Derived
 use IDs distinguish repeated targets inside that view and are never persisted.
 The common return-rule, effect, declaration and execution-support policies are
-reused. Integration of this adapter into reference classification remains
-separate work; current graph coverage does not certify inferred signatures.
+reused. Pass `:implementations` and `:infer-signature
+graphden.types.check/infer-input-signature` to `analyze-effective-input` to
+compute signatures before final reference classification. Explicit projections
+participate in dependency ordering. A target's authored/configured inputs
+determine its initial return and reference mode before incoming lexical captures
+are routed; caller captures do not retroactively switch that mode. The common
+graph solution then resolves correlated input and return variables.
+Each inferred scope retains `:signature-source` (base identity, original root
+entry and argument paths) so compilation can verify it uses the same evidence.
+Changing implementation/type-rule evidence requires a new context snapshot.
+
+`:coverage :signatures` reports whether this inference adapter ran. Without
+it, the API still consumes caller-supplied frozen signatures and reports that
+signature inference was not performed. Source loading and production signature
+publication remain inactive.
 
 `descriptor/resolve-contract` resolves the function's authored `input-type-fn-id`
 using existing type expansion and shape primitives. Field IDs come from declared

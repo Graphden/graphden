@@ -2490,7 +2490,9 @@
                                    {:kind :value :value (:value info)}
                                    {:kind :type-fact})})]
         (-> result (assoc :substitution (:substitution proof))
-            (assoc-in [:proofs argument] proof))))
+            (assoc-in [:proofs argument]
+                      (assoc proof :address (:address info)
+                             :expected-type (types/resolve (:substitution proof) (get-in root-entry [:args argument])))))))
     {:substitution {} :proofs {}} bindings-info))
 
 

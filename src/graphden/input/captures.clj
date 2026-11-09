@@ -84,7 +84,8 @@
         call-sites (into [] (mapcat (fn [field]
                                       (map #(assoc % :parameter (:name field)) (direct-routes field [])))) parameter-fields)
         captures (into [] (mapcat #(lexical-routes graph % :capture binding-id)) captured-fields)
-        target-info (variables/signature-in-scope to (get-in ctx [:signatures target-fn-id]))
+        target-info (or (get-in graph [:scopes (second to) :signature])
+                        (variables/signature-in-scope to (get-in ctx [:signatures target-fn-id])))
         raw (reference/callable-contract (assoc target-info :args (into {} (map (juxt :name :type)) fields)))
         callable (if (types/fn-type? expected)
                    (reference/call-site-contract expected raw (assoc target-info :lambda-params params)) raw)]
@@ -94,7 +95,8 @@
      :hidden (into (set (map :target call-sites)) (keep :address) parameter-fields)}))
 
 
-(defn- apply-edge
+(defn prepare-edge
+  "Partition one incoming use after its target's outgoing uses are resolved."
   [ctx graph {:keys [from to binding-id mode] :as edge}]
   (if (= :resolved-value mode)
     (resolvers/bind-argument graph edge)
@@ -113,13 +115,18 @@
               (update :hidden-input-addresses into (map :from routes))))))))
 
 
+(defn initialize
+  [graph]
+  (assoc graph :input-routes [] :closures {} :resolver-arguments {} :hidden-input-addresses #{}))
+
+
 (defn prepare
   "Partition from deepest uses outward. The shared runtime selector preserves
    authored [], zero-argument captures, positional inference and ambiguity
    rejection. Lexical routes require stable full field-ID paths; a matching
    display name is never evidence of shared identity."
   [ctx graph]
-  (reduce (partial apply-edge ctx)
-          (assoc graph :input-routes [] :closures {} :resolver-arguments {} :hidden-input-addresses #{})
+  (reduce (partial prepare-edge ctx)
+          (initialize graph)
           (sort-by (fn [{:keys [to from]}] [(- (count (second to))) (context/address-sort-key from)])
                    (filter #(contains? #{:value :callable-producer :graph-callable :resolved-value} (:mode %)) (:dependencies graph)))))

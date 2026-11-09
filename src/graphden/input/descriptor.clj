@@ -39,6 +39,8 @@
         resolve-type #(type-body ctx % seen)]
     (cond
       (get primitive-by-id type-id) (get primitive-by-id type-id)
+      (or (:return-type-fn-id row) (seq (:parent-ids row)))
+      (context/reject! :executable-is-not-record-type {:type-id type-id})
       (:base-fn-id row) (let [base (resolve-type (:base-fn-id row))]
                           (if-some [constraint (:constraint row)] [:refine base constraint] base))
       (:element-fn-id row) [:list (resolve-type (:element-fn-id row))]

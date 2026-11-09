@@ -76,6 +76,14 @@
         (context/build-context {:aliases (atom {})}))))
 
 
+(deftest executable-rows-never-supply-record-memberships-test
+  (let [{:keys [context owner root]} (fixture)]
+    (doseq [row [{:return-type-fn-id (get (ids/primitive-fn-ids) :text)}
+                 {:parent-ids [(random-uuid)]}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+            (descriptor/resolve-contract (assoc-in context [:fns root] row) owner))))))
+
+
 (deftest source-and-storage-requiredness-have-explicit-adapter-policies-test
   (let [{:keys [context owner right-field]} (fixture)
         right-required (fn [ctx]

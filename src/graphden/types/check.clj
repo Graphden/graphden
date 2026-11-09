@@ -592,6 +592,33 @@
 ;; below just composes them.
 ;; -----------------------------------------------------------------------------
 
+(defn check-input-binding
+  "ID-addressed entry to the existing directional binding checker. This does
+   not infer a reference mode or publish a signature. The caller supplies the
+   actual type after ref/capture classification and scopes the type registry.
+   Gradual/refinement acceptance remains explicit deferred evidence; it is
+   never a portable execution certificate. Error data omits literal payloads."
+  [{:keys [address expected actual expression substitution]}]
+  (if (nil? actual)
+    {:status :deferred :reason :missing-actual-type :substitution substitution}
+    (let [b-form (when (= :value (:kind expression)) {:value (:value expression)})]
+      (try
+        (let [next-subst (binding [*source-info* {}]
+                           (check-binding! nil address expected actual (or substitution {}) nil b-form))
+              expected (types/resolve next-subst expected)
+              actual (types/resolve next-subst actual)
+              unresolved? (or (types/type-any? #(or (= :any %) (= :jsonb %) (types/type-var? %)) actual)
+                              (types/type-any? #(or (types/refine-type? %) (types/type-var? %)) expected))]
+          {:status (if unresolved? :deferred :checked)
+           :substitution next-subst
+           :reason (when unresolved? :runtime-type-obligation)})
+        (catch clojure.lang.ExceptionInfo e
+          (if (= :types/check-failed (:type (ex-data e)))
+            (throw (ex-info "Structured input binding does not fit its expected type"
+                            {:type :types/check-failed :address address
+                             :reason (or (:reason (ex-data e)) :type-mismatch)}))
+            (throw e)))))))
+
 
 (defn ref-targets
   "Yield the list of fn-name keywords this binding directly references —

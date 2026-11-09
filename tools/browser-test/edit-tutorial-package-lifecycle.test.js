@@ -180,13 +180,12 @@ async function ledger(page) {
       const saved = await ledger(page).catch(() => owned);
       console.error('Retained exact receipt ledger:', JSON.stringify(saved));
       await page.evaluate(async () => { if (_tourState) await _tourEnd(); }).catch(() => {});
-      if (await page.getByRole('button', {name: 'Delete them', exact: true}).isVisible().catch(() => false)) {
+      if (saved.length) {
         try {
-          await page.getByRole('button', {name: 'Delete them', exact: true}).click();
-          // The click only starts async deletion. Keep the page alive until
-          // production cleanup confirms success by closing the dialog.
-          await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-            null, {timeout: 20000});
+          // The cleanup title and buttons render asynchronously. Reuse the
+          // success-path wait through confirmed deletion, not a visibility
+          // snapshot that can close the browser before cleanup even starts.
+          await finishAndDelete(page, 20000, {alreadyFinished: true});
         } catch (cleanupError) {
           console.error('Exact receipt cleanup did not finish:', cleanupError.message);
         }

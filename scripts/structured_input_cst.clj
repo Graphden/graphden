@@ -86,6 +86,23 @@
     {:start start :end end :before before :after (replacement before)}))
 
 
+(defn- argument-loc
+  [loc path]
+  (when-not (and (= :args (first path)) (<= 2 (count path)))
+    (refuse :invalid-argument-path {:path path}))
+  (value-at loc path))
+
+
+(defn- rename-edit
+  [source starts loc definition path target]
+  (when-not (= [:args] path)
+    (refuse :invalid-rename-path {:path path}))
+  (when (key-loc loc target)
+    (refuse :existing-target {:definition definition :target target}))
+  (let [key-node (or (key-loc loc :args) (refuse :missing-path {:path path}))]
+    (node-edit source starts key-node (constantly (str target)))))
+
+
 (defn- operation-edit
   [source starts definitions {:keys [op definition path] :as operation}]
   (when-not (and (keyword? definition) (vector? path) (seq path))
@@ -95,28 +112,102 @@
     (case op
       :rename-input
       (do
-        (when-not (= [:args] path)
-          (refuse :invalid-rename-path {:path path}))
         (when (some #(key-loc loc %)
                     [:parent :parents :type :refine :list :union :map :tuple :variant :fn-type :marker])
           (refuse :not-base-declaration {:definition definition}))
         (when (key-loc loc :input)
           (refuse :existing-input {:definition definition}))
-        (let [key-node (or (key-loc loc :args)
-                           (refuse :missing-path {:path path}))]
-          (node-edit source starts key-node (constantly ":input"))))
+        (rename-edit source starts loc definition path :input))
+
+      :rename-bind
+      (do
+        (when-not (some #(some-> (key-loc loc %) z/right z/sexpr) [:parent :parents])
+          (refuse :not-composed-definition {:definition definition}))
+        (rename-edit source starts loc definition path :bind))
 
       :wrap-value
-      (do
-        (when-not (and (= :args (first path)) (<= 2 (count path)))
-          (refuse :invalid-argument-path {:path path}))
-        (node-edit source starts (value-at loc path) #(str "[:value " % "]")))
+      (node-edit source starts (argument-loc loc path) #(str "[:value " % "]"))
+
+      :wrap-ref
+      (let [leaf (argument-loc loc path)]
+        (when-not (keyword? (z/sexpr leaf))
+          (refuse :non-keyword-reference {:path path}))
+        (node-edit source starts leaf #(str "[:ref " % "]")))
+
+      :map-expression-to-vector
+      (let [leaf (argument-loc loc path)
+            nodes (when (= :map (z/tag leaf)) (children leaf))]
+        (when-not (and (= 2 (count nodes)) (#{:value :ref} (z/sexpr (first nodes)))
+                       (or (= :value (z/sexpr (first nodes)))
+                           (keyword? (z/sexpr (second nodes)))))
+          (refuse :unsupported-expression-map {:path path}))
+        (node-edit source starts leaf #(str "[" (subs % 1 (dec (count %))) "]")))
 
       :move-args-entry
       (refuse :unsupported-comment-safe-move
               {:recommendation "Define comment ownership and exact source/destination spans before moving entries."})
 
       (refuse :unknown-operation {:op op}))))
+
+
+(defn- argument-operation
+  [source {:keys [source-path kind expression policy]}]
+  (let [[operator payload] expression
+        raw (get-in source source-path)
+        wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))]
+    (when-not (and (= :binding kind) (empty? policy)
+                   (vector? source-path) (= 2 (count source-path)) (= :args (first source-path))
+                   (contains? (:args source) (second source-path))
+                   (vector? expression) (= 2 (count expression)) (#{:value :ref} operator)
+                   (or (= :value operator) (qualified-keyword? payload)))
+      (refuse :unsupported-source-argument {:path source-path}))
+    (when-not (if wrapper?
+                (and (= 1 (count raw)) (contains? raw operator)
+                     (if (= :value operator) (= payload (get raw operator))
+                         (keyword? (get raw operator))))
+                (if (= :value operator) (= payload raw) (keyword? raw)))
+      (refuse :planner-ledger-mismatch {:path source-path}))
+    {:op (cond wrapper? :map-expression-to-vector
+               (= :value operator) :wrap-value
+               :else :wrap-ref)
+     :definition (:name source) :path source-path}))
+
+
+(defn entry-operations
+  "Bridge one SUPPORTED graphden.input.source/plan-module entry to CST operations.
+   The semantic planner owns reference resolution. Ref spellings are retained;
+   value payloads and the proposed form must agree exactly with its ledger.
+   The caller binds this entry to the original file snapshot before calling plan."
+  [{:keys [source proposed status kind legacy blockers]}]
+  (when-not (and (= :supported status) (empty? blockers) (map? source) (map? proposed)
+                 (keyword? (:name source))
+                 (not-any? #(contains? source %) [:input :bind :configure]))
+    (refuse :unsupported-source-entry {}))
+  (let [has-args? (contains? source :args)
+        rename (fn [op] (if has-args? [{:op op :definition (:name source) :path [:args]}] []))]
+    (case kind
+      :base
+      (do
+        (when-not (= proposed (cond-> (dissoc source :args) has-args? (assoc :input (:args source))))
+          (refuse :planner-ledger-mismatch {}))
+        (rename :rename-input))
+
+      :type
+      (do (when-not (= source proposed) (refuse :planner-ledger-mismatch {})) [])
+
+      :composed
+      (let [arguments (:arguments legacy)
+            paths (mapv :source-path arguments)
+            bindings (into {} (map (fn [{:keys [source-path expression]}]
+                                     [(second source-path) expression])) arguments)]
+        (when-not (and (or (not has-args?) (map? (:args source)))
+                       (vector? arguments) (= (count paths) (count (set paths)))
+                       (= (set paths) (set (map #(vector :args %) (keys (:args source)))))
+                       (= proposed (cond-> (dissoc source :args) has-args? (assoc :bind bindings))))
+          (refuse :planner-ledger-mismatch {}))
+        (into (rename :rename-bind) (map #(argument-operation source %)) arguments))
+
+      (refuse :unsupported-source-entry {}))))
 
 
 (defn- valid-edit?
@@ -152,7 +243,9 @@
 
 (defn plan
   "Plan edits against one exact source string. Request: {:namespace STRING-OR-NIL
-   :operations [{:op :rename-input|:wrap-value :definition KEYWORD :path VECTOR}]}.
+   :operations [{:op KEYWORD :definition KEYWORD :path VECTOR}]}.
+   Operations: :rename-input, :rename-bind, :wrap-value, :wrap-ref,
+   :map-expression-to-vector (sole-key legacy :value/:ref maps only).
    Paths contain map keys and address the ORIGINAL definition. Rename requires
    [:args]; wrap requires an explicit path below :args. Overlaps refuse.
    The caller owns semantic classification. Moving entries is unsupported."

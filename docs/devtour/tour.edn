@@ -716,6 +716,16 @@
            constraints. Optional fields remain bindable without preventing invocation; partially
            filling an optional record activates its required children. Reference dependencies are
            returned separately: no local missing fields does not prove the whole graph is ready."}
+    {:ns graphden.input.syntax :defn parse-expression
+     :say "Normalizes partial record maps and explicit value/ref expressions against a supplied
+           resolved descriptor. Literal payloads stay opaque and references remain unevaluated.
+           The caller supplies stable binding identities and namespace-resolved reference names;
+           this offline API is not yet connected to the production package loader."}
+    {:ns graphden.input.source :defn plan-module
+     :say "Compares original source forms with a prepared legacy module to plan supported rewrites.
+           It retains rich declarations and binding origins, while reporting unsupported list,
+           rename, ref-scope and policy forms as explicit blockers. A completed report does not
+           prove runtime equivalence or authorize dropping an unsupported definition."}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

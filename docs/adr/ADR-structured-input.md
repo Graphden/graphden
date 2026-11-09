@@ -1,8 +1,10 @@
 # Structured input and partial binding
 
-Status: accepted transition contract; stage 1 implements the pure binding
-algebra only. Stored graphs, package parsing and production execution still
-use the slot model until their respective migration stages land.
+Status: accepted transition contract. Pure binding, expression parsing and
+read-only source planning are available as transition APIs. Stored graphs,
+package loading and production execution still use the slot model until
+their respective migration stages land. See the
+[source transition tools](../STRUCTURED_INPUT_SOURCE.md) for current boundaries.
 
 ## One input contract
 

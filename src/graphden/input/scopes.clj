@@ -60,7 +60,7 @@
                     (cond
                       (contains? #{:value :callable-producer} mode)
                       (if (contains? (conj ancestors target) ref-id)
-                        (vswap! gaps conj {:code :reference-cycle :address address :target-fn-id ref-id})
+                        (context/reject! :reference-cycle {:address address :target-fn-id ref-id})
                         (visit ref-id child-path (overlays-for (:scoped-rows node) binding-id)
                                (conj ancestors target)))
                       (= :graph-callable mode)

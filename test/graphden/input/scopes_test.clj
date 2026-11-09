@@ -67,15 +67,15 @@
     (is (not-any? #(= [source] (second %)) (:required-addresses result)))))
 
 
-(deftest reference-cycles-are-explicit-incomplete-coverage-test
+(deftest evaluated-reference-cycles-preserve-the-graph-dag-invariant-test
   (let [{:keys [owner target source context]} (fixture)
         id (random-uuid)
         ctx (assoc-in context [:bindings id]
                       {:id id :fn-id target :scope-path [] :target-path [source]
                        :expression-kind "ref" :ref-fn-id owner})
-        result (analysis/analyze-effective-input ctx owner)]
-    (is (false? (get-in result [:coverage :recursive-availability])))
-    (is (some #(= :reference-cycle (:code %)) (:diagnostics result)))))
+        error (try (analysis/analyze-effective-input ctx owner)
+                   (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :reference-cycle (:code (ex-data error))))))
 
 
 (deftest callable-producer-lifts-constructor-input-not-invocation-parameters-test

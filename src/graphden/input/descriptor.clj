@@ -176,3 +176,15 @@
           _ (node-at descriptor [id])
           fields (mapv #(if (= id (:id %)) (update-node % (subvec path 1) f) %) (:fields descriptor))]
       (assoc descriptor :fields fields :type (record-body (:type descriptor) fields)))))
+
+
+(defn read-type-at
+  "Type of a field read, retaining content markers from its containers through
+   the existing type-rule taint propagator. Whole-record constraints remain
+   obligations on the container rather than invented constraints on the leaf."
+  [descriptor path]
+  (if (empty? path)
+    (:type descriptor)
+    (types/taint-with-secret-if-tainted
+      {:container {:type (:type descriptor)}}
+      (read-type-at (node-at descriptor [(first path)]) (subvec path 1)))))

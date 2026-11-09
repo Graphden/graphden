@@ -2,11 +2,13 @@
   "Offline structural analysis with explicit checker and closure coverage.
    Never evaluates references, reconstructs flat :args, or mutates registries."
   (:require
+    [graphden.input.checking :as checking]
     [graphden.input.context :as context]
     [graphden.input.core :as input]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.metadata :as metadata]
+    [graphden.input.projections :as projections]
     [graphden.input.rows :as rows]
     [graphden.input.scopes :as scopes]
     [graphden.input.variables :as variables]
@@ -16,11 +18,11 @@
 
 
 (defn- expression-of
-  [row]
+  [row scope]
   (case (:expression-kind row)
     "value" {:kind :value :value (:value row)}
     "ref" {:kind :ref :fn-id (:ref-fn-id row)}
-    "projection" {:kind :projection :scope [(:fn-id row) (:projection-scope-path row)]
+    "projection" {:kind :projection :scope [(first scope) (into (or (:origin-use-path row) []) (:projection-scope-path row))]
                   :path (:projection-path row)}))
 
 
@@ -28,7 +30,7 @@
   [ctx scope contract row]
   (let [path (:target-path row)
         expected (:type (descriptor/node-at contract path))
-        expression (expression-of row)
+        expression (expression-of row scope)
         dispatch (case (:kind expression)
                    :ref (if (contains? (:fns ctx) (:fn-id expression))
                           (reference/classify
@@ -44,33 +46,6 @@
     {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
      :expression expression
      :expected-type expected :reference dispatch}))
-
-
-(defn- check-entry
-  [check-expression substitution {:keys [address expression expected-type reference]}]
-  (cond
-    (= :unresolved (:mode reference))
-    {:status :deferred :reason (:reason reference) :substitution substitution}
-    (= :graph-callable (:mode reference))
-    {:status :deferred :reason :capture-analysis-required :substitution substitution}
-    (nil? check-expression)
-    {:status :deferred :reason :type-checker-required :substitution substitution}
-    :else
-    (check-expression {:address address :expected expected-type
-                       :actual (or (:callable-type reference) (:actual-type reference))
-                       :expression expression :substitution substitution})))
-
-
-(defn- check-entries
-  [entries check-expression substitution]
-  (reduce (fn [{:keys [substitution] :as result} {:keys [address] :as entry}]
-            (let [proof (check-entry check-expression substitution entry)]
-              (when-not (contains? #{:checked :deferred} (:status proof))
-                (context/reject! :invalid-checker-result {:address address}))
-              (-> result
-                  (assoc :substitution (:substitution proof))
-                  (assoc-in [:proofs address] proof))))
-          {:substitution substitution :proofs {}} entries))
 
 
 (defn- container-obligations
@@ -118,7 +93,7 @@
              ;; rejected even when they carry equal literal values.
              _ (rows/state local)
              remaining (input/remaining-input contract state scope)
-             checked (check-entries entries check-expression (:substitution policy))
+             checked (checking/check-entries entries check-expression (:substitution policy))
              obligations (container-obligations (:descriptor remaining) scope [])
              closure-gaps (cond-> []
                             (some #(seq (:scope-path %)) owned) (conj :scoped-analysis-required)
@@ -159,7 +134,13 @@
    references never traverse their target. This is an offline analysis API."
   ([ctx fn-id] (analyze-effective-input ctx fn-id {}))
   ([ctx fn-id options]
-   (scopes/analyze
-     fn-id
-     (fn [target scope overlays]
-       (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))))
+   (context/call-with-types
+     ctx
+     (fn []
+       (-> (scopes/analyze
+             fn-id
+             (fn [target scope overlays]
+               (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))
+           (projections/prepare)
+           (checking/check-graph (:check-expression options))
+           (projections/apply-demands))))))

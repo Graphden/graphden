@@ -753,8 +753,9 @@
      :say "Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope;
            scoped overlays must fit its target's unoccupied fields. Identity refs do not import
            target inputs, and callable producers expose constructor inputs. Required addresses and
-           explicit diagnostics distinguish supported analysis from unresolved capture, projection,
-           metadata and recursion cases. Production execution remains on its existing path."}
+           typed projections expose their source inputs. Metadata narrows contracts; value cycles
+           reject. Capture routing still carries explicit incomplete coverage. Production execution
+           remains on its existing path."}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

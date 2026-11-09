@@ -12,6 +12,12 @@
                   (assoc facts :type :input/unresolved-contract :code code))))
 
 
+(defn address-sort-key
+  "Deterministic address ordering independent of ambient printer limits."
+  [[scope path]]
+  [(str (first scope)) (mapv str (second scope)) (mapv str path)])
+
+
 (defn build-context
   "Accept branch-resolved maps (:fns/:fields/:members/:bindings), ID-keyed
    :type-bodies/:signatures and an already namespace-resolved :aliases map.

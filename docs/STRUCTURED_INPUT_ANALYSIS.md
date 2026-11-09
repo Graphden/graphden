@@ -62,10 +62,21 @@ Identity `fn-ref` edges import neither target inputs nor evaluation dependencies
 The shared `types.reference/call-site-contract` preserves the existing checker's
 capture type/effect projection, including authored `lambda-params []`.
 
-This implementation does not yet complete callable capture routing, projection
-resolution, recursive dependency validation, or runtime execution.
-Those cases retain diagnostics and incomplete coverage. Wrapped identity or
+Projections carry typed source addresses across use scopes. Required projections
+activate their source paths, including optional record ancestors; source
+occupancy and chained routes remain visible. The existing marker propagator
+retains content labels when reading a field. A common substitution reconciles
+constructor inputs/returns and projection routes, with directional checks replayed
+against the common solution. Scoped variable identities use the existing type
+freshener and are never written back to authored names or declarations.
+
+Graph reference cycles and projection cycles (including cycles crossing reference
+uses) are rejected. This preserves the existing DAG invariant and the `:fix`
+recursion model; it does not introduce recursive graph semantics.
+
+This implementation does not yet complete callable capture routing, public input
+projection, or runtime execution. Unsupported callable routes retain diagnostics
+and incomplete coverage. Wrapped identity or
 callable policies that lack an adapter are diagnosed rather than evaluated in
-the wrong mode. Reference cycles are bounded and diagnosed; they are not treated
-as empty input. A locally empty remaining record is not proof that the graph is
+the wrong mode. Reference cycles are rejected; they are never treated as empty input. A locally empty remaining record is not proof that the graph is
 ready. Public activation requires the remaining analyzer and runtime work.

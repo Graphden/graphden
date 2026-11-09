@@ -77,13 +77,13 @@ Resolves an authored input declaration inside a frozen type snapshot. Stable fie
 :PROPERTIES:
 :CUSTOM_ID: types/analyze-effective-input
 :FILE: src/graphden/input/analysis.clj
-:LINE: 151
-:MINS: 1.5
+:LINE: 129
+:MINS: 2.0
 :END:
 
-Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope; scoped overlays must fit its target's unoccupied fields. Identity refs do not import target inputs, and callable producers expose constructor inputs. Required addresses and explicit diagnostics distinguish supported analysis from unresolved capture, projection, metadata and recursion cases. Production execution remains on its existing path.
+Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope; scoped overlays must fit its target's unoccupied fields. Identity refs do not import target inputs, and callable producers expose constructor inputs. Required addresses and typed projections expose their source inputs. Metadata narrows contracts; value cycles reject. Capture routing still carries explicit incomplete coverage. Production execution remains on its existing path.
 
-- source :: [[file:../../../src/graphden/input/analysis.clj::(defn analyze-effective-input][src/graphden/input/analysis.clj:151]]
+- source :: [[file:../../../src/graphden/input/analysis.clj::(defn analyze-effective-input][src/graphden/input/analysis.clj:129]]
 
 * 7. primitives
 :PROPERTIES:

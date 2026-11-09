@@ -97,3 +97,23 @@
                             (assoc (row caller ref-field {:expression-kind "ref" :ref-fn-id base}) :id edge)]))]
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
           (analysis/analyze-effective-input ctx caller)))))
+
+
+(deftest record-type-narrowing-cannot-remap-an-inherited-child-binding-by-name-test
+  (let [{:keys [base child field context]} (fixture)
+        [old-record new-record old-child new-child] (repeatedly 4 random-uuid)
+        numeric (:numeric (ids/primitive-fn-ids))
+        integer (:int (ids/primitive-fn-ids))
+        bound (assoc (row base field {:expression-kind "value" :value-present true :value 1})
+                     :target-path [field old-child])
+        narrowed (row child field {:type-override-fn-id new-record})
+        ctx (-> context
+                (assoc-in [:fields field :type-fn-id] old-record)
+                (assoc-in [:members old-record] [{:slot-id old-child :position 0}])
+                (assoc-in [:members new-record] [{:slot-id new-child :position 0}])
+                (assoc-in [:fields old-child] {:id old-child :name "number" :type-fn-id numeric :required true})
+                (assoc-in [:fields new-child] {:id new-child :name "number" :type-fn-id integer :required true})
+                (with-rows [bound narrowed]))
+        error (try (analysis/analyze-input ctx child) (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :unknown-field (:code (ex-data error))))
+    (is (= [field old-child] (:path (ex-data error))))))

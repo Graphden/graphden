@@ -751,27 +751,6 @@
         []))))
 
 
-(def ^:private automatic-early-limit 20)
-
-
-(defn- bounded-layers
-  "Keep every changed test and direct consumer, then at most limit deeper
-   namespaces. Use graph distance, not layer position: source-only changes
-   have no distance-zero test layer. The full roster's complement runs later."
-  [layers limit]
-  (loop [remaining limit, result [], layers layers]
-    (if (empty? layers)
-      result
-      (let [{:keys [depth names]} (first layers)
-            direct? (<= depth 1)
-            selected (if direct? names (vec (take remaining names)))]
-        (if (empty? selected)
-          result
-          (recur (if direct? remaining (- remaining (count selected)))
-                 (conj result selected)
-                 (rest layers)))))))
-
-
 (defn unit-layers
   [changed]
   (when changed (mapv :names (test-layers changed :unit))))
@@ -795,6 +774,8 @@
 
 
 (defn plan
+  "Run every affected candidate early, in dependency order. The changed graph
+   determines the wave size; the suite runners execute its exact complement."
   ([changed] (plan changed {}))
   ([changed manual]
    (let [eligible (fn [kind]
@@ -812,9 +793,7 @@
                                     (when (seq remaining) remaining)))
                                 automatic))))
          unit-groups (layers :unit (unit-layers changed))
-         integration-groups (layers :integration
-                                    (bounded-layers (test-layers changed :integration)
-                                                    automatic-early-limit))]
+         integration-groups (layers :integration (integration-layers changed))]
      {:runtime (vec (distinct (concat (map #(str "tools/runtime-test/" %)
                                            (get manual :runtime []))
                                       (runtime-first changed))))
@@ -824,5 +803,4 @@
       :integration (vec (mapcat identity integration-groups))
       :integration-layers integration-groups
       :browser (vec (distinct (concat (get manual :browser [])
-                                      (take automatic-early-limit
-                                            (browser-first changed)))))})))
+                                      (browser-first changed))))})))

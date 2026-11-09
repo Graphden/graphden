@@ -1,6 +1,7 @@
 (ns structured-input-cst-test
   "Run with bb scripts/structured_input_cst_test.clj; no JVM or filesystem writes."
   (:require
+    [babashka.classpath :as classpath]
     [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests testing]]
@@ -8,6 +9,14 @@
   (:import
     (java.security
       MessageDigest)))
+
+
+(classpath/add-classpath "src")
+
+
+(require '[graphden.input.source :as source]
+         '[graphden.input.syntax :as syntax]
+         '[graphden.packages.records.parse :as parse])
 
 
 (defn- request
@@ -183,6 +192,107 @@
                         :target-sha256 (apply str (map #(format "%02x" (bit-and % 255)) digest)))]
     (is (= :invalid-plan (reason #(cst/apply-text tampered source))))
     (is (= :invalid-plan (reason #(cst/apply-text tampered target))))))
+
+
+(deftest composed-cst-operations-preserve-comments-and-crlf-test
+  (let [source " ; lead\r\n{:namespace \"demo.main\" :fns\r\n [{:name :child :parent :sink\r\n   :args ; arguments\r\n   {:a { ; before operator\r\n         :value ; before payload\r\n         {:args :data :ref [:value \"a\r\nb\"]} ; after payload\r\n        }\r\n    :b { ; ref\r\n         :ref, :producer ; close\r\n        }\r\n    :c :producer ; ref leaf\r\n    :d :unknown}}]} ; end\r\n"
+        operations [{:op :rename-bind :definition :child :path [:args]}
+                    {:op :map-expression-to-vector :definition :child :path [:args :a]}
+                    {:op :map-expression-to-vector :definition :child :path [:args :b]}
+                    {:op :wrap-ref :definition :child :path [:args :c]}
+                    (wrap-value :child [:args :d])]
+        patch (cst/plan source (apply request operations))]
+    ;; Delimiters alone change for wrappers; all enclosed comments/bytes survive.
+    (is (= (-> source
+               (str/replace ":args ; arguments" ":bind ; arguments")
+               (str/replace "{:a {" "{:a [")
+               (str/replace "        }\r\n    :b {" "        ]\r\n    :b [")
+               (str/replace "        }\r\n    :c :producer" "        ]\r\n    :c [:ref :producer]")
+               (str/replace ":d :unknown" ":d [:value :unknown]"))
+           (:target-text patch)))
+    (is (= {:a [:value {:args :data :ref [:value "a\r\nb"]}]
+            :b [:ref :producer] :c [:ref :producer] :d [:value :unknown]}
+           (get-in (edn/read-string (:target-text patch)) [:fns 0 :bind])))
+    (is (= {:status :already-applied :text (:target-text patch)}
+           (cst/apply-text patch (:target-text patch))))))
+
+
+(defn- planner-entry
+  [raw]
+  (let [definitions [{:name :sink :namespace "demo.main" :args {:x :any} :return-type :any}
+                     {:name :producer :namespace "demo.main" :args {} :return-type :any}
+                     {:name :child :namespace "demo.main" :parent :sink :args {:x raw}}]
+        context (parse/prepare-module definitions {} {})]
+    [(last (:definitions (source/plan-module definitions context))) context]))
+
+
+(deftest bridge-matches-supported-source-planner-values-test
+  (doseq [raw [nil false 3 "multiline\nstring" :unknown [1 2] [:ref :producer]
+               {:data {:args :producer :bind {:ref :unknown}}}
+               {:value {:ref :producer :args {:value [:ref :producer]}}}]]
+    (let [[entry _] (planner-entry raw)
+          original (pr-str {:namespace "demo.main" :fns [(dissoc (:source entry) :namespace)]})
+          patch (cst/plan original (apply request (cst/entry-operations entry)))]
+      (is (= :supported (:status entry)))
+      (is (= (dissoc (:proposed entry) :namespace)
+             (first (:fns (edn/read-string (:target-text patch)))))))))
+
+
+(deftest bridge-retains-reference-spelling-with-equivalent-resolved-identity-test
+  (doseq [raw [:producer :demo.main/producer {:ref :producer} {:ref :demo.main/producer}]]
+    (let [[entry context] (planner-entry raw)
+          original (pr-str {:namespace "demo.main" :fns [(dissoc (:source entry) :namespace)]})
+          patch (cst/plan original (apply request (cst/entry-operations entry)))
+          actual (get-in (edn/read-string (:target-text patch)) [:fns 0 :bind :x])
+          expected (get-in entry [:proposed :bind :x])
+          ;; Syntax parses the preserved spelling against the same frozen index.
+          syntax-context {:name->id (:name->id context) :binding-id (fn [_ _] :binding)}
+          parse-expression #(syntax/parse-expression
+                              {:type {:x :any} :fields [{:id :slot :name :x :type :any}]}
+                              :scope {:x %} syntax-context)]
+      (is (= :supported (:status entry)))
+      (is (= (parse-expression expected) (parse-expression actual))))))
+
+
+(deftest bridge-requires-supported-and-consistent-ledger-test
+  (let [[entry _] (planner-entry {:value false})]
+    (is (= :unsupported-source-entry
+           (reason #(cst/entry-operations (assoc entry :status :blocked)))))
+    (is (= :planner-ledger-mismatch
+           (reason #(cst/entry-operations (assoc-in entry [:proposed :bind :x] [:value true])))))
+    (is (= :planner-ledger-mismatch
+           (reason #(cst/entry-operations (assoc-in entry [:source :args :x] {:value false :extra true})))))
+    (is (= :unsupported-source-argument
+           (reason #(cst/entry-operations (assoc-in entry [:legacy :arguments 0 :policy] {:terminal true})))))
+    (is (= :planner-ledger-mismatch
+           (reason #(cst/entry-operations (assoc-in entry [:legacy :arguments] [])))))))
+
+
+(deftest bridge-handles-declarations-and-empty-args-without-manufacturing-keys-test
+  (doseq [[definition kind proposed expected]
+          [[{:name :base :args {}} :base {:name :base :input {}}
+            [{:op :rename-input :definition :base :path [:args]}]]
+           [{:name :row :type :text} :type {:name :row :type :text} []]
+           [{:name :child :parent :sink :args {}} :composed {:name :child :parent :sink :bind {}}
+            [{:op :rename-bind :definition :child :path [:args]}]]
+           [{:name :child :parent :sink} :composed {:name :child :parent :sink} []]]]
+    (is (= expected (cst/entry-operations {:source definition :kind kind :status :supported
+                                           :legacy {:arguments []} :proposed proposed :blockers []})))))
+
+
+(deftest composed-operations-refuse-unsupported-shapes-test
+  (let [source "{:namespace \"demo.main\" :fns [{:name :child :parent :sink :args {:x {:value 1 :extra 2} :y 42}}]}"]
+    (is (= :unsupported-expression-map
+           (reason #(cst/plan source (request {:op :map-expression-to-vector
+                                               :definition :child :path [:args :x]})))))
+    (is (= :non-keyword-reference
+           (reason #(cst/plan source (request {:op :wrap-ref :definition :child :path [:args :y]}))))))
+  (is (= :not-composed-definition
+         (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :base :args {}}]}"
+                            (request {:op :rename-bind :definition :base :path [:args]})))))
+  (is (= :existing-target
+         (reason #(cst/plan "{:namespace \"demo.main\" :fns [{:name :child :parent :sink :args {} :bind {}}]}"
+                            (request {:op :rename-bind :definition :child :path [:args]}))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]

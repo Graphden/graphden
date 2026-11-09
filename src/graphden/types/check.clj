@@ -90,6 +90,7 @@
     [graphden.types.check.markers :as markers]
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
+    [graphden.types.reference :as reference]
     [graphden.types.view :as view]))
 
 
@@ -216,27 +217,7 @@
    `:call-time-effects` subset, so the picker could disagree with
    `check-binding!` about the very bind it was offering."
   [fn-name]
-  (when-let [info (registry/rich-type-of fn-name)]
-    (let [ret (or (:return info) :any)
-          ;; `:effects` is unconditionally stored — by record-rich-types!
-          ;; AND record-rich-types-raw! (both default `#{}` for pure
-          ;; fns post-P8). Direct lookup is safe.
-          ;;
-          ;; `:call-time-effects` (when present) is the per-invocation
-          ;; subset — bound-arg ref-effects subtracted. HOF slots
-          ;; (`:filter :pred #{}`, `:map :func #{}`) measure against
-          ;; per-invocation purity, NOT against the fn's full
-          ;; construction-time effect set; prefer the call-time
-          ;; subset when recorded. Falls back to `:effects` for
-          ;; base-fns / older raw entries without the split.
-          eff (or (:call-time-effects info) (:effects info))]
-      (if-let [signature (types/callable-signature ret)]
-        ;; Producer-of-callable: the inner fn-type already carries
-        ;; whatever effects-constraint the slot declared. We can't
-        ;; meaningfully inject the producer's own effects here.
-        signature
-        (types/make-fn-type (or (:args info) {}) ret eff
-                            (get info :execution :unknown))))))
+  (reference/callable-contract (registry/rich-type-of fn-name)))
 
 
 (defn- has-type-var?
@@ -610,6 +591,33 @@
 ;; check-fn-def! is split into named phase helpers; the top-level fn
 ;; below just composes them.
 ;; -----------------------------------------------------------------------------
+
+(defn check-input-binding
+  "ID-addressed entry to the existing directional binding checker. This does
+   not infer a reference mode or publish a signature. The caller supplies the
+   actual type after ref/capture classification and scopes the type registry.
+   Gradual/refinement acceptance remains explicit deferred evidence; it is
+   never a portable execution certificate. Error data omits literal payloads."
+  [{:keys [address expected actual expression substitution]}]
+  (if (nil? actual)
+    {:status :deferred :reason :missing-actual-type :substitution substitution}
+    (let [b-form (when (= :value (:kind expression)) {:value (:value expression)})]
+      (try
+        (let [next-subst (binding [*source-info* {}]
+                           (check-binding! nil address expected actual (or substitution {}) nil b-form))
+              expected (types/resolve next-subst expected)
+              actual (types/resolve next-subst actual)
+              unresolved? (or (types/type-any? #(or (= :any %) (= :jsonb %) (types/type-var? %)) actual)
+                              (types/type-any? #(or (types/refine-type? %) (types/type-var? %)) expected))]
+          {:status (if unresolved? :deferred :checked)
+           :substitution next-subst
+           :reason (when unresolved? :runtime-type-obligation)})
+        (catch clojure.lang.ExceptionInfo e
+          (if (= :types/check-failed (:type (ex-data e)))
+            (throw (ex-info "Structured input binding does not fit its expected type"
+                            {:type :types/check-failed :address address
+                             :reason (or (:reason (ex-data e)) :type-mismatch)}))
+            (throw e)))))))
 
 
 (defn ref-targets
@@ -1344,42 +1352,7 @@
    If neither args nor effects changed, return `actual` unchanged
    (avoids needless allocation in the common path)."
   [expected actual b-form]
-  (let [call-site-keys (set (keys (types/fn-args expected)))
-        raw-args       (types/fn-args actual)
-        args-after-var (if (and (empty? raw-args)
-                                (seq call-site-keys))
-                         (types/fn-args expected)
-                         raw-args)
-        declared       (:lambda-params (registry/rich-type-of b-form))
-        extras         (if (some? declared)
-                         (remove (set declared) (keys args-after-var))
-                         (when (> (count args-after-var)
-                                  (count call-site-keys))
-                           (remove call-site-keys (keys args-after-var))))
-        stripped       (if (seq extras)
-                         (apply dissoc args-after-var extras)
-                         args-after-var)
-        final-args     (if (and (empty? stripped) (seq call-site-keys))
-                         (types/fn-args expected)
-                         stripped)
-        stripped-keys  (set extras)
-        actual-effects (types/fn-effects actual)
-        per-arg        (or (some-> (registry/rich-type-of b-form) :arg-effects)
-                           {})
-        capture-eff    (reduce into #{}
-                               (vals (select-keys per-arg stripped-keys)))
-        ;; `:any` in effect position is the canonical "no effect
-        ;; constraint declared" marker (parse-fn-type-decl's 4th
-        ;; element), not a set — stripping captures from an
-        ;; unconstrained contract leaves it unconstrained.
-        final-effects  (if (and (seq stripped-keys) (set? actual-effects))
-                         (set/difference actual-effects capture-eff)
-                         actual-effects)]
-    (if (and (= final-args raw-args)
-             (= final-effects actual-effects))
-      actual
-      (types/make-fn-type final-args (types/fn-ret actual) final-effects
-                          (types/fn-execution actual)))))
+  (reference/call-site-contract expected actual (registry/rich-type-of b-form)))
 
 
 (defn- throw-literal-bound-to-fn-slot!

@@ -1928,13 +1928,18 @@
 (def ^:private ^:dynamic *execution-freshening* nil)
 
 
+(def ^:private ^:dynamic *fresh-variable-name* nil)
+
+
 (defn- freshen-execution
   "Execution symbols share a local scope with each other, never value vars."
   [execution]
   (if (execution-var? execution)
     (or (get @*execution-freshening* execution)
         (let [fresh [:execution-var
-                     (symbol (str (name (second execution)) "-" (next-fresh-suffix)))]]
+                     (if *fresh-variable-name*
+                       (*fresh-variable-name* :execution (second execution))
+                       (symbol (str (name (second execution)) "-" (next-fresh-suffix))))]]
           (swap! *execution-freshening* assoc execution fresh)
           fresh))
     execution))
@@ -1954,7 +1959,9 @@
         (let [n (name t)
               dash (String/.indexOf ^String n "-")
               base (if (neg? dash) n (subs n 0 dash))
-              fresh (symbol (str base "-" (next-fresh-suffix)))]
+              fresh (if *fresh-variable-name*
+                      (*fresh-variable-name* :value t)
+                      (symbol (str base "-" (next-fresh-suffix))))]
           (swap! subst assoc t fresh)
           fresh))
     (fn-type? t)     (make-fn-type
@@ -1995,3 +2002,13 @@
   [t]
   (binding [*execution-freshening* (atom {})]
     (freshen* t (atom {}))))
+
+
+(defn freshen-with
+  "Use the existing type freshener with caller-owned variable identity.
+   name-variable receives [:value|:execution original-symbol] as two args and
+   returns a symbol. This supports stable immutable use scopes without changing
+   the counter-based freshen API or traversing refinement literal payloads."
+  [t name-variable]
+  (binding [*fresh-variable-name* name-variable]
+    (freshen t)))

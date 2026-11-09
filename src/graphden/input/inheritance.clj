@@ -8,7 +8,8 @@
     [graphden.types.core :as types]))
 
 
-(defn- declaration-order
+(defn declaration-order
+  "Stable ancestor-first declaration IDs, with shared ancestors visited once."
   [ctx root]
   (let [visited (volatile! #{})
         ordered (volatile! [])]

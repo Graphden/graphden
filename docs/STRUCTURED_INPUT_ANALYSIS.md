@@ -35,7 +35,10 @@ migration payloads. Whole-record marker/refinement obligations remain attached.
 
 `analysis/analyze-input` checks the local declared record and authored bindings.
 It returns occupancy, residual fields, required addresses, type substitutions,
-proofs, obligations and explicit coverage diagnostics. Supply
+proofs, obligations and explicit coverage diagnostics. Metadata overlays strengthen
+requiredness, narrow types through the existing checker, and enforce terminal
+locks against descendants and caller-use overlays. They update a separate
+configured contract, preserving the authored declaration. Supply
 `graphden.types.check/check-input-binding` as `:check-expression` to use the
 existing directional checker. An absent adapter never means success. Gradual
 values and refinement obligations remain deferred, and error data omits literal
@@ -60,7 +63,7 @@ The shared `types.reference/call-site-contract` preserves the existing checker's
 capture type/effect projection, including authored `lambda-params []`.
 
 This implementation does not yet complete callable capture routing, projection
-resolution, metadata overrides, recursive SCC inference, or runtime execution.
+resolution, recursive dependency validation, or runtime execution.
 Those cases retain diagnostics and incomplete coverage. Wrapped identity or
 callable policies that lack an adapter are diagnosed rather than evaluated in
 the wrong mode. Reference cycles are bounded and diagnosed; they are not treated

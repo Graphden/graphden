@@ -4,7 +4,9 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.core :as input]
+    [graphden.input.descriptor :as descriptor]
     [graphden.input.inheritance :as inheritance]
+    [graphden.input.metadata :as metadata]
     [graphden.input.rows :as rows]
     [graphden.input.scopes :as scopes]
     [graphden.types.check.literals :as literals]
@@ -21,17 +23,10 @@
                   :path (:projection-path row)}))
 
 
-(defn- target-node
-  [contract path]
-  (reduce (fn [node field-id]
-            (or (some #(when (= field-id (:id %)) %) (:fields node))
-                (context/reject! :unknown-field {:path path}))) contract path))
-
-
 (defn- classify-entry
   [ctx scope contract row]
   (let [path (:target-path row)
-        expected (:type (target-node contract path))
+        expected (:type (descriptor/node-at contract path))
         expression (expression-of row)
         dispatch (case (:kind expression)
                    :ref (if (contains? (:fns ctx) (:fn-id expression))
@@ -62,7 +57,7 @@
 
 
 (defn- check-entries
-  [entries check-expression]
+  [entries check-expression substitution]
   (reduce (fn [{:keys [substitution] :as result} {:keys [address] :as entry}]
             (let [proof (check-entry check-expression substitution entry)]
               (when-not (contains? #{:checked :deferred} (:status proof))
@@ -70,7 +65,7 @@
               (-> result
                   (assoc :substitution (:substitution proof))
                   (assoc-in [:proofs address] proof))))
-          {:substitution {} :proofs {}} entries))
+          {:substitution substitution :proofs {}} entries))
 
 
 (defn- container-obligations
@@ -103,8 +98,15 @@
      (fn []
        (let [{:keys [contract bindings declaration-order]} (inheritance/declared-view ctx fn-id)
              scope (or scope [fn-id []])
-             owned (mapv #(rows/normalize (assoc % :fn-id fn-id)) (concat bindings additional-rows))
+             declared contract
+             owned (mapv #(rows/normalize (assoc % :fn-id fn-id
+                                                 :origin-fn-id (or (:origin-fn-id %) (:fn-id %))))
+                         (concat (map #(assoc % :origin-use-path (second scope)) bindings) additional-rows))
              local (filterv #(empty? (:scope-path %)) owned)
+             policy (metadata/apply-overlays ctx declared local
+                                             {:scope scope :declaration-order declaration-order
+                                              :check-expression check-expression})
+             contract (:contract policy)
              entries (mapv #(classify-entry ctx scope contract %) (filter rows/occupied? local))
              state (into {} (map (fn [{:keys [address binding-id expression expected-type]}]
                                    [address {:binding-id binding-id :expression expression
@@ -113,13 +115,10 @@
              ;; rejected even when they carry equal literal values.
              _ (rows/state local)
              remaining (input/remaining-input contract state scope)
-             checked (check-entries entries check-expression)
+             checked (check-entries entries check-expression (:substitution policy))
              obligations (container-obligations (:descriptor remaining) scope [])
              closure-gaps (cond-> []
                             (some #(seq (:scope-path %)) owned) (conj :scoped-analysis-required)
-                            (some #(some (fn [k] (some? (get % k)))
-                                         [:required :terminal :type-override-fn-id]) owned)
-                            (conj :metadata-analysis-required)
                             (some #(contains? #{:value :callable-producer :graph-callable}
                                               (get-in % [:reference :mode])) entries)
                             (conj :reference-availability-required))
@@ -130,8 +129,9 @@
                                (keep (fn [[address proof]]
                                        (when (= :deferred (:status proof))
                                          {:code (:reason proof) :address address})))
-                               (:proofs checked))]
-         {:fn-id fn-id :declared-contract contract :declaration-order declaration-order
+                               (concat (:proofs checked)
+                                       (map (fn [[id proof]] [[scope [:metadata id]] proof]) (:proofs policy))))]
+         {:fn-id fn-id :declared-contract declared :configured-contract contract :declaration-order declaration-order
           :scoped-rows (filterv #(seq (:scope-path %)) owned)
           :effective-contract (when (empty? closure-gaps) (substitute-node contract (:substitution checked)))
           :remaining-contract (substitute-node (:descriptor remaining) (:substitution checked))
@@ -139,7 +139,7 @@
           :bindings (into {} (map (fn [entry]
                                     [(:address entry)
                                      (update entry :expected-type #(types/resolve (:substitution checked) %))])) entries)
-          :substitution (:substitution checked) :proofs (:proofs checked)
+          :substitution (:substitution checked) :proofs (:proofs checked) :metadata-proofs (:proofs policy)
           :obligations obligations
           :diagnostics diagnostics
           :status (if (empty? diagnostics) :checked :incomplete)

@@ -146,3 +146,33 @@
     (when (:alternatives descriptor)
       (context/reject! :ambiguous-record-input {:fn-id fn-id :type-id type-id}))
     (input/input-contract descriptor)))
+
+
+(defn node-at
+  "Read a resolved descriptor node by stable field-ID path."
+  [descriptor path]
+  (reduce (fn [node id]
+            (or (some #(when (= id (:id %)) %) (:fields node))
+                (context/reject! :unknown-field {:path path}))) descriptor path))
+
+
+(defn- record-body
+  [rich fields]
+  (cond
+    (types/refine-type? rich)
+    [:refine (record-body (types/refine-base rich) fields) (types/refine-constraint rich)]
+    (types/marker-type? rich) [(types/marker-tag rich) (record-body (types/marker-inner rich) fields)]
+    (types/record-type? rich) (into {} (map (juxt :name :type)) fields)
+    :else (context/reject! :atomic-field {})))
+
+
+(defn update-node
+  "Update an addressed node and rebuild ancestor rich record types, preserving
+   their whole-record wrappers. Does not infer or replace any field identity."
+  [descriptor path f]
+  (if (empty? path)
+    (f descriptor)
+    (let [id (first path)
+          _ (node-at descriptor [id])
+          fields (mapv #(if (= id (:id %)) (update-node % (subvec path 1) f) %) (:fields descriptor))]
+      (assoc descriptor :fields fields :type (record-body (:type descriptor) fields)))))

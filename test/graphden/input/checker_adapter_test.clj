@@ -1,10 +1,44 @@
 (ns graphden.input.checker-adapter-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]))
+
+
+(deftest frozen-signature-engine-preserves-polymorphism-and-effect-phases-test
+  (let [root (random-uuid)
+        facts {:fn-id (random-uuid)
+               :root-entry {:fn-id root :args {:value 'a} :return 'a
+                            :effects #{} :execution #{:jvm-server}}
+               :bindings-info {:value {:type :text :value "literal" :value-present true}}
+               :argument-effects {:value #{:network}}
+               :free-arguments [] :signature-view {:by-id {} :by-name {}}}
+        result (check/infer-input-signature facts)]
+    (is (= :text (:return result)))
+    (is (= #{:network} (:effects result)))
+    (is (= #{} (:call-time-effects result)))
+    (is (= #{:jvm-server} (:execution result)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/infer-input-signature (assoc facts :declaration {:expects-effects #{}}))))))
+
+
+(deftest registered-return-rule-sees-only-its-frozen-signature-view-test
+  (let [[root target absent] (repeatedly 3 random-uuid)
+        ambient (atom {:by-id {target {:return :int} absent {:return :text}} :by-name {}})
+        facts {:fn-id (random-uuid)
+               :root-entry {:fn-id root :args {} :return :any :effects #{}
+                            :return-type-rule (fn [_ _]
+                                                (is (nil? (registry/rich-type-of absent)))
+                                                (:return (registry/rich-type-of target)))}
+               :bindings-info {} :argument-effects {} :free-arguments []
+               :signature-view {:by-id {target {:return :bool}} :by-name {}}}]
+    (binding [registry/*rich-types-override* ambient]
+      (is (= :bool (:return (check/infer-input-signature facts))))
+      (is (= :int (:return (registry/rich-type-of target)))))
+    (is (= 2 (count (:by-id @ambient))))))
 
 
 (deftest structured-literal-uses-the-existing-directional-checker-test

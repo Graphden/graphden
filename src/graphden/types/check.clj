@@ -2304,6 +2304,27 @@
           resolved)))))
 
 
+(defn rule-return-for-entry
+  "Apply the existing return-rule engine to an explicitly supplied root entry.
+   Entry selection performs no lookup. Registered rules may consult the active
+   registry; offline callers must bind a frozen view. Binding facts use the
+   implementation's argument keys, not authored input identity."
+  [entry binfo static-ret]
+  (let [rule (:return-type-rule entry)
+        taint? (:taint-propagate? entry)
+        sig? (and (not rule) (has-type-var? (:return entry)))]
+    (if-not (or rule taint? sig?)
+      static-ret
+      (let [binfo (if (fn? binfo) (binfo) binfo)
+            structural (cond
+                         rule (rule binfo static-ret)
+                         sig? (signature-return entry binfo static-ret)
+                         :else static-ret)]
+        (if taint?
+          (types/taint-with-secret-if-tainted binfo structural)
+          structural)))))
+
+
 (defn rule-return
   "The return type the ROOT base-fn under `parent` computes for one call
    site: its recorded `:return-type-rule` (e.g. `:assoc`'s record
@@ -2322,20 +2343,8 @@
    Public so the per-rule unit tests (`types.rules-test`) dispatch
    through exactly this wiring instead of a copy of it."
   [parent binfo static-ret]
-  (let [entry (registry/rich-type-of (registry/root-base-fn-name parent))
-        rule (:return-type-rule entry)
-        taint? (:taint-propagate? entry)
-        sig? (and (not rule) (has-type-var? (:return entry)))]
-    (if-not (or rule taint? sig?)
-      static-ret
-      (let [binfo (if (fn? binfo) (binfo) binfo)
-            structural (cond
-                         rule (rule binfo static-ret)
-                         sig? (signature-return entry binfo static-ret)
-                         :else static-ret)]
-        (if taint?
-          (types/taint-with-secret-if-tainted binfo structural)
-          structural)))))
+  (rule-return-for-entry (registry/rich-type-of (registry/root-base-fn-name parent))
+                         binfo static-ret))
 
 
 (defn- compute-return-type
@@ -2465,6 +2474,37 @@
                 :declared declared
                 :computed computed-return})))
     recorded))
+
+
+(defn infer-input-signature
+  "Run existing return, effect, declaration and execution policies for one
+   structured-input use. Facts are keyed by explicit implementation ABI keys;
+   no legacy fn-def binding AST is constructed. The supplied registry view is
+   complete for this use and has no process-global or tenant fallback. This
+   function computes evidence only and never publishes a registry entry."
+  [{:keys [fn-id root-entry bindings-info argument-effects free-arguments
+           signature-view declaration static-return]}]
+  (when-not (and (map? root-entry) (map? bindings-info)
+                 (map? argument-effects) (map? (:by-id signature-view))
+                 (map? (:by-name signature-view)))
+    (throw (ex-info "Structured signature requires frozen evidence"
+                    {:type :input/unresolved-contract :code :signature-evidence-required})))
+  (binding [registry/*rich-types-override* (atom signature-view)
+            registry/*per-org-rich-override* (atom {})]
+    (let [computed (rule-return-for-entry root-entry bindings-info
+                                          (or static-return (:return root-entry)))
+          effects (compute-effects argument-effects root-entry)
+          result {:return (enforce-declared-return! fn-id declaration computed)
+                  :effects effects
+                  :arg-effects argument-effects
+                  :call-time-effects (compute-call-time-effects argument-effects root-entry free-arguments)
+                  :execution (execution/derive root-entry bindings-info registry/rich-type-of)}]
+      (check-effects-policy! fn-id declaration effects)
+      (reduce (fn [result [rule-key result-key]]
+                (if-let [rule (get root-entry rule-key)]
+                  (assoc result result-key (rule bindings-info))
+                  result))
+              result [[:slot-types-rule :slot-types] [:nav-types-rule :nav-types]]))))
 
 
 (defn- return-type-drift

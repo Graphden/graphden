@@ -408,16 +408,16 @@
         nodes (mapv #(node (format "#%06x" %)) (range 65))
         selected (atom [])
         rendered (atom [])
-        selector (fn [dispatch]
-                   (swap! selected conj dispatch)
-                   "_repr-color")]
+        select-repr (fn [dispatch]
+                      (swap! selected conj dispatch)
+                      "_repr-color")]
     (with-redefs [vrepr/render-selected-repr
                   (fn [_ target value]
                     (swap! rendered conj [target value])
                     (throw (ex-info "render failed" {})))]
       (let [result (vrepr/literal-preview-entries
                      harness/*context*
-                     {:nodes (into [(first nodes)] nodes)} graph selector)]
+                     {:nodes (into [(first nodes)] nodes)} graph select-repr)]
         (is (= 66 (count result)))
         (is (every? (comp nil? :repr) result))
         (is (= 1 (count @selected)) "one selection per canonical type")

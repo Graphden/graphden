@@ -32,7 +32,9 @@
           path (str (fs/path dir "stages.edn"))
           roster ["ci" "build" "priority" "integration"]
           prior {:schema 1 :kind "stages" :sha sha :roster roster
-                 :status (zipmap roster (repeat :passed)) :proof {"priority" proof}}]
+                 :status (zipmap roster (repeat :passed))
+                 :sources (assoc (zipmap roster (repeat :local)) "priority" :hosted-integration)
+                 :proof {"priority" proof}}]
       (try
         (is (= proof (get-in @(-> (resume/begin! path "stages" sha roster prior true) :state)
                              [:proof "priority"])))
@@ -42,6 +44,38 @@
           (is (nil? (get-in @(:state run) [:proof "priority"]))
               "a local rerun cannot inherit the old hosted proof"))
         (is (empty? (:proof @(-> (resume/begin! path "stages" sha roster prior false) :state))))
+        (let [run (resume/begin! path "stages" sha roster nil)
+              initial (report/read-report path)
+              writes (atom [])
+              write! report/write-atomic!]
+          (with-redefs [report/write-atomic! (fn [target receipt]
+                                               (swap! writes conj receipt)
+                                               (write! target receipt))]
+            (doseq [invalid [nil (assoc proof :sha "other") (assoc proof :coverage {})]]
+              (is (thrown? clojure.lang.ExceptionInfo
+                    (resume/mark-hosted-passed! run "priority" invalid)))
+              (is (= initial @(:state run) (report/read-report path))))
+            (is (empty? @writes) "invalid proof never publishes a pass")
+            (resume/mark-hosted-passed! run "priority" proof)
+            (is (= 1 (count @writes)) "status and proof use one atomic publication")
+            (is (= :passed (get-in (first @writes) [:status "priority"])))
+            (is (= proof (get-in (first @writes) [:proof "priority"])))
+            (is (= :hosted-integration (resume/stage-proof-source (report/read-report path) "priority"))))
+          (let [passed (report/read-report path)]
+            (doseq [incomplete [(update passed :proof dissoc "priority")
+                                (update passed :sources dissoc "priority")
+                                (-> passed (dissoc :proof) (dissoc :sources))]]
+              (is (= :unknown (resume/stage-proof-source incomplete "priority")))
+              (let [resumed (resume/begin! path "stages" sha roster incomplete true)]
+                (is (not (contains? (:credited resumed) "priority")))
+                (is (= :pending (get-in (report/read-report path) [:status "priority"]))))))
+          (resume/mark! run "priority" :pending)
+          (let [pending (report/read-report path)]
+            (with-redefs [report/write-atomic! (fn [& _] (throw (ex-info "interrupted write" {})))]
+              (is (thrown? clojure.lang.ExceptionInfo
+                    (resume/mark-hosted-passed! run "priority" proof))))
+            (is (= pending @(:state run) (report/read-report path))
+                "failed publication leaves the stage pending with no orphan pass")))
         (finally (fs/delete-tree dir))))))
 
 
@@ -139,7 +173,8 @@
             ["ci" "build" "visual" "e2e"]]]]
     (let [dir (fs/create-temp-dir)
           path (str (fs/path dir "stages.edn"))
-          prior (assoc (hint roster (repeat :passed)) :kind "stages" :sha sha)]
+          prior (assoc (hint roster (repeat :passed)) :kind "stages" :sha sha
+                       :sources (zipmap roster (repeat :local)))]
       (try
         (let [run (resume/begin! path "stages" sha roster prior true)
               receipt (report/read-report path)]

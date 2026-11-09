@@ -3,6 +3,8 @@
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.input.access :as access]
+    [graphden.input.migration :as migration]
+    [graphden.input.offline :as offline]
     [graphden.input.rows :as rows]
     [graphden.schema.graph.schema :as graph]
     [graphden.schema.malli.core :as malli]
@@ -146,3 +148,31 @@
       (deliver start true)
       (is (= #{:ok :input/invalid-binding} (set (map #(deref % 15000 :timeout) writes))))
       (is (= 1 (count (sp/query-entities v :input-binding {})))))))
+
+
+(deftest offline-artifact-preserves-history-and-restores-test
+  (with-storage [base]
+    (let [v (vs/wrap-with-versioning base)
+          t (sp/create-entity v :fn {:name "text"})
+          f (sp/create-entity v :fn {:name "legacy" :return-type-fn-id (:id t)})
+          slot (sp/create-entity v :slot {:name "name" :type-fn-id (:id t)})
+          _ (sp/create-entity v :fn-slot {:fn-id (:id f) :slot-id (:id slot) :position 0})
+          old (sp/create-entity v :binding {:fn-id (:id f) :slot-id (:id slot)
+                                            :value-present true :value "before"})
+          branch (vs/create-branch! v "history")
+          feature (vs/switch-branch v (:id branch))
+          _ (sp/update-entity feature :binding (:id old) {:value "after"})
+          source (offline/snapshot base)
+          artifact (-> source offline/artifact offline/encode offline/decode)]
+      (is (= [] (get-in artifact [:plan :exceptions])))
+      (is (= (:id old) (migration/binding-origin (:plan artifact) [(:id f) []] [(:id slot)])))
+      (is (= {:status :applied} (offline/apply! base artifact)))
+      (is (= {:status :already-applied} (offline/apply! base artifact)))
+      (is (= "before" (:value (sp/read-entity v :input-binding (:id old)))))
+      (is (= "after" (:value (sp/read-entity feature :input-binding (:id old)))))
+      (let [framework [:id :branch-id :created-at :deleted-at :change-id :change-revision :author-id :author-label]
+            original (set (map #(select-keys % framework) (:binding-version source)))
+            migrated (set (map #(select-keys % framework) (sp/query-entities base :input-binding-version {})))]
+        (is (= original migrated)))
+      (is (= {:status :restored} (offline/restore! base artifact)))
+      (is (= (migration/fingerprint source) (migration/fingerprint (offline/snapshot base)))))))

@@ -33,6 +33,7 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
+    [graphden.input.access :as input-access]
     [graphden.http-host.lease :as http-lease]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -149,6 +150,9 @@
    or a raw storage write. Cleared AFTER the write so a concurrent reader
    cannot re-cache the pre-write value."
   [base-storage entity-name write!]
+  (when (contains? input-access/offline-entities entity-name)
+    (input-access/assert-write! entity-name {})
+    (uniq/xact-lock! (tx/datasource base-storage) ["structured-input-bindings"]))
   (let [result (with-bump* base-storage entity-name write!)]
     (when (= :fn entity-name)
       (bl/invalidate! base-storage))

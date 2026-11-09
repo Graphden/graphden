@@ -609,7 +609,11 @@
         ;; scalars in the VALUES clause; nil cast = pass through (text
         ;; / numeric columns infer correctly without help). `fields`
         ;; supplies the cast for a column that is nil in every row.
-        column-types (mapv #(column-type-cast % rows fields) columns)
+        ;; entity->row has already changed kebab-case names to SQL columns.
+        ;; Keep declared fallback types in that same key space, including
+        ;; all-NULL ref/jsonb columns such as input_type_fn_id/lambda_params.
+        column-fields (into {} (map (fn [[k spec]] [(keyword (util/kw->snake-case k)) spec])) fields)
+        column-types (mapv #(column-type-cast % rows column-fields) columns)
         apply-cast (fn [v cast-type]
                      (if cast-type [:cast v (keyword cast-type)] v))
         value-rows (mapv (fn [row]

@@ -40,6 +40,7 @@
   (reduce (fn [owner edge-id]
             (let [edge (get bindings edge-id)]
               (when-not (and edge (= "ref" (:expression-kind edge))
+                             (empty? (:scope-path edge))
                              (contains? (ancestor-ids fns owner) (:fn-id edge)))
                 (reject! :invalid-scope))
               (:ref-fn-id edge)))
@@ -53,6 +54,10 @@
     (when-not (and input-id (contains? fns input-id))
       (reject! :missing-input-contract))
     (reduce (fn [type-id field-id]
+              (doseq [entity [(get fns type-id) (get fields field-id)]]
+                (when-not (and entity (or (nil? (:org-id entity))
+                                          (= (:org-id row) (:org-id entity))))
+                  (reject! :invalid-reference)))
               (when-not (some #(= field-id (:slot-id %)) (get members type-id))
                 (reject! :unknown-field))
               (or (:type-fn-id (get fields field-id)) (reject! :unknown-field)))
@@ -84,8 +89,17 @@
   (let [normalized (mapv #(validate-row! view %) (vals bindings))
         by-owner (group-by :fn-id normalized)]
     (doseq [fn-id (keys fns)]
-      (rows/state (map #(assoc % :fn-id fn-id)
-                       (mapcat by-owner (ancestor-ids fns fn-id)))))
+      (let [ancestors (disj (ancestor-ids fns fn-id) fn-id)
+            inherited (mapcat by-owner ancestors)
+            own (get by-owner fn-id)]
+        (doseq [seal (filter :terminal inherited)
+                row own
+                :when (and (= (:scope-path seal) (:scope-path row))
+                           (let [a (:target-path seal) b (:target-path row)]
+                             (and (<= (count a) (count b))
+                                  (= a (subvec b 0 (count a))))))]
+          (reject! :terminal-seal))
+        (rows/state (map #(assoc % :fn-id fn-id) (concat inherited own)))))
     view))
 
 

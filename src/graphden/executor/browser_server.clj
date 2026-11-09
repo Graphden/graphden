@@ -97,15 +97,23 @@
                   [k (if (vector? rows) (vec (sort-by (comp str :id) rows)) rows)])) graph))
 
 
+(defn- capture-root-anchor
+  [storage authorize! policy]
+  (let [{handler-root :root :keys [root-row selector-row]} (root-binding/capture! storage)
+        choice (resolution/root-choice storage authorize! policy)
+        selected-root (root-binding/selected-root handler-root choice)]
+    {:anchor {:handler-root handler-root :selected-root selected-root}
+     :evidence {:root-binding root-row :selector-binding selector-row
+                :selected-root selected-root}}))
+
+
 (defn- anchor!
   [storage authorize! policy {:keys [fn-id slot-id ref-fn-id handler-root selected-root] :as anchor}]
   (if (contains? anchor :selected-root)
-    (let [{current-root :root :keys [root-row selector-row]} (root-binding/capture! storage)
-          choice (resolution/root-choice storage authorize! policy)
-          current-selection (root-binding/selected-root current-root choice)]
-      (when-not (and (= handler-root current-root) (= selected-root current-selection))
+    (let [captured (capture-root-anchor storage authorize! policy)]
+      (when-not (= {:handler-root handler-root :selected-root selected-root} (:anchor captured))
         (reject! :server-binding-changed))
-      {:root-binding root-row :selector-binding selector-row :selected-root current-selection})
+      (:evidence captured))
     (let [rows (binding-read/exact-slot (binding-read/owner-bindings storage fn-id) slot-id)
           row (first rows)]
       (when-not (and (= 1 (count rows)) (= ref-fn-id (:ref-fn-id row))
@@ -115,10 +123,9 @@
       row)))
 
 
-(defn- capture-client
-  [ctx storage authorize! policy entries anchor]
-  (let [anchor-row (anchor! storage authorize! policy anchor)
-        graph (source/collect-client-closure storage (vals entries) authorize!)
+(defn- capture-client-source
+  [ctx storage authorize! policy entries anchor-row]
+  (let [graph (source/collect-client-closure storage (vals entries) authorize!)
         _ (doseq [id (vals entries)]
             (let [row (some #(when (= id (:id %)) %) (:fns graph))]
               (when-not row (reject! :server-root-missing))
@@ -143,6 +150,12 @@
     {:snapshot captured :targets targets :calls calls :evidence evidence}))
 
 
+(defn- capture-client
+  [ctx storage authorize! policy entries anchor]
+  (capture-client-source ctx storage authorize! policy entries
+                         (anchor! storage authorize! policy anchor)))
+
+
 (defn- issue!
   [record]
   (let [now (System/currentTimeMillis)
@@ -156,13 +169,9 @@
     {:token token}))
 
 
-(defn export-client-plan
-  "Export the selected root. Network targets stop at checked opaque terminals;
-   their implementations and configured captures remain exclusively server-side."
-  [ctx storage authorize! policy entries request anchor]
-  (let [{:keys [snapshot calls targets evidence]}
-        (capture-client ctx storage authorize! policy entries anchor)
-        epoch (context/invalidation-epoch ctx)
+(defn- export-captured-plan
+  [ctx request policy entries anchor {:keys [snapshot calls targets evidence]}]
+  (let [epoch (context/invalidation-epoch ctx)
         descriptors (into {}
                           (map (fn [[site target]]
                                  [site (issue! {:scope (scope ctx request) :anchor anchor
@@ -174,6 +183,28 @@
     (snapshot/export-snapshot
       (assoc snapshot :server-plan-options {:server-descriptors descriptors})
       (:base-fns ctx) entries policy)))
+
+
+(defn export-client-plan
+  "Export the selected root. Network targets stop at checked opaque terminals;
+   their implementations and configured captures remain exclusively server-side."
+  [ctx storage authorize! policy entries request anchor]
+  (export-captured-plan ctx request policy entries anchor
+                        (capture-client ctx storage authorize! policy entries anchor)))
+
+
+(defn call-with-root-export
+  "Resolve the trusted root once inside the caller's immutable snapshot.
+   The callback receives its identity and a zero-argument exporter; no caller
+   can supply prevalidated anchor evidence. Invocations still recapture it."
+  [ctx storage authorize! policy request consume]
+  (let [{:keys [anchor evidence]} (capture-root-anchor storage authorize! policy)
+        root (:selected-root anchor)
+        entries {:root root}]
+    (consume root
+             #(export-captured-plan
+                ctx request policy entries anchor
+                (capture-client-source ctx storage authorize! policy entries evidence)))))
 
 
 (defn- current-auth!

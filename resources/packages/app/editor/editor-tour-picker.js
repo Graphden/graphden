@@ -367,7 +367,6 @@ async function openTutorialMenu() {
   let lessons;
   try {
     [lessons] = await Promise.all([_tourFetchLessons(), preparing]);
-    if (!await _tourWaitForRequirements(lessons?.lessons || [])) throw new Error('Service plan unavailable');
   }
   catch (error) {
     const owned = _tourCatalogClose === closePending;
@@ -403,6 +402,12 @@ async function openTutorialMenu() {
   pop.classList.add('gd-tour-visible');
   _tourCenterPop(pop);
   let disposed = false;
+  let servicePlanState = 'pending';
+  const requirement = lesson => {
+    if (lesson.requires !== 'services' || servicePlanState === 'ready') return _tourRequirement(lesson);
+    const message = servicePlanState === 'pending' ? 'Checking service plan…' : 'Service plan unavailable';
+    return {allowed: false, phrase: 'service plan information', short: message, message};
+  };
   let graph = null;
   let countsRenderer = null;
   let introRenderer = null;
@@ -507,7 +512,7 @@ async function openTutorialMenu() {
     const textOnly = !!lesson['text-only?'];
     const btn = textOnly ? document.createElement('a') : _tourBtn('', 'gd-tour-btn-primary', () => {
       if (!current() || !lessons.lessons.some(item => item.id === lesson.id)
-        || !_tourRequirement(lesson).allowed) return;
+        || !requirement(lesson).allowed) return;
       retire();
       _tourChooseLesson(lesson.id);
     });
@@ -559,7 +564,7 @@ async function openTutorialMenu() {
   function render(needle) {
     if (!current()) return;
     const facts = lessons.lessons.map(lesson => {
-      const need = _tourRequirement(lesson);
+      const need = requirement(lesson);
       const key = _tourKey(lesson);
       return {id: lesson.id, title: lesson.title || '', chapter: lesson.chapter || '',
         done: done.has(key), stale: _tourStale(lesson, done), fresh: news.fresh.includes(lesson.id),
@@ -595,7 +600,7 @@ async function openTutorialMenu() {
             entry = nativeRow(lesson);
             rows.set(item.id, entry);
           }
-          const need = _tourRequirement(lesson);
+          const need = requirement(lesson);
           entry.row.className = 'gd-tour-lesson-row'
             + (item['text-only'] ? ' gd-tour-lesson-row-text' : '')
             + (item.fresh ? ' gd-tour-lesson-row-new' : '')
@@ -605,7 +610,7 @@ async function openTutorialMenu() {
           entry.btn.classList.toggle('gd-tour-btn-locked', !need.allowed && !lesson['text-only?']);
           if (!lesson['text-only?']) {
             entry.btn.disabled = !need.allowed;
-            entry.btn.title = need.allowed ? '' : 'Needs ' + need.phrase + ' — this session does not have it.';
+            entry.btn.title = need.allowed ? '' : need.message || 'Needs ' + need.phrase + ' — this session does not have it.';
           }
           if (done.has(_tourKey(lesson))) {
             if (entry.undo.parentNode !== entry.row) entry.row.appendChild(entry.undo);
@@ -680,6 +685,14 @@ async function openTutorialMenu() {
   });
   render('');
   if (!current()) return;
+  if (lessons.lessons.some(lesson => lesson.requires === 'services')) {
+    const installPlan = ready => {
+      if (!current()) return;
+      servicePlanState = ready ? 'ready' : 'unavailable';
+      render(filter.value);
+    };
+    void _tourWaitForRequirements(lessons.lessons).then(installPlan, () => installPlan(false));
+  }
   if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
   else if (typeof filter.focus === 'function') filter.focus();
 }

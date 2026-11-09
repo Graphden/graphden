@@ -113,6 +113,76 @@ function racingRoutes(ctxRef, typesBody) {
 }
 
 (async () => {
+  for (const progressive of [false, true]) {
+    console.log(` initGraph progressive=${progressive}: replace a cancelled selection-clear render`);
+    const requests = [];
+    const b = boot({routes: url => {
+      requests.push(url);
+      return json(url.includes('scope=tree') ? TREE : {});
+    }});
+    const c = b.ctx;
+    c.location.hash = '';
+    c.selectedFnId = 'deleted';
+    c.expansionState = new Map(); c.previewState = new Map(); c.userMovedNodes = new Set();
+    c.savedUserPositions = new Map(); c.anchorNodeId = null;
+    c.history = {pushState: (_, __, hash) => { c.location.hash = hash; }};
+    c.graph = {nodes: new Map([['deleted', {}], ['literal', {}]]),
+      edges: new Map([['edge', {}]]), incoming: new Map()};
+    const overlays = new Set(['deleted', 'literal']);
+    const animations = [];
+    c.ANIM_DURATION = 1;
+    c.graphStopAnimation = () => {};
+    c.graphNodeIds = () => [...c.graph.nodes.keys()];
+    c.graphRemoveNode = id => c.graph.nodes.delete(id);
+    c.graphRemoveEdge = id => c.graph.edges.delete(id);
+    c.getNodeOverlay = id => id; c.fadeOutOverlay = () => {};
+    c.unregisterNodeOverlay = id => overlays.delete(id);
+    c.createNodeOverlays = () => {};
+    c.reflowFromMeasuredHeights = () => false; c.updateOverlayPositions = () => {};
+    c.graphAnimateNodes = () => new Promise(resolve => animations.push(resolve));
+    for (const file of ['editor-ui.js', 'editor-layout.js', 'editor-render.js']) {
+      vm.runInContext(fs.readFileSync(path.join(EDITOR, file), 'utf8'), c, {filename: file});
+    }
+    // Delay only the first empty layout. The refresh must cancel that render
+    // and replace it using the real null-selection layout (no HTTP request).
+    const emptyLayout = c.fetchBackendLayout;
+    let releaseOld;
+    let layoutCalls = 0;
+    c.fetchBackendLayout = () => ++layoutCalls === 1
+      ? new Promise(resolve => { releaseOld = () => emptyLayout().then(resolve); }) : emptyLayout();
+    c.gdClearSelection();
+    const cancelled = c.gdWaitForSelectionRender();
+    let finished = false;
+    const refresh = c.initGraph({progressive}).then(() => { finished = true; });
+    await releaseOld();
+    await cancelled;
+    for (let i = 0; i < 80; i++) await Promise.resolve();
+    assert(layoutCalls === 2, 'refresh replaces the cancelled empty render');
+    assert(!finished && !c.gdGraphEditsReady(), 'refresh fence waits for the replacement animation');
+    assert(animations.length === 1, 'only the replacement render reaches animation');
+    // The old navigation was reset, so its waiter alone cannot certify boot.
+    await c.gdWaitForSelectionRender();
+    assert(!finished, 'resolved navigation waiter does not bypass the empty render');
+    for (const resolve of animations) resolve();
+    await refresh;
+    assert(c.selectedFnId === null && c.graph.nodes.size === 0 && c.graph.edges.size === 0,
+      'refresh ends with null selection and no graph nodes or edges');
+    assert(overlays.size === 0 && c.graphRenderReady(), 'deleted card and literal overlays are gone');
+    assert(c.gdGraphEditsReady(), 'completed empty render releases editing readiness');
+    assert(requests.length === 3 && requests.every(url => !url.includes('layout') && !url.includes('root-id')),
+      'null selection only requests tree, types and value kinds');
+  }
+
+  {
+    let renders = 0;
+    const b = boot({routes: url => json(url.includes('scope=tree') ? TREE : {}),
+      renderGraph: () => { renders++; }});
+    b.ctx.location.hash = '#manage';
+    b.ctx.gdRouteSurfaceHash = hash => hash === 'manage';
+    await b.ctx.initGraph();
+    assert(renders === 0, 'management surface routing does not render the canvas fallback');
+  }
+
   for (const which of ['initGraph', 'loadGraphData']) {
     console.log(` ${which}: a namespace load landing mid-fetch survives; types installed`);
     const ref = {};

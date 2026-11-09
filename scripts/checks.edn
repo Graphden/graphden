@@ -185,7 +185,8 @@
  ;; read as "the new JVM dep's license was vetted", which this task never does.
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec
   :relevant ["package(-lock)?\\.json$" "^bb\\.edn$"]}
- {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
+ ;; Commit metadata can fail in seconds; reject it before expensive lint waves.
+ {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit :stage :affected}
  ;; Full suites run related cases first, without a separate focused execution.
  {:name "tests-js-affected" :bb "staged-js-affected" :timeout 60000 :group :test :stage :affected
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"

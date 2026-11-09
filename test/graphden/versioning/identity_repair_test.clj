@@ -447,3 +447,35 @@
               [:fn-version {:fn-id :empty}]]
              @queries)
           "Empty owner sets never read any of the four child tables"))))
+
+
+(deftest purge-large-owner-sets-bounds-query-parameters-test
+  (let [owner-count 513
+        child-tables [:binding-list-item-version :binding-list-item
+                      :binding-version :fn-slot-version]
+        rows (fn [entity owner-field owner-entity]
+               (into {:keep {:id :keep owner-field :keep}}
+                     (map (fn [i]
+                            (let [id [entity i]]
+                              [id {:id id owner-field (if (= :fn owner-entity)
+                                                        :x [owner-entity i])}]))
+                          (range owner-count))))
+        seed {:fn {:x {:id :x} :keep {:id :keep}}
+              :fn-version {:fv {:id :fv :fn-id :x} :keep {:id :keep :fn-id :keep}}
+              :binding (rows :binding :fn-id :fn)
+              :binding-version (rows :binding-version :binding-id :binding)
+              :binding-list-item (rows :binding-list-item :binding-id :binding)
+              :binding-list-item-version (rows :binding-list-item-version :binding-id :binding)
+              :fn-slot (rows :fn-slot :fn-id :fn)
+              :fn-slot-version (rows :fn-slot-version :fn-slot-id :fn-slot)}
+        expected (update-vals seed #(select-keys % [:keep]))
+        db (atom seed)
+        queries (atom [])
+        n (idr/purge-fn-subgraph! (mem-storage db queries) :x)
+        child-queries (filterv (comp (set child-tables) first) @queries)]
+    (is (= (+ 2 (* 6 owner-count)) n))
+    (is (= expected @db) "All owned rows are deleted; every unrelated row survives")
+    (is (= 15 (count @queries)) "Three batches per child table plus three owner reads")
+    (is (= (zipmap child-tables (repeat 3)) (frequencies (map first child-queries))))
+    (is (every? #(<= 1 (count (first (vals (second %)))) 256) child-queries)
+        "Each IN query stays bounded even for an owner set larger than one batch")))

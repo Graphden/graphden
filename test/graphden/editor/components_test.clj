@@ -163,7 +163,7 @@
                                       (is (= {:limit 2} opts))
                                       (swap! calls conj :preference)
                                       [{:value {:fn-id "unselected-legacy-identity"}}])
-                  source/collect-closure (fn [actual ids _ _]
+                  source/collect-closure (fn [actual ids _]
                                            (is (= storage actual))
                                            (is (= [fn-id] (vec ids)))
                                            (swap! calls conj :body) {})

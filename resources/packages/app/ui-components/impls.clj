@@ -29,12 +29,6 @@
   (components/export-resolved ctx input))
 
 
-(defbase _editor-configuration-plans-facts
-  [input]
-  (runtime/record-effect! :db)
-  (components/export-resolved-batch ctx input))
-
-
 (defbase _editor-root-plan-facts
   [request]
   (runtime/record-effect! :db)
@@ -143,7 +137,6 @@
 (def impls
   {:ui-components ui-components
    :_editor-configuration-plan-facts {:impl _editor-configuration-plan-facts :taint-propagate? true}
-   :_editor-configuration-plans-facts {:impl _editor-configuration-plans-facts :taint-propagate? true}
    ;; No caller values enter this source-authorized, server-selected export.
    :_editor-root-plan-facts _editor-root-plan-facts
    :_editor-root-migration-preview-outcome {:impl _editor-root-migration-preview-outcome :taint-propagate? true}

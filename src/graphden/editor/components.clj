@@ -59,82 +59,62 @@
       (reject! :policy-refresh-required))))
 
 
-(defn- capture-configuration
-  [storage authorize! policy]
-  (let [resolved (resolution/capture storage authorize! policy)
-        row (sp/read-entity storage :fn (:id resolved))]
-    (when-not row (reject! :source-missing))
-    ;; The selected root is distinct from the HTTP handler's own identity.
-    (authorize! row true)
-    (assert-current-policy! storage)
-    resolved))
-
-
-(defn- configuration-receipt
-  [storage resolved]
-  (let [id (:id resolved)
-        configuration (:configuration resolved)
-        preference-rows (sp/query-entities storage :ui-pref
-                                           {:owner-id (tenancy/current-user-id) :key "components"} {:limit 2})]
-    (when (> (count preference-rows) 1) (reject! :invalid-selection))
-    {:ok true :selection-id (str id)
-     :roots {:configuration-id (str id)
-             :menu-id (str (get-in configuration [:account-menu :view]))
-             :menu-update-id (str (get-in configuration [:account-menu :update]))
-             :picker-id (str (get-in configuration [:fn-picker :view]))
-             :explorer-id (some-> (get-in configuration [:explorer :view]) str)
-             :explorer-initial-id (some-> (get-in configuration [:explorer :initial]) str)
-             :explorer-update-id (some-> (get-in configuration [:explorer :update]) str)
-             :inspector-id (some-> (get-in configuration [:inspector :view]) str)
-             :inspector-initial-id (some-> (get-in configuration [:inspector :initial]) str)
-             :inspector-update-id (some-> (get-in configuration [:inspector :update]) str)
-             :recents-id (some-> (get-in configuration [:recents :view]) str)
-             :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
-             :recents-update-id (some-> (get-in configuration [:recents :update]) str)
-             :canvas-id (some-> (get-in configuration [:canvas :view]) str)
-             :canvas-values-id (some-> (get-in configuration [:canvas-values :view]) str)
-             :canvas-inheritance-id (some-> (get-in configuration [:canvas-inheritance :view]) str)
-             :canvas-metadata-id (some-> (get-in configuration [:canvas-metadata :view]) str)
-             :canvas-type-structure-id (some-> (get-in configuration [:canvas-type-structure :view]) str)
-             :canvas-type-structure-initial-id (some-> (get-in configuration [:canvas-type-structure :initial]) str)
-             :canvas-bindings-id (some-> (get-in configuration [:canvas-bindings :view]) str)
-             :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)
-             :execution-status-id (some-> (get-in configuration [:execution-status :view]) str)
-             :execution-path-id (some-> (get-in configuration [:execution-path :view]) str)
-             :feedback-id (some-> (get-in configuration [:feedback :view]) str)
-             :keymap-id (some-> (get-in configuration [:keymap :view]) str)
-             :appearance-id (some-> (get-in configuration [:appearance :view]) str)}
-     :configuration-revision (:revision resolved)
-     :configuration-preference {:present (boolean (seq preference-rows))
-                                :value (:value (first preference-rows))}
-     :configuration-branch-id (str (get-in resolved [:scope :branch-id]))
-     :configuration-defaults-id (str resolution/defaults-id)
-     :custom-components (resolution/owned-writable-components storage resolved)}))
-
-
-(defn- export-component-plan
-  [ctx component storage authorize! policy resolved]
-  (let [entries (get-in resolved [:configuration component])]
-    (when-not entries (reject! :component-missing))
-    (let [body (source/collect-closure storage (vals entries) authorize! (context/cached-graph ctx))
-          body-snapshot {:graph body :namespaces (source/collect-namespaces storage body)}]
-      (snapshot/export-snapshot body-snapshot (:base-fns ctx) entries policy))))
-
-
-(defn- assert-export-current!
-  [ctx storage epoch]
-  (assert-current-policy! storage)
-  (when-not (= epoch (context/invalidation-epoch ctx))
-    (reject! :policy-refresh-required)))
-
-
 (defn- export-in-snapshot
   [ctx component storage authorize! policy epoch]
-  (let [resolved (capture-configuration storage authorize! policy)
-        plan (export-component-plan ctx component storage authorize! policy resolved)
-        receipt (configuration-receipt storage resolved)]
-    (assert-export-current! ctx storage epoch)
-    (assoc receipt :plan plan)))
+  (let [resolved (resolution/capture storage authorize! policy)
+        id (:id resolved)
+        row (sp/read-entity storage :fn id)]
+    (when-not row (reject! :source-missing))
+    ;; This selected root is distinct from the HTTP handler's own identity.
+    (authorize! row true)
+    (let [configuration (:configuration resolved)
+          entries (get configuration component)]
+      ;; The original policy was frozen before opening this transaction.
+      ;; A fresh check may veto it, never relax erased secret annotations.
+      (assert-current-policy! storage)
+      (let [_ (when-not entries (reject! :component-missing))
+            body (source/collect-closure storage (vals entries) authorize! (context/cached-graph ctx))
+            body-snapshot {:graph body :namespaces (source/collect-namespaces storage body)}
+            plan (snapshot/export-snapshot body-snapshot (:base-fns ctx) entries policy)
+            preference-rows (sp/query-entities storage :ui-pref
+                                               {:owner-id (tenancy/current-user-id) :key "components"} {:limit 2})]
+        (when (> (count preference-rows) 1) (reject! :invalid-selection))
+        (assert-current-policy! storage)
+        (when-not (= epoch (context/invalidation-epoch ctx))
+          (reject! :policy-refresh-required))
+        (assoc {:ok true :selection-id (str id) :plan plan
+                :roots {:configuration-id (str id)
+                        :menu-id (str (get-in configuration [:account-menu :view]))
+                        :menu-update-id (str (get-in configuration [:account-menu :update]))
+                        :picker-id (str (get-in configuration [:fn-picker :view]))
+                        :explorer-id (some-> (get-in configuration [:explorer :view]) str)
+                        :explorer-initial-id (some-> (get-in configuration [:explorer :initial]) str)
+                        :explorer-update-id (some-> (get-in configuration [:explorer :update]) str)
+                        :inspector-id (some-> (get-in configuration [:inspector :view]) str)
+                        :inspector-initial-id (some-> (get-in configuration [:inspector :initial]) str)
+                        :inspector-update-id (some-> (get-in configuration [:inspector :update]) str)
+                        :recents-id (some-> (get-in configuration [:recents :view]) str)
+                        :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
+                        :recents-update-id (some-> (get-in configuration [:recents :update]) str)
+                        :canvas-id (some-> (get-in configuration [:canvas :view]) str)
+                        :canvas-values-id (some-> (get-in configuration [:canvas-values :view]) str)
+                        :canvas-inheritance-id (some-> (get-in configuration [:canvas-inheritance :view]) str)
+                        :canvas-metadata-id (some-> (get-in configuration [:canvas-metadata :view]) str)
+                        :canvas-type-structure-id (some-> (get-in configuration [:canvas-type-structure :view]) str)
+                        :canvas-type-structure-initial-id (some-> (get-in configuration [:canvas-type-structure :initial]) str)
+                        :canvas-bindings-id (some-> (get-in configuration [:canvas-bindings :view]) str)
+                        :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)
+                        :execution-status-id (some-> (get-in configuration [:execution-status :view]) str)
+                        :execution-path-id (some-> (get-in configuration [:execution-path :view]) str)
+                        :feedback-id (some-> (get-in configuration [:feedback :view]) str)
+                        :keymap-id (some-> (get-in configuration [:keymap :view]) str)
+                        :appearance-id (some-> (get-in configuration [:appearance :view]) str)}}
+               :configuration-revision (:revision resolved)
+               :configuration-preference {:present (boolean (seq preference-rows))
+                                          :value (:value (first preference-rows))}
+               :configuration-branch-id (str (get-in resolved [:scope :branch-id]))
+               :configuration-defaults-id (str resolution/defaults-id)
+               :custom-components (resolution/owned-writable-components storage resolved))))))
 
 
 (defn failure-facts
@@ -171,64 +151,5 @@
             policy (snapshot/capture-context-policy ctx)]
         (source/with-snapshot (request/require-storage ctx)
                               #(export-in-snapshot ctx component %1 %2 policy epoch))))
-    (catch Exception error
-      (failure-facts error))))
-
-
-(defn- snapshot-failure?
-  "A failed SQL transaction or stale policy invalidates every item. Never
-   continue reading a connection after a nested SQLException or interruption."
-  [error]
-  (or (= {:type :browser-plan/unsupported :reason :policy-refresh-required}
-         (select-keys (ex-data error) [:type :reason]))
-      (some #(or (instance? java.sql.SQLException %)
-                 (instance? InterruptedException %)
-                 (instance? java.util.concurrent.CancellationException %))
-            (take-while some? (iterate ex-cause error)))))
-
-
-(defn- export-component-result
-  [ctx component storage authorize! policy resolved receipt]
-  (try
-    (assoc receipt :plan (export-component-plan ctx component storage authorize! policy resolved))
-    (catch Exception error
-      (if (and (not (snapshot-failure? error))
-               (contains? #{:authz/forbidden :quota/entity-limit :browser-plan/unsupported
-                            :storage-error/candidate-limit :storage-error/bounded-query-unsupported}
-                          (:type (ex-data error))))
-        (failure-facts error)
-        (throw error)))))
-
-
-(defn- export-batch-in-snapshot
-  [ctx components storage authorize! policy epoch]
-  (let [resolved (capture-configuration storage authorize! policy)
-        receipt (configuration-receipt storage resolved)
-        results (into {} (map (fn [component]
-                                [component (export-component-result ctx (get component-keys component)
-                                                                    storage authorize! policy resolved receipt)]))
-                      components)]
-    ;; Check after ALL source, metadata and plan work, before any result escapes.
-    (assert-export-current! ctx storage epoch)
-    {:ok true :results results}))
-
-
-(defn export-resolved-batch
-  "Export a finite set of components with one fresh authorized configuration
-   snapshot. Each component retains its own closure/plan budgets and isolated
-   checker registry. No plans or authorization grants survive this request."
-  [ctx input]
-  (try
-    (let [components (:components input)]
-      (when-not (and (map? input) (= #{:components} (set (keys input)))
-                     (vector? components) (seq components)
-                     (<= (count components) (count component-keys))
-                     (= (count components) (count (set components)))
-                     (every? #(contains? component-keys %) components))
-        (reject! :invalid-request))
-      (let [epoch (context/invalidation-epoch ctx)
-            policy (snapshot/capture-context-policy ctx)]
-        (source/with-snapshot (request/require-storage ctx)
-                              #(export-batch-in-snapshot ctx components %1 %2 policy epoch))))
     (catch Exception error
       (failure-facts error))))

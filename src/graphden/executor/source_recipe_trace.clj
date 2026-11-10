@@ -97,7 +97,7 @@
   (when-not (identical? connection ds) (ineligible! :foreign-read-connection))
   (when-not (known-options? opts) (ineligible! :jdbc-options))
   (let [ast (or (pg/current-read-plan ds query) (ineligible! :unplanned-read))
-        operation (certificate/prepare-operation guard ast query)]
+        operation (certificate/prepare-operation guard ast query one?)]
     {:operation operation :key [one? (certificate/operation-key operation) opts]}))
 
 

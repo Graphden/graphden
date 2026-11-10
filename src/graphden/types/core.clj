@@ -272,7 +272,17 @@
         ;; Stable order to keep the canonical form deterministic for
         ;; equality. `pr-str` sorts heterogeneous keywords/vectors
         ;; without confusing comparators.
-        unique (vec (sort-by pr-str (distinct flat)))
+        distinct-members (distinct flat)
+        unique (if (next distinct-members)
+                 (->> distinct-members
+                      (map (fn [member] [(pr-str member) member]))
+                      (sort-by first)
+                      (mapv second))
+                 (vec distinct-members))
+        ;; Both the printed key and this structural walk depend only on the
+        ;; member. Compute them once, retaining stable order for equal keys.
+        protected? (mapv #(or (type-var? %) (has-execution-vars? %)) unique)
+        indexed (mapv vector (range) unique)
         ;; Subtype absorption: `T ⊆ S` ⟹ T is redundant in
         ;; `[:union T S]` because every value of T is already a
         ;; value of S. Drop any non-typevar member that's a STRICT
@@ -291,12 +301,11 @@
         absorbed (vec
                    (keep-indexed
                      (fn [i m]
-                       (if (or (type-var? m) (has-execution-vars? m))
+                       (if (nth protected? i)
                          m
                          (when-not (some (fn [[j other]]
                                            (and (not= i j)
-                                                (not (type-var? other))
-                                                (not (has-execution-vars? other))
+                                                (not (nth protected? j))
                                                 (not= m other)
                                                 (subtype? m other)
                                                 ;; If two members are
@@ -307,7 +316,7 @@
                                                 ;; indexed one.
                                                 (or (not (subtype? other m))
                                                     (< j i))))
-                                         (map-indexed vector unique))
+                                         indexed)
                            m)))
                      unique))
         unique (if (seq absorbed) absorbed unique)]

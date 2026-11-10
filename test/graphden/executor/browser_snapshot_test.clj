@@ -611,3 +611,44 @@
         (is (= constraint (:constraint (reconstruct private))) "Private rows receive no restoration")))
     (with-redefs [owned/owned-fn-id? (constantly false)]
       (is (= constraint (:constraint (reconstruct captured))) "Unowned rows receive no restoration"))))
+
+
+(deftest reconstruction-does-not-depend-on-incremental-rich-types
+  (let [f (fixture [{:name :inner :parent :const :args {:value {:value 7}}}]
+                   {:args {:value :inner}})
+        graph (get-in f [:snapshot :graph])
+        storage (remote/from-bundle {:fn (:fns graph) :slot (:slots graph)
+                                     :fn-slot (:fn-slots graph) :binding (:bindings graph)
+                                     :binding-list-item (:list-items graph)
+                                     :ns (get-in f [:snapshot :namespaces])})
+        ids (mapv (:ids f) [:inner :leaf])
+        reconstruct (fn [rich]
+                      (binding [registry/*rich-types-override* (atom rich)
+                                registry/*per-org-rich-override* (atom {})
+                                types/*type-aliases-override* (atom (:aliases f))]
+                        (mapv #(type-check/reconstruct-fn-def storage %) ids)))
+        empty-rich (reconstruct {:by-id {} :by-name {}})
+        checked-rich (reconstruct (:rich f))]
+    (is (every? map? empty-rich))
+    (is (= empty-rich checked-rich))))
+
+
+(deftest later-provenance-observes-mutation-by-an-earlier-check
+  (let [literal (java.util.Date. 0)
+        f (fixture [{:name :inner :parent :const :args {}}]
+                   {:parent :inner :args {:value {:value literal}}})
+        check! check/check-fn-def!
+        called (atom [])
+        error (with-redefs [check/check-fn-def!
+                            (fn [definition]
+                              (swap! called conj (:fn-id definition))
+                              (let [result (check! definition)]
+                                (when (= (get-in f [:ids :inner]) (:fn-id definition))
+                                  (.setTime literal 1000))
+                                result))]
+                (failure #(export f)))]
+    (is (= 1000 (.getTime literal)))
+    (is (= [(get-in f [:ids :inner])] @called)
+        "Changed later source is rejected before its checker runs")
+    (is (= :type-source-mismatch (:reason error)))
+    (is (= (:id f) (:fn-id error)))))

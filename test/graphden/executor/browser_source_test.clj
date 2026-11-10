@@ -6,6 +6,7 @@
     [graphden.executor.capabilities :as capabilities]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.bounded-query :as bounded]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -368,3 +369,63 @@
       (is (= :mixed-server-target
              (try (source/collect-client-closure (fixture-storage mixed (atom [])) [root] (constantly nil))
                   (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))
+
+
+(defn- grouped-fixture
+  [base calls candidate-reader]
+  (reify sp/StorageCRUD
+    (read-entity [_ entity id] (sp/read-entity base entity id))
+
+    (query-entities [_ entity where] (sp/query-entities base entity where))
+
+    (query-entities [_ entity where opts] (sp/query-entities base entity where opts))
+
+
+    sp/StorageBoundedQuery
+
+    (query-identity-candidates [_ e w v n] (candidate-reader base e w v n))
+
+    (query-bounded-entities [_ e w n] (sp/query-bounded-entities base e w n))
+
+
+    sp/StorageGroupedRead
+
+    (read-operations
+      [_ requests]
+      (swap! calls conj [:group (mapv :entity requests)])
+      (mapv #(grouped/scalar-operation base %) requests))))
+
+
+(deftest grouped-source-preserves-authorization-before-bodies-and-candidate-barriers
+  (let [root (random-uuid)
+        graph {:fns [{:id root}]
+               :bindings [{:id (random-uuid) :fn-id root :value-present true :value nil}]}
+        calls (atom [])
+        base (fixture-storage (graph-tables graph) calls)
+        storage (grouped-fixture base calls sp/query-identity-candidates)
+        authorize (fn [row] (swap! calls conj [:authorize (:id row)]))
+        ordinary (source/collect-closure base [root] (constantly nil))]
+    (reset! calls [])
+    (is (= (graph-rows ordinary)
+           (graph-rows (source/collect-closure storage [root] authorize))))
+    (is (= [[:read :fn root] [:authorize root]
+            [:candidates :fn-slot {:fn-id [root]} 0]
+            [:candidates :binding {:fn-id [root]} 1]
+            [:group [:fn-slot :binding]]]
+           (subvec @calls 0 5)))
+    (reset! calls [])
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"denied"
+          (source/collect-closure storage [root]
+                                  (fn [_] (throw (ex-info "denied" {}))))))
+    (is (= [[:read :fn root]] @calls) "Denied owners cause no candidate or payload scan")
+    (reset! calls [])
+    (let [overflow (grouped-fixture
+                     base calls
+                     (fn [st e w v n]
+                       (if (= e :binding)
+                         (throw (ex-info "overflow" {:type :storage-error/candidate-limit}))
+                         (sp/query-identity-candidates st e w v n))))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"source is unavailable"
+            (source/collect-closure overflow [root] authorize)))
+      (is (not-any? #(contains? #{:query :group} (first %)) @calls)
+          "A later candidate overflow prevents even the earlier owner's payload"))))

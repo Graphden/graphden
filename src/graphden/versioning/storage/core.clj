@@ -35,6 +35,7 @@
   (:require
     [graphden.http-host.lease :as http-lease]
     [graphden.storage.graph-writer :as writer]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
@@ -961,6 +962,16 @@
   (query-bounded-entities
     [_ entity-name where max-candidates]
     (res/resolve-bounded-entities base-storage entity-name branch-id where max-candidates))
+
+
+  sp/StorageGroupedRead
+
+  (read-operations
+    [this requests]
+    (if (every? res/grouped-query? requests)
+      (res/resolve-query-group base-storage branch-id requests)
+      ;; Unsupported shapes keep this wrapper's semantics and call order.
+      (mapv #(grouped/scalar-operation this %) requests)))
 
 
   sp/StorageBatchCRUD

@@ -131,8 +131,8 @@
                                              (swap! events conj [:component frozen]) {:valid true})]
       (is (:ok (components/export-resolved ctx {:component "fn-picker"})))
       (is (= [:epoch [:capture {:original :secret}] :snapshot
-              [:manifest (assoc policy :type-recheck nil)]
-              [:component (assoc policy :type-recheck nil)] :epoch] @events)))))
+              [:manifest (assoc policy :type-recheck nil :checker-cache nil)]
+              [:component (assoc policy :type-recheck nil :checker-cache nil)] :epoch] @events)))))
 
 
 (deftest resolved-export-uses-authorized-configuration-not-legacy-selector
@@ -148,7 +148,7 @@
                                          (f actual authorize!))
                   resolution/capture (fn [actual guard frozen]
                                        (swap! calls conj :resolve)
-                                       (is (= [storage authorize! (assoc policy :type-recheck nil)]
+                                       (is (= [storage authorize! (assoc policy :type-recheck nil :checker-cache nil)]
                                               [actual guard frozen]))
                                        {:id selected :revision "authoritative-revision"
                                         :configuration {:fn-picker {:view fn-id}}
@@ -170,7 +170,7 @@
                   source/collect-namespaces (constantly [])
                   snapshot/export-snapshot (fn [_ _ entries frozen]
                                              (is (= {:view fn-id} entries))
-                                             (is (= (assoc policy :type-recheck nil) frozen))
+                                             (is (= (assoc policy :type-recheck nil :checker-cache nil) frozen))
                                              (swap! calls conj :export) {:checked true})]
       (let [result (components/export-resolved ctx {:component "fn-picker"})]
         (is (:ok result))

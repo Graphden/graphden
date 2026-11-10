@@ -180,6 +180,16 @@
       (is (not-any? #(str/starts-with? % "SELECT * FROM \"trace_row\"") (:queries replay))))))
 
 
+(deftest single-read-of-multiple-unordered-rows-is-not-replayable-test
+  (jdbc/execute! *connection* ["INSERT INTO trace_row(id,org_id) VALUES(?,'second')" (random-uuid)])
+  (let [result (snapshot #(trace/record %
+                                        (fn [_] (pg/exec-read-one! *connection* (dissoc row-query :where) {:quoted true}))
+                                        authorize!))]
+    (is (uuid? (get-in result [:value :id])))
+    (is (nil? (:recipe result)))
+    (is (= :clipped-result (:reason result)))))
+
+
 (deftest copied-parameters-are-executed-after-preparation-test
   (let [stamp (Timestamp/valueOf "2026-01-01 00:00:00.123456")
         ast (assoc row-query :where [:= :stamp stamp])

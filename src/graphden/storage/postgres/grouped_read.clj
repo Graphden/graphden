@@ -6,7 +6,8 @@
     [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.read-plan :as plan]
     [graphden.storage.postgres.util :as util]
-    [honey.sql :as sql])
+    [honey.sql :as sql]
+    [next.jdbc.result-set :as rs])
   (:import
     (java.util
       Locale)))
@@ -60,44 +61,28 @@
           (recur (next remaining) (conj result planned) total))))))
 
 
-(defn- shape-query
-  [entities]
-  (let [tables (mapv (comp keyword util/kw->snake-case) entities)
-        locks (mapcat (fn [index table]
-                        ;; Relation references acquire ACCESS SHARE locks during
-                        ;; parse/analysis, even though these joins return no rows.
-                        [[{:select [[[:inline 1] :unused]] :from [table]
-                           :where [:= [:inline 1] [:inline 0]]}
-                          (keyword (str "shape_lock_" index))]
-                         [:= [:inline 1] [:inline 1]]])
-                      (range) tables)]
-    {:select [:c.relname :c.relkind :a.attname :t.typtype]
-     :from [[:pg_catalog.pg_attribute :a]]
-     :join [[:pg_catalog.pg_class :c] [:= :c.oid :a.attrelid]
-            [:pg_catalog.pg_type :t] [:= :t.oid :a.atttypid]]
-     :left-join (vec locks)
-     :where [:and [:in :c.oid (mapv #(vector :to_regclass (name %)) tables)]
-             [:> :a.attnum [:inline 0]] [:not :a.attisdropped]]
-     :order-by [:c.relname :a.attnum]}))
-
-
 (defn- physical-shapes!
   [connection cache entities]
-  (let [missing (vec (remove #(contains? @cache %) (distinct entities)))]
-    (when (seq missing)
-      (let [rows (util/exec! connection (sql/format (shape-query missing) {:quoted true}))
-            by-table (group-by :relname rows)
-            shapes (into {}
-                         (map (fn [entity]
-                                (let [columns (get by-table (util/kw->snake-case entity))]
-                                  [entity (when (and (seq columns)
-                                                     (every? #(contains? #{"r" "p"} (str (:relkind %))) columns)
-                                                     (not-any? #(= "d" (str (:typtype %))) columns)
-                                                     (every? #(re-matches #"[a-z][a-z0-9_]*" (:attname %)) columns))
-                                            (mapv (comp keyword :attname) columns))])))
-                         missing)]
-        (swap! cache merge shapes)))
-    (select-keys @cache entities)))
+  (doseq [entity (distinct entities)
+          :when (not (contains? @cache entity))]
+    ;; Native SELECT descriptors follow DDL committed even after an RR data
+    ;; snapshot; querying pg_attribute would still see the old catalog snapshot.
+    ;; One table per probe also avoids PostgreSQL's output-column limit when
+    ;; several individually valid wide tables must fall back to scalar reads.
+    (let [query {:select [:*] :from [(keyword (util/kw->snake-case entity))]
+                 :where [:= [:inline 1] [:inline 0]]}
+          rows (util/exec! connection (sql/format query {:quoted true})
+                           ;; Empty results still carry a label vector. This
+                           ;; builder uses getColumnLabel only, not driver
+                           ;; catalog RPCs such as getTableName/getColumnTypeName.
+                           (util/query-opts {:builder-fn rs/as-unqualified-arrays}))
+          columns (first rows)]
+      (swap! cache assoc entity
+             (when (and (seq columns)
+                        (every? #(and (nil? (namespace %))
+                                      (re-matches #"[a-z][a-z0-9_]*" (name %))) columns))
+               columns))))
+  (select-keys @cache entities))
 
 
 (defn- layout

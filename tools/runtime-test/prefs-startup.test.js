@@ -18,9 +18,12 @@ function fixture() {
   const requests = [];
   const notifications = [];
   const mirror = new Map();
+  const reloads = {root: 0, explorer: 0};
   const style = {setProperty() {}, removeProperty() {}, getPropertyValue() { return ''; }};
   const window = {
     API: {api_prefs: '/api/prefs'}, innerWidth: 1200,
+    gdEditorRoot: {reload() { reloads.root++; }},
+    gdExplorerGraph: {reload() { reloads.explorer++; }},
     authFetch: () => { const request = deferred(); requests.push(request); return request.promise; },
     addEventListener(name, callback) {
       if (!events.has(name)) events.set(name, []);
@@ -35,17 +38,18 @@ function fixture() {
       body: {style, classList: {toggle() {}, contains() { return false; }}},
       documentElement: {style},
       getElementById: id => id === 'sidebar-expand-floating' ? {} : null,
+      addEventListener() {},
     },
     localStorage: {getItem: key => mirror.get(key) ?? null, setItem: (key, value) => mirror.set(key, value)},
     getComputedStyle: () => ({getPropertyValue: () => ''}),
   });
   // Load the real theme listener too: it must invalidate old theme work without
   // launching a second preference request beside the preference lifecycle.
-  for (const file of ['editor-prefs.js', 'editor-theme-graph.js']) {
+  for (const file of ['editor-prefs.js', 'editor-theme-graph.js', 'editor-ui-components.js']) {
     vm.runInContext(fs.readFileSync(path.join(editor, file), 'utf8'), context, {filename: file});
   }
   window.gdPrefOnChange((key, value, detail) => notifications.push({key, value, detail}));
-  return {window, requests, notifications,
+  return {window, requests, notifications, reloads,
     authChanged() { window.dispatchEvent(new Event('gd-auth-changed')); },
     components() { return notifications.filter(event => event.key === 'components'); },
     reply(index, prefs = {}, owner = 'owner-a') {
@@ -148,27 +152,28 @@ test('later sign-in refreshes preferences and sign-out invalidates without anoth
   assert.equal(f.window.gdPrefRead('components'), null);
 });
 
-test('unchanged component selection skips invalidation while explicit refreshes and theme authorization remain fresh', async () => {
+test('explicit refresh revalidates unchanged component selection and theme after source or authority changes', async () => {
   const f = fixture();
   const themes = [];
   f.window.gdApplyThemeGraphPreference = value => { themes.push(value); };
   const first = {'fn-id': 'selection', config: {a: 1, b: [1, 2]}};
   const theme = {graph: {'fn-id': 'theme'}};
   await f.refresh({components: first, theme});
-  const stamp = JSON.stringify(f.window.gdPrefRead('components'));
+  const initialRootReloads = f.reloads.root;
   await f.refresh({components: {config: {b: [1, 2], a: 1}, 'fn-id': 'selection'}, theme: {...theme}});
   assert.equal(f.requests.length, 2, 'explicit refresh is never memoized');
-  assert.equal(f.components().length, 1, 'object key order is not a selection change');
-  assert.equal(JSON.stringify(f.window.gdPrefRead('components')), stamp, 'root scope stamp stays valid');
-  assert.equal(f.window.gdPrefRead('components'), first);
+  assert.equal(f.components().length, 2, 'equal selection does not certify unchanged source or authority');
+  assert.equal(f.reloads.root, initialRootReloads + 1, 'the real component listener revalidates the root');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(f.reloads.explorer, 1, 'coalesced component reload still reaches the Explorer');
   assert.equal(themes.length, 2, 'theme still reauthorizes the fresh server object');
   assert.notEqual(themes[0], themes[1]);
   await f.refresh({components: {'fn-id': 'selection', config: {a: 1, b: [2, 1]}}});
-  assert.equal(f.components().length, 2, 'array order changes propagate');
+  assert.equal(f.components().length, 3, 'array order changes propagate');
   await f.refresh({});
-  assert.equal(f.components().length, 3, 'removing a selected configuration propagates');
+  assert.equal(f.components().length, 4, 'removing a selected configuration propagates');
   await f.refresh({});
-  assert.equal(f.components().length, 3, 'unchanged empty selection does not reload');
+  assert.equal(f.components().length, 5, 'unchanged empty selection still revalidates current server defaults');
   await f.refresh({}, 'owner-b');
-  assert.equal(f.components().length, 4, 'server owner transition propagates even for an empty selection');
+  assert.equal(f.components().length, 6, 'server owner transition propagates even for an empty selection');
 });

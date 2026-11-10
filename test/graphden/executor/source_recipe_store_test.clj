@@ -51,6 +51,52 @@
       (is (zero? (:charged-bytes (recipes/stats store)))))))
 
 
+(deftest family-lookup-is-bounded-leased-and-never-crosses-family-or-expiry
+  (let [{:keys [store closed clock]} (fixture {:max-leases 1})
+        family (family! store) other (family! store)
+        a (Object.) b (Object.)]
+    (put! store family a :first 20)
+    (put! store family b :recent 20)
+    (put! store other (Object.) :unrelated 20)
+    (let [lease (recipes/acquire-family! store family)]
+      (is (= :recent (recipes/lease-value store lease)))
+      (is (nil? (recipes/acquire-family! store family)))
+      (is (nil? (recipes/acquire! store family a)))
+      (swap! closed conj b)
+      (is (= 60 (:charged-bytes (recipes/stats store))) "Closed leased entry remains charged")
+      (recipes/release! store lease))
+    (let [lease (recipes/acquire-family! store family)]
+      (is (= :first (recipes/lease-value store lease)))
+      (recipes/evict-family! store family)
+      (is (nil? (recipes/acquire-family! store family)))
+      (is (= :first (recipes/lease-value store lease)))
+      (recipes/release! store lease))
+    (is (= 20 (:charged-bytes (recipes/stats store))))
+    (reset! clock 101)
+    (is (nil? (recipes/acquire-family! store other)))
+    (is (zero? (:charged-bytes (recipes/stats store))))))
+
+
+(deftest retiring-one-lease-preserves-other-entry-and-current-leases-charge
+  (let [{:keys [store]} (fixture)
+        family (family! store) a (Object.) b (Object.)]
+    (put! store family a :old 20)
+    (put! store family b :other 20)
+    (let [first-lease (recipes/acquire! store family a)
+          second-lease (recipes/acquire! store family a)]
+      (is (true? (recipes/retire-lease! store first-lease)))
+      (is (nil? (recipes/acquire! store family a)))
+      (is (= :old (recipes/lease-value store second-lease)))
+      (recipes/release! store first-lease)
+      (is (= 40 (:charged-bytes (recipes/stats store))))
+      (recipes/release! store second-lease)
+      (is (= 20 (:charged-bytes (recipes/stats store))))
+      (is (false? (recipes/retire-lease! store first-lease))))
+    (let [lease (recipes/acquire-family! store family)]
+      (is (= :other (recipes/lease-value store lease)))
+      (recipes/release! store lease))))
+
+
 (deftest pending-and-retained-use-one-budget-and-publish-is-one-shot
   (let [{:keys [store]} (fixture)
         family (family! store) a (Object.) b (Object.)

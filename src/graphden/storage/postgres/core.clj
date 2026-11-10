@@ -12,10 +12,12 @@
    - crud.clj - CRUD operations"
   (:require
     [graphden.storage.graph-writer :as writer]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.graph :as graph]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
+    [graphden.storage.postgres.grouped-read :as grouped-pg]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.metadata :as metadata]
@@ -297,6 +299,15 @@
                    (vec (sp/query-entities this entity-name (assoc where :id ids)))
                    [])
         (meta candidates))))
+
+
+  sp/StorageGroupedRead
+
+  (read-operations
+    [this requests]
+    (grouped-pg/read-operations pool requests
+                                #(get-entity-fields pool metadata-cache lock %)
+                                #(grouped/scalar-operation this %)))
 
 
   sp/StorageBatchCRUD

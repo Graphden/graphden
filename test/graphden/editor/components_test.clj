@@ -148,7 +148,7 @@
                                          (f actual authorize!))
                   resolution/capture (fn [actual guard frozen]
                                        (swap! calls conj :resolve)
-                                       (is (= [storage authorize! (assoc policy :type-recheck nil)]
+                                       (is (= [storage authorize! (assoc policy :type-recheck nil :checker-cache nil)]
                                               [actual guard frozen]))
                                        {:id selected :revision "authoritative-revision"
                                         :configuration {:fn-picker {:view fn-id}}
@@ -163,14 +163,14 @@
                                       (is (= {:limit 2} opts))
                                       (swap! calls conj :preference)
                                       [{:value {:fn-id "unselected-legacy-identity"}}])
-                  source/collect-closure (fn [actual ids _]
+                  source/collect-closure (fn [actual ids _ _]
                                            (is (= storage actual))
                                            (is (= [fn-id] (vec ids)))
                                            (swap! calls conj :body) {})
                   source/collect-namespaces (constantly [])
                   snapshot/export-snapshot (fn [_ _ entries frozen]
                                              (is (= {:view fn-id} entries))
-                                             (is (= (assoc policy :type-recheck nil) frozen))
+                                             (is (= (assoc policy :type-recheck nil :checker-cache nil) frozen))
                                              (swap! calls conj :export) {:checked true})]
       (let [result (components/export-resolved ctx {:component "fn-picker"})]
         (is (:ok result))

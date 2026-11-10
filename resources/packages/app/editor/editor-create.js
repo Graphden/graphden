@@ -447,6 +447,9 @@ let activeCreate = null;  // { type, parentNsId, parentNsPath } | null
 function startInlineCreate(type, parentNsId, parentNsPath) {
   if (window.gdGraphEditsReady?.() === false) return;
   activeCreate = { type, parentNsId, parentNsPath };
+  // The + action is available on collapsed headers too. The create row lives
+  // inside the child group, whose expansion key is the dotted path, not its id.
+  if (parentNsPath) expandedNamespaces.add(parentNsPath);
   // Re-render so renderNsNode picks up the active-create marker and
   // injects the inline input row at the right spot.
   if (typeof updateEntityList === 'function' && graphData) {

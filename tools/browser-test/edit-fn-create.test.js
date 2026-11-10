@@ -4,7 +4,7 @@
 // Coverage:
 //   • Click `+` on a namespace's actions row → create-menu appears
 //     with three items (namespace / graph / type).
-//   • Click "New graph…" → inline-input-row appears inside that ns.
+//   • Collapsed namespace → "New graph…" → visible, focused inline input.
 //   • Empty name → "Name required" inline error, no POST fires.
 //   • Valid name → POST /api/entities/fn lands → ns auto-expanded →
 //     new fn-row visible in sidebar → editor selects it (hash + card).
@@ -32,28 +32,21 @@ async function cleanup(page) {
 
 async function openCreateMenuForNs(page, nsName) {
   await waitForEditorReady(page);
-  // Ensure the ns is expanded, then click its + button. The header
-  // click toggles expand/collapse — only click it if we need to
-  // toggle ON.
+  // Keep the parent collapsed: + is available on its header, and choosing a
+  // child must reveal the input itself. Pre-expanding here masked that bug.
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
       (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
     if (!target) throw new Error('namespace not found: ' + name);
-    // expandedNamespaces is module-scope; expanded state is reflected
-    // by whether the arrow is `▼` (expanded) or `▶` (collapsed).
-    const arrow = target.querySelector('.ns-arrow');
-    if (arrow && /▶/.test(arrow.textContent || '')) {
-      target.click(); // expand
-    }
+    if (target.getAttribute('aria-expanded') === 'true') target.click();
   }, nsName);
-  // Wait for the expansion (arrow flipped to ▼) instead of a fixed delay.
+  // Assert the actual DOM starts collapsed, rather than inspecting the Set.
   await page.waitForFunction((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
       (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
-    const arrow = target?.querySelector('.ns-arrow');
-    return arrow && /▼/.test(arrow.textContent || '');
+    return target?.getAttribute('aria-expanded') === 'false';
   }, nsName, {timeout: 2000, polling: 50});
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
@@ -103,12 +96,12 @@ async function openCreateMenuForNs(page, nsName) {
     // ===================================================================
     // Phase B: click "New graph…" → inline-input-row appears.
     // ===================================================================
-    await page.evaluate(() => {
-      const item = Array.from(document.querySelectorAll('.create-menu-item'))
-        .find((b) => /New graph/.test(b.textContent));
-      item?.click();
-    });
+    await page.locator('.create-menu-item').filter({hasText: 'New graph'}).click();
     await page.waitForSelector('.inline-input-row', {timeout: 5000});
+    await page.waitForFunction(() => {
+      const input = document.querySelector('.inline-input-row .inline-input');
+      return input && input.getClientRects().length > 0 && document.activeElement === input;
+    }, null, {timeout: 5000});
     const formState = await page.evaluate(() => {
       const row = document.querySelector('.inline-input-row');
       return {
@@ -117,6 +110,8 @@ async function openCreateMenuForNs(page, nsName) {
         hasSaveBtn: !!row?.querySelector('.inline-btn-save'),
         hasCancelBtn: !!row?.querySelector('.inline-btn-cancel'),
         placeholder: row?.querySelector('.inline-input')?.placeholder,
+        focused: document.activeElement === row?.querySelector('.inline-input'),
+        expandedParent: row?.closest('.ns-children')?.previousElementSibling?.getAttribute('aria-expanded'),
       };
     });
     assert(formState.rowPresent && formState.hasInput
@@ -124,6 +119,8 @@ async function openCreateMenuForNs(page, nsName) {
            'inline-input-row has input + Save + Cancel');
     assert(/graph/i.test(formState.placeholder || ''),
            'placeholder reads "New graph name": ' + formState.placeholder);
+    assert(formState.focused && formState.expandedParent === 'true',
+           'New graph reveals its collapsed namespace and focuses the visible input');
 
     // ===================================================================
     // Phase C: empty submit → "Name required" inline error.

@@ -155,6 +155,34 @@
       (is (true? (live? token origin)) "Other-role miss does not retire a valid origin"))))
 
 
+(deftest before-guard-lock-setup-does-not-resolve-shadow-functions
+  (with-open [admin (jdbc/get-connection {:jdbcUrl (:jdbc-url *config*)
+                                          :user (:username *config*) :password (:password *config*)})
+              origin (connect "source_session_same")]
+    (try
+      (jdbc/execute! admin ["CREATE FUNCTION public.pg_try_advisory_lock(bigint) RETURNS boolean LANGUAGE sql AS 'SELECT false'"])
+      (jdbc/execute! admin ["CREATE FUNCTION public.pg_advisory_unlock(bigint) RETURNS boolean LANGUAGE sql AS 'SELECT false'"])
+      (jdbc/execute! origin ["SET search_path=public,pg_catalog"])
+      (let [owner (manager)]
+        (is (some? (session/ensure-marker! owner origin (constantly nil))))
+        (is (= 2 (lock-count origin))))
+      (with-open [pending (connect "source_session_same")]
+        (jdbc/execute! pending ["SET search_path=public,pg_catalog"])
+        (let [owner (manager)]
+          (is (nil?
+                (binding [pg/*jdbc-override*
+                          {:execute! (fn [connection query opts]
+                                       (let [result (jdbc/execute! connection query opts)]
+                                         (when (str/includes? (first query) "pg_try_advisory_lock")
+                                           (session/close-manager! owner))
+                                         result))}]
+                  (session/ensure-marker! owner pending (constantly nil)))))
+          (is (= 0 (lock-count pending)) "Cleanup cannot resolve the shadow unlock function")))
+      (finally
+        (jdbc/execute! admin ["DROP FUNCTION public.pg_try_advisory_lock(bigint)"])
+        (jdbc/execute! admin ["DROP FUNCTION public.pg_advisory_unlock(bigint)"])))))
+
+
 (deftest dead-backend-does-not-reuse-cached-activity-statistics
   (with-open [origin (connect "source_session_same") destination (connect "source_session_same")
               admin (jdbc/get-connection {:jdbcUrl (:jdbc-url *config*)
@@ -251,6 +279,27 @@
               (session/ensure-marker! owner origin (constantly nil)))))
       (is (= 0 (lock-count origin)))
       (is (= {:registered 1 :active 0 :closed? true} (session/stats owner))))))
+
+
+(deftest close-during-origin-observation-revokes-returned-evidence
+  (doseq [operation [:seal :live]]
+    (with-open [origin (connect "source_session_same") destination (connect "source_session_same")]
+      (let [owner (manager)
+            marker (session/ensure-marker! owner origin (constantly nil))
+            token (capture marker origin)]
+        (session/ensure-marker! owner destination (constantly nil))
+        (let [result (binding [pg/*jdbc-override*
+                               {:execute! (fn [connection query opts]
+                                            (let [result (jdbc/execute! connection query opts)]
+                                              (when (str/includes? (first query)
+                                                                   (if (= operation :seal)
+                                                                     "WHERE a.pid=pg_catalog.pg_backend_pid()"
+                                                                     "SELECT EXISTS"))
+                                                (session/close-manager! owner))
+                                              result))}]
+                       (if (= operation :seal) (capture marker origin) (live? token destination)))]
+          (is (= (if (= operation :seal) nil false) result))
+          (is (true? (:closed? (session/stats owner)))))))))
 
 
 (deftest hikari-borrows-retain-exact-physical-registration

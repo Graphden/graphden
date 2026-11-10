@@ -133,6 +133,7 @@
    Recovery may request a retry, never supply a source certificate or grant."
   [ctx]
   (assoc (capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
+         :checker-cache (:checker-cache ctx)
          :type-recheck (some-> (:type-recheck-state ctx) deref
                                (select-keys [:status :pending-ids]))))
 
@@ -345,8 +346,9 @@
 (defn- checked-source
   "Derive a fresh policy and plan from the SAME immutable rows. No writes to
    the executor's rich types, aliases, markers, diagnostics, or storage."
-  [snapshot entries {:keys [rich classes type-recheck]} structural? consume]
-  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+  [snapshot entries {:keys [rich classes type-recheck checker-cache]} structural? consume]
+  (binding [checker-memo/*memo* (or checker-cache checker-memo/*memo*)
+            registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             registry/*per-org-rich-override* (atom {})
             types/*type-aliases-override* (atom {})
             types/*alias-view* nil

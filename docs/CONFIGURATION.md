@@ -291,6 +291,7 @@ Executor context for running functions.
 | `:pg-storage` | ref | Raw PG storage for `NOTIFY` emission (`:db/postgres`) |
 | `:base-fns` | ref | Ctx-scoped base-fns map (`:exec/base-fns`) |
 | `:auth-provider` | ref | Reference to `:auth/provider` |
+| `:checker-cache?` | boolean/string | Enable bounded pure checker artifacts for this runtime |
 
 ```clojure
 :exec/context
@@ -300,6 +301,21 @@ Executor context for running functions.
  :base-fns #ig/ref :exec/base-fns
  :auth-provider #ig/ref :auth/provider}
 ```
+
+Production enables checker artifacts by default. Set `GRAPHDEN_CHECKER_CACHE=false`
+and restart to disable them. Development and test configurations leave the cache
+off, so code reload cannot reuse proofs from an earlier checker implementation.
+An explicitly enabled development runtime must be halted before reloading code.
+
+One cache is shared by all branch contexts in a runtime: 512 MiB of conservative
+retained/reserved charge, at most 256 MiB per checking pass, 16 entries, and a
+10-minute TTL. The limit is not an eager heap allocation. Capacity or admission
+misses perform ordinary checking. Retiring the runtime prevents publication;
+in-flight reservations remain charged until their workers finish.
+
+Only isolated checker artifacts are reused. Every request still captures fresh
+source, checks authorization, validates provenance and native signatures, and
+builds a fresh plan. Raw JDBC/source replay is not enabled by this setting.
 
 ### `:exec/compiled-registry`
 
@@ -457,6 +473,7 @@ The production config reads these via `#env`:
 | `VAULT_ADDR` | *(empty)* | OpenBao / Vault address (unset → `:vault-get` errors) |
 | `VAULT_TOKEN` | *(empty)* | OpenBao / Vault token |
 | `AUTH_TOKEN` | *(empty)* | Single-token auth secret |
+| `GRAPHDEN_CHECKER_CACHE` | `true` | Bounded checker artifacts; `false` disables after restart (raw source replay stays off) |
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |

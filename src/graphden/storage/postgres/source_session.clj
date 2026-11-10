@@ -223,9 +223,16 @@
       physical)))
 
 
+(def ^:private marker-condition
+  (str "2=(SELECT count(*) FROM pg_locks l WHERE l.pid=a.pid "
+       "AND l.database=a.datid AND l.locktype='advisory' AND l.granted "
+       "AND l.mode='ExclusiveLock' AND l.objsubid=1 "
+       "AND ((l.classid::bigint << 32) | l.objid::bigint) IN (?,?))"))
+
+
 (def ^:private identity-query
-  (str "SELECT pid,backend_start,datid::text AS database,usesysid::text AS role "
-       "FROM pg_stat_activity WHERE pid=pg_backend_pid()"))
+  (str "SELECT a.pid,a.backend_start,a.datid::text AS database,a.usesysid::text AS role "
+       "FROM pg_stat_activity a WHERE a.pid=pg_backend_pid() AND " marker-condition))
 
 
 (defn- origin-present?
@@ -240,10 +247,7 @@
                   [(str "SELECT EXISTS (SELECT 1 FROM pg_stat_activity a "
                         "WHERE a.pid=? AND a.backend_start=? AND a.datid::text=? AND a.usesysid::text=? "
                         "AND a.datid=(SELECT oid FROM pg_database WHERE datname=current_database()) "
-                        "AND 2=(SELECT count(*) FROM pg_locks l WHERE l.pid=a.pid "
-                        "AND l.database=a.datid AND l.locktype='advisory' AND l.granted "
-                        "AND l.mode='ExclusiveLock' AND l.objsubid=1 "
-                        "AND ((l.classid::bigint << 32) | l.objid::bigint) IN (?,?))) AS present")
+                        "AND " marker-condition ") AS present")
                    pid (Timestamp/from start) database role (first lock-keys) (second lock-keys)])))))
 
 
@@ -259,12 +263,13 @@
       (when-let [physical (guarded-connection connection)]
         (when (identical? physical (.get ^WeakReference (:physical state)))
           (execute! connection check! ["SELECT pg_stat_clear_snapshot()"])
-          (let [{:keys [pid backend_start database role]} (first (execute! connection check! [identity-query]))
+          (let [{:keys [pid backend_start database role]}
+                (first (execute! connection check! (into [identity-query] (:keys state))))
                 origin-identity (when (and (= pid (.getBackendPID ^PgConnection physical))
                                            backend_start database role)
                                   {:pid pid :start (.toInstant ^Timestamp backend_start)
                                    :database database :role role :keys (:keys state)})]
-            (if (and origin-identity (origin-present? connection check! origin-identity))
+            (if origin-identity
               (Origin. witness-seal {:marker marker :identity origin-identity})
               (do (reset! (:status state) :retired) nil))))))))
 

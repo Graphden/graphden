@@ -14,7 +14,9 @@
       Proxy)
     (java.sql
       Connection
-      SQLException)))
+      SQLException)
+    (org.postgresql
+      PGConnection)))
 
 
 (def ^:private maps {:builder-fn rs/as-unqualified-lower-maps})
@@ -153,6 +155,24 @@
       (is (true? (live? token origin)) "Other-role miss does not retire a valid origin"))))
 
 
+(deftest dead-backend-does-not-reuse-cached-activity-statistics
+  (with-open [origin (connect "source_session_same") destination (connect "source_session_same")
+              admin (jdbc/get-connection {:jdbcUrl (:jdbc-url *config*)
+                                          :user (:username *config*) :password (:password *config*)})]
+    (let [owner (manager)
+          marker (session/ensure-marker! owner origin (constantly nil))
+          token (capture marker origin)
+          pid (.getBackendPID (.unwrap ^Connection origin PGConnection))]
+      (session/ensure-marker! owner destination (constantly nil))
+      (snapshot destination
+                (fn [tx]
+                  (is (true? (session/origin-live? token tx (constantly nil))))
+                  (is (true? (:terminated (jdbc/execute-one! admin
+                                                             ["SELECT pg_terminate_backend(?, 1000) AS terminated" pid] maps))))
+                  (is (false? (session/origin-live? token tx (constantly nil)))
+                      "Activity cache from the earlier success is cleared before each check"))))))
+
+
 (deftest partial-acquisition-is-released-and-not-retried
   (with-open [blocker (connect "source_session_same") origin (connect "source_session_same")]
     (let [lock-keys [907123456789 907123456790] owner (manager)]
@@ -198,6 +218,39 @@
       (.close a)
       (is (= 0 (:registered (session/stats owner))))
       (is (some? (session/ensure-marker! owner b (constantly nil)))))))
+
+
+(deftest cleanup-failure-closes-owned-physical-and-keeps-primary-error
+  (with-open [origin (connect "source_session_same")]
+    (let [owner (manager)
+          primary (SQLException. "fixture acquired then cancelled" "57014")
+          cleanup (SQLException. "fixture unlock failed" "08006")
+          result (binding [pg/*jdbc-override*
+                           {:execute! (fn [connection query opts]
+                                        (if (str/includes? (first query) "pg_advisory_unlock")
+                                          (throw cleanup)
+                                          (do (jdbc/execute! connection query opts) (throw primary))))}]
+                   (try (session/ensure-marker! owner origin (constantly nil)) nil
+                        (catch SQLException error error)))]
+      (is (identical? primary result))
+      (is (= [cleanup] (vec (.getSuppressed ^Throwable result))))
+      (is (.isClosed origin))
+      (is (= 0 (:registered (session/stats owner)))))))
+
+
+(deftest close-during-acquisition-unwinds-pending-markers
+  (with-open [origin (connect "source_session_same")]
+    (let [owner (manager)]
+      (is (nil?
+            (binding [pg/*jdbc-override*
+                      {:execute! (fn [connection query opts]
+                                   (let [result (jdbc/execute! connection query opts)]
+                                     (when (str/includes? (first query) "pg_try_advisory_lock")
+                                       (session/close-manager! owner))
+                                     result))}]
+              (session/ensure-marker! owner origin (constantly nil)))))
+      (is (= 0 (lock-count origin)))
+      (is (= {:registered 1 :active 0 :closed? true} (session/stats owner))))))
 
 
 (deftest hikari-borrows-retain-exact-physical-registration

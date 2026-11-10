@@ -52,8 +52,9 @@
    (try
      (let [policy (snapshot/capture-context-policy ctx)
            epoch (context/invalidation-epoch ctx)]
-       (source/with-snapshot
+       (source/with-hinted-snapshot
          (:storage ctx)
+         (context/cached-graph ctx)
          (fn [storage authorize!]
            (server/call-with-root-export
              ctx storage authorize! policy request

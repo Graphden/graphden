@@ -110,15 +110,17 @@
 
 
 (deftest batch-items-use-the-existing-public-response-policy
-  (let [receipt {:ok true :selection-id "selected" :plan {:bounded true}}
+  (let [calls (atom 0)
+        receipt {:ok true :selection-id "selected" :plan {:bounded true}}
         native {:ok true :results {"inspector" receipt
                                    "explorer" (failure {:type :browser-plan/unsupported :reason :component-missing})
                                    "canvas" (failure {:type :authz/forbidden})}}]
-    (with-redefs [components/export-resolved-batch (fn [& _] native)]
+    (with-redefs [components/export-resolved-batch (fn [& _] (swap! calls inc) native)]
       (let [out (exec/execute-with-named-args (:ctx *graph*)
                                               (ids/fn-id "app.ui-components" :_editor-configuration-plans)
                                               {:input {:components ["inspector" "explorer" "canvas"]}})]
         (is (true? (:ok out)))
+        (is (= 1 @calls) "Response composition invokes the effectful batch capture exactly once")
         (is (= receipt (get-in out [:results "inspector"])))
         (is (= {:ok false :http-status 422 :code "component-missing" :fallback "builtin"
                 :reason "Personal UI graph is unavailable. Using built-in components."}

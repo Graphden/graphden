@@ -91,7 +91,10 @@
  {:token #or [#env AUTH_TOKEN ""]}
 
  :exec/context
- {:storage #ig/ref :db/versioned
+ {;; Pure checker artifacts only; raw source replay remains disabled.
+  ;; Restart after changing this flag. Development hot reload leaves it off.
+  :checker-cache? #or [#env GRAPHDEN_CHECKER_CACHE "true"]
+  :storage #ig/ref :db/versioned
   :vault-client #ig/ref :vault/client
   ;; NOTIFY listener — event-driven SSE (`:sse-stream`'s
   ;; :wake-on-writes) registers per-stream callbacks on it.

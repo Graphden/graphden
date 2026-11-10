@@ -73,7 +73,7 @@
       ;; A fresh check may veto it, never relax erased secret annotations.
       (assert-current-policy! storage)
       (let [_ (when-not entries (reject! :component-missing))
-            body (source/collect-closure storage (vals entries) authorize!)
+            body (source/collect-closure storage (vals entries) authorize! (context/cached-graph ctx))
             body-snapshot {:graph body :namespaces (source/collect-namespaces storage body)}
             plan (snapshot/export-snapshot body-snapshot (:base-fns ctx) entries policy)
             preference-rows (sp/query-entities storage :ui-pref

@@ -4,8 +4,10 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.browser-source-prefetch :as prefetch]
     [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.bindings :as bindings]
+    [graphden.executor.compile.deps :as deps]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
@@ -39,6 +41,9 @@
 (def ^:private batch-size 64)
 
 
+(def ^:dynamic ^:private *prefetched* nil)
+
+
 (defn- reject!
   [reason]
   (throw (ex-info "Component source is unavailable"
@@ -48,12 +53,15 @@
 (defn- read-rows
   [storage entity ids]
   (check-snapshot!)
-  (if (satisfies? sp/StorageBatchCRUD storage)
-    (vals (sp/read-entities storage entity ids))
-    (keep #(sp/read-entity storage entity %) ids)))
+  (if *prefetched*
+    (prefetch/read-through *prefetched* entity ids
+                           #(binding [*prefetched* nil] (read-rows storage entity %)))
+    (if (satisfies? sp/StorageBatchCRUD storage)
+      (vals (sp/read-entities storage entity ids))
+      (keep #(sp/read-entity storage entity %) ids))))
 
 
-(defn- limited-query
+(defn- query-rows
   [storage entity where budget]
   (check-snapshot!)
   (when-not (satisfies? sp/StorageBoundedQuery storage)
@@ -69,6 +77,15 @@
         :storage-error/candidate-limit (reject! :source-row-limit)
         :storage-error/bounded-query-unsupported (reject! :bounded-storage-unsupported)
         (throw error)))))
+
+
+(defn- limited-query
+  [storage entity where budget]
+  (check-snapshot!)
+  (if *prefetched*
+    (prefetch/query-through *prefetched* entity where
+                            #(query-rows storage entity % budget))
+    (query-rows storage entity where budget)))
 
 
 (defn- related-ids
@@ -107,8 +124,8 @@
    receives each fn row BEFORE any of its binding/item values are loaded.
    Callers must supply an immutable storage/policy pair; HTTP code uses
    `with-snapshot`, not a live context's whole-graph cache."
-  [storage roots authorize! manifest? server?]
-  (let [budget (atom 0)]
+  [storage roots authorize! manifest? server? & [budget]]
+  (let [budget (or budget (atom 0))]
     (loop [pending (set roots)
            seen #{}
            graph {:fns [] :slots [] :fn-slots [] :bindings [] :list-items []}]
@@ -187,11 +204,59 @@
                        (update :list-items into items)))))))))
 
 
+(defn- hinted-ids
+  [graph roots]
+  (when graph
+    (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]}
+          (deps/index-graph graph)
+          dependencies (fn [id]
+                         (let [bindings (get bindings-by-fn id)]
+                           (related-ids [(get fn-map id)]
+                                        (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
+                                        bindings
+                                        (mapcat #(get items-by-binding (:id %)) bindings))))]
+      (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions))))
+
+
+(defn- row-limit?
+  [error]
+  (= {:type :browser-plan/unsupported :reason :source-row-limit} (ex-data error)))
+
+
+(defn- collect-hinted-closure
+  [storage roots authorize! graph-hint]
+  (let [budget (atom 0)
+        prepared (try
+                   (prefetch/prepare (hinted-ids graph-hint roots)
+                                     #(read-rows storage %1 %2)
+                                     #(limited-query storage %1 %2 budget)
+                                     authorize!)
+                   (catch clojure.lang.ExceptionInfo error
+                     (when-not (row-limit? error) (throw error))))]
+    (if prepared
+      (try
+        (binding [*prefetched* prepared]
+          (collect-source storage roots authorize! false false budget))
+        (catch clojure.lang.ExceptionInfo error
+          ;; Stale extras may consume the candidate budget. One ordinary retry
+          ;; in this SAME snapshot preserves the semantic closure limit. Total
+          ;; acquisition work has bounded speculative overhead (at most two
+          ;; candidate budgets), not a promise of one physical-query budget.
+          (if (row-limit? error)
+            (collect-source storage roots authorize! false false)
+            (throw error))))
+      (collect-source storage roots authorize! false false))))
+
+
 (defn collect-closure
   "Collect the full authorized source closure. Identity targets are included
-   in this general-purpose mode, preserving the existing export boundary."
-  [storage roots authorize!]
-  (collect-source storage roots authorize! false false))
+   in this general-purpose mode, preserving the existing export boundary.
+   An optional graph supplies bounded dependency IDs ONLY; all source rows and
+   authorization are fresh. Caller must retain one immutable storage snapshot."
+  ([storage roots authorize!]
+   (collect-source storage roots authorize! false false))
+  ([storage roots authorize! graph-hint]
+   (collect-hinted-closure storage roots authorize! graph-hint)))
 
 
 (defn collect-client-closure

@@ -60,8 +60,8 @@
   (or (string? value) (uuid? value)
       (and (keyword? value)
            (not (str/includes? (name value) "/"))
-           (let [namespace (namespace value)]
-             (or (nil? namespace) (not (str/includes? namespace "/")))))))
+           (let [keyword-ns (namespace value)]
+             (or (nil? keyword-ns) (not (str/includes? keyword-ns "/")))))))
 
 
 (defn- same-fingerprint-input?

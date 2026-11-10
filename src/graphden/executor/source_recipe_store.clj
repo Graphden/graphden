@@ -141,21 +141,32 @@
                    [(update state :pending dissoc ticket) (contains? (:pending state) ticket)])))
 
 
+(defn revoke!
+  "Forbid publication without freeing a running builder's reservation.
+   Request cancellation must not evict a shared family. abort! belongs in the
+   builder's actual finally/on-done, not the timed-out caller's finally."
+  [store ticket]
+  (change! store (fn [state _]
+                   (if (contains? (:pending state) ticket)
+                     [(assoc-in state [:pending ticket :revoked?] true) true]
+                     [state false]))))
+
+
 (defn publish!
   "Call ONLY after the complete export/invocation, including postcheck, succeeds.
    Transfers a reservation to retained payload ownership. Charge must include
-   every retained structure and fit its reservation. A rejected publication
-   releases its reservation; the caller must then discard the payload. A stale
+   every retained structure and fit its reservation. Rejection keeps the charge
+   until the builder calls abort! in finally after discarding its payload. A stale
    ticket cannot replace a newer entry or recreate an evicted/expired family."
   [store ticket payload actual-charge]
   (change! store
            (fn [state _]
              (let [{:keys [family physical generation reserved revoked?] :as reservation}
-                   (get-in state [:pending ticket])
-                   state (update state :pending dissoc ticket)]
+                   (get-in state [:pending ticket])]
                (if (and reservation (not revoked?)
                         (integer? actual-charge) (pos? actual-charge) (<= actual-charge reserved))
-                 (let [old-id (first (matching-entry state family physical))
+                 (let [state (update state :pending dissoc ticket)
+                       old-id (first (matching-entry state family physical))
                        state (cond-> state old-id (retire-entry old-id))
                        tick (inc (:tick state))]
                    [(-> state (assoc :tick tick)

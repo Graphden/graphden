@@ -242,7 +242,7 @@
                  (integer? max-bytes) (> max-bytes (+ preparation-scratch-bytes (* 1024 1024))))
     (throw (ex-info "Source trace requires an owned bounded scope" {})))
   (certificate/assert-connection! guard connection)
-  (assoc scope :authority-fields (into [] authority-fields)
+  (assoc scope :authority-fields (vec authority-fields)
          :owner (Thread/currentThread) :active? (atom true)))
 
 
@@ -283,6 +283,8 @@
                  (catch SQLException error (restart! :certificate-sql-failed error))))))))))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
 (defn replay
   "Validate the whole recipe and reauthorize its narrow projections BEFORE
    returning any cached payload. Every source check/decoder still runs. A miss

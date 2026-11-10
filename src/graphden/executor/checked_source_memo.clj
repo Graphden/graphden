@@ -29,7 +29,7 @@
     (throw (ex-info "Checker memo requires explicit limits and a reviewed callback ABI" {})))
   (let [active? (atom true)]
     {:store (store/create-store (assoc options :closed? #(or (not @active?)
-                                                             (nil? (.get ^WeakReference %)))))
+                                                             (nil? (WeakReference/.get %)))))
      :active? active? :environment (atom nil)
      :admission {:max-bytes entry-bytes :max-nodes max-nodes :callbacks callbacks}
      :entry-bytes entry-bytes :ttl-ms ttl-ms :clock-ms clock-ms :checker-abi checker-abi}))
@@ -61,7 +61,7 @@
   (let [environment (:environment memo)]
     (locking environment
       (let [previous @environment]
-        (if (and previous (identical? original-rich (.get ^WeakReference previous)))
+        (if (and previous (identical? original-rich (WeakReference/.get previous)))
           previous
           (let [token (WeakReference. original-rich)]
             (reset! environment token)
@@ -86,7 +86,7 @@
         charge (some-> (data/charge payload (:admission memo)) (+ 1024))
         result (consume)]
     (check-cancel)
-    (when (.isInterrupted (Thread/currentThread))
+    (when (Thread/.isInterrupted (Thread/currentThread))
       (throw (InterruptedException. "Checker artifact builder interrupted")))
     (when (and charge (<= charge (:entry-bytes memo)))
       ;; Pure checker artifacts publish after checked-source including consume.

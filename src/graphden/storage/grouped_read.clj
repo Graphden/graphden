@@ -31,9 +31,9 @@
   (when (and (not *grouping-disabled?*) *snapshot-cache*
              (identical? connection (:connection *snapshot-cache*))
              @(:active? *snapshot-cache*)
-             (not (.isClosed ^Connection connection))
-             (not (.getAutoCommit ^Connection connection))
-             (.isReadOnly ^Connection connection))
+             (not (Connection/.isClosed connection))
+             (not (Connection/.getAutoCommit connection))
+             (Connection/.isReadOnly connection))
     *snapshot-cache*))
 
 
@@ -43,10 +43,10 @@
    No source values or authorization decisions belong in :shapes."
   [connection f]
   (if (and (not *grouping-disabled?*) (instance? Connection connection)
-           (not (.getAutoCommit ^Connection connection))
-           (.isReadOnly ^Connection connection)
+           (not (Connection/.getAutoCommit connection))
+           (Connection/.isReadOnly connection)
            (= Connection/TRANSACTION_REPEATABLE_READ
-              (.getTransactionIsolation ^Connection connection)))
+              (Connection/.getTransactionIsolation connection)))
     (let [state {:connection connection :shapes (atom {}) :active? (atom true)}]
       (binding [*snapshot-cache* state]
         (try (f) (finally (reset! (:active? state) false)))))

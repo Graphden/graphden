@@ -7,10 +7,7 @@
     [graphden.storage.postgres.read-plan :as plan]
     [graphden.storage.postgres.util :as util]
     [honey.sql :as sql]
-    [next.jdbc.result-set :as rs])
-  (:import
-    (java.util
-      Locale)))
+    [next.jdbc.result-set :as rs]))
 
 
 (def ^:private max-columns 256)
@@ -90,7 +87,7 @@
   (vec (mapcat (fn [index {:keys [entity]}]
                  (map-indexed (fn [position column]
                                 {:group index
-                                 :column (keyword (.toLowerCase (name column) Locale/ROOT))
+                                 :column column
                                  :sql-alias (keyword (str "g" index "_c" position))
                                  :qualified (keyword (str "g" index "." (name column)))})
                               (get shapes entity)))
@@ -111,7 +108,7 @@
 (defn- carrier
   [plans shapes]
   (when (every? #(let [columns (get shapes (:entity %))]
-                   (and (seq columns) (not (some #{:__gd_row_order} columns)))) plans)
+                   (and (seq columns) (not-any? #{:__gd_row_order} columns))) plans)
     (let [columns (layout plans shapes)
           cells (*' (+ 2 (count columns)) (reduce + (map :bound plans)))]
       (when (and (<= (count columns) max-columns) (<= cells max-cells))
@@ -132,7 +129,7 @@
                                 :from [(subquery index)]}) (range (count plans)))
               params (sql/format {:union-all (into [header] branches)} {:quoted true})]
           (when (and (<= (dec (count params)) util/*max-statement-params*)
-                     (<= (alength (.getBytes ^String (first params) "UTF-8")) max-sql-bytes))
+                     (<= (alength (String/.getBytes (first params) "UTF-8")) max-sql-bytes))
             {:params params :columns columns}))))))
 
 

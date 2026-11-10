@@ -70,12 +70,16 @@
     (Manager. witness-seal {:id (Object.) :mode mode :max-sessions max-sessions :closed? (atom false)})))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn- manager-state
   [manager]
   (when (and (instance? Manager manager) (identical? witness-seal (.-seal ^Manager manager)))
     (.-state ^Manager manager)))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
 (defn- marker-state
   [marker]
   (when (and (instance? Marker marker) (identical? witness-seal (.-seal ^Marker marker)))
@@ -87,8 +91,8 @@
   ;; Do not invoke arbitrary unwrap implementations. Pool/adaptor ownership is
   ;; additionally proved by the consumer before calling this module.
   (when (and (#{PgConnection HikariProxyConnection} (class connection))
-             (not (.isClosed ^Connection connection)))
-    (let [physical (.unwrap ^Connection connection PGConnection)]
+             (not (Connection/.isClosed connection)))
+    (let [physical (Connection/.unwrap connection PGConnection)]
       (when (= PgConnection (class physical)) physical))))
 
 
@@ -102,39 +106,42 @@
 
 (defn- random-keys
   []
-  (let [a (.nextLong random)]
-    (loop [b (.nextLong random)]
-      (if (= a b) (recur (.nextLong random)) [a b]))))
+  (let [a (SecureRandom/.nextLong random)]
+    (loop [b (SecureRandom/.nextLong random)]
+      (if (= a b) (recur (SecureRandom/.nextLong random)) [a b]))))
 
 
 (defn- prune-closed!
   []
   ;; WeakHashMap values must never retain their physical key strongly.
-  (let [entries (.iterator (.entrySet registrations))]
-    (while (.hasNext entries)
-      (let [entry (.next entries) connection (.getKey ^java.util.Map$Entry entry)]
-        (when (.isClosed ^Connection connection) (.remove entries))))))
+  (let [entries (java.util.Set/.iterator (WeakHashMap/.entrySet registrations))]
+    (while (java.util.Iterator/.hasNext entries)
+      (let [entry (java.util.Iterator/.next entries) connection (java.util.Map$Entry/.getKey entry)]
+        (when (Connection/.isClosed connection) (java.util.Iterator/.remove entries))))))
 
 
 (defn- reserve-marker!
   [owner physical]
   (locking registrations
     (prune-closed!)
-    (if-let [existing (.get registrations physical)]
+    (if-let [existing (WeakHashMap/.get registrations physical)]
       (let [{:keys [owner-id status]} (marker-state existing)]
         (when (and (identical? (:id owner) owner-id) (= :active @status))
           [existing false]))
-      (when (and (< (.size registrations) max-registrations)
+      (when (and (< (WeakHashMap/.size registrations) max-registrations)
                  (< (count (filter #(identical? (:id owner) (:owner-id (marker-state %)))
-                                   (.values registrations)))
+                                   (WeakHashMap/.values registrations)))
                     (:max-sessions owner)))
         (let [marker (Marker. witness-seal {:owner-id (:id owner) :closed? (:closed? owner)
                                             :physical (WeakReference. physical) :keys (random-keys)
                                             :status (atom :pending)})]
-          (.put registrations physical marker)
+          (WeakHashMap/.put registrations physical marker)
           [marker true])))))
 
 
+;; Cleanup must also run on JVM Errors and preserve the original failure with
+;; suppressed cleanup failures. This handler never turns a failure into success.
+^{:splint/disable [lint/catch-throwable]}
 (defn- release-keys!
   [connection lock-keys]
   ;; Called only on the caller's owned autocommit borrow. If cleanup itself
@@ -146,11 +153,13 @@
                (first lock-keys) (second lock-keys)] query-options)
     (catch Throwable error
       (when-let [physical (physical-connection connection)]
-        (try (.close ^Connection physical)
-             (catch Throwable close-error (.addSuppressed error close-error))))
+        (try (Connection/.close physical)
+             (catch Throwable close-error (Throwable/.addSuppressed error close-error))))
       (throw error))))
 
 
+;; Cleanup must also run on JVM Errors and preserve the original failure with
+;; suppressed cleanup failures. This handler never turns a failure into success.
 (defn ensure-marker!
   "Before owning RR, register a random nonblocking lock pair once per physical
    session. Repeated calls perform no SQL or reentrant acquisitions. Unknown
@@ -161,14 +170,15 @@
   (check!)
   (when-let [owner (manager-state manager)]
     (when-let [physical (physical-connection connection)]
-      (when (and (not @(:closed? owner)) (.getAutoCommit connection)
-                 (= TransactionState/IDLE (.getTransactionState ^PgConnection physical)))
+      (when (and (not @(:closed? owner)) (Connection/.getAutoCommit connection)
+                 (= TransactionState/IDLE (PgConnection/.getTransactionState physical)))
         (when-let [[marker fresh?] (reserve-marker! owner physical)]
           (if-not fresh?
             marker
             (let [{:keys [status] lock-keys :keys} (marker-state marker)
                   attempted? (volatile! false)
                   failure (volatile! nil)]
+              ^{:splint/disable [lint/catch-throwable]}
               (try
                 (check!)
                 (vreset! attempted? true)
@@ -189,7 +199,7 @@
                       (try (release-keys! connection lock-keys)
                            (catch Throwable cleanup-error
                              (if-let [error @failure]
-                               (.addSuppressed ^Throwable error cleanup-error)
+                               (Throwable/.addSuppressed error cleanup-error)
                                (throw cleanup-error)))))))))))))))
 
 
@@ -207,19 +217,19 @@
 (defn- marker-live?
   [state]
   (and state (not @(:closed? state)) (= :active @(:status state))
-       (when-let [physical (.get ^WeakReference (:physical state))]
-         (not (.isClosed ^Connection physical)))))
+       (when-let [physical (WeakReference/.get (:physical state))]
+         (not (Connection/.isClosed physical)))))
 
 
 (defn- guarded-connection
   [connection]
   (when-let [physical (physical-connection connection)]
-    (when (and (not (.getAutoCommit ^Connection connection))
-               (.isReadOnly ^Connection connection)
+    (when (and (not (Connection/.getAutoCommit connection))
+               (Connection/.isReadOnly connection)
                ;; getTransactionIsolation may issue driver SQL. Refuse an IDLE
                ;; transaction before that call, preserving first-LOCK ordering.
-               (= TransactionState/OPEN (.getTransactionState ^PgConnection physical))
-               (= Connection/TRANSACTION_REPEATABLE_READ (.getTransactionIsolation ^Connection connection)))
+               (= TransactionState/OPEN (PgConnection/.getTransactionState physical))
+               (= Connection/TRANSACTION_REPEATABLE_READ (Connection/.getTransactionIsolation connection)))
       physical)))
 
 
@@ -261,13 +271,13 @@
   (let [state (marker-state marker)]
     (when (marker-live? state)
       (when-let [physical (guarded-connection connection)]
-        (when (identical? physical (.get ^WeakReference (:physical state)))
+        (when (identical? physical (WeakReference/.get (:physical state)))
           (execute! connection check! ["SELECT pg_catalog.pg_stat_clear_snapshot()"])
           (let [{:keys [pid backend_start database role]}
                 (first (execute! connection check! (into [identity-query] (:keys state))))
-                origin-identity (when (and (= pid (.getBackendPID ^PgConnection physical))
+                origin-identity (when (and (= pid (PgConnection/.getBackendPID physical))
                                            backend_start database role)
-                                  {:pid pid :start (.toInstant ^Timestamp backend_start)
+                                  {:pid pid :start (Timestamp/.toInstant backend_start)
                                    :database database :role role :keys (:keys state)})]
             (if (and origin-identity (marker-live? state))
               (Origin. witness-seal {:marker marker :identity origin-identity})
@@ -277,11 +287,13 @@
 (defn- registered-destination?
   [origin-state physical]
   (locking registrations
-    (let [state (marker-state (.get registrations physical))]
+    (let [state (marker-state (WeakHashMap/.get registrations physical))]
       (and (marker-live? state)
            (identical? (:owner-id origin-state) (:owner-id state))))))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
 (defn origin-live?
   "Fresh destination-RR proof, after its first LOCK and before any cached row.
    Hidden backend_start, missing locks, wrong database/session or retired local
@@ -310,7 +322,7 @@
       (prune-closed!)
       (let [states (keep #(let [state (marker-state %)]
                             (when (identical? (:id owner) (:owner-id state)) state))
-                         (.values registrations))]
+                         (WeakHashMap/.values registrations))]
         {:registered (count states)
          :active (count (filter #(and (= :active @(:status %)) (not @(:closed? %))) states))
          :closed? @(:closed? owner)}))))

@@ -170,13 +170,13 @@ Implements reachable-graph resolution using generic row loaders and [[file:gloss
 :PROPERTIES:
 :CUSTOM_ID: storage/ensure-marker!
 :FILE: src/graphden/storage/postgres/source_session.clj
-:LINE: 154
+:LINE: 163
 :MINS: 3.5
 :END:
 
 Prepares bounded session-incarnation evidence before owning a repeatable-read transaction. A known direct/session datasource acquires two random session advisory locks once per physical connection. Sealing and checking the origin happen only after the certificate's first relation lock. This inactive foundation does not authorize rows or replace fresh schema, transaction-ID and complete membership checks. Its manager shares the pool's lifetime; replacing the manager requires retiring the pool, not stacking new locks.
 
-- source :: [[file:../../../src/graphden/storage/postgres/source_session.clj::(defn ensure-marker!][src/graphden/storage/postgres/source_session.clj:154]]
+- source :: [[file:../../../src/graphden/storage/postgres/source_session.clj::(defn ensure-marker!][src/graphden/storage/postgres/source_session.clj:163]]
 
 * 14. PostgresStorage
 :PROPERTIES:

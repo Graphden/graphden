@@ -363,6 +363,7 @@ function buildFnRowButtons(actionsEl, fnId, fnName) {
 
 let activeChildMenu = null;
 let stopChildMenuObservation = null;
+let childMenuOutsideClick = null;
 
 function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   closeChildCreateMenu();
@@ -392,6 +393,7 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   };
   stopChildMenuObservation = observePopoverAnchor(menu, anchorEl, place);
   place();
+  if (activeChildMenu !== menu) return;
   // A menu the keyboard can leave: focus lands on the first item, Escape
   // closes it and returns focus to the `+` that opened it (consumed, so a
   // running tour does not end). ↑ / ↓ walk the items.
@@ -434,16 +436,18 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   // (a copy-chip mid-step must not throw the menu away), which keeps the
   // listener armed for the next click instead of consuming its one shot.
   setTimeout(() => {
-    const onDocClick = (e) => {
+    if (activeChildMenu !== menu) return;
+    childMenuOutsideClick = (e) => {
       if (pointerEventInTour(e)) return;
-      document.removeEventListener('click', onDocClick);
       closeChildCreateMenu();
     };
-    document.addEventListener('click', onDocClick);
+    document.addEventListener('click', childMenuOutsideClick);
   }, 0);
 }
 
 function closeChildCreateMenu() {
+  if (childMenuOutsideClick) document.removeEventListener('click', childMenuOutsideClick);
+  childMenuOutsideClick = null;
   if (stopChildMenuObservation) stopChildMenuObservation();
   stopChildMenuObservation = null;
   if (activeChildMenu) {

@@ -25,6 +25,7 @@
     [clojure.set :as set]
     [graphden.schema.versioned.schema :as vts]
     [graphden.storage.bounded-query :as bounded]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
@@ -450,19 +451,9 @@
       (meta ids))))
 
 
-(defn- resolve-all-entities*
-  [base-storage entity-name branch-id where version-entity version-id-field entity-ids]
-  (let [cache
-        (load-merge-aware-cache base-storage version-entity version-id-field
-                                entity-ids branch-id)
-        ;; Entities visible: those with at least one loaded version
-        ;; (loaded set already covers chain + merge sources).
-        entity-ids-with-versions (set (keys (:versions-by-id cache)))
-        identities-map (if (empty? entity-ids-with-versions)
-                         {}
-                         (sp/read-entities base-storage entity-name
-                                           (vec entity-ids-with-versions)))
-        resolved (for [[eid identity-rec] identities-map
+(defn- resolve-query-rows
+  [base-storage entity-name cache identities-map where version-id-field]
+  (let [resolved (for [[eid identity-rec] identities-map
                        :let [version (resolve-version-from-cache
                                        base-storage entity-name cache eid)]
                        ;; A tombstone-winner ⇒ deleted on this branch ⇒ omit.
@@ -485,6 +476,22 @@
                                 (= rv prepared-v))))
                           where-prepared))
                 resolved)))))
+
+
+(defn- resolve-all-entities*
+  [base-storage entity-name branch-id where version-entity version-id-field entity-ids]
+  (let [cache
+        (load-merge-aware-cache base-storage version-entity version-id-field
+                                entity-ids branch-id)
+        ;; Entities visible: those with at least one loaded version
+        ;; (loaded set already covers chain + merge sources).
+        entity-ids-with-versions (set (keys (:versions-by-id cache)))
+        identities-map (if (empty? entity-ids-with-versions)
+                         {}
+                         (sp/read-entities base-storage entity-name
+                                           (vec entity-ids-with-versions)))]
+    (resolve-query-rows base-storage entity-name cache identities-map
+                        where version-id-field)))
 
 
 ;; === Batch Resolution for ExecutionGraph ===
@@ -545,102 +552,96 @@
           chain)))))
 
 
+(defn- cache-read-plan
+  "Plan chain latest rows and complete merge-source history independently.
+   Historical reads retain their exact revision checks and bounded scans."
+  [base-storage version-entity version-id-field entity-ids branch-id as-of-revision]
+  (let [branch-chain (collect-branch-chain base-storage branch-id)
+        merge-history (if as-of-revision
+                        (historical-merges-for-chain base-storage branch-id branch-chain)
+                        (merges-for-chain base-storage branch-id branch-chain))
+        _ (when (and as-of-revision (some #(nil? (:change-revision %)) merge-history))
+            (throw (ex-info "A historical merge has no exact revision"
+                            {:type :history/incomplete-provenance})))
+        all-merges (if as-of-revision
+                     (filterv #(<= (:change-revision %) as-of-revision) merge-history)
+                     merge-history)
+        source-branch-ids (into #{} (map :source-branch-id) all-merges)
+        entity-where (when (seq entity-ids)
+                       {version-id-field (vec entity-ids)})
+        chain-where (merge entity-where {:branch-id (vec branch-chain)})
+        source-where (merge entity-where {:branch-id (vec source-branch-ids)})
+        chain-request (if as-of-revision
+                        {:op :query :entity version-entity :where chain-where
+                         :opts {:limit 10001}}
+                        {:op :latest :entity version-entity :where chain-where
+                         :group-cols [version-id-field :branch-id]})
+        ;; Merge cutoffs may precede the latest source version. Keep all
+        ;; source history: latest-per-group here would silently lose merges.
+        source-request (cond-> {:op :query :entity version-entity :where source-where}
+                         as-of-revision (assoc :opts {:limit 10001}))]
+    {:version-entity version-entity :version-id-field version-id-field
+     :as-of-revision as-of-revision :branch-chain branch-chain :all-merges all-merges
+     :requests (cond-> [chain-request] (seq source-branch-ids) (conj source-request))}))
+
+
+(defn- finish-cache-read
+  [base-storage {:keys [version-entity version-id-field as-of-revision
+                        branch-chain all-merges]} [chain-versions source-rows]]
+  (let [source-versions (or source-rows [])
+        _ (when (and as-of-revision
+                     (or (> (count chain-versions) 10000)
+                         (> (count source-versions) 10000)))
+            (throw (ex-info "Historical version scan exceeds its bound"
+                            {:type :history/too-large})))
+        all-versions (if as-of-revision
+                       (let [rows (into chain-versions source-versions)]
+                         (when (some #(nil? (:change-revision %)) rows)
+                           (throw (ex-info "A historical version has no exact revision"
+                                           {:type :history/incomplete-provenance})))
+                         (filterv #(<= (:change-revision %) as-of-revision) rows))
+                       (into chain-versions source-versions))]
+    {:versions-by-id (group-by version-id-field all-versions)
+     :merges-by-target (group-by :target-branch-id all-merges)
+     :branch-chain branch-chain
+     ;; A merged-in list item's branch-local filter needs the fn owning its
+     ;; binding (`owning-fn-id`); read those bindings ONCE here instead of
+     ;; once per merged item while resolving.
+     :binding-fn-ids (when (and (= :binding-list-item-version version-entity)
+                                (seq source-versions))
+                       (into {}
+                             (map (juxt :id :fn-id))
+                             (vals (sp/read-entities
+                                     base-storage :binding
+                                     (into [] (comp (keep :binding-id) (distinct))
+                                           source-versions)))))}))
+
+
+(defn- load-cache-plans
+  [base-storage plans group?]
+  (let [requests (into [] (mapcat :requests) plans)
+        results (if group?
+                  (grouped/read-operations base-storage requests)
+                  (mapv #(grouped/scalar-operation base-storage %) requests))]
+    (loop [plans (seq plans) results results caches []]
+      (if-let [plan (first plans)]
+        (let [n (count (:requests plan))]
+          (recur (next plans) (subvec results n)
+                 (conj caches (finish-cache-read base-storage plan (subvec results 0 n)))))
+        caches))))
+
+
 (defn- load-merge-aware-cache
-  "Pre-load every row needed to resolve `entity-ids` (or every entity
-   of the type if `entity-ids` is nil) on `branch-id` with full
-   `branch-merge` support.
-
-   Returns `{:versions-by-id :merges-by-target :branch-chain :binding-fn-ids}`:
-
-   - `:branch-chain` — `[branch-id parent-id … root-id]`.
-   - `:merges-by-target` — every `branch-merge` row landing on any
-     branch in chain, grouped by `:target-branch-id`. Tells
-     `resolve-version-from-cache` what to walk per chain level.
-   - `:versions-by-id` — versions grouped by entity-id.
-
-   The version loader is two-phase to keep the working set bounded:
-
-   * Chain branches: `query-latest-per-group` returns ONE row per
-     (entity-id, branch-id) — the latest. That's all
-     `resolve-version-from-cache` ever consults via
-     `latest-by-created-at`. Without this dedup the full version
-     history is materialised per call; on a long-running executor
-     `/api/graph/entities` and friends OOM the cheshire-encode step
-     (root cause of the e2e cascade).
-   * Source-merge branches: full history fetch with `query-entities`.
-     `merge-candidates-from-cache` needs every version with
-     `created-at <= merge.source-timestamp` per merge; if two merges
-     from the same source have different timestamps, the latest-per-
-     branch row may post-date the older merge's cutoff and we'd lose
-     visibility into what that merge actually carried. Source-merge
-     volume is small in practice (1-2 merges per chain in normal
-     use), so the full fetch on this slice is OK.
-
-   Both slices are filtered by `entity-ids` when the caller passes
-   them (batch path). Without entity-ids (used by `resolve-all-
-   entities`) the chain-branches fetch returns latest-per-entity
-   across the whole branch — still O(entities × branches), but no
-   longer multiplied by version history depth."
+  "Load latest chain versions and full merge-source history, then use the
+   existing in-memory branch/merge resolver. Historical reads also validate
+   exact revision provenance; merged list items retain binding-owner lookup."
   ([base-storage version-entity version-id-field entity-ids branch-id]
    (load-merge-aware-cache base-storage version-entity version-id-field entity-ids branch-id nil))
   ([base-storage version-entity version-id-field entity-ids branch-id as-of-revision]
-   (let [branch-chain (collect-branch-chain base-storage branch-id)
-         merge-history (if as-of-revision
-                         (historical-merges-for-chain base-storage branch-id branch-chain)
-                         (merges-for-chain base-storage branch-id branch-chain))
-         _ (when (and as-of-revision (some #(nil? (:change-revision %)) merge-history))
-             (throw (ex-info "A historical merge has no exact revision"
-                             {:type :history/incomplete-provenance})))
-         all-merges (if as-of-revision
-                      (filterv #(<= (:change-revision %) as-of-revision) merge-history)
-                      merge-history)
-         source-branch-ids (into #{} (map :source-branch-id) all-merges)
-         entity-where (when (seq entity-ids)
-                        {version-id-field (vec entity-ids)})
-         ;; Phase 1: chain branches — only the latest per (entity, branch).
-         chain-versions (if as-of-revision
-                          (sp/query-entities base-storage version-entity
-                                             (merge entity-where {:branch-id (vec branch-chain)})
-                                             {:limit 10001})
-                          (sp/query-latest-per-group
-                            base-storage version-entity
-                            (merge entity-where {:branch-id (vec branch-chain)})
-                            [version-id-field :branch-id]))
-         ;; Phase 2: merge source branches — full history (small slice).
-         source-versions (if (seq source-branch-ids)
-                           (let [where (merge entity-where
-                                              {:branch-id (vec source-branch-ids)})]
-                             (if as-of-revision
-                               (sp/query-entities base-storage version-entity where
-                                                  {:limit 10001})
-                               (sp/query-entities base-storage version-entity where)))
-                           [])
-         _ (when (and as-of-revision
-                      (or (> (count chain-versions) 10000)
-                          (> (count source-versions) 10000)))
-             (throw (ex-info "Historical version scan exceeds its bound"
-                             {:type :history/too-large})))
-         all-versions (if as-of-revision
-                        (let [rows (into chain-versions source-versions)]
-                          (when (some #(nil? (:change-revision %)) rows)
-                            (throw (ex-info "A historical version has no exact revision"
-                                            {:type :history/incomplete-provenance})))
-                          (filterv #(<= (:change-revision %) as-of-revision) rows))
-                        (into chain-versions source-versions))]
-     {:versions-by-id (group-by version-id-field all-versions)
-      :merges-by-target (group-by :target-branch-id all-merges)
-      :branch-chain branch-chain
-      ;; A merged-in list item's branch-local filter needs the fn owning its
-      ;; binding (`owning-fn-id`); read those bindings ONCE here instead of
-      ;; once per merged item while resolving.
-      :binding-fn-ids (when (and (= :binding-list-item-version version-entity)
-                                 (seq source-versions))
-                        (into {}
-                              (map (juxt :id :fn-id))
-                              (vals (sp/read-entities
-                                      base-storage :binding
-                                      (into [] (comp (keep :binding-id) (distinct))
-                                            source-versions)))))})))
+   (first (load-cache-plans base-storage
+                            [(cache-read-plan base-storage version-entity version-id-field
+                                              entity-ids branch-id as-of-revision)]
+                            false))))
 
 
 (defn- merge-candidates-from-cache
@@ -1156,3 +1157,40 @@
                      (inc iter-count)))
             (recur rest-to-visit visited fns fn-slots-acc bindings-acc
                    items-acc (inc iter-count))))))))
+
+
+(defn grouped-query?
+  "Only explicit, finite identity queries with ordinary resolved-row semantics.
+   Pagination and identity-as-is reads keep their existing scalar paths."
+  [{:keys [op entity where opts]}]
+  (and (= :query op) (versioned-entity? entity) (empty? opts)
+       (map? where) (contains? where :id)
+       (coll? (:id where)) (not (map? (:id where)))))
+
+
+(defn resolve-query-group
+  "Resolve independent bounded queries through the same merge algorithm.
+   Callers must have completed candidate/authorization barriers before entry.
+   Version rows precede identity reads, exactly as resolve-all-entities does."
+  [base-storage branch-id requests]
+  (let [active (filterv #(seq (get-in % [:where :id])) requests)
+        plans (mapv (fn [{:keys [entity where]}]
+                      (let [{:keys [version-entity version-id-field]} (get entity-config entity)]
+                        (cache-read-plan base-storage version-entity version-id-field
+                                         (:id where) branch-id nil))) active)
+        caches (load-cache-plans base-storage plans true)
+        identities (grouped/read-operations
+                     base-storage
+                     (mapv (fn [request cache]
+                             {:op :read-ids :entity (:entity request)
+                              :ids (vec (keys (:versions-by-id cache)))}) active caches))
+        resolved (mapv (fn [{:keys [entity where]} cache rows]
+                         (vec (resolve-query-rows base-storage entity cache rows where
+                                                  (:version-id-field (get entity-config entity)))))
+                       active caches identities)]
+    (loop [requests requests resolved (seq resolved) result []]
+      (if-let [request (first requests)]
+        (if (seq (get-in request [:where :id]))
+          (recur (next requests) (next resolved) (conj result (first resolved)))
+          (recur (next requests) resolved (conj result [])))
+        result))))

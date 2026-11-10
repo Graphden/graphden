@@ -9,6 +9,8 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.storage.bounded-query :as bounded]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
@@ -88,6 +90,36 @@
     (query-rows storage entity where budget)))
 
 
+(defn- owner-rows
+  "Authorize owners before entry. Scan candidates sequentially, charging their
+   physical counts before any grouped payload load. Unknown wrappers and the
+   advisory cache keep the ordinary bounded-query path."
+  [storage ids budget]
+  (let [where {:fn-id (vec ids)}]
+    (if (or *prefetched* (not (satisfies? sp/StorageGroupedRead storage)))
+      [(limited-query storage :fn-slot where budget)
+       (limited-query storage :binding where budget)]
+      (try
+        (let [requests
+              (mapv (fn [entity]
+                      (check-snapshot!)
+                      (let [remaining (- max-rows @budget)
+                            candidates (bounded/candidate-ids storage entity where nil remaining)
+                            physical-count (or (::sp/candidate-count (meta candidates))
+                                               (count candidates))]
+                        (when (> physical-count remaining) (reject! :source-row-limit))
+                        (swap! budget + physical-count)
+                        {:op :query :entity entity :where (assoc where :id candidates)}))
+                    [:fn-slot :binding])]
+          (check-snapshot!)
+          (grouped/read-operations storage requests))
+        (catch clojure.lang.ExceptionInfo error
+          (case (:type (ex-data error))
+            :storage-error/candidate-limit (reject! :source-row-limit)
+            :storage-error/bounded-query-unsupported (reject! :bounded-storage-unsupported)
+            (throw error)))))))
+
+
 (defn- related-ids
   [fns slots bindings items]
   (into #{}
@@ -162,8 +194,7 @@
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
           (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
                 bare-types (into #{} (keep (fn [[id kind]] (when (= :bare-type kind) id))) authorizations)
-                fn-slots (limited-query storage :fn-slot {:fn-id (vec ids)} budget)
-                bindings (limited-query storage :binding {:fn-id (vec ids)} budget)
+                [fn-slots bindings] (owner-rows storage ids budget)
                 items (if (seq bindings)
                         (limited-query storage :binding-list-item
                                        {:binding-id (mapv :id bindings)} budget)
@@ -315,7 +346,8 @@
                                                (str *statement-timeout-ms*)]))
                              (check-snapshot!)
                              (let [storage (tx/with-connection storage connection)]
-                               (f storage (tenancy/browser-source-policy storage)))))))
+                               (grouped/call-with-snapshot-cache
+                                 connection #(f storage (tenancy/browser-source-policy storage))))))))
 
 
 (defn collect-namespaces

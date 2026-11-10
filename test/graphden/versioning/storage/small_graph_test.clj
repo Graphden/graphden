@@ -117,3 +117,29 @@
         (is (< (:calls attempt) 20) "One bounded attempt, not one request per parent")
         (is (= 130 (count (:fns (sp/resolve-execution-graph storage root))))))
       (finally (sp/close storage)))))
+
+
+(deftest inherited-renames-and-optionality-use-the-same-public-surface
+  (let [storage (setup/create-versioned-test-storage)
+        any-id (ids/primitive-fn-id :any)
+        parent (:id (sp/create-entity storage :fn {:name "rename-parent"}))
+        child (:id (sp/create-entity storage :fn {:name "rename-child" :parent-ids [parent]}))
+        source (:id (sp/create-entity storage :slot
+                                      {:name "original" :type-fn-id any-id :required true}))
+        view (:id (sp/create-entity storage :slot
+                                    {:name "visible" :type-fn-id any-id
+                                     :source-slot-id source :required false}))
+        ctx {:storage storage}
+        hinted (assoc ctx :compile-deps
+                      (atom {:forward-deps {child #{parent any-id} parent #{any-id} any-id #{}}}))]
+    (try
+      (sp/create-entity storage :fn-slot {:fn-id parent :slot-id source :position 0})
+      (sp/create-entity storage :fn-slot {:fn-id child :slot-id view :position 0})
+      (let [expected (lookup/free-arg-facts ctx child)
+            actual (lookup/free-arg-facts hinted child)]
+        (is (= expected actual))
+        (is (= [{:ext-name :visible :slot-id view :optional? false :captured? nil :via nil}]
+               (:entries actual))))
+      (sp/create-entity storage :binding {:fn-id child :slot-id view :value nil})
+      (is (= {:entries [] :via-names {}} (lookup/free-arg-facts hinted child)))
+      (finally (sp/close storage)))))

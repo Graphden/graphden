@@ -24,6 +24,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.context :as context]
+    [graphden.executor.source-recipe-replay :as replay]
     [graphden.storage.binding-read :as binding-read]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.tenancy.context :as tenancy]
@@ -195,7 +196,7 @@
       row)))
 
 
-(defn- capture-client-source
+(defn- capture-client-source-value
   [ctx storage authorize! policy entries anchor-row]
   (let [graph (source/collect-client-closure storage (vals entries) authorize!)
         _ (doseq [id (vals entries)]
@@ -220,6 +221,13 @@
                    {:graph (normalized-graph graph) :anchor anchor-row
                     :targets (into {} (map (fn [[id proof]] [id (:fingerprint proof)])) targets)})]
     {:snapshot captured :targets targets :calls calls :evidence evidence}))
+
+
+(defn- capture-client-source
+  [ctx storage authorize! policy entries anchor-row]
+  (replay/capture storage authorize! entries
+                  (fn [fresh-storage fresh-authorize!]
+                    (capture-client-source-value ctx fresh-storage fresh-authorize! policy entries anchor-row))))
 
 
 (defn- capture-client
@@ -378,7 +386,7 @@
     result))
 
 
-(defn invoke-current
+(defn- invoke-current-value
   "Request accepts only opaque descriptor plus tagged data. No client target,
    capture, binding, principal or branch can be supplied as authority."
   [ctx request input]
@@ -400,3 +408,10 @@
                 {:type :browser-server/refused
                  :reason (if (= :authz/forbidden (:type (ex-data error))) :forbidden :unavailable)})
       (components/failure-facts error))))
+
+
+(defn invoke-current
+  "Invoke an opaque current descriptor. Optional source recipes publish only
+   after execution AND the fresh caller-side postcheck have succeeded."
+  [ctx request input]
+  (replay/call-with-operation ctx #(invoke-current-value ctx request input)))

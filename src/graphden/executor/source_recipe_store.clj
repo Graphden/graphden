@@ -176,19 +176,41 @@
                  [state false])))))
 
 
-(defn acquire!
-  "Lease a matching live recipe. Leases are opaque and carry no payload;
-   release! in finally after certificate validation/replay, including failures."
-  [store family physical]
+(defn- acquire-matching!
+  [store match-entry]
   (change! store
            (fn [state _]
              (if-let [[id _] (when (< (count (:leases state)) (get-in store [:options :max-leases]))
-                               (matching-entry state family physical))]
+                               (match-entry state))]
                (let [lease (Object.) tick (inc (:tick state))]
                  [(-> state (assoc :tick tick)
                       (assoc-in [:entries id :used] tick)
                       (assoc-in [:leases lease] id)) lease])
                [state nil]))))
+
+
+(defn acquire!
+  "Lease a matching live recipe. Leases are opaque and carry no payload;
+   release! in finally after certificate validation/replay, including failures."
+  [store family physical]
+  (acquire-matching! store #(matching-entry % family physical)))
+
+
+(defn acquire-family!
+  "Lease the most recently used live entry within EXACTLY this family.
+   This lookup does not prove compatibility with another physical handle.
+   The consumer must establish its own fresh session/certificate/authorization
+   proof before returning any payload; release! in finally on every outcome.
+   The scan is bounded by the store's existing max-entries limit."
+  [store family]
+  (acquire-matching!
+    store
+    (fn [state]
+      (reduce (fn [chosen [id entry]]
+                (if (and (not (:retired? entry)) (= family (:family entry))
+                         (or (nil? chosen) (> (:used entry) (:used (second chosen)))))
+                  [id entry]
+                  chosen)) nil (:entries state)))))
 
 
 (defn lease-value
@@ -197,6 +219,18 @@
   [store lease]
   (change! store (fn [state _]
                    [state (get-in state [:entries (get-in state [:leases lease]) :payload])])))
+
+
+(defn retire-lease!
+  "Prevent NEW acquisitions of exactly this failed entry. Existing leases
+   retain both their immutable payload and charge until actual release; other
+   entries and the family's generation are unaffected."
+  [store lease]
+  (change! store
+           (fn [state _]
+             (if-let [id (get-in state [:leases lease])]
+               [(retire-entry state id) true]
+               [state false]))))
 
 
 (defn release!

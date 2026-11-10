@@ -34,10 +34,32 @@
   [state])
 
 
+(def ^:private restart-seal (Object.))
+
+
 (defn- restart!
   ([reason] (restart! reason nil))
   ([reason cause]
-   (throw (ex-info "Source replay requires a fresh snapshot" {:type ::restart :reason reason} cause))))
+   (throw (ex-info "Source replay requires a fresh snapshot" {:type ::restart :reason reason ::seal restart-seal} cause))))
+
+
+(defn restart?
+  "Recognize only an internal restart, not a target exception that happens
+   to use the same public error keyword."
+  [error]
+  (and (= ::restart (:type (ex-data error)))
+       (identical? restart-seal (::seal (ex-data error)))))
+
+
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
+(defn charge-bytes
+  "Conservative retained recipe size, also the allowance for fresh witness and
+   row reconstruction during replay. Caller separately reserves preparation
+   scratch before entering the owned guarded snapshot."
+  [recipe]
+  (when-not (instance? Recipe recipe)
+    (restart! :recipe-missing))
+  (:charge-bytes (.-state ^Recipe recipe)))
 
 
 (defn- ineligible!

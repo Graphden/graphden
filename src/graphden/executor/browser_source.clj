@@ -9,6 +9,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.executor.source-recipe-replay :as replay]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.protocol.core :as sp]
@@ -325,7 +326,7 @@
   (collect-manifests storage [root] authorize!))
 
 
-(defn with-snapshot
+(defn- ordinary-snapshot
   "Call `f` with transaction-decorated storage and a snapshot-local source
    policy. Policy creation, configuration reads and bounded closure reads share
    the same REPEATABLE READ snapshot. No nested/connection-backed export."
@@ -348,6 +349,14 @@
                              (let [storage (tx/with-connection storage connection)]
                                (grouped/call-with-snapshot-cache
                                  connection #(f storage (tenancy/browser-source-policy storage))))))))
+
+
+(defn with-snapshot
+  "Call f with a fresh decorated read-only snapshot and its live source policy.
+   Explicit replay controllers may add physical guards; ordinary execution and
+   unknown storage stacks preserve the existing snapshot path."
+  [storage f]
+  (replay/with-snapshot storage check-snapshot! f #(ordinary-snapshot % f)))
 
 
 (defn collect-namespaces

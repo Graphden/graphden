@@ -93,3 +93,20 @@
                                      {:ok true}))
     (is (= [nil false nil] (@late)))
     (is (zero? (:charged-bytes (store/stats store))))))
+
+
+(deftest fatal-postcheck-revokes-staged-recipe-without-swallowing-the-error
+  (let [{:keys [store family physical] :as controller} (fixture)
+        failure (AssertionError. "fatal postcheck")
+        result (try
+                 (lifecycle/call-with-operation controller
+                                                (fn []
+                                                  (let [ticket (pending! controller)]
+                                                    (lifecycle/complete-record! ticket :must-not-publish 40))
+                                                  (throw failure)))
+                 nil
+                 (catch AssertionError error error))]
+    (is (identical? failure result))
+    (is (nil? (store/acquire! store family physical)))
+    (is (= {:entries 0 :pending 0 :charged-bytes 0}
+           (select-keys (store/stats store) [:entries :pending :charged-bytes])))))

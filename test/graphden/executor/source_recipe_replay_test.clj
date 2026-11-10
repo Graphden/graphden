@@ -229,3 +229,21 @@
       (is (= 2 @attempts))
       (is (= {:entries 0 :pending 0 :charged-bytes 0}
              (select-keys (replay/stats (:source-replay *ctx*)) [:entries :pending :charged-bytes]))))))
+
+
+(deftest fatal-consumer-error-discards-staged-source-without-retry
+  (let [failure (AssertionError. "fatal target")
+        calls (atom 0)
+        result (try
+                 (replay/call-with-operation *ctx*
+                                             #(source/with-snapshot (:storage *ctx*)
+                                                                    (fn [storage authorize!]
+                                                                      (swap! calls inc)
+                                                                      (capture-slot storage authorize! *slot*)
+                                                                      (throw failure))))
+                 nil
+                 (catch AssertionError error error))]
+    (is (identical? failure result))
+    (is (= 1 @calls))
+    (is (= {:entries 0 :pending 0 :charged-bytes 0}
+           (select-keys (replay/stats (:source-replay *ctx*)) [:entries :pending :charged-bytes])))))

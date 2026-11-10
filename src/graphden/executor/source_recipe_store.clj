@@ -59,8 +59,8 @@
 
 (defn- occupied-bytes
   [state]
-  (+ (reduce + 0 (map :charge (vals (:entries state))))
-     (reduce + 0 (map :reserved (vals (:pending state))))))
+  (+' (reduce +' 0 (map :charge (vals (:entries state))))
+      (reduce +' 0 (map :reserved (vals (:pending state))))))
 
 
 (defn- same-location?
@@ -77,7 +77,7 @@
 
 (defn- room?
   [store state charge]
-  (and (<= (+ (occupied-bytes state) charge) (get-in store [:options :max-bytes]))
+  (and (<= (+' (occupied-bytes state) charge) (get-in store [:options :max-bytes]))
        (< (+ (count (:entries state)) (count (:pending state)))
           (get-in store [:options :max-entries]))))
 
@@ -103,7 +103,7 @@
              (cond
                (contains? (:families state) family) [state family]
                (and (some? family) (integer? expires-at) (< now expires-at)
-                    (<= expires-at (+ now (get-in store [:options :max-ttl-ms])))
+                    (<= expires-at (+' now (get-in store [:options :max-ttl-ms])))
                     (< (count (:families state)) (get-in store [:options :max-families])))
                [(assoc-in state [:families family]
                           {:expires-at expires-at :generation (Object.)}) family]
@@ -217,6 +217,6 @@
              [state {:families (count (:families state)) :pending (count (:pending state))
                      :entries (count (:entries state)) :leases (count (:leases state))
                      :retired (count (filter :retired? (vals (:entries state))))
-                     :pending-bytes (reduce + 0 (map :reserved (vals (:pending state))))
-                     :retained-bytes (reduce + 0 (map :charge (vals (:entries state))))
+                     :pending-bytes (reduce +' 0 (map :reserved (vals (:pending state))))
+                     :retained-bytes (reduce +' 0 (map :charge (vals (:entries state))))
                      :charged-bytes (occupied-bytes state)}])))

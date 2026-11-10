@@ -7,7 +7,7 @@ Protocols, rows, traversal, and change notifications.
 
 after: executor
 
-[[file:index.org][index]] · ~65 min
+[[file:index.org][index]] · ~69 min
 
 * 1. Storage
 :PROPERTIES:
@@ -166,7 +166,19 @@ Implements reachable-graph resolution using generic row loaders and [[file:gloss
 - source :: [[file:../../../src/graphden/storage/protocol/generic_graph.clj::(defn resolve-execution-graph][src/graphden/storage/protocol/generic_graph.clj:36]]
 - see also :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
-* 13. PostgresStorage
+* 13. ensure-marker!
+:PROPERTIES:
+:CUSTOM_ID: storage/ensure-marker!
+:FILE: src/graphden/storage/postgres/source_session.clj
+:LINE: 154
+:MINS: 3.5
+:END:
+
+Prepares bounded session-incarnation evidence before owning a repeatable-read transaction. A known direct/session datasource acquires two random session advisory locks once per physical connection. Sealing and checking the origin happen only after the certificate's first relation lock. This inactive foundation does not authorize rows or replace fresh schema, transaction-ID and complete membership checks. Its manager shares the pool's lifetime; replacing the manager requires retiring the pool, not stacking new locks.
+
+- source :: [[file:../../../src/graphden/storage/postgres/source_session.clj::(defn ensure-marker!][src/graphden/storage/postgres/source_session.clj:154]]
+
+* 14. PostgresStorage
 :PROPERTIES:
 :CUSTOM_ID: storage/PostgresStorage
 :FILE: src/graphden/storage/postgres/core.clj
@@ -178,7 +190,7 @@ Implements the storage [[file:glossary.org::#term/protocol][protocols]] for Post
 
 - source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:127]]
 
-* 14. do-initialize
+* 15. do-initialize
 :PROPERTIES:
 :CUSTOM_ID: storage/do-initialize
 :FILE: src/graphden/storage/postgres/migration.clj
@@ -190,7 +202,7 @@ Compares the declared schema with stored metadata and applies the required datab
 
 - source :: [[file:../../../src/graphden/storage/postgres/migration.clj::(defn do-initialize][src/graphden/storage/postgres/migration.clj:286]]
 
-* 15. reachable-fns-sql
+* 16. reachable-fns-sql
 :PROPERTIES:
 :CUSTOM_ID: storage/reachable-fns-sql
 :FILE: src/graphden/storage/postgres/graph.clj
@@ -204,7 +216,7 @@ Builds a [[file:glossary.org::#term/cte][recursive SQL]] [[file:glossary.org::#t
 - see also :: [[file:storage.org::#storage/process-fn-node][process-fn-node]]
 - same file :: [[file:storage.org::#storage/resolve-execution-graph~2][resolve-execution-graph]]
 
-* 16. resolve-execution-graph
+* 17. resolve-execution-graph
 :PROPERTIES:
 :CUSTOM_ID: storage/resolve-execution-graph~2
 :FILE: src/graphden/storage/postgres/graph.clj
@@ -218,7 +230,7 @@ Runs the [[file:glossary.org::#term/cte][recursive query]] for reachable functio
 - see also :: [[file:storage.org::#storage/->execution-graph][->execution-graph]]
 - same file :: [[file:storage.org::#storage/reachable-fns-sql][reachable-fns-sql]]
 
-* 17. candidate-ids
+* 18. candidate-ids
 :PROPERTIES:
 :CUSTOM_ID: storage/candidate-ids
 :FILE: src/graphden/storage/bounded_query.clj
@@ -230,7 +242,7 @@ Loads a limited set of identity IDs before reading their values. The optional ~S
 
 - source :: [[file:../../../src/graphden/storage/bounded_query.clj::(defn candidate-ids][src/graphden/storage/bounded_query.clj:37]]
 
-* 18. make-emitter
+* 19. make-emitter
 :PROPERTIES:
 :CUSTOM_ID: storage/make-emitter
 :FILE: src/graphden/storage/postgres/notify.clj
@@ -244,7 +256,7 @@ Creates the write-notification sender. After a write, it sends ~pg_notify~ throu
 - see also :: [[file:crud.org::#crud/notify-after-write!][notify-after-write!]]
 - same file :: [[file:storage.org::#storage/create-listener][create-listener]]
 
-* 19. create-listener
+* 20. create-listener
 :PROPERTIES:
 :CUSTOM_ID: storage/create-listener
 :FILE: src/graphden/storage/postgres/notify.clj

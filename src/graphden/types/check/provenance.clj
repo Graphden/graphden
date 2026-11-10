@@ -20,14 +20,25 @@
 (defonce ^:private marker-key (Object.))
 
 
+(defn- sort-by-printed
+  [key-fn values]
+  ;; sort-by recomputes its key on each comparison. Print once per immutable
+  ;; item, retaining the same stable ordering and canonical digest bytes.
+  (if (next values)
+    (->> values
+         (map (fn [value] [(pr-str (key-fn value)) value]))
+         (sort-by first)
+         (mapv second))
+    (vec values)))
+
+
 (defn- canonical
   [value]
   (cond
     (map? value) [::map (->> value
                              (map (fn [[k v]] [(canonical k) (canonical v)]))
-                             (sort-by (comp pr-str first))
-                             vec)]
-    (set? value) [::set (vec (sort-by pr-str (map canonical value)))]
+                             (sort-by-printed first))]
+    (set? value) [::set (sort-by-printed identity (map canonical value))]
     (vector? value) [::vector (mapv canonical value)]
     (sequential? value) [::sequence (mapv canonical value)]
     :else value))

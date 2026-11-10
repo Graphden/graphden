@@ -338,16 +338,20 @@
    from borrowing another read's plan. This is not authorization or a cache
    certificate; consumers must copy mutable parameters before executing SQL."
   [ds sql-params]
-  (when (and (identical? ds (:connection *active-read*))
+  (when (and *active-read* @(:active? *active-read*)
+             (identical? ds (:connection *active-read*))
              (identical? sql-params (:sql-params *active-read*)))
     (:plan *active-read*)))
 
 
 (defn- execute-read
   [execute ds plan format-options opts]
-  (let [query (sql/format plan format-options)]
-    (binding [*active-read* {:connection ds :sql-params query :plan plan}]
-      (execute ds query opts))))
+  (let [query (sql/format plan format-options)
+        active? (volatile! true)]
+    (binding [*active-read* {:connection ds :sql-params query :plan plan :active? active?}]
+      (try
+        (execute ds query opts)
+        (finally (vreset! active? false))))))
 
 
 (defn exec-read!

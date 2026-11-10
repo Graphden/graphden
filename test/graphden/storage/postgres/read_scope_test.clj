@@ -46,10 +46,12 @@
         other-connection (Object.)
         plan {:select [:id] :from [:fn] :where [:= :id 7]}
         error (ex-info "Read failed" {:type ::expected})
-        observed (atom nil)]
+        observed (atom nil)
+        late-plan (atom nil)]
     (binding [util/*jdbc-override*
               {:execute! (fn [ds query opts]
                            (reset! observed query)
+                           (reset! late-plan (bound-fn [] (util/current-read-plan ds query)))
                            (is (= plan (util/current-read-plan ds query)))
                            (is (nil? (util/current-read-plan other-connection query)))
                            (is (nil? (util/current-read-plan ds (assoc query 1 8))))
@@ -58,7 +60,8 @@
                            (throw error))}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Read failed"
             (util/exec-read! connection plan {:quoted true} {:fetch-size 17}))))
-    (is (nil? (util/current-read-plan connection @observed)))))
+    (is (nil? (util/current-read-plan connection @observed)))
+    (is (nil? (@late-plan)))))
 
 
 (deftest application-sql-is-visible-but-unclassified

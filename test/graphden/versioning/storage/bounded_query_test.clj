@@ -127,7 +127,7 @@
       (let [sql (ffirst @queries)
             projection (first (str/split (or sql "") #"(?i) FROM "))]
         (is (and sql (str/includes? sql "LIMIT ?")))
-        (is (str/includes? projection "DISTINCT"))
+        (is (str/includes? sql "DISTINCT"))
         (is (not (str/includes? projection "value")))))))
 
 

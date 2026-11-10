@@ -190,8 +190,8 @@
         one (or (:execute-one! prior) jdbc/execute-one!)]
     (binding [*trace* trace-ref *active-scope* trace-ref
               pg/*jdbc-override* {:execute! (jdbc-hook many false) :execute-one! (jdbc-hook one true)}]
-      (try (f) (finally (when-let [active? (:active? @trace-ref)] (reset! active? false))
-                        (reset! trace-ref ::closed))))))
+      (try (pg/call-with-flat-read-plans f) (finally (when-let [active? (:active? @trace-ref)] (reset! active? false))
+                                                     (reset! trace-ref ::closed))))))
 
 
 (defn- authority-projection

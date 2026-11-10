@@ -318,3 +318,15 @@
           (is (nil? (:recipe result)))
           (is (= :nested-source-trace (:reason result))))))
     (is (zero? @inner-calls))))
+
+
+(deftest recording-and-replay-keep-flat-certificate-plans-scoped
+  (let [seen-flags (atom [])
+        run (fn [authorize]
+              (swap! seen-flags conj (pg/flat-read-plans?))
+              (source-pass authorize))
+        recording (snapshot #(trace/record % run authorize!))
+        replay-value (snapshot #(trace/replay % (:recipe recording) run authorize!))]
+    (is (= (:value recording) replay-value))
+    (is (= [true true] @seen-flags))
+    (is (false? (pg/flat-read-plans?)))))

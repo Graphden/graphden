@@ -259,3 +259,52 @@
              (try (jdbc-rows/freeze [row] false 65536) nil
                   (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))
     (is (zero? @called))))
+
+
+(deftest scope-cannot-pair-one-guards-witness-with-another-connections-payload-test
+  (let [recipe (:recipe (recorded)) reached (atom 0)]
+    (with-open [other (jdbc/get-connection *pool*)]
+      (snapshot
+        (fn [scope]
+          (doseq [attempt [(fn [run] (trace/record (assoc scope :connection other) run authorize!))
+                           (fn [run] (trace/replay (assoc scope :connection other) recipe run authorize!))]]
+            (is (= {:type ::certificate/miss :reason :guard-connection-mismatch}
+                   (try (attempt (fn [auth] (swap! reached inc) (source-pass auth))) nil
+                        (catch clojure.lang.ExceptionInfo error (ex-data error)))))))))
+    (is (zero? @reached))))
+
+
+(deftest nested-traces-refuse-before-inner-reads-and-poison-outer-record-test
+  (let [inner-calls (atom 0)
+        inner (fn [_] (swap! inner-calls inc) (pg/exec! *connection* ["SELECT 1"]))
+        recipe (:recipe (recorded))]
+    (snapshot
+      (fn [scope]
+        (doseq [nested [(fn [] (trace/record scope inner authorize!))
+                        (fn [] (trace/replay scope recipe inner authorize!))]]
+          (let [result (trace/record scope
+                                     (fn [auth]
+                                       (source-pass auth)
+                                       (is (= :nested-source-trace (restart-reason nested)))
+                                       :ordinary)
+                                     authorize!)]
+            (is (= :ordinary (:value result)))
+            (is (= :nested-source-trace (:reason result)))
+            (is (nil? (:recipe result)))))
+        (is (= :source-scope-expired
+               (restart-reason
+                 (fn []
+                   (trace/replay scope recipe
+                                 (fn [_]
+                                   (is (= :nested-source-trace
+                                          (restart-reason (fn [] (trace/record scope inner authorize!)))))
+                                   :caught-inner-error)
+                                 authorize!)))))
+        (let [result (trace/record scope source-pass
+                                   (fn [& args]
+                                     (is (= :nested-source-trace
+                                            (restart-reason (fn [] (trace/record scope inner authorize!)))))
+                                     (apply authorize! args)))]
+          (is (nil? (:recipe result)))
+          (is (= :nested-source-trace (:reason result))))))
+    (is (zero? @inner-calls))))

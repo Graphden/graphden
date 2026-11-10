@@ -27,6 +27,7 @@
 
 (def ^:private state-charge (+ preparation-scratch-bytes 4096))
 (def ^:dynamic ^:private *trace* nil)
+(def ^:dynamic ^:private *active-scope* nil)
 
 
 (deftype ^:private Recipe
@@ -63,6 +64,18 @@
     ;; the actual builder's finally, never to this admission failure alone.
     (reset! state {:poisoned? true :reason (:reason (ex-data error))})
     (throw error)))
+
+
+(defn- refuse-nested!
+  []
+  (when *active-scope*
+    (let [outer @*active-scope*]
+      (when-not (map? outer) (restart! :source-scope-expired))
+      (check-active! outer)
+      (if (= :record (:mode outer))
+        (reset! (:state outer) {:poisoned? true :reason :nested-source-trace})
+        (reset! (:active? outer) false))
+      (restart! :nested-source-trace))))
 
 
 (defn- charge!
@@ -116,7 +129,7 @@
           ;; Execute exactly the immutable values that were prepared, even if
           ;; the producer mutates a Date/Timestamp before the JDBC call starts.
           result (original ds (if prepared (certificate/operation-query (:operation prepared)) query) opts)]
-      (when prepared
+      (when (and prepared (not (:poisoned? @state)))
         (try (retain-query! trace prepared result)
              (catch clojure.lang.ExceptionInfo error (poison! state error))))
       result)))
@@ -153,7 +166,7 @@
   (let [prior pg/*jdbc-override*
         many (or (:execute! prior) jdbc/execute!)
         one (or (:execute-one! prior) jdbc/execute-one!)]
-    (binding [*trace* trace-ref
+    (binding [*trace* trace-ref *active-scope* trace-ref
               pg/*jdbc-override* {:execute! (jdbc-hook many false) :execute-one! (jdbc-hook one true)}]
       (try (f) (finally (when-let [active? (:active? @trace-ref)] (reset! active? false))
                         (reset! trace-ref ::closed))))))
@@ -206,6 +219,7 @@
                  (every? #{:id :org-id :namespace-id :concealed} authority-fields)
                  (integer? max-bytes) (> max-bytes (+ preparation-scratch-bytes (* 1024 1024))))
     (throw (ex-info "Source trace requires an owned bounded scope" {})))
+  (certificate/assert-connection! guard connection)
   (assoc scope :authority-fields (into [] authority-fields)
          :owner (Thread/currentThread) :active? (atom true)))
 
@@ -216,6 +230,7 @@
    Unknown reads/codecs poison the whole recipe while ordinary reads continue.
    Metadata SQL errors require outer transaction restart; cancellation escapes."
   [scope run authorize!]
+  (refuse-nested!)
   (let [state (atom {:operations [] :by-key {} :authorizations {} :bytes state-charge})
         trace (assoc (trace-context scope) :mode :record :state state :authorize! authorize!)
         trace-ref (atom trace)]
@@ -253,6 +268,7 @@
    In addition to its entry lease, the caller owns preparation-scratch-bytes
    until this synchronous pass has actually returned or unwound."
   [scope recipe run authorize!]
+  (refuse-nested!)
   (when-not (instance? Recipe recipe) (restart! :recipe-missing))
   (let [saved (.-state ^Recipe recipe)
         trace (assoc (trace-context scope) :mode :replay :by-key (:by-key saved) :authorize! authorize!)

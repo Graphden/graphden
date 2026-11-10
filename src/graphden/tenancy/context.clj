@@ -275,6 +275,17 @@
     policy))
 
 
+(defn source-replay-registration
+  "Describe the current opt-in registration before borrowing/opening source RR.
+   This performs no policy factory call or I/O and grants no source authority.
+   Consumers must verify the newly created policy's sealed info afterward."
+  []
+  (let [policies @(seams-atom)]
+    (if (:browser-source-policy-fn policies)
+      (:browser-source-replay-adapter policies)
+      (when-not (:org-cap-installed? policies) (:unscoped-source-replay-policy policies)))))
+
+
 ;; Uniform Class/.-field syntax resolves these generated fields as methods.
 ^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn source-replay-policy-info
@@ -282,10 +293,7 @@
    Unknown factories and policies from replaced/uninstalled registrations are
    ineligible. Every cached read still needs its own snapshot and fresh guard."
   [policy]
-  (let [policies @(seams-atom)
-        current (if (:browser-source-policy-fn policies)
-                  (:browser-source-replay-adapter policies)
-                  (when-not (:org-cap-installed? policies) (:unscoped-source-replay-policy policies)))
+  (let [current (source-replay-registration)
         witness (get (meta policy) source-replay-policy-key)]
     (when (and (fn? policy) current
                (instance? SourceReplayPolicyWitness witness)

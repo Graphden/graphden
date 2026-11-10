@@ -142,7 +142,7 @@
   ;; pool would make the lock bound fictitious. Never unlock a different key.
   (try
     (pg/exec! connection
-              ["SELECT pg_advisory_unlock(?) AS first, pg_advisory_unlock(?) AS second"
+              ["SELECT pg_catalog.pg_advisory_unlock(?) AS first, pg_catalog.pg_advisory_unlock(?) AS second"
                (first lock-keys) (second lock-keys)] query-options)
     (catch Throwable error
       (when-let [physical (physical-connection connection)]
@@ -173,7 +173,7 @@
                 (check!)
                 (vreset! attempted? true)
                 (let [row (first (execute! connection check!
-                                           ["SELECT pg_try_advisory_lock(?) AS first, pg_try_advisory_lock(?) AS second"
+                                           ["SELECT pg_catalog.pg_try_advisory_lock(?) AS first, pg_catalog.pg_try_advisory_lock(?) AS second"
                                             (first lock-keys) (second lock-keys)]))]
                   (when (and (true? (:first row)) (true? (:second row))
                              (not @(:closed? owner)))
@@ -224,29 +224,29 @@
 
 
 (def ^:private marker-condition
-  (str "2=(SELECT count(*) FROM pg_locks l WHERE l.pid=a.pid "
+  (str "2=(SELECT count(*) FROM pg_catalog.pg_locks l WHERE l.pid=a.pid "
        "AND l.database=a.datid AND l.locktype='advisory' AND l.granted "
        "AND l.mode='ExclusiveLock' AND l.objsubid=1 "
-       "AND ((l.classid::bigint << 32) | l.objid::bigint) IN (?,?))"))
+       "AND ((l.classid::pg_catalog.int8 << 32) | l.objid::pg_catalog.int8) IN (?,?))"))
 
 
 (def ^:private identity-query
-  (str "SELECT a.pid,a.backend_start,a.datid::text AS database,a.usesysid::text AS role "
-       "FROM pg_stat_activity a WHERE a.pid=pg_backend_pid() AND " marker-condition))
+  (str "SELECT a.pid,a.backend_start,a.datid::pg_catalog.text AS database,a.usesysid::pg_catalog.text AS role "
+       "FROM pg_catalog.pg_stat_activity a WHERE a.pid=pg_catalog.pg_backend_pid() AND " marker-condition))
 
 
 (defn- origin-present?
   [connection check! {:keys [pid start database role] lock-keys :keys}]
   ;; Activity statistics are transaction cached independently of MVCC. Only
   ;; clear them AFTER the certificate's first relation LOCK, never before it.
-  (execute! connection check! ["SELECT pg_stat_clear_snapshot()"])
+  (execute! connection check! ["SELECT pg_catalog.pg_stat_clear_snapshot()"])
   (true?
     (:present
       (first
         (execute! connection check!
-                  [(str "SELECT EXISTS (SELECT 1 FROM pg_stat_activity a "
-                        "WHERE a.pid=? AND a.backend_start=? AND a.datid::text=? AND a.usesysid::text=? "
-                        "AND a.datid=(SELECT oid FROM pg_database WHERE datname=current_database()) "
+                  [(str "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity a "
+                        "WHERE a.pid=? AND a.backend_start=? AND a.datid::pg_catalog.text=? AND a.usesysid::pg_catalog.text=? "
+                        "AND a.datid=(SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database()) "
                         "AND " marker-condition ") AS present")
                    pid (Timestamp/from start) database role (first lock-keys) (second lock-keys)])))))
 
@@ -262,14 +262,14 @@
     (when (marker-live? state)
       (when-let [physical (guarded-connection connection)]
         (when (identical? physical (.get ^WeakReference (:physical state)))
-          (execute! connection check! ["SELECT pg_stat_clear_snapshot()"])
+          (execute! connection check! ["SELECT pg_catalog.pg_stat_clear_snapshot()"])
           (let [{:keys [pid backend_start database role]}
                 (first (execute! connection check! (into [identity-query] (:keys state))))
                 origin-identity (when (and (= pid (.getBackendPID ^PgConnection physical))
                                            backend_start database role)
                                   {:pid pid :start (.toInstant ^Timestamp backend_start)
                                    :database database :role role :keys (:keys state)})]
-            (if origin-identity
+            (if (and origin-identity (marker-live? state))
               (Origin. witness-seal {:marker marker :identity origin-identity})
               (do (reset! (:status state) :retired) nil))))))))
 
@@ -297,7 +297,9 @@
         (and (marker-live? state)
              (when-let [physical (guarded-connection connection)]
                (and (registered-destination? state physical)
-                    (origin-present? connection check! origin-identity))))))))
+                    (origin-present? connection check! origin-identity)
+                    (marker-live? state)
+                    (registered-destination? state physical))))))))
 
 
 (defn stats

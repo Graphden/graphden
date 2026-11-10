@@ -3,14 +3,14 @@
    primitive boot-data. Leaf namespace — depends on nothing else under
    `graphden.packages.records`."
   (:require
-    [graphden.tenancy.context :as tc])
+    [graphden.tenancy.context :as tc]
+    [graphden.util.hex :as hex])
   (:import
     (java.nio.charset
       StandardCharsets)
     (java.security
       MessageDigest)
     (java.util
-      HexFormat
       UUID)))
 
 
@@ -129,7 +129,7 @@
   (let [digest (MessageDigest/getInstance algo)
         utf-bytes (String/.getBytes ^String s StandardCharsets/UTF_8)
         hash-bytes (MessageDigest/.digest digest utf-bytes)]
-    (HexFormat/.formatHex (HexFormat/of) hash-bytes)))
+    (hex/encode hash-bytes)))
 
 
 (defn shape-hash

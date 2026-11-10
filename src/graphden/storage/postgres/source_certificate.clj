@@ -476,20 +476,24 @@
 (defn prepare-operation
   "Before the actual source SQL, freeze and admit its exact quoted plan and
    typed parameters. Unknown formatting/expressions must poison the capture.
-   The caller separately owns replay-key options/builder identity and results."
-  [guard ast sql-params]
-  (let [{:keys [locked scope]} (check-guard guard)
-        {ast :ast nodes :nodes} (freeze-ast ast)
-        parts (participants ast locked)
-        actual (freeze-query sql-params)
-        expected (freeze-query (sql/format ast {:quoted true}))]
-    (when-not (= (select-keys actual [:sql :params]) (select-keys expected [:sql :params]))
-      (miss! :plan-query-mismatch))
-    (check-guard guard)
-    (Operation. {:ast ast :parts parts :scope scope
-                 :query (select-keys actual [:sql :params])
-                 :key (OperationKey. (select-keys actual [:sql :params]))
-                 :charge-bytes (+ 4096 (* 16 (:bytes actual)) (* 256 nodes))})))
+   The caller separately owns replay-key options/builder identity and results.
+   single-row? requires complete predicate cardinality <=1 at capture, rather
+   than assuming execute-one! chooses a deterministic unordered first row."
+  ([guard ast sql-params] (prepare-operation guard ast sql-params false))
+  ([guard ast sql-params single-row?]
+   (when-not (boolean? single-row?) (miss! :operation-shape))
+   (let [{:keys [locked scope]} (check-guard guard)
+         {ast :ast nodes :nodes} (freeze-ast ast)
+         parts (participants ast locked)
+         actual (freeze-query sql-params)
+         expected (freeze-query (sql/format ast {:quoted true}))]
+     (when-not (= (select-keys actual [:sql :params]) (select-keys expected [:sql :params]))
+       (miss! :plan-query-mismatch))
+     (check-guard guard)
+     (Operation. {:ast ast :parts parts :scope scope :single-row? single-row?
+                  :query (select-keys actual [:sql :params])
+                  :key (OperationKey. (select-keys actual [:sql :params]))
+                  :charge-bytes (+ 4096 (* 16 (:bytes actual)) (* 256 nodes))}))))
 
 
 (defn operation-key
@@ -523,12 +527,13 @@
 (defn- witness-member
   "Reject clipped results or ambiguous ordered selection without transferring
    source values. Window counts cover the COMPLETE predicate before LIMIT."
-  [ast member]
+  [ast member single-row?]
   (let [ordering (mapv #(if (vector? %) (first %) %) (:order-by ast))
         ties (when (seq ordering)
                [:> [:over [[:count :*] {:partition-by ordering}]] [:inline 1]])
-        clipped (when (contains? ast :limit)
-                  [:> [:over [[:count :*] {}]] (:limit ast)])]
+        limit (if single-row? (min 1 (or (:limit ast) 1)) (:limit ast))
+        clipped (when (some? limit)
+                  [:> [:over [[:count :*] {}]] limit])]
     (if (or ties clipped)
       (into [:case] (concat (when ties [ties [:inline -1]])
                             (when clipped [clipped [:inline -2]])
@@ -539,13 +544,13 @@
 (defn- operation-statements
   [operation-index operation]
   (when-not (instance? Operation operation) (miss! :operation-missing))
-  (let [{:keys [ast parts]} (.-state ^Operation operation)]
+  (let [{:keys [ast parts single-row?]} (.-state ^Operation operation)]
     (mapv (fn [member {table-alias :alias}]
             (let [column #(keyword (str (name table-alias) "." %))]
               (freeze-query
                 (sql/format
                   (assoc (select-keys ast [:from :join :where])
-                         :select [[[:inline operation-index] :operation] [(witness-member ast member) :member]
+                         :select [[[:inline operation-index] :operation] [(witness-member ast member single-row?) :member]
                                   [[:cast (column "tableoid") :text] :relation]
                                   [[:cast (column "ctid") :text] :location]
                                   [[:cast (column "xmin") :text] :insertion]]

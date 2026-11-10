@@ -670,8 +670,10 @@
         ;; we replace the cached handler with our own atom-capturer.
         noop-fn (sp/create-entity storage :fn {:name "noop-handler"
                                                :parent-ids []})
-        base-ctx (ctx/create-context {:storage storage
-                                      :base-fns (exec/get-default-registry)})
+        checker-cache (Object.)
+        base-ctx (assoc (ctx/create-context {:storage storage
+                                             :base-fns (exec/get-default-registry)})
+                        :checker-cache checker-cache)
         feature (vs/create-branch! storage "e2e-feature")
         captured (atom [])]
     (try
@@ -703,6 +705,8 @@
           ;; bypass that one step by swapping the cached entry after
           ;; the ctx is constructed.
           (let [feature-ctx (br/ctx-for router (:id feature))]
+            (is (identical? checker-cache (:checker-cache feature-ctx))
+                "Branches inherit the runtime budget instead of allocating another cache")
             (testing "the lazy-built ctx is bound to the feature branch"
               (is (= (:id feature)
                      (vs/current-branch-id (:storage feature-ctx)))))

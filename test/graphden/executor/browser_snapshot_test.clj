@@ -9,9 +9,11 @@
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.browser-preview :as preview]
+    [graphden.executor.browser-server-execution :as execution]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.checked-source-memo :as checker-memo]
+    [graphden.executor.checked-source-runtime :as checker-runtime]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.source-contract :as source-contract]
@@ -747,3 +749,33 @@
       (is (thrown-with-msg? InterruptedException #"cancelled" (export f))))
     (is (= 0 (:entries (checker-memo/stats m))))
     (is (= 0 (:pending (checker-memo/stats m))))))
+
+
+(deftest runtime-policy-carries-checker-cache-into-real-execution-worker
+  (let [f (fixture [] {}) cache (checker-runtime/create-cache)
+        ctx {:storage (remote/from-bundle {}) :rich-types-atom (atom (:rich f))
+             :checker-cache cache}
+        check! check/check-fn-def! calls (atom 0)
+        run #(execution/run ctx
+                            (fn []
+                              (let [policy (snapshot/capture-context-policy ctx)]
+                                (snapshot/export-snapshot (:snapshot f) {} {:view (:id f)} policy))))]
+    (try
+      (binding [types/*type-aliases-override* (atom (:aliases f))
+                shapes/*marker-registry-override* (atom (:markers f))
+                tenancy/*current-org* (random-uuid)]
+        (with-redefs [check/check-fn-def! (fn [definition] (swap! calls inc) (check! definition))]
+          (let [plan (run) checked @calls]
+            (is (pos? checked))
+            (is (= 1 (:entries (checker-memo/stats cache))))
+            (is (= plan (run)))
+            (is (= checked @calls) "The worker gets the runtime cache without diagnostic binding")
+            (let [policy (assoc-in (snapshot/capture-context-policy ctx)
+                                   [:classes (:id f)] :secret-output)]
+              (is (= :visibility-denied
+                     (:reason (failure #(snapshot/export-snapshot (:snapshot f) {} {:view (:id f)} policy))))))
+            (is (= checked @calls) "A hit still obeys the fresh policy veto")
+            (checker-memo/retire! cache)
+            (is (= plan (run)))
+            (is (> @calls checked) "Retired runtime falls back to fresh checking"))))
+      (finally (checker-memo/retire! cache)))))

@@ -261,6 +261,31 @@
    :args {:envelope {:parent :_editor-configuration-plan :args {:input :parse-json-body}}}}
   {:name :api-editor-configuration-plan :parent :app.routes.auth/post
    :args {:path "/ui/configuration/plan" :handler :_editor-configuration-plan-handler}}
+  {:name :_editor-configuration-plans-facts
+   :description "Capture one fresh authorized configuration and export a finite set of components with independent source and plan budgets."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_component-batch-item
+   :parent :component-export-result
+   :args {:result {:as :value :type :keyword-map}}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-plans-items
+   :parent :update-vals
+   :args {:m {:parent :get :args {:coll :_editor-configuration-plans-facts :key {:value :results} :default nil}}
+          :f :_component-batch-item}
+   :return-type :text-keyed-map}
+  {:name :_editor-configuration-plans
+   :parent :if
+   :args {:test {:parent :_ui-operation-ok? :args {:result :_editor-configuration-plans-facts}}
+          :then {:parent :assoc
+                 :args {:map :_editor-configuration-plans-facts :key {:value :results}
+                        :value :_editor-configuration-plans-items}}
+          :else {:parent :component-export-result :args {:result :_editor-configuration-plans-facts}}}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-plans-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-plans :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-plans :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/plans" :handler :_editor-configuration-plans-handler}}
   {:name :_editor-configuration-prepare
    :description "Explicitly prepare the owner's ordinary editor root, preserving legacy configuration by reference. Creates no component closure copy."
    :parent :configuration-result

@@ -38,7 +38,7 @@
       return evaluator.run(entry, argumentsForGraph, operationBudget);
     }};
   }
-  async function loadPlan(component, started, signal) {
+  async function loadSinglePlan(component, started, signal) {
     return window.gdReadGraphResponse(
       () => window.authFetch(window.API.api_ui_configuration_plan, {
         method: 'POST', signal, cache: 'no-store',
@@ -47,6 +47,81 @@
       }), signal, () => started === stamp(),
       (response, result) => response.status === 422 && !response.ok && result.ok === false
         && result.code === 'policy-refresh-required' && result.retryable === true);
+  }
+  const queuedPlans = new Map();
+  const activePlans = new Set();
+  const aborted = () => new DOMException('Selection changed', 'AbortError');
+  function removeSubscription(batch, subscription) {
+    subscription.signal?.removeEventListener('abort', subscription.abort);
+    batch.subscriptions.delete(subscription);
+    if (batch.subscriptions.size === 0) {
+      clearTimeout(batch.timer);
+      if (queuedPlans.get(batch.started) === batch) queuedPlans.delete(batch.started);
+      activePlans.delete(batch);
+      batch.controller.abort();
+    }
+  }
+  function settleSubscription(batch, subscription, value, error) {
+    const obsolete = subscription.signal?.aborted || batch.started !== stamp();
+    removeSubscription(batch, subscription);
+    if (obsolete) subscription.reject(aborted());
+    else if (error) subscription.reject(error);
+    else subscription.resolve(value);
+  }
+  function batchItem(response, result, component) {
+    if (!response.ok || result.ok !== true) return {response, result};
+    const item = result.results?.[component];
+    if (!item || typeof item.ok !== 'boolean') throw new Error('Invalid component batch');
+    const status = item.ok ? 200 : item['http-status'];
+    if (!item.ok && (!Number.isInteger(status) || status < 400 || status > 599)) throw new Error('Invalid component refusal');
+    return {response: {ok: item.ok, status}, result: item};
+  }
+  async function sendPlans(batch) {
+    queuedPlans.delete(batch.started);
+    const components = [...new Set([...batch.subscriptions].map(subscription => subscription.component))];
+    if (!components.length) return;
+    const signal = batch.controller.signal;
+    try {
+      const {response, result} = await window.gdReadGraphResponse(
+        () => window.authFetch(window.API.api_ui_configuration_plans, {
+          method: 'POST', signal, cache: 'no-store',
+          headers: {'Content-Type': 'application/json'}, body: JSON.stringify({components}),
+        }), signal, () => batch.started === stamp(),
+        (reply, body) => reply.status === 422 && !reply.ok && body.ok === false
+          && body.code === 'policy-refresh-required' && body.retryable === true);
+      // Validate the complete envelope before publishing any item. Individual
+      // plans retain the runtime/contract validation in their own consumer.
+      if (response.ok && result.ok === true
+        && (!result.results || Array.isArray(result.results)
+          || Object.keys(result.results).length !== components.length
+          || components.some(component => !Object.hasOwn(result.results, component)))) throw new Error('Invalid component batch');
+      const items = new Map(components.map(component => [component, batchItem(response, result, component)]));
+      for (const subscription of [...batch.subscriptions]) settleSubscription(batch, subscription, items.get(subscription.component));
+    } catch (error) {
+      for (const subscription of [...batch.subscriptions]) settleSubscription(batch, subscription, null, error);
+    }
+  }
+  function cancelPlans() {
+    for (const batch of [...activePlans]) {
+      for (const subscription of [...batch.subscriptions]) settleSubscription(batch, subscription, null, aborted());
+    }
+  }
+  function loadPlan(component, started, signal) {
+    if (!window.API.api_ui_configuration_plans) return loadSinglePlan(component, started, signal);
+    if (signal?.aborted || started !== stamp()) return Promise.reject(aborted());
+    let batch = queuedPlans.get(started);
+    if (!batch) {
+      batch = {started, controller: new AbortController(), subscriptions: new Set(), timer: null};
+      queuedPlans.set(started, batch);
+      activePlans.add(batch);
+      batch.timer = setTimeout(() => { void sendPlans(batch); }, 0);
+    }
+    return new Promise((resolve, reject) => {
+      const subscription = {component, signal, resolve, reject, abort: null};
+      subscription.abort = () => settleSubscription(batch, subscription, null, aborted());
+      batch.subscriptions.add(subscription);
+      signal?.addEventListener('abort', subscription.abort, {once: true});
+    });
   }
   function acceptConfiguration(response, result, started) {
     if (!response.ok || !result.ok || !uuid.test(result['selection-id'] || '')
@@ -96,6 +171,7 @@
   function refresh(root = true) {
     if (root) void window.gdEditorRoot?.reload();
     generation++;
+    cancelPlans();
     configuration = null;
     catalog = null;
     runtimeIdentities.clear();

@@ -54,7 +54,7 @@
     ;; binding values; the protected metadata lookup returns server-owned rows.
     :_editor-configuration-apply-outcome :_editor-configuration-cleanup-preview-outcome
     :_editor-server-call-facts :_editor-root-plan-facts :_editor-root-migration-preview-outcome :_editor-root-migration-apply-outcome
-    :_editor-configuration-plan-facts :_editor-configuration-prepare-outcome
+    :_editor-configuration-plan-facts :_editor-configuration-plans-facts :_editor-configuration-prepare-outcome
     :_editor-configuration-preview-outcome :_editor-configuration-reconcile-outcome
     :_editor-configuration-reconcile-undo-outcome :_editor-configuration-undo-outcome
     :find-function :ui-pref-store-status
@@ -262,7 +262,7 @@
     ;; Migration proposals and receipts carry caller-selected graph identity;
     ;; validation is not a declassification boundary.
     :_editor-root-migration-preview-outcome :_editor-root-migration-apply-outcome
-    :_editor-server-call-facts :_editor-configuration-plan-facts :_editor-configuration-prepare-outcome
+    :_editor-server-call-facts :_editor-configuration-plan-facts :_editor-configuration-plans-facts :_editor-configuration-prepare-outcome
     :_editor-configuration-preview-outcome :_editor-configuration-reconcile-outcome
     :_editor-configuration-reconcile-undo-outcome :_editor-configuration-undo-outcome
     :ui-pref-store-status
@@ -398,7 +398,7 @@
 
 (deftest component-and-view-commands-preserve-and-redact-input-taint
   (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
-    (doseq [primitive [:_editor-configuration-plan-facts :_ui-components-create-preview-facts
+    (doseq [primitive [:_editor-configuration-plan-facts :_editor-configuration-plans-facts :_ui-components-create-preview-facts
                        :_ui-components-create-apply-facts :_save-explorer-view-operation
                        :_save-explorer-view-safe-error]]
       (let [definition (get definitions primitive)

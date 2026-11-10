@@ -107,3 +107,29 @@
     (is (= (assoc receipt :publication-warnings
                   [{:reason "Your UI graphs were created. Refresh the editor to reload their derived state."}])
            (response :apply (assoc receipt :publication-incomplete? true))))))
+
+
+(deftest batch-items-use-the-existing-public-response-policy
+  (let [receipt {:ok true :selection-id "selected" :plan {:bounded true}}
+        native {:ok true :results {"inspector" receipt
+                                   "explorer" (failure {:type :browser-plan/unsupported :reason :component-missing})
+                                   "canvas" (failure {:type :authz/forbidden})}}]
+    (with-redefs [components/export-resolved-batch (fn [& _] native)]
+      (let [out (exec/execute-with-named-args (:ctx *graph*)
+                                              (ids/fn-id "app.ui-components" :_editor-configuration-plans)
+                                              {:input {:components ["inspector" "explorer" "canvas"]}})]
+        (is (true? (:ok out)))
+        (is (= receipt (get-in out [:results "inspector"])))
+        (is (= {:ok false :http-status 422 :code "component-missing" :fallback "builtin"
+                :reason "Personal UI graph is unavailable. Using built-in components."}
+               (get-in out [:results "explorer"])))
+        (is (= 403 (get-in out [:results "canvas" :http-status])))
+        (is (not (str/includes? (pr-str out) "failure-type"))))))
+  (with-redefs [components/export-resolved-batch
+                (fn [& _] (failure {:type :browser-plan/unsupported :reason :policy-refresh-required}))]
+    (let [out (exec/execute-with-named-args (:ctx *graph*)
+                                            (ids/fn-id "app.ui-components" :_editor-configuration-plans)
+                                            {:input {:components ["inspector"]}})]
+      (is (= [false 422 "policy-refresh-required" true]
+             ((juxt :ok :http-status :code :retryable) out)))
+      (is (not (contains? out :results))))))

@@ -1700,6 +1700,11 @@
            The protected lookup is bounded metadata discovery, not arbitrary graph execution.
            Source and policy use one snapshot; fresh checking cannot erase cached secret metadata.
            The editor host still owns callbacks, search, navigation and the validated DOM contract."}
+    {:ns graphden.editor.components :defn export-resolved-batch
+     :say "A same-turn UI refresh captures one fresh authorized configuration for a finite component set.
+           Every item keeps its own source budgets and checker registry. SQL transaction failure or
+           a changed policy discards the whole batch; individual component refusals remain independent.
+           Browser subscriptions share transport, but one consumer's abort cannot cancel another."}
     {:ns graphden.graph.personal-home :defn ensure-current!
      :say "Explicit profile infrastructure setup follows the configured personal namespace authority.
            Tenancy requires an already provisioned exact home; an addonless single operator may create

@@ -999,6 +999,7 @@
                   :api-ui-theme-evaluate
                   :api-ui-theme-create-template
                   :api-editor-configuration-plan
+                  :api-editor-configuration-plans
                   :api-editor-root-plan
                   :api-editor-root-migration-preview
                   :api-editor-root-migration-apply

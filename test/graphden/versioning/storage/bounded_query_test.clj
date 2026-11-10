@@ -103,7 +103,11 @@
            (set (map :id (sp/query-bounded-entities target-view :binding-list-item
                                                     {:binding-id (:id left)} 3)))))
     (let [graph (source/collect-closure target-view [(:id a) (:id b)] (constantly nil))]
-      (is (= #{(:id item) (:id hidden)} (set (map :id (:list-items graph))))))
+      (is (= #{(:id item) (:id hidden)} (set (map :id (:list-items graph)))))
+      (let [hint (source/collect-closure storage [(:id a) (:id b)] (constantly nil))
+            fresh (source/collect-closure target-view [(:id a) (:id b)] (constantly nil) hint)]
+        (is (= (update-vals graph set) (update-vals fresh set))
+            "Stale branch hints preserve merged owner moves, new items and tombstones")))
     (is (= :storage-error/unsupported-opts
            (error-type #(sp/query-entities storage :binding-list-item {:binding-id (:id left)} {:limit 1}))))))
 
@@ -153,3 +157,33 @@
         (is (= (count rows) all))
         (is (pos? one-queries) "The JDBC spy observed actual SQL")
         (is (= one-queries all-queries) "A 64-owner batch uses the same SQL round trips")))))
+
+
+(deftest hinted-source-closure-bounds-jdbc-exchanges-across-deep-shared-dependencies
+  (let [storage (setup/create-versioned-test-storage)
+        type (sp/create-entity storage :fn {:name "closure-shared" :parent-ids []})
+        slot (sp/create-entity storage :slot {:name "value" :type-fn-id (:id type)})
+        owners (reduce (fn [rows position]
+                         (conj rows (sp/create-entity storage :fn
+                                                      {:name (str "closure-depth-" position)
+                                                       :parent-ids (cond-> [(:id type)]
+                                                                     (seq rows) (conj (:id (peek rows))))})))
+                       [] (range 12))
+        root (:id (peek owners))
+        _ (doseq [owner owners]
+            (sp/create-entity storage :fn-slot {:fn-id (:id owner) :slot-id (:id slot) :position 0})
+            (sp/create-entity storage :binding {:fn-id (:id owner) :slot-id (:id slot) :value 1}))
+        collect (fn [hint]
+                  (let [calls (atom [])
+                        result (binding [util/*jdbc-override* (jdbc-spy calls)
+                                         resolution/*branch-chain-cache* (atom {})
+                                         resolution/*merges-memo* (atom {})
+                                         resolution/*graph-load-memo* (atom {})]
+                                 (source/collect-closure storage [root] (constantly nil) hint))]
+                    {:graph result :queries (count @calls)}))
+        ordinary (collect nil)
+        hinted (collect (:graph ordinary))]
+    (is (= (update-vals (:graph ordinary) set) (update-vals (:graph hinted) set)))
+    (is (> (:queries ordinary) 100) "The spy observes the actual versioned frontier SQL path")
+    (is (<= 1 (:queries hinted) 40) "A complete hint keeps this closure within tens of exchanges")
+    (is (< (:queries hinted) (/ (:queries ordinary) 3)))))

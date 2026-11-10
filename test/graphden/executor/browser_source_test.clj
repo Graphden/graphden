@@ -54,7 +54,7 @@
                                       (contains? (set (if (coll? values) values [values]))
                                                  (get row field))) where))
                           (vec (vals (get tables entity))))]
-        (swap! calls conj [:candidates entity where])
+        (swap! calls conj [:candidates entity where (count rows)])
         (bounded/check-candidate-count! rows max-candidates)
         (with-meta (mapv #(select-keys % [:id :org-id]) rows)
           {::sp/candidate-count (count rows)})))
@@ -71,6 +71,102 @@
 (defn- keyed
   [rows]
   (into {} (map (juxt :id identity)) rows))
+
+
+(defn- graph-tables
+  [graph]
+  (into {} (map (fn [[entity collection]] [entity (keyed (get graph collection))]))
+        {:fn :fns :slot :slots :fn-slot :fn-slots :binding :bindings :binding-list-item :list-items}))
+
+
+(defn- graph-rows
+  [graph]
+  (update-vals graph set))
+
+
+(deftest hinted-general-closure-batches-depth-and-shared-dependencies
+  (let [ids (vec (repeatedly 20 random-uuid))
+        common (random-uuid)
+        graph {:fns (conj (mapv (fn [id next-id] {:id id :parent-ids [next-id common]})
+                                (butlast ids) (rest ids))
+                          {:id (peek ids)} {:id common})
+               :bindings [{:id (random-uuid) :fn-id (peek ids) :value "fresh"}]}
+        calls (atom [])
+        storage (fixture-storage (graph-tables graph) calls)
+        ordinary (source/collect-closure storage [(first ids)] (constantly nil))
+        ordinary-scans (count (filter #(= :candidates (first %)) @calls))
+        _ (reset! calls [])
+        hinted (source/collect-closure storage [(first ids)] (constantly nil) graph)
+        hinted-queries (count (filter #(= :query (first %)) @calls))]
+    (is (= (graph-rows ordinary) (graph-rows hinted)))
+    (is (> ordinary-scans 35))
+    (is (= 1 hinted-queries) "one nonempty owner query; empty owner groups are cached too")
+    (is (= 3 (count (filter #(= :candidates (first %)) @calls)))
+        "bounded candidate scans are independent of closure depth")))
+
+
+(deftest hinted-values-are-never-authoritative-and-new-edges-are-followed
+  (let [root (random-uuid) old (random-uuid) fresh (random-uuid) binding (random-uuid)
+        hint {:fns [{:id root} {:id old}]
+              :bindings [{:id binding :fn-id root :ref-fn-id old :value "stale"}]}
+        current {:fns [{:id root} {:id old} {:id fresh}]
+                 :bindings [{:id binding :fn-id root :ref-fn-id fresh :value "current"}]}
+        calls (atom [])
+        storage (fixture-storage (graph-tables current) calls)
+        ordinary (source/collect-closure storage [root] (constantly nil))
+        hinted (source/collect-closure storage [root] (constantly nil) hint)]
+    (is (= (graph-rows ordinary) (graph-rows hinted)))
+    (is (= #{root fresh} (set (map :id (:fns hinted)))))
+    (is (= "current" (:value (first (:bindings hinted)))))))
+
+
+(deftest denied-or-missing-stale-hints-fall-back-before-body-reads
+  (let [root (random-uuid) extra (random-uuid)
+        hint {:fns [{:id root :parent-ids [extra]} {:id extra}]}
+        calls (atom [])
+        authorize! (fn [row]
+                     (when (= extra (:id row))
+                       (throw (ex-info "Denied" {:type :authz/forbidden}))))]
+    (doseq [extra-row [nil {:id extra}]]
+      (reset! calls [])
+      (let [storage (fixture-storage
+                      {:fn (cond-> {root {:id root}} extra-row (assoc extra extra-row))
+                       :binding {(random-uuid) {:id (random-uuid) :fn-id extra :value "private"}}}
+                      calls)
+            result (source/collect-closure storage [root] authorize! hint)]
+        (is (= [{:id root}] (:fns result)))
+        (is (not-any? (fn [[operation entity where]]
+                        (and (= :query operation) (= :binding entity)
+                             (some #{extra} (:fn-id where)))) @calls))))))
+
+
+(deftest oversized-hint-does-not-expand-the-request-or-its-function-budget
+  (let [root (random-uuid)
+        extras (vec (repeatedly 2048 random-uuid))
+        hint {:fns (cons {:id root :parent-ids extras} (map #(hash-map :id %) extras))}
+        calls (atom [])
+        storage (fixture-storage {:fn {root {:id root}}} calls)]
+    (is (= [{:id root}]
+           (:fns (source/collect-closure storage [root] (constantly nil) hint))))
+    (is (= [[:read :fn root]] (filterv #(= :read (first %)) @calls)))))
+
+
+(deftest stale-extra-budget-exhaustion-retries-once-with-ordinary-semantics
+  (let [root (random-uuid) extra (random-uuid) fresh (random-uuid)
+        hint {:fns [{:id root :parent-ids [extra]} {:id extra}]}
+        extra-bindings (mapv (fn [_] {:id (random-uuid) :fn-id extra :value "unused"}) (range 16384))
+        current-binding {:id (random-uuid) :fn-id fresh :value "current"}
+        current {:fns [{:id root :parent-ids [fresh]} {:id extra} {:id fresh}]
+                 :bindings (conj extra-bindings current-binding)}
+        calls (atom [])
+        storage (fixture-storage (graph-tables current) calls)
+        result (source/collect-closure storage [root] (constantly nil) hint)
+        candidates (filter #(= :candidates (first %)) @calls)]
+    (is (= #{root fresh} (set (map :id (:fns result)))))
+    (is (= [current-binding] (:bindings result)))
+    (is (= 2 (count (filter #{[:read :fn root]} @calls))) "One speculative pass and one ordinary retry")
+    (is (<= (reduce + (map #(nth % 3) candidates)) (+ (* 2 16384) 2))
+        "Physical candidate work is bounded, including overflow sentinels")))
 
 
 (deftest inaccessible-dependency-is-refused-before-its-literals-are-read

@@ -56,7 +56,7 @@ esac
   fs.writeFileSync(path.join(dir, name), body);
 }
 
-function runSuite(tests, env = {}) {
+function runSuite(tests, env = {}, phases = [{}]) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-edit-verdicts-'));
   const dir = env.STUB_RESUME ? path.join(root, 'tools', 'browser-test') : root;
   fs.mkdirSync(dir, {recursive: true});
@@ -102,7 +102,7 @@ case "$url" in
 esac
 if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; else printf '%s' "$body"; fi
 `);
-  const r = spawnSync('bash', [path.join(dir, 'run-edit-tests.sh')], {
+  const results = phases.map((phase) => spawnSync('bash', [path.join(dir, 'run-edit-tests.sh')], {
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -119,8 +119,10 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
       GRAPHDEN_RESUME_FROM: '',
       GRAPHDEN_E2E_PRIORITY_BASE: '',
       ...env,
+      ...phase,
     },
-  });
+  }));
+  const r = results[results.length - 1];
   const counts = Object.fromEntries(Object.keys(tests).map((n) => {
     const f = path.join(state, n + '.n');
     return [n, fs.existsSync(f) ? Number(fs.readFileSync(f, 'utf8')) : 0];
@@ -128,7 +130,31 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
   const attempts = (name) => counts[name];
   const receipt = env.STUB_RESUME ? fs.readFileSync(path.join(root, 'current.browser.edn'), 'utf8') : '';
   fs.rmSync(root, { recursive: true, force: true, maxRetries: 2 });
-  return { receipt, code: r.status, out: (r.stdout || '') + (r.stderr || ''), attempts };
+  return { receipt, code: r.status, out: results.map((result) => (result.stdout || '') + (result.stderr || '')).join('\n'), attempts };
+}
+
+console.log(' browser phases retain final passes in the current full-roster journal');
+{
+  const tests = {
+    'edit-manual.test.js': ['pass'],
+    'edit-auto.test.js': ['pass'],
+    'edit-tutorial-tour-org.test.js': ['skip:optional fixture unavailable'],
+  };
+  const prior = '{:schema 1 :kind "browser" :sha "@SHA@" '
+    + ':roster ["edit-manual.test.js" "edit-auto.test.js" "edit-tutorial-tour-org.test.js"] '
+    + ':status {"edit-manual.test.js" :pending "edit-auto.test.js" :pending "edit-tutorial-tour-org.test.js" :pending}}';
+  const r = runSuite(tests, {STUB_RESUME: prior, GRAPHDEN_RESUME_CREDIT: '0'}, [
+    {GRAPHDEN_E2E_ONLY_FILES: 'edit-manual.test.js'},
+    {GRAPHDEN_E2E_EXCLUDE_FILES: 'edit-manual.test.js'},
+  ]);
+  assert(r.code === 0, 'both browser phases retain successful suite verdicts', r.out);
+  assert(r.attempts('edit-manual.test.js') === 1 && r.attempts('edit-auto.test.js') === 1,
+    'both selected phases execute exactly once', r.out);
+  assert(/"edit-manual.test.js" :passed/.test(r.receipt)
+    && /"edit-auto.test.js" :passed/.test(r.receipt),
+    'second phase retains the manual pass alongside its own pass', r.receipt);
+  assert(/"edit-tutorial-tour-org.test.js" :pending/.test(r.receipt),
+    'declared skip never becomes pass credit', r.receipt);
 }
 
 console.log(' two REAL races in one run stay distinct diagnostics, not host jitter');

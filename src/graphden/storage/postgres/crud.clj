@@ -2,6 +2,7 @@
   "CRUD operations for PostgreSQL storage.
    Generic entity operations for create, read, update, delete, query."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.postgres.codec :as codec]
@@ -283,11 +284,39 @@
                                        records))))))
 
 
+(defn- targeted-version-candidates
+  [query where fields {:keys [version-entity version-id-field]}]
+  (let [version-field? #(str/starts-with? (name %) "versions.")
+        version-where (into {} (filter (comp version-field? key)) where)
+        identity-where (into {} (remove (comp version-field? key)) where)
+        identity-predicate (read-plan/where-clause identity-where fields)
+        version-id (keyword (str "versions." (util/kw->snake-case version-id-field)))
+        columns (:select-distinct query)]
+    (if (or (util/flat-read-plans?) (empty? version-where))
+      query
+      ;; Filtering the version index first avoids scanning every identity and
+      ;; evaluating its RLS policy for each owner batch. DISTINCT retains ANY
+      ;; matching version; identity predicates and RLS still run before LIMIT.
+      {:select columns
+       :from [[{:select-distinct [[version-id :owner_id]]
+                :from [[(keyword (util/kw->snake-case version-entity)) :versions]]
+                :where (read-plan/where-clause version-where fields)} :matched]]
+       :cross-join [[[:lateral
+                      {:select columns :from (:from query)
+                       :where (if identity-predicate
+                                [:and [:= :ident.id :matched.owner_id] identity-predicate]
+                                [:= :ident.id :matched.owner_id])
+                       ;; Preserve the correlated PK lookup: flattening this
+                       ;; subquery can restore a whole-table RLS scan.
+                       :offset [:inline 0]}] :ident]]
+       :limit (:limit query)})))
+
+
 (defn query-identity-candidates
   "Cap distinct owner candidates in SQL without projecting payload data.
    For versioned reads, ANY matching version is a conservative superset;
    create-time identity owner columns do not describe branch-local moves."
-  [ds entity-name where fields {:keys [version-entity version-id-field version-data-fields]} max-candidates]
+  [ds entity-name where fields {:keys [version-entity version-id-field version-data-fields] :as version-source} max-candidates]
   (let [where (bounded/candidate-where entity-name where max-candidates)]
     (sp/standard-query-validations! entity-name fields where)
     (let [identity-fields fields
@@ -308,7 +337,10 @@
                   version-entity
                   (assoc :join [[(keyword (util/kw->snake-case version-entity)) :versions]
                                 [:= :ident.id
-                                 (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))]
+                                 (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))
+          query (if version-entity
+                  (targeted-version-candidates query where fields version-source)
+                  query)]
       (util/with-sql-error-handling "Database error" :query-identity-candidates
                                     {:entity-name entity-name}
                                     (let [rows (util/exec-read! ds query {:quoted true})]

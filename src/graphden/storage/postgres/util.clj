@@ -332,6 +332,21 @@
 (def ^:dynamic ^:private *active-read* nil)
 
 
+(def ^:dynamic ^:private *flat-read-plans?* false)
+
+
+(defn call-with-flat-read-plans
+  "Keep scalar plans within the physical source certificate's admitted SQL.
+   This affects query planning only, never predicates or authorization."
+  [f]
+  (binding [*flat-read-plans?* true] (f)))
+
+
+(defn flat-read-plans?
+  []
+  *flat-read-plans?*)
+
+
 (defn current-read-plan
   "Return the structured plan only for this synchronous storage read.
    Connection and SQL vector identity prevent nested or rewritten statements

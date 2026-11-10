@@ -2,6 +2,8 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.schema.malli.core :as mds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as util]
@@ -173,6 +175,94 @@
                   (fn [scoped _]
                     (let [answer (grouped/read-operations scoped ops)]
                       (is (every? #(= "fresh" (:after-snapshot %)) (vals (first answer))))))))
+      (finally (sp/close storage)))))
+
+
+(deftest first-shape-read-observes-ddl-committed-after-the-data-snapshot
+  (let [storage (sample-storage)]
+    (try
+      (let [data (seed! storage)
+            ops (vec (take 2 (requests data)))]
+        (snapshot storage
+                  (fn [scoped connection]
+                    ;; Establish the RR snapshot without locking sample. A
+                    ;; later SELECT * still uses its current tuple descriptor.
+                    (jdbc/execute! connection ["SELECT count(*) FROM pg_catalog.pg_namespace"])
+                    (jdbc/execute! (:pool storage)
+                                   ["ALTER TABLE sample ADD COLUMN committed_after_snapshot text DEFAULT 'retained'"])
+                    (let [expected (mapv #(grouped/scalar-operation scoped %) ops)
+                          actual (observed #(grouped/read-operations scoped ops))]
+                      (is (= "retained"
+                             (get-in expected [0 (get-in data [:old :id]) :committed-after-snapshot])))
+                      (is (= (mapv bag expected) (mapv bag (:result actual))))
+                      (is (= 2 (count (:calls actual))))
+                      (is (some #(str/includes? (first %) "UNION ALL") (:calls actual)))))))
+      (finally (sp/close storage)))))
+
+
+(deftest native-shapes-preserve-domain-values-without-catalog-type-lookups
+  (let [storage (sample-storage)]
+    (try
+      (let [data (seed! storage) ops (vec (take 2 (requests data)))]
+        (jdbc/execute! (:pool storage) ["CREATE DOMAIN sample_text AS text CHECK (VALUE <> '')"])
+        (jdbc/execute! (:pool storage) ["CREATE DOMAIN sample_numeric AS numeric(30,10)"])
+        (jdbc/execute! (:pool storage) ["ALTER TABLE sample ADD COLUMN domain_text sample_text DEFAULT 'retained', ADD COLUMN domain_numeric sample_numeric DEFAULT 12.2500000000"])
+        (snapshot storage
+                  (fn [scoped _]
+                    (let [expected (mapv #(grouped/scalar-operation scoped %) ops)
+                          actual (observed #(grouped/read-operations scoped ops))]
+                      (is (= (mapv bag expected) (mapv bag (:result actual))))
+                      (is (= "retained" (get-in actual [:result 0 (get-in data [:old :id]) :domain-text])))
+                      (is (= 12.2500000000M (get-in actual [:result 0 (get-in data [:old :id]) :domain-numeric])))
+                      (is (= 2 (count (:calls actual))))
+                      (is (some #(str/includes? (first %) "UNION ALL") (:calls actual)))))))
+      (finally (sp/close storage)))))
+
+
+(deftest unsupported-native-column-labels-retain-scalar-columns
+  (let [storage (sample-storage)]
+    (try
+      (let [data (seed! storage) ops (vec (take 2 (requests data)))]
+        (jdbc/execute! (:pool storage) ["ALTER TABLE sample ADD COLUMN __gd_shape_0 text DEFAULT 'retained'"])
+        (snapshot storage
+                  (fn [scoped _]
+                    (let [expected (mapv #(grouped/scalar-operation scoped %) ops)
+                          cold (observed #(grouped/read-operations scoped ops))
+                          warm (observed #(grouped/read-operations scoped ops))]
+                      (is (= (mapv bag expected) (mapv bag (:result cold)) (mapv bag (:result warm))))
+                      (is (= 3 (count (:calls cold))))
+                      (is (= 2 (count (:calls warm))))
+                      (is (not-any? #(str/includes? (first %) "UNION ALL") (:calls cold)))))))
+      (finally (sp/close storage)))))
+
+
+(deftest wide-tables-decline-grouping-without-a-combined-shape-column-limit
+  (let [storage (setup/create-test-storage)]
+    (try
+      (sp/initialize storage
+                     (ds/build (reduce (fn [schema entity]
+                                         (ds/add-entity schema entity (random-uuid)
+                                                        {:name {:uuid (random-uuid) :type :text}}))
+                                       (mds/create-builder) [:wide-a :wide-b])))
+      (let [a (sp/create-entity storage :wide-a {:name "a"})
+            b (sp/create-entity storage :wide-b {:name "b"})
+            ops [{:op :read-ids :entity :wide-a :ids [(:id a)]}
+                 {:op :read-ids :entity :wide-b :ids [(:id b)]}]
+            ;; Test-only DDL: fixed local identifiers, no external input. Two
+            ;; legal tables together exceed PG's 1664 SELECT-column ceiling.
+            additions (str/join ", " (map #(str "ADD COLUMN c" % " text") (range 850)))]
+        (doseq [table ["wide_a" "wide_b"]]
+          (jdbc/execute! (:pool storage) [(str "ALTER TABLE " table " " additions)]))
+        (snapshot storage
+                  (fn [scoped _]
+                    (let [expected (mapv #(grouped/scalar-operation scoped %) ops)
+                          cold (observed #(grouped/read-operations scoped ops))
+                          warm (observed #(grouped/read-operations scoped ops))]
+                      (is (= expected (:result cold) (:result warm)))
+                      (is (contains? (get-in cold [:result 0 (:id a)]) :c849))
+                      (is (= 4 (count (:calls cold))) "Two table shapes plus two scalar payload reads")
+                      (is (= 2 (count (:calls warm))))
+                      (is (not-any? #(str/includes? (first %) "UNION ALL") (:calls cold)))))))
       (finally (sp/close storage)))))
 
 

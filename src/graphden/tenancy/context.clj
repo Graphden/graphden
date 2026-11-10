@@ -266,7 +266,7 @@
     (let [owner (volatile! nil)
           witness (SourceReplayPolicyWitness. source-replay-policy-seal (:generation adapter)
                                               #(identical? @owner %))
-          tagged (with-meta policy (assoc (meta policy) source-replay-policy-key witness))]
+          tagged (vary-meta policy assoc source-replay-policy-key witness)]
       ;; Seal the exact returned function. Copying its metadata cannot admit a
       ;; different function. The owner cell stays private to this witness and
       ;; the collectable policy/witness cycle; no global policy registry.
@@ -275,6 +275,8 @@
     policy))
 
 
+;; Uniform Class/.-field syntax resolves these generated fields as methods.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn source-replay-policy-info
   "Return an explicit current adapter, not authority to reuse source rows.
    Unknown factories and policies from replaced/uninstalled registrations are

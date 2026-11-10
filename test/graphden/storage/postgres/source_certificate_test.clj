@@ -353,6 +353,19 @@
   (is (not= (prepared-key 1) (prepared-key 1N)) "Clojure-equal numbers retain their JDBC parameter type"))
 
 
+(deftest preparation-rejects-oversized-trees-and-parameter-copies-test
+  (snapshot
+    (fn [_ guard]
+      (doseq [[value reason] [[(vec (repeat 9000 :id)) :plan-complexity]
+                              [(vec (repeat 10 (apply str (repeat 30000 "x")))) :parameter-byte-limit]
+                              [[(.shiftLeft java.math.BigInteger/ONE 262145)] :parameter-byte-limit]]]
+        (let [ast (assoc all-rows :where [:in :id value])]
+          (is (= reason
+                 (miss-reason #(certificate/prepare-operation guard ast ["SELECT 1"]))))))
+      (is (= 1 (count (pg/exec! *connection* ["SELECT 1"])))
+          "Admission failure leaves the owned RR usable for ordinary reads"))))
+
+
 (deftest ordered-projection-alias-cannot-change-the-witness-sort-key-test
   (jdbc/execute! *pool* ["INSERT INTO certificate_row(id,owner_id,value) VALUES(3,10,'tied alias')"])
   (snapshot

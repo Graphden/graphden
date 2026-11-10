@@ -13,12 +13,22 @@
 (def ^:dynamic ^:private *snapshot-cache* nil)
 
 
+(def ^:dynamic ^:private *grouping-disabled?* false)
+
+
+(defn call-without-grouping
+  "Keep ordinary scalar storage semantics inside a synchronous source trace.
+   Nested metadata-cache scopes cannot silently reactivate a raw SQL carrier."
+  [f]
+  (binding [*grouping-disabled?* true *snapshot-cache* nil] (f)))
+
+
 (defn snapshot-cache
   "Return metadata cache state only for its still-active owned connection.
    Isolation was checked once on entry; PgJDBC's isolation getter itself sends
    SQL, so looking up cached metadata must not call it again."
   [connection]
-  (when (and *snapshot-cache*
+  (when (and (not *grouping-disabled?*) *snapshot-cache*
              (identical? connection (:connection *snapshot-cache*))
              @(:active? *snapshot-cache*)
              (not (.isClosed ^Connection connection))
@@ -32,7 +42,7 @@
    Must run inside the JDBC transaction, whose lifetime remains caller-owned.
    No source values or authorization decisions belong in :shapes."
   [connection f]
-  (if (and (instance? Connection connection)
+  (if (and (not *grouping-disabled?*) (instance? Connection connection)
            (not (.getAutoCommit ^Connection connection))
            (.isReadOnly ^Connection connection)
            (= Connection/TRANSACTION_REPEATABLE_READ

@@ -11,6 +11,7 @@
     [graphden.executor.browser-preview :as preview]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.checked-source-memo :as checker-memo]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.source-contract :as source-contract]
@@ -652,3 +653,97 @@
         "Changed later source is rejected before its checker runs")
     (is (= :type-source-mismatch (:reason error)))
     (is (= (:id f) (:fn-id error)))))
+
+
+(defn- artifact-memo
+  []
+  (checker-memo/create-memo
+    {:max-bytes 16000000 :max-entries 8 :max-pending 4 :max-families 8
+     :max-leases 8 :max-ttl-ms 1000 :clock-ms (constantly 0)
+     :entry-bytes 4000000 :max-nodes 100000 :ttl-ms 1000
+     :checker-abi "snapshot-test-1" :callbacks []}))
+
+
+(deftest opt-in-artifact-reuses-only-checker-work
+  (let [f (fixture [] {}) m (artifact-memo)
+        changed (update-in f [:snapshot :graph :bindings]
+                           #(mapv (fn [row] (assoc row :value "changed")) %))
+        check! check/check-fn-def! calls (atom 0)]
+    (binding [checker-memo/*memo* m tenancy/*current-org* (random-uuid)]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition] (swap! calls inc) (check! definition))]
+        (let [first-plan (export f) first-count @calls]
+          (is (pos? first-count))
+          (is (= 1 (:entries (checker-memo/stats m))))
+          (is (= first-plan (export f)))
+          (is (= first-count @calls) "Second export restores both isolated registries")
+          (let [policy (assoc-in (policy-of f) [:classes (:id f)] :secret-output)]
+            (is (= :visibility-denied
+                   (:reason (failure #(export (assoc f :policy policy)))))))
+          (is (= first-count @calls) "Fresh policy can veto a checker cache hit")
+          (is (= :type-source-mismatch (:reason (failure #(export changed)))))
+          (is (= 0 (:leases (checker-memo/stats m)))))))))
+
+
+(deftest mutable-source-and-unknown-rule-never-eagerly-prepare
+  (let [literal (java.util.Date. 0)
+        f (fixture [{:name :inner :parent :const :args {}}]
+                   {:parent :inner :args {:value {:value literal}}})
+        check! check/check-fn-def! called (atom []) m (artifact-memo)]
+    (binding [checker-memo/*memo* m]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition]
+                      (swap! called conj (:fn-id definition))
+                      (let [result (check! definition)]
+                        (when (= (get-in f [:ids :inner]) (:fn-id definition))
+                          (.setTime literal 1000))
+                        result))]
+        (is (= :type-source-mismatch (:reason (failure #(export f)))))
+        (is (= [(get-in f [:ids :inner])] @called))
+        (is (= 0 (:entries (checker-memo/stats m))))))))
+
+
+(deftest checker-artifact-key-includes-alias-marker-and-recheck-inputs
+  (let [f (fixture [{:name :aux-type :union [:text :null]}
+                    {:name :aux-tag :marker {:hide-result? false}}] {})
+        m (artifact-memo) check! check/check-fn-def! calls (atom 0)
+        policy (policy-of f)
+        with-constraint (fn [name constraint]
+                          (update-in f [:snapshot :graph :fns]
+                                     #(mapv (fn [row]
+                                              (if (= name (:name row))
+                                                (assoc row :constraint constraint) row)) %)))]
+    (binding [checker-memo/*memo* m]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition] (swap! calls inc) (check! definition))]
+        (export (assoc f :policy policy))
+        (let [one-pass @calls]
+          (is (pos? one-pass))
+          (doseq [changed [(with-constraint "aux-type" [:union :int :null])
+                           (with-constraint "aux-tag" [:marker-def {:hide-result? true}])
+                           (assoc f :policy (assoc policy :type-recheck {:status :running :pending-ids #{}}))]]
+            (let [before @calls]
+              (is (map? (export (update changed :policy #(or % policy)))))
+              (is (= one-pass (- @calls before)) "Changed checker input forces a fresh ordered pass"))))))))
+
+
+(deftest unknown-primitive-callback-never-enters-artifact-cache
+  (let [f (fixture [(assoc constant :return-type-rule (fn [_ _] :text))] [] {})
+        m (artifact-memo) check! check/check-fn-def! calls (atom 0)]
+    (binding [checker-memo/*memo* m]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition] (swap! calls inc) (check! definition))]
+        (is (map? (export f)))
+        (let [first-count @calls]
+          (is (map? (export f)))
+          (is (= (* 2 first-count) @calls)))
+        (is (zero? (:entries (checker-memo/stats m))))))))
+
+
+(deftest cancelled-checker-builder-cannot-publish-and-preserves-interruption
+  (let [f (fixture [] {}) m (artifact-memo)]
+    (binding [checker-memo/*memo* m
+              runtime/*cancel-check* #(throw (InterruptedException. "cancelled"))]
+      (is (thrown-with-msg? InterruptedException #"cancelled" (export f))))
+    (is (= 0 (:entries (checker-memo/stats m))))
+    (is (= 0 (:pending (checker-memo/stats m))))))

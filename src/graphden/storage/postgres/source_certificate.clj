@@ -5,6 +5,7 @@
    certificate miss; SQL errors require a new transaction before fallback."
   (:require
     [clojure.string :as str]
+    [graphden.storage.postgres.source-session :as source-session]
     [graphden.storage.postgres.util :as pg]
     [honey.sql :as sql]
     [next.jdbc.result-set :as rs])
@@ -284,6 +285,16 @@
     state))
 
 
+(defn assert-connection!
+  "Require the exact connection owned by this active guard before executing or
+   replaying source reads. A scope map cannot pair another connection's payload
+   with this guard's physical witness."
+  [guard connection]
+  (when-not (identical? connection (:connection (check-guard guard)))
+    (miss! :guard-connection-mismatch))
+  nil)
+
+
 (defn- execute!
   [connection check! query]
   (check!)
@@ -417,10 +428,12 @@
    have borrowed in autocommit and must not commit/restart inside consume.
    No SELECT precedes SET LOCAL + relation locks. The Guard expires on return.
    Optional :policy-contract supplies trusted installer expectations for every
-   locked table plus current request GUC values; missing/unknown RLS is refused."
+   locked table plus current request GUC values; missing/unknown RLS is refused.
+   Optional :session-marker was registered BEFORE RR by an explicit known-pool
+   manager. Its origin is sealed after these locks, outside any source trace."
   ([connection locked check! consume]
    (call-with-guard connection locked {} check! consume))
-  ([^Connection connection locked {:keys [policy-contract]} check! consume]
+  ([^Connection connection locked {:keys [policy-contract session-marker]} check! consume]
    (check!)
    (when-not (and (set? locked) (seq locked) (<= (count locked) max-tables)) (miss! :lock-set))
    (doseq [table locked] (relation table))
@@ -452,7 +465,11 @@
        (policy-contract! connection locked session schema policy-contract check!)
        (try
          (check!)
-         (let [answer (consume (Guard. state))] (check!) answer)
+         (let [guard (Guard. state)
+               origin (when session-marker
+                        (source-session/seal-origin session-marker connection #(check-guard guard)))
+               answer (consume (if origin (Guard. (assoc state :origin origin)) guard))]
+           (check!) answer)
          (finally (vreset! active? false)))))))
 
 
@@ -601,6 +618,7 @@
   (+ (* 1024 1024)
      (* 4 (or (:guard_bytes (first (:schema state))) 0))
      (if (:policy-facts state) (* 4 262144) 0)
+     (if (:origin state) 4096 0)
      (* 256 operation-count)))
 
 
@@ -633,7 +651,7 @@
          (when-not (admissible? (:bounds state) (:xmins current)) (miss! :xid-admission))
          (check-guard guard)
          (Certificate.
-           (merge (-> (select-keys state [:physical :schema :session :jvm-zone :bounds :locked :policy-facts])
+           (merge (-> (select-keys state [:physical :schema :session :jvm-zone :bounds :locked :policy-facts :origin])
                       (update :physical #(WeakReference. %)))
                   current {:plans plans :operations (count operations)
                            :charge-bytes (+ base (* token-charge (:rows current)))})))))))
@@ -652,7 +670,9 @@
 
 
 (defn unchanged?
-  "Verify on the same physical connection using a NEW active guarded snapshot.
+  "Verify using a NEW active guarded snapshot. Physical connection identity may
+   be replaced only by a fresh explicit session-origin witness; every schema,
+   session, XID and complete source-membership comparison still applies.
    Current metadata queries always execute. False means restart the whole source
    operation; SQL/deadline failures propagate and cannot reuse partial results."
   [guard certificate]
@@ -661,7 +681,10 @@
         (and (instance? Certificate certificate)
              (let [old (.-state ^Certificate certificate)
                    before (:bounds old) after (:bounds current)
-                   compatible (and (identical? (.get ^WeakReference (:physical old)) (:physical current))
+                   compatible (and (or (identical? (.get ^WeakReference (:physical old)) (:physical current))
+                                       (and (:origin old)
+                                            (source-session/origin-live?
+                                              (:origin old) (:connection current) #(check-guard guard))))
                                    (= (select-keys old [:schema :session :jvm-zone :locked :policy-facts])
                                       (select-keys current [:schema :session :jvm-zone :locked :policy-facts]))
                                    (admissible? before (:xmins old)) (snapshot-shape? after)

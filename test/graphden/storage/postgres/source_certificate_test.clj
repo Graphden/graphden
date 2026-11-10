@@ -3,6 +3,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.storage.postgres.source-certificate :as certificate]
+    [graphden.storage.postgres.source-session :as source-session]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as pg]
     [graphden.storage.protocol.core :as sp]
@@ -366,8 +367,43 @@
           "Admission failure leaves the owned RR usable for ordinary reads"))))
 
 
+(defn- session-snapshot
+  [connection marker f]
+  (jdbc/with-transaction [tx connection {:isolation :repeatable-read :read-only true}]
+                         (certificate/call-with-guard tx locked {:session-marker marker} (constantly nil)
+                                                      #(f tx %))))
+
+
+(deftest explicit-session-origin-allows-cross-connection-but-preserves-fresh-proof-test
+  (with-open [destination (jdbc/get-connection *pool*)]
+    (let [manager (source-session/create-manager {:mode :direct :max-sessions 2})
+          marker (source-session/ensure-marker! manager *connection* (constantly nil))
+          capture-origin (fn []
+                           (session-snapshot *connection* marker
+                                             (fn [connection guard]
+                                               (certificate/capture guard [(prepare-and-read connection guard all-rows)]))))
+          captured (capture-origin)]
+      (try
+        (is (false? (session-snapshot destination nil (fn [_ guard] (certificate/unchanged? guard captured))))
+            "Opaque origin alone cannot admit an unknown destination pool")
+        (let [destination-marker (source-session/ensure-marker! manager destination (constantly nil))
+              check-current (fn [proof]
+                              (session-snapshot destination destination-marker
+                                                (fn [_ guard] (certificate/unchanged? guard proof))))]
+          (is (true? (check-current captured)))
+          (jdbc/execute! *connection* ["UPDATE certificate_row SET value='changed' WHERE id=1"])
+          (is (false? (check-current captured)) "Fresh tuple comparison remains mandatory across sessions")
+          (let [new-capture (capture-origin)]
+            (jdbc/execute! *connection* ["ALTER TABLE certificate_row ADD COLUMN extra text"])
+            (is (false? (check-current new-capture)) "Fresh schema comparison remains mandatory"))
+          (let [new-capture (capture-origin)]
+            (source-session/close-manager! manager)
+            (is (false? (check-current new-capture)) "Revoked origin cannot authorize cross-session replay")))
+        (finally (source-session/close-manager! manager))))))
+
+
 (deftest ordered-projection-alias-cannot-change-the-witness-sort-key-test
-  (jdbc/execute! *pool* ["INSERT INTO certificate_row(id,owner_id,value) VALUES(3,10,'tied alias')"])
+  (jdbc/execute! *connection* ["INSERT INTO certificate_row(id,owner_id,value) VALUES(3,10,'tied alias')"])
   (snapshot
     (fn [connection guard]
       (let [ast {:select-distinct-on [[:id] [:owner_id :id] :value]

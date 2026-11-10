@@ -12,6 +12,20 @@
 (def adapter {:authority-fields [:id :org-id :namespace-id :concealed]})
 
 
+(deftest registration-is-readable-before-factory-but-does-not-seal-another-generation
+  (let [called (atom 0)]
+    (context/install-browser-source-policy!
+      (fn [_] (swap! called inc) (constantly :current)) adapter)
+    (let [before (context/source-replay-registration)
+          _ (is (zero? @called))
+          policy (context/browser-source-policy :fresh-snapshot)]
+      (is (identical? before (context/source-replay-policy-info policy)))
+      (is (= 1 @called))
+      (context/install-browser-source-policy! (constantly (constantly :replacement)) adapter)
+      (is (not (identical? before (context/source-replay-registration))))
+      (is (nil? (context/source-replay-policy-info policy))))))
+
+
 (deftest unknown-factory-cannot-borrow-an-old-adapter
   (context/install-org-cap-fn! nil)
   (context/install-browser-source-policy! nil)

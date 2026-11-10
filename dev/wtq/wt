@@ -635,39 +635,16 @@ cmd_doctor() {
   say "  to your leftovers. Check the pid, then kill it yourself."
 }
 
-# What a gate run leaves on the host besides the image it built, and what
-# `gc` (and every green landing) reclaims. Measured 2026-09-16 after a week
-# of gates: 57 anonymous volumes (1.1 GB) — exactly two per gate, the e2e
-# stack's two Postgres containers each get one from the image's VOLUME
-# instruction and Testcontainers' stop leaves it behind; 3 GB of build cache
-# no build had touched in days; a handful of Playwright temp dirs from
-# crashed walks. Every removal here is of something nothing references:
-# a dangling anonymous volume is by definition attached to no container
-# (a stopped stack's volumes are named and stay), a dangling image has no
-# tag, build cache unused for 3 days is rebuilt on demand.
+# Automatic cleanup reclaims only build artifacts and old diagnostic logs.
+# Unreferenced Docker volumes can still contain recoverable database state;
+# Trivy databases are retained to avoid downloading them again on gate retries.
+# Neither is disposable merely because a gate needs more free disk space.
 gc_gate_leftovers() {
-  local removed n
-  info "Removing anonymous volumes no container references (the e2e stack's Postgres data) ..."
-  removed="$(docker volume ls -q -f dangling=true | grep -E '^[0-9a-f]{64}$' | xargs -r docker volume rm 2>/dev/null || true)"
-  n="$(printf '%s' "$removed" | grep -c . || true)"
-  [ "$n" -gt 0 ] && ok "  removed $n"
-
   info "Reclaiming dangling image layers ..."
   docker image prune -f >/dev/null 2>&1 || true
 
   info "Dropping build cache unused for 3 days ..."
   docker builder prune -f --filter unused-for=72h 2>/dev/null | tail -1 || true
-
-  # Trivy downloads separate OS and Java vulnerability DBs. The Java DB can
-  # exceed a GiB; reclaiming only db/ left the gate below its disk admission
-  # threshold even after cleanup. Both are reproducible caches.
-  local trivy_cache="${WTQ_TRIVY_CACHE_DIR:-/tmp/trivy-cache}/trivy" trivy_db
-  for trivy_db in "$trivy_cache/db" "$trivy_cache/java-db"; do
-    if [ -f "$trivy_db/trivy.db" ] || [ -f "$trivy_db/trivy-java.db" ]; then
-      info "Reclaiming the downloaded Trivy DB in $trivy_db ..."
-      find "$trivy_db" -maxdepth 1 -type f \( -name trivy.db -o -name trivy-java.db -o -name metadata.json \) -delete
-    fi
-  done
 
   info "Removing stale test temp dirs (Playwright crash artifacts, tour audits older than a day) ..."
   find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \

@@ -163,9 +163,10 @@
                                       (is (= {:limit 2} opts))
                                       (swap! calls conj :preference)
                                       [{:value {:fn-id "unselected-legacy-identity"}}])
-                  source/collect-closure (fn [actual ids _]
+                  source/collect-closure (fn [actual ids _ hint]
                                            (is (= storage actual))
                                            (is (= [fn-id] (vec ids)))
+                                           (is (nil? hint) "A cache miss does not manufacture source hints")
                                            (swap! calls conj :body) {})
                   source/collect-namespaces (constantly [])
                   snapshot/export-snapshot (fn [_ _ entries frozen]

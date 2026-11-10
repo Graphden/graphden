@@ -11,6 +11,7 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
+    [graphden.executor.source-recipe-replay :as replay]
     [graphden.graph.metadata :as metadata]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tenancy]))
@@ -44,10 +45,10 @@
           overrides)))
 
 
-(defn export-current
+(defn- export-current-value
   "The request carries no target identity. The handler's graph-bound resolver
    selects an authorized personal HOF; its static root remains the fallback."
-  ([ctx] (export-current ctx {}))
+  ([ctx] (export-current-value ctx {}))
   ([ctx request]
    (try
      (let [policy (snapshot/capture-context-policy ctx)
@@ -96,3 +97,11 @@
          (when-not (= reason :policy-refresh-required)
            (log/warn "Editor root export refused" {:type type :reason reason})))
        (components/failure-facts error)))))
+
+
+(defn export-current
+  "Export the trusted current root. Optional source recipes are staged until
+   the entire root export, policy checks and component selection succeed."
+  ([ctx] (export-current ctx {}))
+  ([ctx request]
+   (replay/call-with-operation ctx #(export-current-value ctx request))))

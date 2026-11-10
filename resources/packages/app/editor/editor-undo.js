@@ -420,7 +420,7 @@ function gdUndoRecordRename(fnId, oldName, newName) {
       const r = await authMutate('PUT', API.api_entities_type_id('fn', fnId),
                                  { name: oldName });
       const res = await _gdUndoResult(r);
-      if (res.ok && typeof initGraph === 'function') await initGraph();
+      if (res.ok && typeof initGraph === 'function') await initGraph({preserveSelection: true});
       return res;
     },
   });

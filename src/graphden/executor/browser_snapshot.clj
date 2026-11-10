@@ -6,6 +6,7 @@
     [graphden.crud.type-check :as type-check]
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
+    [graphden.executor.checked-source-memo :as checker-memo]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry]
@@ -271,16 +272,74 @@
     (reject! :type-unresolved {:fn-id id})))
 
 
-(defn- check-closure!
-  [snapshot entries original-rich recovery]
-  (let [{:keys [ordered] :as prepared} (prepare-check-closure snapshot entries)]
-    ;; Keep the default path's prepare/check interleaving: a preceding custom
-    ;; rule could mutate a later literal, which its fresh provenance must see.
-    ;; The memo is always pass-local; no ambient registry evidence is reused.
-    (binding [check/*ref-return-memo* (atom {})]
-      (doseq [id ordered]
-        (when-let [definition (prepare-checked-definition prepared original-rich recovery id)]
-          (check-definition! id definition))))))
+(defn- check-ordered!
+  [{:keys [ordered] :as prepared} original-rich recovery]
+  ;; Keep the default path's prepare/check interleaving: a preceding custom
+  ;; rule could mutate a later literal, which its fresh provenance must see.
+  ;; The memo is always pass-local; no ambient registry evidence is reused.
+  (binding [check/*ref-return-memo* (atom {})]
+    (doseq [id ordered]
+      (when-let [definition (prepare-checked-definition prepared original-rich recovery id)]
+        (check-definition! id definition)))))
+
+
+(defn- checker-state
+  []
+  {:rich @registry/*rich-types-override*
+   :per-org @registry/*per-org-rich-override*})
+
+
+(defn- restore-checker-state!
+  [{:keys [rich per-org]}]
+  (reset! registry/*rich-types-override* rich)
+  (reset! registry/*per-org-rich-override* per-org))
+
+
+(defn- prepare-memo-input
+  [memo {:keys [snapshot entries original-rich recovery structural? prepared]}]
+  (let [input {:source (select-keys snapshot [:graph :namespaces])
+               :entries entries :structural? structural? :recovery recovery
+               :org tenancy/*current-org* :seed (checker-state)
+               :aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)
+               :per-org-aliases @runtime/*per-org-aliases-override*
+               :caller-narrowings check/*caller-narrowings*
+               :ref-return-overrides check/*ref-return-overrides*
+               :type-compare-depth types/*type-compare-depth*
+               :original-signatures (select-keys (:by-id original-rich) (:ordered prepared))}]
+    ;; Only proven immutable input and explicitly approved rules permit eager
+    ;; preparation. The ordinary path keeps its original per-fn interleaving.
+    (when (checker-memo/admitted? memo input)
+      (try
+        (assoc input :definitions
+               (mapv (fn [id]
+                       [id (prepare-checked-definition prepared original-rich recovery id)])
+                     (:ordered prepared)))
+        (catch InterruptedException error (throw error))
+        (catch Exception _
+          ;; Preserve original error precedence: an earlier type error may
+          ;; precede this later provenance/reconstruction error.
+          nil)))))
+
+
+(defn- with-checked-closure
+  [snapshot entries original-rich recovery structural? consume]
+  (let [prepared (prepare-check-closure snapshot entries)
+        fallback (fn [] (check-ordered! prepared original-rich recovery) (consume))]
+    (if-let [memo checker-memo/*memo*]
+      (checker-memo/call-with-artifact
+        memo {:family [tenancy/*current-org* entries structural?]
+              :original-rich original-rich
+              :prepare #(prepare-memo-input memo {:snapshot snapshot :entries entries
+                                                  :original-rich original-rich :recovery recovery
+                                                  :structural? structural? :prepared prepared})
+              :build (fn [{:keys [definitions]}]
+                       (binding [check/*ref-return-memo* (atom {})]
+                         (doseq [[id definition] definitions :when definition]
+                           (check-definition! id definition)))
+                       (checker-state))
+              :restore restore-checker-state! :consume consume :fallback fallback
+              :check-cancel runtime/check-cancel!})
+      (fallback))))
 
 
 (defn- checked-source
@@ -308,26 +367,28 @@
                                      (cond-> (conj (plan/supported-primitive-ids)
                                                    (ids/fn-id "app.ui-components" :ui-components))
                                        structural? (into (structural-contracts/operation-ids)))))
-      (check-closure! snapshot entries rich type-recheck)
-      ;; A snapshot checks only source identities it actually exports. The
-      ;; original policy was frozen in full before the storage read; this
-      ;; second classification is a fresh veto, not another authority grant.
-      (let [current-flags (shapes/markers-snapshot)
-            snapshot-class (memoize
-                             (fn [id]
-                               (get-in (capture-policy-for rich
-                                                           (select-keys (:by-id rich) [id])
-                                                           current-flags)
-                                       [:classes id])))]
-        (consume
-          {:allow-fn?
-           (fn [id]
-             (and (= :plain (registry/trace-capture-class id nil))
-                  ;; Storage intentionally erases inline marker
-                  ;; annotations. A fresh check is only a veto:
-                  ;; it must never relax the original policy.
-                  (= :plain (get classes id))
-                  (= :plain (snapshot-class id))))}))
+      (with-checked-closure snapshot entries rich type-recheck structural?
+        (fn []
+          ;; A snapshot checks only source identities it actually exports. The
+          ;; original policy was frozen in full before the storage read; this
+          ;; second classification is a fresh veto, not another authority grant.
+          (let [current-flags (shapes/markers-snapshot)
+                snapshot-class (memoize
+                                 (fn [id]
+                                   (get-in (capture-policy-for rich
+                                                               (select-keys (:by-id rich) [id])
+                                                               current-flags)
+                                           [:classes id])))]
+            (consume
+              {:allow-fn?
+               (fn [id]
+                 (and (= :plain (registry/trace-capture-class id nil))
+                      ;; Storage intentionally erases inline marker
+                      ;; annotations. A fresh check is only a veto:
+                      ;; it must never relax the original policy.
+                      (= :plain (get classes id))
+                      (= :plain (snapshot-class id))))}))))
+      (catch InterruptedException error (throw error))
       (catch Exception error
         (if (= :browser-plan/unsupported (:type (ex-data error)))
           (throw error)

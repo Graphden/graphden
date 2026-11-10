@@ -39,12 +39,12 @@
      ;; No persistence or sharing across runtime instances/builds. Changes to
      ;; checker semantics require a new runtime, not an in-place code reload.
      :checker-abi "builtin-checker-runtime-v1"
-     :callbacks (into []
-                      (for [[ns-sym names] approved-rules
-                            :let [loaded (find-ns ns-sym)]
-                            :when loaded
-                            rule names
-                            :let [v (ns-resolve loaded rule)]
-                            :let [callback (when (and v (bound? v)) @v)]
-                            :when (data/static-callback? callback)]
-                        callback))}))
+     :callbacks (vec
+                  (for [[ns-sym names] approved-rules
+                        :let [loaded (find-ns ns-sym)]
+                        :when loaded
+                        rule names
+                        :let [v (ns-resolve loaded rule)]
+                        :let [callback (when (and v (bound? v)) @v)]
+                        :when (data/static-callback? callback)]
+                    callback))}))

@@ -49,11 +49,11 @@
       (throw (ex-info "Source replay requires an explicit capture reservation" {})))
     (let [closed? (atom false)
           clock #(quot (System/nanoTime) 1000000)
-          manager (session/create-manager {:mode pool-mode :max-sessions (.getMaximumPoolSize ^HikariDataSource pool)})
+          manager (session/create-manager {:mode pool-mode :max-sessions (HikariDataSource/.getMaximumPoolSize pool)})
           cache (store/create-store
                   (assoc (select-keys options [:max-bytes :max-entries :max-pending :max-families :max-leases :max-ttl-ms])
                          :clock-ms clock
-                         :closed? #(or @closed? (.isClosed ^HikariDataSource pool) (.isClosed ^Connection %))))]
+                         :closed? #(or @closed? (HikariDataSource/.isClosed pool) (Connection/.isClosed %))))]
       (when manager
         (Controller. {:id (Object.) :pool pool :manager manager :store cache :closed? closed?
                       :clock clock :ttl max-ttl-ms :capture-bytes max-capture-bytes})))))
@@ -135,44 +135,49 @@
   ;; delegate. Session markers are admitted in autocommit BEFORE owned RR.
   (with-open [connection (jdbc/get-connection (:datasource description))]
     (check!)
-    (when-not (.getAutoCommit ^Connection connection) (unavailable! :borrowed-transaction))
+    (when-not (Connection/.getAutoCommit connection) (unavailable! :borrowed-transaction))
     (let [marker (try (session/ensure-marker! (:manager controller) connection check!)
                       (catch SQLException _ (unavailable! :session-sql-failed)))]
       (when-not marker (unavailable! :session-unavailable))
-      (let [physical (.unwrap ^Connection connection PGConnection)
+      (let [physical (Connection/.unwrap connection PGConnection)
             key [:source-snapshot-v1 (:id controller) (:branch-id description) (:generation registration)]
             family (family! controller key)
             ticket (when family (store/reserve! (:store controller) family physical trace/preparation-scratch-bytes))
-            staged (atom #{})]
+            staged (atom #{})
+            completed? (volatile! false)]
         (when-not ticket (unavailable! :snapshot-budget))
         (try
-          (let [contract (when-let [provider (:policy-contract-for description)] (provider storage/source-tables))]
-            (when (and (:policy-contract-for description) (nil? contract)) (unavailable! :policy-unavailable))
-            (binding [jdbc-tx/*nested-tx* :prohibit]
-              (jdbc/with-transaction [tx connection {:isolation :repeatable-read :read-only true}]
-                                     (let [guard-entered? (volatile! false)]
-                                       (try
-                                         (certificate/call-with-guard
-                                           tx storage/source-tables {:policy-contract contract :session-marker marker} check!
-                                           (fn [guard]
-                                             (vreset! guard-entered? true)
-                                             (consume-snapshot {:controller controller :description description :registration registration
-                                                                :connection tx :physical physical :guard guard :check! check! :staged staged}
-                                                               consume)))
-                                         (catch SQLException error
-                                           ;; A target/policy/export SQL error is NOT replay failure.
-                                           ;; Preserve its original exception; never execute it twice.
-                                           (if @guard-entered? (throw error) (unavailable! :guard-sql-failed)))
-                                         (catch clojure.lang.ExceptionInfo error
-                                           (if (and (not @guard-entered?) (= ::certificate/miss (:type (ex-data error))))
-                                             (unavailable! (:reason (ex-data error)))
-                                             (throw error))))))))
-          (catch Throwable error
-            ;; Also covers transaction completion after the callback returned.
-            ;; A retried/aborted snapshot cannot publish a staged subpass.
-            (doseq [record-ticket @staged] (lifecycle/discard-record! record-ticket))
-            (throw error))
-          (finally (store/abort! (:store controller) ticket)))))))
+          (let [result
+                (let [contract (when-let [provider (:policy-contract-for description)] (provider storage/source-tables))]
+                  (when (and (:policy-contract-for description) (nil? contract)) (unavailable! :policy-unavailable))
+                  (binding [jdbc-tx/*nested-tx* :prohibit]
+                    (jdbc/with-transaction [tx connection {:isolation :repeatable-read :read-only true}]
+                                           (let [guard-entered? (volatile! false)]
+                                             (try
+                                               (certificate/call-with-guard
+                                                 tx storage/source-tables {:policy-contract contract :session-marker marker} check!
+                                                 (fn [guard]
+                                                   (vreset! guard-entered? true)
+                                                   (consume-snapshot {:controller controller :description description :registration registration
+                                                                      :connection tx :physical physical :guard guard :check! check! :staged staged}
+                                                                     consume)))
+                                               (catch SQLException error
+                                                 ;; A target/policy/export SQL error is NOT replay failure.
+                                                 ;; Preserve its original exception; never execute it twice.
+                                                 (if @guard-entered? (throw error) (unavailable! :guard-sql-failed)))
+                                               (catch clojure.lang.ExceptionInfo error
+                                                 (if (and (not @guard-entered?) (= ::certificate/miss (:type (ex-data error))))
+                                                   (unavailable! (:reason (ex-data error)))
+                                                   (throw error))))))))]
+            (vreset! completed? true)
+            result)
+          (finally
+            (try
+              ;; Includes transaction completion after the callback returned.
+              ;; An aborted snapshot cannot publish a staged subpass, even on Error.
+              (when-not @completed?
+                (doseq [record-ticket @staged] (lifecycle/discard-record! record-ticket)))
+              (finally (store/abort! (:store controller) ticket)))))))))
 
 
 (defn with-snapshot

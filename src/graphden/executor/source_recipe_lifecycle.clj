@@ -51,15 +51,16 @@
   (if (or (nil? controller) *operation*)
     (f)
     (let [operation-ref (atom {:controller controller :workers 0 :finished? false
-                               :success? false :pending {}})]
+                               :success? false :pending {}})
+          completed? (volatile! false)]
       (binding [*operation* operation-ref]
         (try
           (let [result (f)]
             (finish! operation-ref (true? (:ok result)))
+            (vreset! completed? true)
             result)
-          (catch Throwable error
-            (finish! operation-ref false)
-            (throw error)))))))
+          (finally
+            (when-not @completed? (finish! operation-ref false))))))))
 
 
 (defn register-worker!

@@ -43,6 +43,8 @@
   [state])
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (deftype ^:private OperationKey
   [state]
 
@@ -70,6 +72,20 @@
 
 (deftype ^:private Certificate
   [state])
+
+
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
+(defn- operation-state
+  [operation]
+  (.-state ^Operation operation))
+
+
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
+(defn- certificate-state
+  [certificate]
+  (.-state ^Certificate certificate))
 
 
 (defn- miss!
@@ -105,8 +121,8 @@
 
 (defn- text-bytes
   [^String value]
-  (when (> (.length value) max-packet-bytes) (miss! :parameter-byte-limit))
-  (alength (.getBytes value "UTF-8")))
+  (when (> (String/.length value) max-packet-bytes) (miss! :parameter-byte-limit))
+  (alength (String/.getBytes value "UTF-8")))
 
 
 (defn- frozen-parameter
@@ -117,20 +133,21 @@
     (cond
       (or (nil? value) (string? value) (boolean? value) (uuid? value)) [:scalar value]
       (contains? number-readers kind)
-      (let [integer (cond
-                      (= java.math.BigDecimal kind) (.unscaledValue ^java.math.BigDecimal value)
-                      (= java.math.BigInteger kind) value
-                      (= clojure.lang.BigInt kind) (biginteger value))]
+      (let [integer (condp = kind
+                      java.math.BigDecimal (java.math.BigDecimal/.unscaledValue value)
+                      java.math.BigInteger value
+                      clojure.lang.BigInt (biginteger value)
+                      nil)]
         ;; Reject oversized precision before decimal string conversion itself
         ;; can allocate an arbitrarily large temporary representation.
-        (when (and integer (> (.bitLength ^java.math.BigInteger integer) max-packet-bytes))
+        (when (and integer (> (java.math.BigInteger/.bitLength integer) max-packet-bytes))
           (miss! :parameter-byte-limit))
         (let [printed (str value)]
           (text-bytes printed)
           [:number kind printed]))
-      (= Timestamp kind) [:timestamp (.getTime ^Timestamp value) (.getNanos ^Timestamp value)]
-      (contains? #{java.util.Date java.sql.Date java.sql.Time} kind) [:date kind (.getTime ^java.util.Date value)]
-      (= Instant kind) [:instant (.getEpochSecond ^Instant value) (.getNano ^Instant value)]
+      (= Timestamp kind) [:timestamp (Timestamp/.getTime value) (Timestamp/.getNanos value)]
+      (contains? #{java.util.Date java.sql.Date java.sql.Time} kind) [:date kind (java.util.Date/.getTime value)]
+      (= Instant kind) [:instant (Instant/.getEpochSecond value) (Instant/.getNano value)]
       :else (miss! :parameter-type))))
 
 
@@ -139,7 +156,7 @@
   (case kind
     :scalar a
     :number ((get number-readers a) b)
-    :timestamp (doto (Timestamp. a) (.setNanos b))
+    :timestamp (doto (Timestamp. a) (Timestamp/.setNanos b))
     :date (condp = a
             java.util.Date (java.util.Date. b)
             java.sql.Date (java.sql.Date. b)
@@ -267,20 +284,22 @@
 
 (defn- physical-connection
   [^Connection connection]
-  (let [physical (.unwrap connection PGConnection)]
+  (let [physical (Connection/.unwrap connection PGConnection)]
     (when-not (instance? BaseConnection physical) (miss! :driver-unsupported))
     physical))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
 (defn- check-guard
   [guard]
   (when-not (instance? Guard guard) (miss! :guard-missing))
   (let [{:keys [connection physical active? check!] :as state} (.-state ^Guard guard)]
     (check!)
-    (when-not (and @active? (not (.isClosed ^Connection connection))
-                   (not (.getAutoCommit ^Connection connection)) (.isReadOnly ^Connection connection)
+    (when-not (and @active? (not (Connection/.isClosed connection))
+                   (not (Connection/.getAutoCommit connection)) (Connection/.isReadOnly connection)
                    (identical? physical (physical-connection connection))
-                   (= TransactionState/OPEN (.getTransactionState ^BaseConnection physical)))
+                   (= TransactionState/OPEN (BaseConnection/.getTransactionState physical)))
       (miss! :guard-inactive))
     state))
 
@@ -438,8 +457,8 @@
    (when-not (and (set? locked) (seq locked) (<= (count locked) max-tables)) (miss! :lock-set))
    (doseq [table locked] (relation table))
    (let [physical (physical-connection connection)]
-     (when-not (and (not (.getAutoCommit connection)) (.isReadOnly connection)
-                    (= TransactionState/IDLE (.getTransactionState ^BaseConnection physical)))
+     (when-not (and (not (Connection/.getAutoCommit connection)) (Connection/.isReadOnly connection)
+                    (= TransactionState/IDLE (BaseConnection/.getTransactionState physical)))
        (miss! :not-fresh-read-transaction))
      (execute! connection check! ["SET LOCAL statement_timeout = '1000ms'"])
      (execute! connection check! [(str "LOCK TABLE "
@@ -451,7 +470,7 @@
            state {:connection connection :physical physical :locked locked :check! check! :active? active? :scope (Object.)
                   :bounds {:lower (bigint (:lower session)) :upper (bigint (:upper session))}
                   :session (dissoc session :lower :upper)
-                  :jvm-zone (.getRules (ZoneId/systemDefault))
+                  :jvm-zone (ZoneId/.getRules (ZoneId/systemDefault))
                   :schema schema :relation-oids (set (map :oid schema))
                   :policy-facts (when policy-contract
                                   {:tables (:tables policy-contract)
@@ -502,7 +521,7 @@
    Scope identity is excluded; consumers separately compare options/builders."
   [operation]
   (when-not (instance? Operation operation) (miss! :operation-missing))
-  (:key (.-state ^Operation operation)))
+  (:key (operation-state operation)))
 
 
 (defn operation-query
@@ -511,7 +530,7 @@
    after preparation; a later mutation cannot change this operation's predicate."
   [operation]
   (when-not (instance? Operation operation) (miss! :operation-missing))
-  (let [{:keys [sql params]} (:query (.-state ^Operation operation))]
+  (let [{:keys [sql params]} (:query (operation-state operation))]
     (into [sql] (map parameter params))))
 
 
@@ -521,7 +540,7 @@
    certificate capture has its own separate bounded metadata allowance."
   [operation]
   (when-not (instance? Operation operation) (miss! :operation-missing))
-  (:charge-bytes (.-state ^Operation operation)))
+  (:charge-bytes (operation-state operation)))
 
 
 (defn- witness-member
@@ -544,7 +563,7 @@
 (defn- operation-statements
   [operation-index operation]
   (when-not (instance? Operation operation) (miss! :operation-missing))
-  (let [{:keys [ast parts single-row?]} (.-state ^Operation operation)]
+  (let [{:keys [ast parts single-row?]} (operation-state operation)]
     (mapv (fn [member {table-alias :alias}]
             (let [column #(keyword (str (name table-alias) "." %))]
               (freeze-query
@@ -643,7 +662,7 @@
    (let [state (check-guard guard)]
      (when-not (and (vector? operations) (<= (count operations) max-operations)
                     (every? #(and (instance? Operation %)
-                                  (identical? (:scope state) (:scope (.-state ^Operation %)))) operations))
+                                  (identical? (:scope state) (:scope (operation-state %)))) operations))
        (miss! :operation-scope))
      (when-not (and (integer? max-bytes) (<= (* 1024 1024) max-bytes max-capture-bytes))
        (miss! :capture-budget))
@@ -684,9 +703,9 @@
   (let [current (check-guard guard)
         answer
         (and (instance? Certificate certificate)
-             (let [old (.-state ^Certificate certificate)
+             (let [old (certificate-state certificate)
                    before (:bounds old) after (:bounds current)
-                   compatible (and (or (identical? (.get ^WeakReference (:physical old)) (:physical current))
+                   compatible (and (or (identical? (WeakReference/.get (:physical old)) (:physical current))
                                        (and (:origin old)
                                             (source-session/origin-live?
                                               (:origin old) (:connection current) #(check-guard guard))))
@@ -704,7 +723,7 @@
   "Bounded counts only. Never expose stored predicates, tokens or schema data."
   [certificate]
   (when (instance? Certificate certificate)
-    (let [{:keys [operations rows plans charge-bytes]} (.-state ^Certificate certificate)]
+    (let [{:keys [operations rows plans charge-bytes]} (certificate-state certificate)]
       {:operations operations :rows rows :charge-bytes charge-bytes :packets (count plans)
        :metadata-selects (reduce + 0 (map count plans))
        :plan-bytes (reduce + 0 (map :bytes (mapcat identity plans)))})))

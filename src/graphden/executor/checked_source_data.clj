@@ -31,9 +31,9 @@
    Refuse closures with retained instance captures, even if explicitly listed."
   [value]
   (and (fn? value) (nil? (meta value))
-       (contains? #{clojure.lang.AFunction clojure.lang.RestFn} (.getSuperclass (class value)))
-       (every? #(Modifier/isStatic (.getModifiers ^java.lang.reflect.Field %))
-               (.getDeclaredFields (class value)))))
+       (contains? #{clojure.lang.AFunction clojure.lang.RestFn} (Class/.getSuperclass (class value)))
+       (every? #(Modifier/isStatic (java.lang.reflect.Field/.getModifiers %))
+               (Class/.getDeclaredFields (class value)))))
 
 
 (defn- approved-callback?
@@ -43,9 +43,11 @@
 
 (defn- integer-charge
   [^BigInteger value]
-  (+ 96 (quot (+ 7 (.bitLength value)) 8)))
+  (+ 96 (quot (+ 7 (BigInteger/.bitLength value)) 8)))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn- scalar-charge
   [value]
   (cond
@@ -53,8 +55,8 @@
     (or (keyword? value) (symbol? value))
     (+ 192 (* 2 (+ (count (name value)) (count (namespace value)))))
     (instance? BigInteger value) (integer-charge value)
-    (instance? BigInt value) (+ 96 (integer-charge (.toBigInteger ^BigInt value)))
-    (instance? BigDecimal value) (+ 96 (integer-charge (.unscaledValue ^BigDecimal value)))
+    (instance? BigInt value) (+ 96 (integer-charge (BigInt/.toBigInteger value)))
+    (instance? BigDecimal value) (+ 96 (integer-charge (BigDecimal/.unscaledValue value)))
     (instance? Ratio value) (+ 96 (integer-charge (.-numerator ^Ratio value))
                                (integer-charge (.-denominator ^Ratio value)))
     :else 96))
@@ -99,6 +101,8 @@
       (when (walk value 0) @charged-bytes))))
 
 
+;; Direct fields have no Class/.method equivalent; retain typed field access.
+^{:splint/disable [lint/prefer-method-values]}
 (defn same-input?
   "Only for separately admitted immutable inputs. Preserve concrete numeric
    representation, container kind/iteration order and provenance identity."
@@ -118,4 +122,4 @@
            (instance? Ratio left) (and (= (.-numerator ^Ratio left) (.-numerator ^Ratio right))
                                        (= (.-denominator ^Ratio left) (.-denominator ^Ratio right)))
            (nil? left) true
-           :else (.equals ^Object left right)))))
+           :else (Object/.equals left right)))))

@@ -5,7 +5,6 @@
     [clojure.tools.logging :as log]
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
-    [graphden.editor.root-binding :as binding]
     [graphden.editor.root-migration-plan :as migration]
     [graphden.editor.root-migration-templates :as migration-templates]
     [graphden.executor.browser-server :as server]
@@ -56,44 +55,42 @@
        (source/with-snapshot
          (:storage ctx)
          (fn [storage authorize!]
-           (let [{handler-root :root} (binding/capture! storage)
-                 choice (resolution/root-choice storage authorize! policy)
-                 root (binding/selected-root handler-root choice)
-                 row (sp/read-entity storage :fn root)
-                 home (tenancy/current-personal-namespace)
-                 home-row (when home
-                            (metadata/namespace-row storage (:namespace-path home)
-                                                    (tenancy/current-org)))
-                 migrated? (migration/migration-owned? row (:id home-row))
-                 selected-configuration? (and (tenancy/current-user-id)
-                                              (or (= resolution/default-root-id root)
-                                                  migrated?))]
-             (when-not row (reject! :source-missing))
-             (authorize! row {:execute? true})
-             (components/assert-current-policy! storage)
-             (let [plan (server/export-client-plan
-                          ctx storage authorize! policy {:root root} request
-                          {:handler-root handler-root :selected-root root})
-                   input (get-in plan [:inputs (str root)])
-                   required (:required input)
-                   argument (first required)
-                   selected (when selected-configuration?
-                              (resolution/capture storage authorize! policy))
-                   editable (when (and migrated? selected)
-                              (editable-role-ids storage authorize! row (:configuration selected)))]
-               ;; This first slice exports closed static roots with at most
-               ;; one invocation input. Remaining free captures need a caller
-               ;; environment and must not silently become client arguments.
-               (when (or (> (count required) 1)
-                         (and (= [] (:lambda-params row))
-                              (seq required)))
-                 (reject! :root-captures))
-               (components/assert-current-policy! storage)
-               (when-not (= epoch (context/invalidation-epoch ctx))
-                 (reject! :policy-refresh-required))
-               {:ok true :plan plan :argument-name argument :root-id (str root)
-                :editable-role-ids editable
-                :component-selection-id (:id selected)})))))
+           (server/call-with-root-export
+             ctx storage authorize! policy request
+             (fn [root export-plan]
+               (let [row (sp/read-entity storage :fn root)
+                     home (tenancy/current-personal-namespace)
+                     home-row (when home
+                                (metadata/namespace-row storage (:namespace-path home)
+                                                        (tenancy/current-org)))
+                     migrated? (migration/migration-owned? row (:id home-row))
+                     selected-configuration? (and (tenancy/current-user-id)
+                                                  (or (= resolution/default-root-id root)
+                                                      migrated?))]
+                 (when-not row (reject! :source-missing))
+                 (authorize! row {:execute? true})
+                 (components/assert-current-policy! storage)
+                 (let [plan (export-plan)
+                       input (get-in plan [:inputs (str root)])
+                       required (:required input)
+                       argument (first required)
+                       selected (when selected-configuration?
+                                  (resolution/capture storage authorize! policy))
+                       editable (when (and migrated? selected)
+                                  (editable-role-ids storage authorize! row (:configuration selected)))]
+                   ;; This first slice exports closed static roots with at most
+                   ;; one invocation input. Remaining free captures need a caller
+                   ;; environment and must not silently become client arguments.
+                   (when (or (> (count required) 1)
+                             (and (= [] (:lambda-params row))
+                                  (seq required)))
+                     (reject! :root-captures))
+                   (components/assert-current-policy! storage)
+                   (when-not (= epoch (context/invalidation-epoch ctx))
+                     (reject! :policy-refresh-required))
+                   {:ok true :plan plan :argument-name argument :root-id (str root)
+                    :editable-role-ids editable
+                    :component-selection-id (:id selected)})))))))
      (catch Exception error
        (let [{:keys [type reason]} (ex-data error)]
          (when-not (= reason :policy-refresh-required)

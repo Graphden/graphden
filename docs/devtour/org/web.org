@@ -222,26 +222,26 @@ Parses whether an ~Accept-Encoding~ token accepts one coding. The surrounding ~:
 :PROPERTIES:
 :CUSTOM_ID: web/type-name-entries
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 188
+:LINE: 196
 :MINS: 2.8
 :END:
 
 Acquires the scoped picker rows with canonical namespace references kept separate from displayed selection names. The graph's ~compatible-type-names~ filters those references with subtyping before sharing the ~type-name-kinds~ wire projection.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn type-name-entries][src/graphden/crud/types_api.clj:188]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn type-name-entries][src/graphden/crud/types_api.clj:196]]
 - same file :: [[file:web.org::#web/all-rich-types][all-rich-types]]
 
 * 18. all-rich-types
 :PROPERTIES:
 :CUSTOM_ID: web/all-rich-types
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 725
+:LINE: 729
 :MINS: 1.1
 :END:
 
 Acquires the augmented, scoped [[file:glossary.org::#term/rich-types][rich-types registry]] snapshot. The graph's ~api-rich-types~ maps its wire projection over this single snapshot, removing metadata unused by the editor while preserving type fields.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn all-rich-types][src/graphden/crud/types_api.clj:725]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn all-rich-types][src/graphden/crud/types_api.clj:729]]
 - same file :: [[file:web.org::#web/type-name-entries][type-name-entries]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 

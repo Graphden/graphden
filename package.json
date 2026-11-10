@@ -7,9 +7,9 @@
     "lint:fix": "biome check --write resources/packages/app/editor"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
-    "@commitlint/cli": "^21.2.3",
-    "@commitlint/config-conventional": "^21.2.3",
+    "@biomejs/biome": "^2.6.6",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "acorn": "^8.19.0",
     "markdownlint-cli2": "^0.23.3",
     "stylelint": "^17.16.0",

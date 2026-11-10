@@ -60,8 +60,9 @@ const LIST_CHILD = 'eip-button';
 
     await page.goto(BASE + '/#' + OWNER);
     // The base fn's card is on the canvas (one hop), with the owner's ⋯ context.
-    await page.waitForSelector('.node-overlay[data-fn-name="map"] .ancestor-line[data-level="0"] button.more-actions-trigger',
-      {timeout: 60000});
+    await page.waitForFunction(() => gdGraphEditsReady()
+      && !!document.querySelector('.node-overlay[data-fn-name="map"] .ancestor-line[data-level="0"] button.more-actions-trigger'),
+    null, {timeout: 60000});
 
     // ---- TENANT-shaped ownership (issue #30). Package fns are not the
     // org's; the user's own fn is. The ⋯ on the PACKAGE fn's use-site card

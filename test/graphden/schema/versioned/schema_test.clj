@@ -188,7 +188,13 @@
       (is (true? (:indexed? (:ref-fn-id (ds/entity-fields schema :binding-list-item-version)))))
       (is (true? (:indexed? (:name (ds/entity-fields schema :fn-version))))
           "fn-version.name keeps the base's index — check-fn-name-collision!
-           bounds its candidate query on it"))))
+           bounds its candidate query on it"))
+    (testing "bounded source owner queries stay indexed after ref demotion"
+      (doseq [[entity field] [[:fn-slot-version :fn-id]
+                              [:binding-version :fn-id]
+                              [:binding-list-item-version :binding-id]]]
+        (is (true? (:indexed? (get (ds/entity-fields schema entity) field)))
+            (str entity "/" field " must bound source reads without scanning every version"))))))
 
 
 (deftest derive-version-fields-fails-loud-test

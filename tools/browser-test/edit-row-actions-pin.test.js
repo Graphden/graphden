@@ -59,7 +59,7 @@ async function popoverVisible(page) {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/#' + PROBE_FN);
     await page.waitForFunction(
-      () => graphReady()
+      () => graphReady() && gdGraphEditsReady()
             && !!document.querySelector('button.more-actions-trigger')
             && !graph.animating,
       null,

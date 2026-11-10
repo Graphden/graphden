@@ -35,7 +35,31 @@ function gdNavigateToFn(fnId, qname) {
   if (qname && typeof selectFnByName === 'function') selectFnByName(qname);
 }
 
+let _navigationEpoch = 0;
+let _navigationWork = Promise.resolve();
+let _navigationChanged = Promise.resolve();
+let _wakeNavigation = () => {};
+function beginNavigation() {
+  _wakeNavigation();
+  _navigationChanged = new Promise(resolve => { _wakeNavigation = resolve; });
+  return ++_navigationEpoch;
+}
+function gdInvalidateNavigation() {
+  beginNavigation();
+  _navigationWork = Promise.resolve();
+}
+async function gdWaitForSelectionRender() {
+  let current;
+  do {
+    current = _navigationWork;
+    await Promise.race([current, _navigationChanged]);
+  } while (current !== _navigationWork);
+}
+window.gdInvalidateNavigation = gdInvalidateNavigation;
+window.gdWaitForSelectionRender = gdWaitForSelectionRender;
+
 function selectFn(fnId, updateHistory = true) {
+  beginNavigation();
   // Re-selecting the SAME root — what every write's `loadGraphData` does —
   // keeps the canvas as the reader left it: unfolded cards stay unfolded,
   // dragged cards stay put. Only a change of root folds everything
@@ -87,7 +111,8 @@ function selectFn(fnId, updateHistory = true) {
     window.gdAnnounce(getQualifiedFnName(fn) + ' selected');
   }
 
-  return renderGraph(true);
+  _navigationWork = Promise.resolve(renderGraph(true));
+  return _navigationWork;
 }
 
 // No selection at all — the state a fresh load without a hash shows: an
@@ -99,6 +124,7 @@ function selectFn(fnId, updateHistory = true) {
 // hashchange). `fetchBackendLayout` answers an empty layout for a null
 // selection, so the plain render removes every node.
 function gdClearSelection() {
+  gdInvalidateNavigation();
   selectedFnId = null;
   expansionState.clear();
   previewState.clear();
@@ -106,7 +132,7 @@ function gdClearSelection() {
   if (graphData && typeof updateEntityList === 'function') updateEntityList(graphData);
   if (typeof gdInspectorRender === 'function') gdInspectorRender(null);
   try { window.history.pushState(null, '', '#'); } catch (_) { /* file:// */ }
-  renderGraph(false);
+  _navigationWork = Promise.resolve(renderGraph(false));
 }
 window.gdClearSelection = gdClearSelection;
 
@@ -126,24 +152,33 @@ window.gdClearSelection = gdClearSelection;
 // genuine miss still reports itself.
 async function selectJustCreatedFn(name, tries = 12, gapMs = 250) {
   if (!name) return;
+  const epoch = beginNavigation();
   for (let i = 0; i < tries; i++) {
+    if (epoch !== _navigationEpoch) return;
     if (typeof resolveFnByName !== 'function') break;
     try {
       if (await resolveFnByName(name)) break;
     } catch (_) { /* keep trying — the write already succeeded */ }
     await new Promise((r) => setTimeout(r, gapMs));
   }
-  if (typeof selectFnByName === 'function') await selectFnByName(name);
+  if (epoch === _navigationEpoch && typeof selectFnByName === 'function') await selectFnByName(name);
 }
 window.selectJustCreatedFn = selectJustCreatedFn;
 
 
-async function selectFnByName(name, updateHistory = true) {
+function selectFnByName(name, updateHistory = true) {
+  _navigationWork = resolveFnSelection(name, updateHistory, beginNavigation());
+  return _navigationWork;
+}
+
+async function resolveFnSelection(name, updateHistory, epoch) {
+  const current = () => epoch === _navigationEpoch;
+  if (!graphData) return;
   // Identity bookmarks retain ordinary navigation across renamed functions.
   // An exact subtree read supplies the authoritative row in this branch.
   if (/^fn:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(name)) {
     const id = name.slice(3).toLowerCase();
-    if (await ensureSubtreeFor(id) && graphData.fns.some(fn => fn.id === id)) {
+    if (await ensureSubtreeFor(id) && current() && graphData?.fns.some(fn => fn.id === id)) {
       if (typeof gdShellSurface === 'function') gdShellSurface('build');
       await selectFn(id, updateHistory);
     }
@@ -161,11 +196,13 @@ async function selectFnByName(name, updateHistory = true) {
   if (!fn && typeof resolveFnByName === 'function') {
     try {
       const resolved = await resolveFnByName(name);
+      if (!current()) return;
       if (resolved) fn = resolved;
     } catch (err) {
       console.error('selectFnByName resolution failed', err);
     }
   }
+  if (!current()) return;
   // Display-name fallback: the tree shows private names WITHOUT their
   // `_` prefix (displayLabel), so a name a user copied from the UI may
   // be the stripped form. Retry with `_` on the last segment before
@@ -179,6 +216,7 @@ async function selectFnByName(name, updateHistory = true) {
           : null);
     if (!fn && typeof resolveFnByName === 'function') {
       try { fn = await resolveFnByName(privatized); } catch (_) { /* below */ }
+      if (!current()) return;
     }
   }
   if (!fn) {

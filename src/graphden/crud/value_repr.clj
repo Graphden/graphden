@@ -121,7 +121,7 @@
    canonical slot identities and rejects markers, secret references and invalid
    refinements before any pure sanitized execution. Equal previews share the
    same budget entry, including failed evaluations."
-  [ctx elements graph selector]
+  [ctx elements graph select-repr]
   (let [rows (value-form/registry-pairs ctx "_value-inline-repr-registry")
         lookups {:fn-map (into {} (map (juxt :id identity)) (:fns graph))
                  :slot-map (into {} (map (juxt :id identity)) (:slots graph))
@@ -138,7 +138,7 @@
                   target (when (valid-literal? t value)
                            (if (contains? @targets t)
                              (get @targets t)
-                             (let [selected (selector {:registry rows :type-expr t})]
+                             (let [selected (select-repr {:registry rows :type-expr t})]
                                (swap! targets assoc t selected)
                                selected)))
                   k [(:id info) value]

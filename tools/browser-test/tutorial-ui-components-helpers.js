@@ -117,7 +117,7 @@ async function reviewEditorConfigurationCleanup(page, timeout) {
 
 async function bindPersonalMenuTheme(page, entry, accent, background) {
   const bound = await page.waitForFunction(entry => {
-    if (typeof _singleEditableIncomingArg !== 'function' || !gv.ready() || graph.animating) return false;
+    if (!gdGraphEditsReady() || typeof _singleEditableIncomingArg !== 'function' || !gv.ready() || graph.animating) return false;
     for (const overlay of document.querySelectorAll('.node-overlay[data-original-fn-id]')) {
       const arg = _singleEditableIncomingArg(overlay.dataset.nodeId);
       const trigger = overlay.querySelector('.ancestor-line[data-level="0"] button.more-actions-trigger');

@@ -93,6 +93,7 @@ function createGraph(nodes, edges, layout, shouldFit) {
 // whichever layout answered last: A's graph under B's sidebar and Inspector.
 let _renderGen = 0;
 let _renderedGen = -1;
+function invalidateGraphRender() { _renderGen++; }
 
 // Data readiness and an idle animation do not imply that a pending backend
 // layout has been installed. Only the completed current render certifies it.

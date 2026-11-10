@@ -651,7 +651,10 @@
    :fn-slot {:identity-fields #{:org-id}
              :uuids {:fn-id fn-slot-version-fn-id-field-uuid
                      :slot-id fn-slot-version-slot-id-field-uuid
-                     :position fn-slot-version-position-field-uuid}}
+                     :position fn-slot-version-position-field-uuid}
+             ;; Bounded source reads find candidates by owner on ANY version.
+             ;; Demoted refs need explicit indexes on the version table.
+             :tweaks {:fn-id {:indexed? true}}}
    :binding {:identity-fields #{:org-id}
              :uuids {:fn-id binding-version-fn-id-field-uuid
                      :slot-id binding-version-slot-id-field-uuid
@@ -670,7 +673,8 @@
              ;; ref-check). Not a `:ref` (no FK — the target fn may be
              ;; deleted while a version row lingers), so it needs the
              ;; explicit index flag.
-             :tweaks {:ref-fn-id {:indexed? true}}}
+             :tweaks {:ref-fn-id {:indexed? true}
+                      :fn-id {:indexed? true}}}
    :resource-override {:identity-fields #{:org-id}
                        :uuids {:path resource-override-version-path-field-uuid
                                :content resource-override-version-content-field-uuid}
@@ -686,7 +690,8 @@
                                :literal binding-list-item-version-literal-field-uuid}
                        ;; Same version-side reverse-ref lookup as
                        ;; binding-version's :ref-fn-id above.
-                       :tweaks {:ref-fn-id {:indexed? true}}}})
+                       :tweaks {:ref-fn-id {:indexed? true}
+                                :binding-id {:indexed? true}}}})
 
 
 (def ^:private mirror-fields

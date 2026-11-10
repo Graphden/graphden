@@ -176,7 +176,7 @@
           slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root)
           selector-slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root-selector)
           binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id slot}))
-          selector (first (sp/query-entities storage :binding {:fn-id handler :slot-id selector-slot}))]
+          selector-binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id selector-slot}))]
       (doseq [change [{:value-present true} {:terminal true} {:list-append true}
                       {:list-closed true} {:resolver-fn-id (ids/fn-id "core.logic" :const)}
                       {:type-override-fn-id (ids/fn-id "core.logic" :const)}]]
@@ -189,12 +189,12 @@
             (sp/update-entity storage :binding (:id binding) (select-keys binding (keys change))))))
       (doseq [change [{:ref-fn-id (random-uuid)} {:value-present true}]]
         (try
-          (sp/update-entity storage :binding (:id selector) change)
+          (sp/update-entity storage :binding (:id selector-binding) change)
           (let [result (export-editor-root ctx)]
             (is (= 422 (:http-status result)))
             (is (not (contains? result :plan))))
           (finally
-            (sp/update-entity storage :binding (:id selector) (select-keys selector (keys change)))))))))
+            (sp/update-entity storage :binding (:id selector-binding) (select-keys selector-binding (keys change)))))))))
 
 
 (deftest editor-root-rejects-a-missing-principal-before-selection

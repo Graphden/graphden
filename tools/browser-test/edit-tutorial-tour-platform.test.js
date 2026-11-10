@@ -65,9 +65,7 @@ const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
     await waitTourTitle(page, 'Give it a parent', 150000);
     await setParentViaStrip(page, 'const');
     await waitTourTitle(page, 'Publish the namespace', 150000);
-    await page.evaluate(() => {
-      document.querySelector('.ns-header[data-ns-path="mycorp"] .ns-publish-btn').click();
-    });
+    await page.locator('.ns-header[data-ns-path="mycorp"] .ns-publish-btn').click({timeout: 15000});
     await page.waitForSelector('#gd-nspub-name', {timeout: 15000});
     // The tour popover overlays the dialog — click through the DOM, the way
     // the other guards do, instead of Playwright's hit-testing click.

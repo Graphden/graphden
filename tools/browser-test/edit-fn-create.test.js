@@ -16,7 +16,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, deleteFnByName} =
+const {assert, newContext, waitForEditorReady, api, deleteFnByName} =
   require('./edit-test-helpers');
 
 
@@ -31,6 +31,7 @@ async function cleanup(page) {
 
 
 async function openCreateMenuForNs(page, nsName) {
+  await waitForEditorReady(page);
   // Ensure the ns is expanded, then click its + button. The header
   // click toggles expand/collapse — only click it if we need to
   // toggle ON.

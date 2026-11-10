@@ -46,15 +46,11 @@ const BH = {'X-Graphden-Branch': BRANCH};
     await page.click('[data-ns-path="app"] .ns-label');
     await page.waitForSelector('[data-ns-path="app.contact-demo"]', {timeout: 15000});
 
-    // ⬆ is a row-action (hover-revealed) — fire its listener directly;
-    // the popover anchors on the button either way.
-    const hasBtn = await page.evaluate(() => {
-      const row = document.querySelector('[data-ns-path="app.contact-demo"]');
-      const btn = row && row.querySelector('.ns-publish-btn');
-      if (btn) btn.click();
-      return !!btn;
-    });
-    assert(hasBtn, 'the app.contact-demo row offers the ⬆ publish action');
+    // Namespace rows appear before metadata is ready. A real click waits for
+    // the authoring action to leave its inert state, just as a reader must.
+    const publish = page.locator('.ns-header[data-ns-path="app.contact-demo"] .ns-publish-btn');
+    assert(await publish.count() === 1, 'the app.contact-demo row offers the ⬆ publish action');
+    await publish.click({timeout: 15000});
 
     await page.waitForSelector('#gd-nspub-pop', {timeout: 5000});
     const prefill = await page.evaluate(() => ({

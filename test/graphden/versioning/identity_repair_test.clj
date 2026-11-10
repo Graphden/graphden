@@ -20,36 +20,43 @@
 
 (defn- row-matches?
   [row where]
-  (every? (fn [[k v]] (= v (get row k))) where))
+  (every? (fn [[k v]]
+            (if (or (vector? v) (set? v) (seq? v))
+              (contains? (set v) (get row k))
+              (= v (get row k))))
+          where))
 
 
 (defn- mem-storage
   "In-memory StorageCRUD over `db`, an atom of `{entity → {id → row}}`.
    Only the methods the repair primitives use are implemented
    (query-entities/3, update-entity, delete-entity) — the rest throw."
-  [db]
-  (reify sp/StorageCRUD
-    (create-entity [_ _ _] (unexpected! "create-entity"))
+  ([db] (mem-storage db nil))
+  ([db queries]
+   (reify sp/StorageCRUD
+     (create-entity [_ _ _] (unexpected! "create-entity"))
 
-    (read-entity [_ _ _] (unexpected! "read-entity"))
+     (read-entity [_ _ _] (unexpected! "read-entity"))
 
-    (update-entity
-      [_ entity-name id data]
-      (swap! db update-in [entity-name id] merge data)
-      nil)
+     (update-entity
+       [_ entity-name id data]
+       (swap! db update-in [entity-name id] merge data)
+       nil)
 
-    (delete-entity
-      [_ entity-name id]
-      (swap! db update entity-name dissoc id)
-      nil)
+     (delete-entity
+       [_ entity-name id]
+       (swap! db update entity-name dissoc id)
+       nil)
 
-    (query-entities
-      [_ entity-name where]
-      (filterv #(row-matches? % where) (vals (get @db entity-name))))
+     (query-entities
+       [_ entity-name where]
+       (when queries
+         (swap! queries conj [entity-name where]))
+       (filterv #(row-matches? % where) (vals (get @db entity-name))))
 
-    (query-entities [_ _ _ _] (unexpected! "query-entities/4"))
+     (query-entities [_ _ _ _] (unexpected! "query-entities/4"))
 
-    (query-latest-per-group [_ _ _ _] (unexpected! "query-latest-per-group"))))
+     (query-latest-per-group [_ _ _ _] (unexpected! "query-latest-per-group")))))
 
 
 (deftest base-of-test
@@ -376,3 +383,99 @@
       (is (= [{:entity :fn :id :child :field :parent-ids :owner-fn-id :child}]
              (:e live))
           "the vanished-branch version is gone, the parent junction stays"))))
+
+
+(deftest purge-owned-versions-across-branches-with-bounded-queries-test
+  (let [seed (-> (purge-seed)
+                 (assoc-in [:binding-version :bv1 :branch-id] :main)
+                 (assoc-in [:binding-list-item-version :iv1 :branch-id] :main)
+                 (assoc-in [:fn-slot-version :fsv1 :branch-id] :main)
+                 (assoc-in [:fn-version :fv1 :branch-id] :main)
+                 (assoc-in [:binding-version :bv2]
+                           {:id :bv2 :binding-id :b1 :fn-id :different :branch-id :other})
+                 (assoc-in [:binding-list-item-version :iv2]
+                           {:id :iv2 :binding-id :b1 :branch-id :other})
+                 (assoc-in [:fn-slot-version :fsv2]
+                           {:id :fsv2 :fn-slot-id :fs1 :branch-id :other})
+                 (assoc-in [:fn-version :fv2]
+                           {:id :fv2 :fn-id :x :branch-id :other})
+                 (assoc-in [:slot :shared] {:id :shared :type-fn-id :keep})
+                 (assoc-in [:binding-version :bvk :fn-id] :x))
+        expected (-> seed
+                     (update :fn dissoc :x)
+                     (update :fn-version dissoc :fv1 :fv2)
+                     (update :binding dissoc :b1 :b2)
+                     (update :binding-version dissoc :bv1 :bv2)
+                     (update :binding-list-item dissoc :i1)
+                     (update :binding-list-item-version dissoc :iv1 :iv2)
+                     (update :fn-slot dissoc :fs1)
+                     (update :fn-slot-version dissoc :fsv1 :fsv2))]
+    (doseq [dry-run? [false true]]
+      (let [db (atom seed)
+            queries (atom [])
+            plan (atom [])
+            n (idr/purge-fn-subgraph! (mem-storage db queries) :x
+                                      #(swap! plan conj %) dry-run?)]
+        (is (= 13 n))
+        (is (= 13 (count @plan)))
+        (is (= (if dry-run? seed expected) @db)
+            "Every branch's owned versions are removed; unrelated rows and shared slots survive")
+        (is (= [[:binding {:fn-id :x}]
+                [:binding-list-item-version {:binding-id #{:b1 :b2}}]
+                [:binding-list-item {:binding-id #{:b1 :b2}}]
+                [:binding-version {:binding-id #{:b1 :b2}}]
+                [:fn-slot {:fn-id :x}]
+                [:fn-slot-version {:fn-slot-id #{:fs1}}]
+                [:fn-version {:fn-id :x}]]
+               @queries)
+            "Seven targeted reads, with no table-wide or per-child queries")))))
+
+
+(deftest purge-empty-owners-skips-child-queries-test
+  (doseq [dry-run? [false true]]
+    (let [seed (assoc-in (purge-seed) [:fn :empty] {:id :empty})
+          db (atom seed)
+          queries (atom [])
+          plan (atom [])
+          n (idr/purge-fn-subgraph! (mem-storage db queries) :empty
+                                    #(swap! plan conj %) dry-run?)]
+      (is (= 1 n))
+      (is (= [{:op :remove :entity :fn :id :empty}] @plan))
+      (is (= (if dry-run? seed (purge-seed)) @db))
+      (is (= [[:binding {:fn-id :empty}]
+              [:fn-slot {:fn-id :empty}]
+              [:fn-version {:fn-id :empty}]]
+             @queries)
+          "Empty owner sets never read any of the four child tables"))))
+
+
+(deftest purge-large-owner-sets-bounds-query-parameters-test
+  (let [owner-count 513
+        child-tables [:binding-list-item-version :binding-list-item
+                      :binding-version :fn-slot-version]
+        rows (fn [entity owner-field owner-entity]
+               (into {:keep {:id :keep owner-field :keep}}
+                     (map (fn [i]
+                            (let [id [entity i]]
+                              [id {:id id owner-field (if (= :fn owner-entity)
+                                                        :x [owner-entity i])}]))
+                          (range owner-count))))
+        seed {:fn {:x {:id :x} :keep {:id :keep}}
+              :fn-version {:fv {:id :fv :fn-id :x} :keep {:id :keep :fn-id :keep}}
+              :binding (rows :binding :fn-id :fn)
+              :binding-version (rows :binding-version :binding-id :binding)
+              :binding-list-item (rows :binding-list-item :binding-id :binding)
+              :binding-list-item-version (rows :binding-list-item-version :binding-id :binding)
+              :fn-slot (rows :fn-slot :fn-id :fn)
+              :fn-slot-version (rows :fn-slot-version :fn-slot-id :fn-slot)}
+        expected (update-vals seed #(select-keys % [:keep]))
+        db (atom seed)
+        queries (atom [])
+        n (idr/purge-fn-subgraph! (mem-storage db queries) :x)
+        child-queries (filterv (comp (set child-tables) first) @queries)]
+    (is (= (+ 2 (* 6 owner-count)) n))
+    (is (= expected @db) "All owned rows are deleted; every unrelated row survives")
+    (is (= 15 (count @queries)) "Three batches per child table plus three owner reads")
+    (is (= (zipmap child-tables (repeat 3)) (frequencies (map first child-queries))))
+    (is (every? #(<= 1 (count (first (vals (second %)))) 256) child-queries)
+        "Each IN query stays bounded even for an owner set larger than one batch")))

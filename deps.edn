@@ -4,21 +4,21 @@
  {org.clojure/clojure {:mvn/version "1.12.6"}
   ;; Logging
   org.clojure/tools.logging {:mvn/version "1.3.1"}
-  ch.qos.logback/logback-classic {:mvn/version "1.6.5"}
+  ch.qos.logback/logback-classic {:mvn/version "1.6.6"}
   ;; Schema validation
   metosin/malli {:mvn/version "0.20.3"}
   ;; PostgreSQL
   org.postgresql/postgresql {:mvn/version "42.7.14"}
-  com.github.seancorfield/next.jdbc {:mvn/version "1.4.70"}
-  com.github.seancorfield/honeysql {:mvn/version "2.7.1495"}
+  com.github.seancorfield/next.jdbc {:mvn/version "1.4.72"}
+  com.github.seancorfield/honeysql {:mvn/version "2.8.85"}
   com.zaxxer/HikariCP {:mvn/version "7.1.0"}
-  cheshire/cheshire {:mvn/version "6.2.0"}
+  cheshire/cheshire {:mvn/version "6.2.1"}
   ;; Pin jackson directly over cheshire's older transitive version. 2.22.3
   ;; includes fixes for earlier databind/core advisories and the current
   ;; forward-reference DoS (CVE-2026-91777). Keep core and databind aligned.
   ;; Surfaced by `bb trivy`'s JVM classpath scan — keep in sync with it.
-  com.fasterxml.jackson.core/jackson-core {:mvn/version "2.22.4"}
-  com.fasterxml.jackson.core/jackson-databind {:mvn/version "2.22.4"}
+  com.fasterxml.jackson.core/jackson-core {:mvn/version "2.23.0"}
+  com.fasterxml.jackson.core/jackson-databind {:mvn/version "2.23.0"}
   ;; Web
   http-kit/http-kit {:mvn/version "2.8.1"}
   ;; OkHttp — used ONLY for a tenant's RESTRICTED outbound call, where its
@@ -28,7 +28,7 @@
   ;; graphden.clients.egress. (Apache-2.0; pulls okio + kotlin-stdlib.
   ;; okhttp 5.x is Kotlin-multiplatform — the bare `okhttp` coord is Gradle
   ;; module metadata; Maven/tools.deps consumers need the -jvm artifact.)
-  com.squareup.okhttp3/okhttp-jvm {:mvn/version "5.5.0"}
+  com.squareup.okhttp3/okhttp-jvm {:mvn/version "5.5.1"}
   metosin/reitit {:mvn/version "0.11.0"}
   ;; HTML templating
   hiccup/hiccup {:mvn/version "2.0.0"}
@@ -48,8 +48,8 @@
   ;; encode-response handler wrap. Java API + the Linux x86_64
   ;; native binary that the deploy target runs on; ARM / macOS
   ;; would need their own native jar.
-  com.aayushatharva.brotli4j/brotli4j {:mvn/version "1.23.0"}
-  com.aayushatharva.brotli4j/native-linux-x86_64 {:mvn/version "1.23.0"}
+  com.aayushatharva.brotli4j/brotli4j {:mvn/version "1.24.0"}
+  com.aayushatharva.brotli4j/native-linux-x86_64 {:mvn/version "1.24.0"}
   ;; bcrypt password hashing — `tenancy.users` (§4.1). Static API
   ;; (BCrypt/hashpw, BCrypt/checkpw, BCrypt/gensalt); standard $2a$ format.
   org.mindrot/jbcrypt {:mvn/version "0.4"}
@@ -127,15 +127,15 @@
   :nrepl
   {:extra-deps
    {nrepl/nrepl {:mvn/version "1.8.0"}
-    cider/cider-nrepl {:mvn/version "0.63.1"}
-    refactor-nrepl/refactor-nrepl {:mvn/version "3.14.0"}}
+    cider/cider-nrepl {:mvn/version "0.64.1"}
+    refactor-nrepl/refactor-nrepl {:mvn/version "3.15.0"}}
    :main-opts
    ["-m" "nrepl.cmdline"
     "--middleware" "[cider.nrepl/cider-middleware,refactor-nrepl.middleware/wrap-refactor]"]}
 
   ;; Linters
   :kondo
-  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2026.08.04"}}
+  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2026.10.26"}}
    :main-opts ["-m" "clj-kondo.main"]}
 
   :cljstyle

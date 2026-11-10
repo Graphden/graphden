@@ -16,7 +16,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
   // Wait for cytoscape to mount the fn-card with its `⋯` trigger and
   // for the post-mount fit animation to drain.
   await page.waitForFunction(
-    () => graphReady()
+    () => graphReady() && gdGraphEditsReady()
           && !!document.querySelector('button.more-actions-trigger')
           && !graph.animating,
     null,

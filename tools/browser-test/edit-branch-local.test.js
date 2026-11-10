@@ -74,7 +74,7 @@ async function openServicePopover(page, fnHash) {
   // to drain. Without this, dispatchEvent below races the post-mount
   // fit animation and the popover never settles.
   await page.waitForFunction(
-    () => graphReady()
+    () => graphReady() && gdGraphEditsReady()
           && !!document.querySelector('button.more-actions-trigger')
           && !graph.animating,
     null,

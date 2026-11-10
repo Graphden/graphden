@@ -115,6 +115,7 @@ function boot() {
     MiniElement.prototype.__checkedShim = true;
   }
   vm.runInContext(SRC, ctx);
+  vm.runInContext('_tenantPlanTier = null; _tenantPlanSession = serviceSessionKey()', ctx);
   // The ⚙ trigger lives on a canvas card, which a rebuild replaces.
   const card = doc.createElement('div');
   card.className = 'card';
@@ -233,6 +234,107 @@ const popover = (doc) => doc.querySelector('.service-popover');
     first({ok: true, text: async () => 'FORM stale'});
     await opening;
     assert(popover(t.doc).textContent.includes('latest'), 'reopening same UUID ignores old response');
+  }
+
+  console.log(' service consumers wait for their shared tenant plan without platform fallback');
+  {
+    const t = boot();
+    vm.runInContext('_tenantPlanTier = undefined', t.ctx);
+    t.ctx.API.api_orgs_quota = '/api/orgs/quota';
+    t.ctx.graphdenTenancyActive = () => false;
+    const fetch = t.ctx.authFetch;
+    const urls = [];
+    t.ctx.authFetch = (url, opts) => { urls.push(url); return fetch(url, opts); };
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    assert(!urls.includes('/api/orgs/quota') && urls.some(url => url.startsWith('/partials/service-popover')),
+      'explicit self-host capability skips an addon quota URL and opens platform services');
+    assert(t.ctx.gdServicesManageable(), 'self-host services remain available');
+  }
+  for (const consumer of ['dialog', 'list']) {
+    const t = boot();
+    const requests = tenant(t);
+    vm.runInContext('_tenantPlanTier = undefined', t.ctx);
+    t.ctx.API.api_orgs_quota = '/api/orgs/quota';
+    const fetch = t.ctx.authFetch;
+    let release;
+    t.ctx.authFetch = (url, options) => url === '/api/orgs/quota'
+      ? (requests.push({url}), new Promise(resolve => { release = resolve; })) : fetch(url, options);
+    const eager = t.ctx.loadServicesEager();
+    const opening = consumer === 'dialog'
+      ? t.ctx.showServicePopover({id: 'f1'}, t.anchor) : t.ctx.loadAllServiceFnIds();
+    assert(requests.length === 1, consumer + ' coalesces the pending plan and issues no premature service request');
+    assert(!t.ctx.gdServicesManageable(), 'unknown plan cannot certify service management');
+    release({ok: true, json: async () => ({plan: 'dedicated'})});
+    await Promise.all([eager, opening]);
+    assert(requests.some(row => row.url === '/api/orgs/services'), consumer + ' uses tenant service route after plan readiness');
+    assert(!requests.some(row => row.url === '/api/services' || row.url.startsWith('/partials/service-popover')),
+      consumer + ' never requests the platform route');
+    if (consumer === 'dialog') assert(!!popover(t.doc).querySelector('.service-popover-save-btn'), 'delayed plan still opens tenant form');
+  }
+  {
+    const t = boot();
+    vm.runInContext('_tenantPlanTier = undefined', t.ctx);
+    t.ctx.API.api_orgs_quota = '/api/orgs/quota';
+    const urls = [];
+    t.ctx.authFetch = async url => { urls.push(url); return {ok: false, status: 503}; };
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    assert(urls.length === 1 && !!popover(t.doc).querySelector('.service-popover-error'),
+      'failed quota shows a local error without guessing the platform route');
+  }
+
+  console.log(' background service metadata stays within its session and latest request');
+  {
+    const t = boot();
+    tenant(t);
+    const fetch = t.ctx.authFetch;
+    let release;
+    t.ctx.authFetch = url => new Promise(resolve => { release = resolve; });
+    const old = t.ctx.refreshServicesCache();
+    t.ctx.authFetch = (url, opts) => url === '/api/orgs/services'
+      ? Promise.resolve({ok: true, json: async () => [{id: 'fresh', 'fn-id': 'other'}]}) : fetch(url, opts);
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    release({ok: true, json: async () => [{id: 'obsolete'}]});
+    await old;
+    assert(vm.runInContext('servicesCache.services[0].id === "fresh"', t.ctx),
+      'old background response cannot overwrite the newer tenant dialog cache');
+  }
+  {
+    const t = boot();
+    let release;
+    t.ctx.authFetch = () => new Promise(resolve => { release = resolve; });
+    const old = t.ctx.refreshServicesCache();
+    t.seen['gd-auth-changed']();
+    release({ok: true, json: async () => ({services: [{id: 'old-org'}]})});
+    await old;
+    assert(vm.runInContext('servicesCache === null', t.ctx), 'auth invalidation rejects an old background service cache');
+  }
+  {
+    const t = boot();
+    const releases = [];
+    t.ctx.authFetch = () => new Promise(resolve => releases.push(resolve));
+    const old = t.ctx.refreshServicesCache();
+    const latest = t.ctx.refreshServicesCache();
+    releases[1]({ok: true, json: async () => ({services: [{id: 'latest'}]})});
+    await latest;
+    releases[0]({ok: true, json: async () => ({services: [{id: 'old'}]})});
+    await old;
+    assert(vm.runInContext('servicesCache.services[0].id === "latest"', t.ctx), 'late prior refresh cannot replace latest services');
+  }
+  for (const change of ['authorization', 'org', 'branch']) {
+    const t = boot();
+    vm.runInContext('_tenantPlanTier = undefined', t.ctx);
+    t.ctx.API.api_orgs_quota = '/api/orgs/quota';
+    let release;
+    const urls = [];
+    t.ctx.authFetch = url => { urls.push(url); return new Promise(resolve => { release = resolve; }); };
+    const loading = t.ctx.loadServicesEager();
+    if (change === 'authorization') t.seen['gd-auth-changed']();
+    if (change === 'org') t.ctx.graphdenCurrentOrg = 'org-b';
+    if (change === 'branch') t.seen.branch = 'prod';
+    release({ok: true, json: async () => ({plan: 'dedicated'})});
+    await loading;
+    assert(vm.runInContext('_tenantPlanTier === undefined', t.ctx), change + ' rejects obsolete tenant plan');
+    assert(urls.length === 1, change + ' cannot continue into a service request using obsolete tier');
   }
 
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

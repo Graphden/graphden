@@ -57,7 +57,7 @@ async function rowOf(page, fn) {
 async function openCanvas(page, name, waitSelector) {
   await page.goto(BASE + '/?t=' + Date.now().toString(36) + '#' + name);
   await page.waitForFunction(
-    (n) => typeof graphReady === 'function' && graphReady()
+    (n) => typeof graphReady === 'function' && graphReady() && gdGraphEditsReady()
            && !!document.querySelector('.node-overlay[data-fn-name="' + n + '"]') && !graph.animating,
     name, {timeout: 30000, polling: 100});
   await page.waitForSelector(waitSelector, {timeout: 15000});

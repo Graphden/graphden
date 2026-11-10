@@ -696,6 +696,8 @@ async function startTutorial(lessonId, resumeStep, resumeCreated, session, ticke
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId)
     || (lessons.lessons || [])[0];
   if (!lesson) return false;
+  if (lesson.requires === 'services'
+      && !await _tourPrepareServiceLesson(lesson, () => _tourStartCurrent(ticket))) return false;
   // A tour's steps anchor into the BUILD surface (the Explorer, the
   // canvas); lessons that need another surface tell the reader to open
   // it. Starting — or resuming after a branch-switch reload — while an

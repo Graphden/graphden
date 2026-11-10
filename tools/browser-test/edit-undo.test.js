@@ -303,17 +303,9 @@ const undoToast = (page) => page.evaluate(() => {
         .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
       return h ? true : false;
     }, name);
-    // Rename the namespace through its ✎ — find-and-click in ONE poll: a
-    // one-shot lookup could land between a tree rebuild's teardown and its
-    // repaint (the tree rebuilds on the network's schedule after a load).
-    await page.waitForFunction((n) => {
-      const h = Array.from(document.querySelectorAll('.ns-header'))
-        .find((x) => x.querySelector('.ns-label')?.textContent.trim() === n);
-      const btn = h?.querySelector('.ns-edit-btn');
-      if (!btn) return false;
-      btn.click();
-      return true;
-    }, NS, {timeout: 30000, polling: 200});
+    // The early tree may still have inert authoring controls. Resolve the
+    // current row and wait for an actionable rename instead of bypassing it.
+    await page.locator('.ns-header[data-ns-path="' + NS + '"] .ns-edit-btn').click({timeout: 30000});
     await submitInlineRow(page, NS_RENAMED);
     await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
       .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS_RENAMED, {timeout: 30000, polling: 200});

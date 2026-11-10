@@ -40,6 +40,9 @@ function showServiceError(el, anchorEl, message) {
 // to matter, and we don't want a stale entry to misrepresent
 // enabled?/restart-policy.
 let servicesCache = null;
+let _serviceAuthEpoch = 0;
+let _serviceCacheRequest = 0;
+let _tenantPlanRequest = 0;
 
 
 function ensureServicePopoverEl() {
@@ -142,17 +145,38 @@ function presentServicePopover(el, anchorEl) {
 // the platform endpoints. The reliable tenant signal is the quota plan slug —
 // nil for the public org, a real slug for a tenant — primed once at startup.
 let _tenantPlanTier; // undefined = not primed; null = public/single-tenant; slug otherwise
+let _tenantPlanPending = null;
+let _tenantPlanSession = null;
 
-async function primeTenantPlan() {
-  _tenantPlanTier = null;
-  if (typeof API !== 'object' || typeof API.api_orgs_quota === 'undefined') return;
-  try {
-    const r = await authFetch(API.api_orgs_quota, { method: 'GET' });
-    if (r?.ok) {
-      const q = await r.json();
-      _tenantPlanTier = q?.plan || null; // null body ≡ public org
-    }
-  } catch (_) { /* leave null → platform path; a quota blip must not break services */ }
+function primeTenantPlan() {
+  const session = serviceSessionKey();
+  if (_tenantPlanTier !== undefined && _tenantPlanSession === session) return Promise.resolve(true);
+  if (_tenantPlanPending?.session === session) return _tenantPlanPending.promise;
+  _tenantPlanTier = undefined;
+  const request = ++_tenantPlanRequest;
+  const epoch = _serviceAuthEpoch;
+  const pending = {session};
+  pending.promise = readTenantPlan(request, epoch, session).finally(() => {
+    if (_tenantPlanPending === pending) _tenantPlanPending = null;
+  });
+  _tenantPlanPending = pending;
+  return pending.promise;
+}
+
+async function readTenantPlan(request, epoch, session) {
+  let tier = null;
+  const selfHosted = typeof graphdenTenancyActive === 'function' && !graphdenTenancyActive();
+  if (!selfHosted && typeof API === 'object' && typeof API.api_orgs_quota !== 'undefined') {
+    try {
+      const r = await authFetch(API.api_orgs_quota, {method: 'GET'});
+      if (!r?.ok) return false;
+      tier = (await r.json())?.plan || null;
+    } catch (_) { return false; }
+  }
+  if (request !== _tenantPlanRequest || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()) return false;
+  _tenantPlanTier = tier;
+  _tenantPlanSession = session;
+  return true;
 }
 
 // A real tenant (org ≠ public) — its services live under `:org-id`, reachable
@@ -168,6 +192,9 @@ function tenantServiceMode() { return _tenantPlanTier === 'dedicated'; }
 // === API helpers ===========================================================
 
 async function fetchServices() {
+  if (_tenantPlanTier === undefined || _tenantPlanSession !== serviceSessionKey()) {
+    if (!await primeTenantPlan()) return null;
+  }
   const listUrl = isRealTenant() ? API.api_orgs_services : API.api_services;
   try {
     const r = await authFetch(listUrl, { method: 'GET' });
@@ -193,8 +220,12 @@ async function fetchServices() {
 // (`getServiceForFnId` for the badge, `loadAllServiceFnIds` for the
 // sidebar filter) see the freshest data without a duplicate roundtrip.
 async function refreshServicesCache(context) {
+  const request = ++_serviceCacheRequest;
+  const epoch = _serviceAuthEpoch;
+  const session = serviceSessionKey();
   const cache = await fetchServices();
-  if (context && !serviceContextCurrent(context)) return null;
+  if (request !== _serviceCacheRequest || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()
+      || (context && !serviceContextCurrent(context))) return null;
   servicesCache = cache;
   return servicesCache;
 }
@@ -300,7 +331,9 @@ async function loadServicesEager() {
   // Prime the plan tier BEFORE the first services fetch so `fetchServices`
   // routes to the tenant vs platform list endpoint correctly (a real tenant's
   // `/api/services` would 403).
-  await primeTenantPlan();
+  const epoch = _serviceAuthEpoch;
+  const session = serviceSessionKey();
+  if (!await primeTenantPlan() || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()) return;
   await refreshServicesCache();
 }
 
@@ -473,10 +506,9 @@ async function refreshServiceInstances(el, serviceId, context) {
 
 async function showTenantServicePopover(el, fnEntity, anchorEl, context) {
   try {
-    const cache = await fetchServices();
+    const cache = await refreshServicesCache(context);
     if (!serviceContextCurrent(context)) return;
     if (!Array.isArray(cache?.services)) throw new Error('Service lookup unavailable');
-    servicesCache = cache;
     const svc = getServiceForFnId(context.fnId);
     const branch = await serviceBranchForDialog(svc, context);
     if (!serviceContextCurrent(context)) return;
@@ -498,6 +530,7 @@ function showTenantPopoverBody(el, anchorEl, bodyHtml) {
 
 
 async function showServicePopover(fnEntity, anchorEl) {
+  if (window.gdGraphEditsReady?.() === false) return;
   if (!fnEntity || !anchorEl) return;
   const el = ensureServicePopoverEl();
   if (serviceInstanceTimer !== null) clearTimeout(serviceInstanceTimer);
@@ -506,6 +539,11 @@ async function showServicePopover(fnEntity, anchorEl) {
     branch: typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null};
   servicePopoverContext = context;
   el.textContent = '';
+  if (_tenantPlanTier === undefined || _tenantPlanSession !== serviceSessionKey()) {
+    const ready = await primeTenantPlan();
+    if (!serviceContextCurrent(context)) return;
+    if (!ready) { showServiceError(el, anchorEl, 'Service plan unavailable'); return; }
+  }
   if (isRealTenant()) {
     // A tenant never reaches the platform server partial (it reads the
     // tenant-forbidden :service). Dedicated tier → the management form; any
@@ -669,6 +707,12 @@ installPopoverDismiss({
 
 
 window.addEventListener?.('gd-auth-changed', () => {
+  _serviceAuthEpoch++;
+  _serviceCacheRequest++;
+  _tenantPlanRequest++;
+  _tenantPlanTier = undefined;
+  _tenantPlanPending = null;
+  _tenantPlanSession = null;
   hideServicePopover();
   servicesCache = null;
 });
@@ -680,10 +724,12 @@ window.getServiceForFnId = getServiceForFnId;
 window.serviceBadgeState = serviceBadgeState;
 window.loadServicesEager = loadServicesEager;
 window.refreshServicesCache = refreshServicesCache;
+window.gdWaitForServicePlan = primeTenantPlan;
 
 // May this session manage services at all? The dedicated tier can (own
 // cgroup-limited pod); a free / network tenant cannot, and the platform or a
 // single-tenant self-host always can. Exported because the tutorial gates its
 // services lesson on it — a lesson nobody on this plan can finish is worse
 // than one that says so up front.
-window.gdServicesManageable = () => !isRealTenant() || tenantServiceMode();
+window.gdServicesManageable = () => _tenantPlanTier !== undefined
+  && _tenantPlanSession === serviceSessionKey() && (!isRealTenant() || tenantServiceMode());

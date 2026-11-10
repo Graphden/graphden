@@ -444,7 +444,7 @@
    the selector owns axis composition and bounded result presentation.
    Use/diagnostic maps store positive memberships only; unused? is nil when
    not requested. Unmatched requested tags do not form a row-by-tag matrix."
-  [ctx normalized-filters selector]
+  [ctx normalized-filters select-facts]
   (let [storage (:storage ctx)
         env (entity-list/filter-env ctx)
         base (:base env)
@@ -490,7 +490,7 @@
                                                                      [target true]))) users)
                                     :unused? (when adj (empty? (get adj (:id row))))}) rows))
         rev @(:rev-index env)
-        result (selector facts)
+        result (select-facts facts)
         selected (:ids result)]
     (when-not (and (map? result) (sequential? selected)
                    (boolean? (:truncated? result)) (nat-int? (:total result))

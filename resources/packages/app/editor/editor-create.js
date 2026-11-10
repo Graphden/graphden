@@ -25,16 +25,19 @@ const TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" s
 // =============================================================================
 
 async function postEntity(type, fields) {
+  if (window.gdGraphEditsReady?.() === false) throw new Error('Editor metadata is loading.');
   return authMutate('POST', API.api_entities_type(type), fields);
 }
 
 
 async function deleteEntity(type, id) {
+  if (window.gdGraphEditsReady?.() === false) throw new Error('Editor metadata is loading.');
   return authMutate('DELETE', API.api_entities_type_id(type, id));
 }
 
 
 async function putEntity(type, id, fields) {
+  if (window.gdGraphEditsReady?.() === false) throw new Error('Editor metadata is loading.');
   return authMutate('PUT', API.api_entities_type_id(type, id), fields);
 }
 
@@ -251,6 +254,10 @@ function openNsPublishPopover(anchorEl, nsPath) {
 }
 
 function ensureAuth() {
+  if (window.gdGraphEditsReady?.() === false) {
+    if (typeof gdToast === 'function') gdToast('Editor metadata is loading.');
+    return false;
+  }
   if (isAuthenticated()) return true;
   openAuthPopover('Sign in to edit the graph.');
   return false;
@@ -438,6 +445,7 @@ function closeChildCreateMenu() {
 let activeCreate = null;  // { type, parentNsId, parentNsPath } | null
 
 function startInlineCreate(type, parentNsId, parentNsPath) {
+  if (window.gdGraphEditsReady?.() === false) return;
   activeCreate = { type, parentNsId, parentNsPath };
   // Re-render so renderNsNode picks up the active-create marker and
   // injects the inline input row at the right spot.
@@ -541,6 +549,7 @@ function attrValue(v) {
 }
 
 function startNsRename(headerEl, nsId, nsPath) {
+  if (window.gdGraphEditsReady?.() === false) return;
   // Replace label + actions with input row inline.
   const segments = nsPath.split('.');
   const currentName = segments[segments.length - 1];
@@ -600,6 +609,7 @@ function startNsRename(headerEl, nsId, nsPath) {
 }
 
 function startFnRename(itemEl, fnId, currentName) {
+  if (window.gdGraphEditsReady?.() === false) return;
   const hides = '.name, .ns-row-actions';
   // Hide name + actions; the input row takes their place.
   itemEl.querySelectorAll(hides).forEach((el) => { el.style.display = 'none'; });

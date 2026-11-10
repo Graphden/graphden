@@ -58,7 +58,7 @@ function clearAuthPassword() {
 //   accountsAuthed — the cookie session currently authenticates
 let accountsMode = false;
 let accountsAuthed = false;
-async function probeAccountsAuth() {
+async function probeAccountsAuth({ refreshGraph = true } = {}) {
   const wasAuthed = accountsAuthed;
   const priorAccount = window.gdAccount?.id;
   try {
@@ -87,14 +87,11 @@ async function probeAccountsAuth() {
     const changed = wasAuthed !== accountsAuthed || priorAccount !== window.gdAccount?.id;
     if (changed) window.dispatchEvent(new Event('gd-auth-changed'));
     renderAuthLock();
-    // The sidebar (edit affordances + admin panels) is painted at boot, BEFORE
-    // this async probe resolves — with isAuthenticated() still false for a
-    // cookie session. Re-render it now that the cookie session is known, so an
-    // accounts operator actually sees the create/edit controls + Operate panels
-    // instead of a read-only view. Idempotent; skipped until graphData loads
-    // (initGraph's own render then paints with the correct auth state).
-    if (accountsAuthed && typeof initGraph === 'function' && changed) {
-      void initGraph().catch(() => {});
+    // Boot waits for this identity before its own first graph load. A later
+    // probe that changes the account must reload the graph, while an unchanged
+    // account can refresh affordances without repeating tree/type requests.
+    if (refreshGraph && accountsAuthed && typeof initGraph === 'function' && changed) {
+      void initGraph({progressive: true}).catch(() => {});
     } else if (accountsAuthed && typeof updateEntityList === 'function'
         && typeof graphData !== 'undefined' && graphData) {
       try { updateEntityList(graphData); } catch (_) {}
@@ -309,7 +306,9 @@ function initAuthLock() {
   // Published as a promise (resolves to accountsMode) so dependents that
   // only make sense under the accounts addon (the org-switcher) can wait
   // instead of firing doomed requests on every non-accounts boot.
-  window.gdAccountsReady = probeAccountsAuth().then(() => accountsMode);
+  // The DOM boot owns the first graph load after this probe. Later probes
+  // still refresh on account changes, but boot must not fetch twice.
+  window.gdAccountsReady = probeAccountsAuth({ refreshGraph: false }).then(() => accountsMode);
 }
 
 // Lazily fetch the popover FIELDS (graph partial, GET /partials/auth-form) into
@@ -541,7 +540,7 @@ async function submitAuth() {
       setAuthPassword(pw);
       closeAuthPopover();
       if (typeof graphData !== 'undefined' && graphData === null && typeof initGraph === 'function') {
-        void initGraph().catch((error) => console.error('Editor initialization after sign-in failed', error));
+        void initGraph({progressive: true}).catch((error) => console.error('Editor initialization after sign-in failed', error));
       }
     } else if (response.status === 401) {
       if (err) { err.textContent = 'Wrong password.'; err.classList.remove('hidden'); }

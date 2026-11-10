@@ -64,7 +64,7 @@ async function createProbe(page, name, parentId) {
 // carries one). The trigger fires on mousedown.
 async function openExecutePopoverForCard(page, fnId) {
   await page.waitForFunction(
-    (id) => graphReady() && !graph.animating
+    (id) => graphReady() && gdGraphEditsReady() && !graph.animating
             && !!document.querySelector(
               '.node-overlay[data-original-fn-id="' + id + '"] button.more-actions-trigger'),
     fnId,

@@ -35,10 +35,13 @@ const json = (body, status = 200) => ({
 // A fresh editor-main per case. `routes(url)` answers fetches; a route may
 // return a function (called at fetch time) to act mid-flight.
 function boot({ routes, accounts = false, tenancyClass = false, renderGraph = () => {} }) {
-  const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [], inlineClosed: 0 };
+  const calls = { popover: [], entityList: 0, href: null, requery: 0, viewInvalidations: 0, events: [], inlineClosed: 0 };
+  const listeners = {};
+  const windowListeners = new Map();
+  const actions = {inert: false};
   const oldChip = {attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }};
   const surfaces = Object.fromEntries(['graph-container', 'gd-inspector', 'entity-list'].map(id => [id, {
-    inert: false, attrs: {},
+    id, inert: false, attrs: {},
     getAttribute(key) { return this.attrs[key] ?? null; },
     setAttribute(key, value) { this.attrs[key] = value; },
     removeAttribute(key) { delete this.attrs[key]; },
@@ -49,12 +52,13 @@ function boot({ routes, accounts = false, tenancyClass = false, renderGraph = ()
     API: { api_graph_entities: '/api/graph/entities', api_types: '/api/types', api_value_kinds: '/api/value-kinds' },
     location: { pathname: '/', search: '', hash: '#app.x',
                 set href(v) { calls.href = v; }, get href() { return calls.href; } },
-    document: { addEventListener() {}, getElementById: id => surfaces[id] || null,
-                querySelectorAll: () => [oldChip], body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
+    document: { addEventListener: (name, fn) => { listeners[name] = fn; }, getElementById: id => surfaces[id] || null,
+                querySelectorAll: selector => selector.includes('ns-row-actions') ? [actions] : [oldChip], body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
     hideAllInlineHosts: () => { calls.inlineClosed += 1; },
     buildLookups: (g) => ({ fnMap: new Map(g.fns.map((f) => [f.id, f])) }),
     updateEntityList: () => { calls.entityList += 1; },
     requerySearch: () => { calls.requery += 1; },
+    gdInvalidateSharedViews: () => { calls.viewInvalidations += 1; },
     clearAuthPassword() {},
     openAuthPopover: (msg) => { calls.popover.push(msg); },
     graphdenAccountsMode: () => accounts,
@@ -68,8 +72,17 @@ function boot({ routes, accounts = false, tenancyClass = false, renderGraph = ()
     typeUsagesCache: new Map([['t-port', [{ kind: 'slot-of' }]]]),
   });
   ctx.window = ctx;
-  ctx.window.addEventListener = () => {};
-  ctx.window.dispatchEvent = (event) => calls.events.push(event.type);
+  ctx.window.addEventListener = (name, fn, opts) => {
+    const entries = windowListeners.get(name) || [];
+    entries.push({fn, once: opts?.once});
+    windowListeners.set(name, entries);
+  };
+  ctx.window.dispatchEvent = event => {
+    calls.events.push(event.type);
+    const entries = windowListeners.get(event.type) || [];
+    windowListeners.set(event.type, entries.filter(entry => !entry.once));
+    for (const {fn} of entries) fn(event);
+  };
   ctx.window.gdAccountsReady = Promise.resolve(accounts);
   ctx.window.location = ctx.location;
   ctx.fetch = (url) => {
@@ -77,7 +90,7 @@ function boot({ routes, accounts = false, tenancyClass = false, renderGraph = ()
     return Promise.resolve(typeof r === 'function' ? r() : r);
   };
   vm.runInContext(SRC, ctx, { filename: 'editor-main.js' });
-  return { ctx, calls, rowActions, oldChip, surfaces };
+  return { ctx, calls, rowActions, oldChip, surfaces, listeners, actions };
 }
 
 const TREE = { namespaces: [{ id: 'ns1', name: 'app' }], counts: [] };
@@ -100,6 +113,76 @@ function racingRoutes(ctxRef, typesBody) {
 }
 
 (async () => {
+  for (const progressive of [false, true]) {
+    console.log(` initGraph progressive=${progressive}: replace a cancelled selection-clear render`);
+    const requests = [];
+    const b = boot({routes: url => {
+      requests.push(url);
+      return json(url.includes('scope=tree') ? TREE : {});
+    }});
+    const c = b.ctx;
+    c.location.hash = '';
+    c.selectedFnId = 'deleted';
+    c.expansionState = new Map(); c.previewState = new Map(); c.userMovedNodes = new Set();
+    c.savedUserPositions = new Map(); c.anchorNodeId = null;
+    c.history = {pushState: (_, __, hash) => { c.location.hash = hash; }};
+    c.graph = {nodes: new Map([['deleted', {}], ['literal', {}]]),
+      edges: new Map([['edge', {}]]), incoming: new Map()};
+    const overlays = new Set(['deleted', 'literal']);
+    const animations = [];
+    c.ANIM_DURATION = 1;
+    c.graphStopAnimation = () => {};
+    c.graphNodeIds = () => [...c.graph.nodes.keys()];
+    c.graphRemoveNode = id => c.graph.nodes.delete(id);
+    c.graphRemoveEdge = id => c.graph.edges.delete(id);
+    c.getNodeOverlay = id => id; c.fadeOutOverlay = () => {};
+    c.unregisterNodeOverlay = id => overlays.delete(id);
+    c.createNodeOverlays = () => {};
+    c.reflowFromMeasuredHeights = () => false; c.updateOverlayPositions = () => {};
+    c.graphAnimateNodes = () => new Promise(resolve => animations.push(resolve));
+    for (const file of ['editor-ui.js', 'editor-layout.js', 'editor-render.js']) {
+      vm.runInContext(fs.readFileSync(path.join(EDITOR, file), 'utf8'), c, {filename: file});
+    }
+    // Delay only the first empty layout. The refresh must cancel that render
+    // and replace it using the real null-selection layout (no HTTP request).
+    const emptyLayout = c.fetchBackendLayout;
+    let releaseOld;
+    let layoutCalls = 0;
+    c.fetchBackendLayout = () => ++layoutCalls === 1
+      ? new Promise(resolve => { releaseOld = () => emptyLayout().then(resolve); }) : emptyLayout();
+    c.gdClearSelection();
+    const cancelled = c.gdWaitForSelectionRender();
+    let finished = false;
+    const refresh = c.initGraph({progressive}).then(() => { finished = true; });
+    await releaseOld();
+    await cancelled;
+    for (let i = 0; i < 80; i++) await Promise.resolve();
+    assert(layoutCalls === 2, 'refresh replaces the cancelled empty render');
+    assert(!finished && !c.gdGraphEditsReady(), 'refresh fence waits for the replacement animation');
+    assert(animations.length === 1, 'only the replacement render reaches animation');
+    // The old navigation was reset, so its waiter alone cannot certify boot.
+    await c.gdWaitForSelectionRender();
+    assert(!finished, 'resolved navigation waiter does not bypass the empty render');
+    for (const resolve of animations) resolve();
+    await refresh;
+    assert(c.selectedFnId === null && c.graph.nodes.size === 0 && c.graph.edges.size === 0,
+      'refresh ends with null selection and no graph nodes or edges');
+    assert(overlays.size === 0 && c.graphRenderReady(), 'deleted card and literal overlays are gone');
+    assert(c.gdGraphEditsReady(), 'completed empty render releases editing readiness');
+    assert(requests.length === 3 && requests.every(url => !url.includes('layout') && !url.includes('root-id')),
+      'null selection only requests tree, types and value kinds');
+  }
+
+  {
+    let renders = 0;
+    const b = boot({routes: url => json(url.includes('scope=tree') ? TREE : {}),
+      renderGraph: () => { renders++; }});
+    b.ctx.location.hash = '#manage';
+    b.ctx.gdRouteSurfaceHash = hash => hash === 'manage';
+    await b.ctx.initGraph();
+    assert(renders === 0, 'management surface routing does not render the canvas fallback');
+  }
+
   for (const which of ['initGraph', 'loadGraphData']) {
     console.log(` ${which}: a namespace load landing mid-fetch survives; types installed`);
     const ref = {};
@@ -223,6 +306,137 @@ function racingRoutes(ctxRef, typesBody) {
   await ten.ctx.initGraph();
   assert(ten.calls.href === null, 'tenancy class without accounts: no redirect to a /login that does not exist');
   assert(ten.calls.popover.length === 1, 'tenancy class without accounts: admin popover');
+
+  console.log(' cookie boot waits for identity and makes one graph/type request');
+  {
+    const requested = [];
+    const b = boot({ routes: url => {
+      requested.push(url);
+      return json(url.includes('scope=tree') ? TREE : {});
+    }});
+    b.ctx.location.hash = '';
+    b.ctx.initPrefsLate = () => {};
+    let finishAuth;
+    b.ctx.initAuthLock = () => {
+      b.ctx.gdAccountsReady = new Promise(resolve => { finishAuth = resolve; });
+    };
+    let tutorialReady;
+    const ready = new Promise(resolve => { tutorialReady = resolve; });
+    b.ctx.maybeStartTutorial = tutorialReady;
+    const booting = b.listeners.DOMContentLoaded();
+    assert(requested.length === 0, 'no graph requests before cookie identity is known');
+    finishAuth(true);
+    await booting;
+    await ready;
+    assert(requested.filter(url => url.includes('scope=tree')).length === 1, 'one initial tree request');
+    assert(requested.filter(url => url === '/api/types').length === 1, 'one initial types request');
+    assert(b.calls.entityList === 2, 'initial Explorer paints tree, then fresh metadata annotations');
+  }
+
+  console.log(' progressive boot paints navigation before metadata and services');
+  {
+    let finishTypes, finishServices;
+    const b = boot({routes: url => url === '/api/types'
+      ? new Promise(resolve => { finishTypes = resolve; })
+      : json(url.includes('scope=subtree') ? {fns: [{id: 'f1'}], bindings: [], slots: [], 'fn-slots': [], 'list-items': []}
+        : url.includes('scope=namespace') ? {fns: [{id: 'f1', name: 'one'}]}
+        : url.includes('scope=tree') ? TREE : ['int'])});
+    b.ctx.location.hash = '';
+    b.ctx.loadServicesEager = () => new Promise(resolve => { finishServices = resolve; });
+    const pending = b.ctx.initGraph({progressive: true});
+    for (let i = 0; i < 12 && !b.calls.events.includes('gd-explorer-ready'); i++) await new Promise(resolve => setImmediate(resolve));
+    assert(b.calls.events.includes('gd-explorer-ready'), 'tree publishes separate navigation readiness');
+    assert(!b.surfaces['entity-list'].inert, 'Explorer navigation is available with types/services held');
+    assert(b.surfaces['graph-container'].inert && b.surfaces['gd-inspector'].inert, 'editing surfaces remain fenced');
+    assert(!b.ctx.gdGraphEditsReady() && b.actions.inert, 'tree action groups cannot mutate early');
+    let ready = false;
+    const full = b.ctx.gdWaitForGraphReady().then(() => { ready = true; });
+    await b.ctx.loadNamespaceFns('ns1');
+    await b.ctx.ensureSubtreeFor('f1');
+    assert(vm.runInContext('lookups.fnMap.has("f1")', b.ctx), 'namespace and selected subtree load while metadata is pending');
+    assert(!ready, 'strong readiness stays pending');
+    finishTypes(json({fresh: true}));
+    await pending;
+    await full;
+    assert(b.ctx.graphTypesReady(), 'late types preserve the already installed subtree');
+    assert(b.ctx.gdGraphEditsReady() && !b.actions.inert, 'fresh metadata releases mutation actions');
+    assert(ready, 'full readiness does not wait for service badges');
+    assert(b.calls.requery === 1, 'metadata annotations do not repeat the initial search refresh');
+    assert(b.calls.viewInvalidations === 1, 'metadata annotations do not invalidate unchanged shared views');
+    finishServices();
+  }
+
+  console.log(' superseded progressive metadata cannot overwrite the next session');
+  {
+    let finishOld;
+    let old = true;
+    const b = boot({routes: url => url === '/api/types' && old
+      ? new Promise(resolve => { finishOld = resolve; })
+      : json(url.includes('scope=tree') ? TREE : url === '/api/types' ? {newSession: true} : ['int'])});
+    b.ctx.location.hash = '';
+    const pending = b.ctx.initGraph({progressive: true});
+    for (let i = 0; i < 12 && !finishOld; i++) await new Promise(resolve => setImmediate(resolve));
+    b.ctx.window.dispatchEvent(new Event('gd-auth-changed'));
+    old = false;
+    await b.ctx.initGraph({progressive: true});
+    await pending;
+    assert(b.ctx.gdGraphEditsReady(), 'superseded boot no longer holds the new session fence');
+    finishOld(json({oldSession: true}));
+    await new Promise(resolve => setImmediate(resolve));
+    assert(vm.runInContext('richTypes.newSession && !richTypes.oldSession', b.ctx), 'late old-session types are discarded');
+  }
+
+  console.log(' failed progressive metadata keeps editing closed, then a retry recovers');
+  {
+    let broken = true;
+    const b = boot({routes: url => json(url.includes('scope=tree') ? TREE
+      : url === '/api/types' ? (broken ? new Error('bad body') : {fresh: true}) : ['int'])});
+    b.ctx.location.hash = '';
+    console.error = () => {};
+    let rejected = false;
+    try { await b.ctx.initGraph({progressive: true}); } catch (_) { rejected = true; }
+    console.error = origError;
+    assert(rejected && !b.ctx.gdGraphEditsReady(), 'metadata failure is explicit and cannot authorize edits');
+    assert(!b.surfaces['entity-list'].inert && b.surfaces['gd-inspector'].inert, 'failed metadata retains read navigation only');
+    assert(!b.calls.events.includes('gd-graph-ready'), 'failure does not publish strong readiness');
+    broken = false;
+    await b.ctx.initGraph({progressive: true});
+    assert(Object.values(b.surfaces).every(el => !el.inert), 'retry restores original surface state');
+  }
+
+  console.log(' stale tree failures are silent and current failures settle metadata waiters');
+  {
+    let rejectOld;
+    let old = true;
+    const b = boot({routes: url => url.includes('scope=tree') && old
+      ? new Promise((_, reject) => { rejectOld = reject; })
+      : json(url.includes('scope=tree') ? TREE : {})});
+    b.ctx.location.hash = '';
+    const pending = b.ctx.initGraph();
+    b.ctx.window.dispatchEvent(new Event('gd-auth-changed'));
+    old = false;
+    await b.ctx.initGraph();
+    rejectOld(new Error('obsolete tree offline'));
+    let rejected = false;
+    try { await pending; } catch (_) { rejected = true; }
+    assert(!rejected, 'old tree rejection cannot create a fatal banner in the new session');
+  }
+  for (const reply of [json({}, 503), json(new Error('bad tree JSON'))]) {
+    const b = boot({routes: url => url.includes('scope=tree') ? reply : json({})});
+    b.ctx.location.hash = '';
+    const pending = b.ctx.initGraph({progressive: true});
+    const metadata = b.ctx.gdWaitForGraphMetadata();
+    let rejected = false;
+    try { await pending; } catch (_) { rejected = true; }
+    assert(rejected && await metadata === false, 'tree failure settles local metadata waiter false');
+    assert(!b.ctx.gdGraphEditsReady(), 'tree failure keeps mutations closed');
+  }
+  {
+    const b = boot({routes: unauthorized, accounts: true});
+    b.ctx.clearAuthPassword = () => b.ctx.window.dispatchEvent(new Event('gd-auth-changed'));
+    await b.ctx.initGraph({progressive: true});
+    assert(b.calls.href?.startsWith('/login?next='), 'clearing our rejected credential still opens the auth wall');
+  }
 
   console.log(' a description save drops the row-actions HTML it was baked into');
   {

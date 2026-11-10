@@ -21,6 +21,7 @@
     [clojure.string :as str]
     [graphden.storage.postgres.errors :as errors]
     [graphden.storage.protocol.core :as sp]
+    [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
 
@@ -326,3 +327,41 @@
    (if-let [f (:execute-one! *jdbc-override*)]
      (f ds sql-params opts)
      (jdbc/execute-one! ds sql-params opts))))
+
+
+(def ^:dynamic ^:private *active-read* nil)
+
+
+(defn current-read-plan
+  "Return the structured plan only for this synchronous storage read.
+   Connection and SQL vector identity prevent nested or rewritten statements
+   from borrowing another read's plan. This is not authorization or a cache
+   certificate; consumers must copy mutable parameters before executing SQL."
+  [ds sql-params]
+  (when (and (identical? ds (:connection *active-read*))
+             (identical? sql-params (:sql-params *active-read*)))
+    (:plan *active-read*)))
+
+
+(defn- execute-read
+  [execute ds plan format-options opts]
+  (let [query (sql/format plan format-options)]
+    (binding [*active-read* {:connection ds :sql-params query :plan plan}]
+      (execute ds query opts))))
+
+
+(defn exec-read!
+  "Execute a structured read through the existing scoped JDBC seam.
+   Formatting and JDBC options remain caller-owned; no result is cached."
+  ([ds plan] (exec-read! ds plan {} (query-opts)))
+  ([ds plan format-options] (exec-read! ds plan format-options (query-opts)))
+  ([ds plan format-options opts]
+   (execute-read exec! ds plan format-options opts)))
+
+
+(defn exec-read-one!
+  "Single-row counterpart of exec-read!, with identical option semantics."
+  ([ds plan] (exec-read-one! ds plan {} (query-opts)))
+  ([ds plan format-options] (exec-read-one! ds plan format-options (query-opts)))
+  ([ds plan format-options opts]
+   (execute-read exec-one! ds plan format-options opts)))

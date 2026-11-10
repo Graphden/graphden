@@ -175,12 +175,11 @@
    (read-entity ds entity-name id nil))
   ([ds entity-name id fields]
    (let [table-name (keyword (util/kw->snake-case entity-name))
-         query (sql/format {:select [:*]
-                            :from [table-name]
-                            :where [:= :id id]}
-                           {:quoted true})]
+         query {:select [:*]
+                :from [table-name]
+                :where [:= :id id]}]
      (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
-                                   (when-let [row (util/exec-one! ds query)]
+                                   (when-let [row (util/exec-read-one! ds query {:quoted true})]
                                      (let [record (codec/row->entity row fields)]
                                        (if (and fields (junction/has-ref-many? fields))
                                          (first (junction/populate-ref-many-fields ds entity-name [record] fields))
@@ -273,12 +272,11 @@
    (query-entities ds entity-name where fields nil))
   ([ds entity-name where fields opts]
    (let [plan (read-plan/query entity-name where fields opts)
-         where-clause (:where plan)
-         query (sql/format plan {:quoted true})]
+         where-clause (:where plan)]
      (when-not where-clause
        (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
      (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where :opts opts}
-                                   (let [rows (util/exec! ds query)
+                                   (let [rows (util/exec-read! ds plan {:quoted true})
                                          records (mapv #(codec/row->entity % fields) rows)]
                                      (if (and fields (junction/has-ref-many? fields))
                                        (junction/populate-ref-many-fields ds entity-name records fields)
@@ -303,19 +301,17 @@
           where (into {} (map (fn [[field value]] [(qualified field) value])) where)
           columns (cond-> [[:ident.id :id]]
                     (contains? identity-fields :org-id) (conj [:ident.org_id :org_id]))
-          query (sql/format
-                  (cond-> {:select-distinct columns
-                           :from [[(keyword (util/kw->snake-case entity-name)) :ident]]
-                           :where (read-plan/where-clause where fields)
-                           :limit (inc max-candidates)}
-                    version-entity
-                    (assoc :join [[(keyword (util/kw->snake-case version-entity)) :versions]
-                                  [:= :ident.id
-                                   (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))
-                  {:quoted true})]
+          query (cond-> {:select-distinct columns
+                         :from [[(keyword (util/kw->snake-case entity-name)) :ident]]
+                         :where (read-plan/where-clause where fields)
+                         :limit (inc max-candidates)}
+                  version-entity
+                  (assoc :join [[(keyword (util/kw->snake-case version-entity)) :versions]
+                                [:= :ident.id
+                                 (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))]
       (util/with-sql-error-handling "Database error" :query-identity-candidates
                                     {:entity-name entity-name}
-                                    (let [rows (util/exec! ds query)]
+                                    (let [rows (util/exec-read! ds query {:quoted true})]
                                       (bounded/check-candidate-count! rows max-candidates)
                                       (with-meta (mapv #(codec/row->entity %
                                                                            (select-keys identity-fields [:id :org-id]))
@@ -347,14 +343,13 @@
    dedup and reverts to query-entities behaviour."
   [ds entity-name where group-cols fields]
   (let [plan (read-plan/latest entity-name where group-cols fields)
-        where-clause (:where plan)
-        query (sql/format plan {:quoted true})]
+        where-clause (:where plan)]
     (when-not where-clause
       (log/debug "Full table DISTINCT ON scan (no where clause)" {:entity-name entity-name}))
     (util/with-sql-error-handling "Database error" :query-latest-per-group
                                   {:entity-name entity-name :where where
                                    :group-cols group-cols}
-                                  (let [rows (util/exec! ds query)
+                                  (let [rows (util/exec-read! ds plan {:quoted true})
                                         records (mapv #(codec/row->entity % fields) rows)]
                                     (if (and fields (junction/has-ref-many? fields))
                                       (junction/populate-ref-many-fields ds entity-name records fields)
@@ -459,9 +454,9 @@
      {}
      (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
                                    (let [rows (mapcat (fn [chunk]
-                                                        (util/exec! ds
-                                                                    (sql/format (read-plan/by-ids entity-name chunk)
-                                                                                {:quoted true})))
+                                                        (util/exec-read! ds
+                                                                         (read-plan/by-ids entity-name chunk)
+                                                                         {:quoted true}))
                                                       (chunk-rows ids 1))
                                          ;; Decode WITHOUT field-specs on purpose: the
                                          ;; versioned-resolution + compile paths that call

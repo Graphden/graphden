@@ -216,6 +216,32 @@
       (finally (fs/delete-tree dir)))))
 
 
+(deftest current-browser-phase-requires-exact-non-inherited-roster
+  (let [dir (fs/create-temp-dir)
+        scripts (str (fs/absolutize "scripts"))
+        prefix (str (fs/path dir "current"))
+        path (str prefix ".browser.edn")
+        current-sha (resume/git-output "rev-parse" "HEAD")
+        receipt {:schema 1 :kind "browser" :sha current-sha :roster ["a" "b"]
+                 :status {"a" :passed "b" :pending}}
+        invoke (fn []
+                 (p/shell {:out :string :err :string
+                           :extra-env {"GRAPHDEN_RESUME_OUT" prefix "GRAPHDEN_RESUME_FROM" ""
+                                       "GRAPHDEN_RESUME_CREDIT" "0"}}
+                          "bb" "-cp" scripts (str scripts "/ci_resume_cli.clj")
+                          "auto" "browser" "a" "b")
+                 (report/read-report path))]
+    (try
+      (report/write-atomic! path receipt)
+      (is (= {"a" :passed "b" :pending} (:status (invoke))))
+      (doseq [invalid [(assoc receipt :sha sha)
+                       (assoc receipt :inherited true)
+                       (-> receipt (assoc :roster ["a"]) (assoc :status {"a" :passed}))]]
+        (report/write-atomic! path invalid)
+        (is (= {"a" :pending "b" :pending} (:status (invoke)))))
+      (finally (fs/delete-tree dir)))))
+
+
 (deftest browser-failure-survives-an-intervening-build-failure
   (let [dir (fs/create-temp-dir)
         prefix #(str (fs/path dir %))

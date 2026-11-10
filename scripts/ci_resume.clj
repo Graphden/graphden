@@ -255,6 +255,12 @@
                          (or (seq output-prefix)
                              (zero? (:exit (p/shell {:out :string :err :string :continue true}
                                                     "git" "merge-base" "--is-ancestor" (:sha prior) sha)))))
-                prior)]
-    (begin! path kind sha roster prior
-            (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT")))))
+                prior)
+        ;; Several browser phases share this gate-owned full-roster journal.
+        ;; Carry only final passes; inherited hints and provisional files are
+        ;; not current work, and standalone retries retain their old policy.
+        current (when (and (= kind "browser") (seq output-prefix))
+                  (read-hint path kind))
+        current (when (exact-credit? current sha roster) current)]
+    (begin! path kind sha roster (or current prior)
+            (or (some? current) (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT"))))))

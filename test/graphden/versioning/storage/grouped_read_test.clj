@@ -64,15 +64,15 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"pagination"
           (grouped/read-operations target
                                    [(assoc (first requests) :opts {:limit 1})])))
-    (let [identity (sp/create-entity (vs/unwrap target) :fn {:name "grouped-no-version"})]
+    (let [identity-row (sp/create-entity (vs/unwrap target) :fn {:name "grouped-no-version"})]
       (is (= [{} []]
              (grouped/read-operations target
                                       [{:op :read-ids :entity :fn :ids []}
-                                       {:op :query :entity :fn :where {:id [(:id identity)]}}])))
-      (is (= (:id identity)
+                                       {:op :query :entity :fn :where {:id [(:id identity-row)]}}])))
+      (is (= (:id identity-row)
              (get-in (grouped/read-operations target
-                                              [{:op :read-ids :entity :fn :ids [(:id identity)]}])
-                     [0 (:id identity) :id]))))))
+                                              [{:op :read-ids :entity :fn :ids [(:id identity-row)]}])
+                     [0 (:id identity-row) :id]))))))
 
 
 (defrecord ScalarReads

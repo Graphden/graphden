@@ -351,3 +351,17 @@
     (is (not= before (prepared-key value)))
     (is (= "#<source-operation-key>" (str before))))
   (is (not= (prepared-key 1) (prepared-key 1N)) "Clojure-equal numbers retain their JDBC parameter type"))
+
+
+(deftest ordered-projection-alias-cannot-change-the-witness-sort-key-test
+  (jdbc/execute! *pool* ["INSERT INTO certificate_row(id,owner_id,value) VALUES(3,10,'tied alias')"])
+  (snapshot
+    (fn [connection guard]
+      (let [ast {:select-distinct-on [[:id] [:owner_id :id] :value]
+                 :from [:certificate_row] :order-by [:id]}
+            query (sql/format ast {:quoted true})
+            rows (pg/exec! connection query)
+            answer (observed #(miss-reason (fn [] (certificate/prepare-operation guard ast query))))]
+        (is (= 2 (count rows)) "Source DISTINCT ON id resolves projected owner_id alias")
+        (is (= :unknown-read-plan (:result answer)))
+        (is (empty? (:queries answer)) "Cannot attest input id uniqueness for output owner_id ordering")))))

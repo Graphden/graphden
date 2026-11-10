@@ -1102,61 +1102,63 @@
   (call-with-merges-memo #(resolve-execution-graph-batch* base-storage fn-id branch-id)))
 
 
+(defn execution-references
+  "Function IDs reached by one resolved execution node, including identity refs."
+  [fn-rec fn-fs fn-bs fn-items slot-by-id]
+  (reduce into #{}
+          [(extract-fn-refs-from-bindings fn-bs)
+           (extract-fn-refs-from-list-items fn-items)
+           (set (remove nil? (:parent-ids fn-rec)))
+           (into #{} (keep #(get fn-rec %))
+                 [:base-fn-id :element-fn-id :return-type-fn-id])
+           (into #{} (keep #(:type-fn-id (slot-by-id (:slot-id %)))) fn-fs)]))
+
+
+(defn execution-graph-from-index
+  "Walk resolved, owner-indexed rows with the execution resolver's edge rules.
+   Callers choose whole-branch or bounded acquisition; no values are read here."
+  [fn-id {:keys [all-fns fn-slots-by-fn bindings-by-fn items-by-binding
+                 slots slot-by-id]}]
+  (loop [to-visit #{fn-id}
+         visited #{fn-id}
+         fns {}
+         fn-slots-acc []
+         bindings-acc []
+         items-acc []
+         iter-count 0]
+    (when (> iter-count 10000)
+      (throw (ex-info "Execution graph resolution exceeded maximum iterations"
+                      {:type :execution-error/graph-too-large
+                       :fn-id fn-id
+                       :iteration-count iter-count})))
+    (if (empty? to-visit)
+      {:fns fns :slots slots :fn-slots fn-slots-acc
+       :bindings bindings-acc :list-items items-acc}
+      (let [current (first to-visit)
+            rest-to-visit (disj to-visit current)]
+        (if-let [fn-rec (get all-fns current)]
+          (let [fn-fs (get fn-slots-by-fn current [])
+                fn-bs (get bindings-by-fn current [])
+                fn-binding-ids (set (map :id fn-bs))
+                fn-items (mapcat #(get items-by-binding % []) fn-binding-ids)
+                new-to-visit (set/difference
+                               (execution-references fn-rec fn-fs fn-bs fn-items slot-by-id)
+                               visited)]
+            (recur (set/union rest-to-visit new-to-visit)
+                   (set/union visited new-to-visit)
+                   (assoc fns current fn-rec)
+                   (into fn-slots-acc fn-fs)
+                   (into bindings-acc fn-bs)
+                   (into items-acc fn-items)
+                   (inc iter-count)))
+          (recur rest-to-visit visited fns fn-slots-acc bindings-acc
+                 items-acc (inc iter-count)))))))
+
+
 (defn- resolve-execution-graph-batch*
-  "The body of `resolve-execution-graph-batch`, under one merge-record
-   memo: the four `load-all-resolved` calls share the chain's
-   `branch-merge` rows instead of each fetching them."
+  "One merge-record memo is shared by the four whole-branch entity loads."
   [base-storage fn-id branch-id]
-  (let [{:keys [all-fns fn-slots-by-fn bindings-by-fn items-by-binding
-                slots slot-by-id]}
-        (branch-graph base-storage branch-id)
-        collect-fn-refs
-        (fn [fn-rec fn-fs fn-bs fn-items]
-          (reduce into #{}
-                  [(extract-fn-refs-from-bindings fn-bs)
-                   (extract-fn-refs-from-list-items fn-items)
-                   (set (remove nil? (:parent-ids fn-rec)))
-                   (into #{} (keep #(get fn-rec %))
-                         [:base-fn-id :element-fn-id :return-type-fn-id])
-                   ;; Slots themselves reference fn-rows via :type-fn-id —
-                   ;; pull those in too so type-checker / editor see the
-                   ;; complete sub-graph.
-                   (into #{} (keep #(:type-fn-id (slot-by-id (:slot-id %))))
-                         fn-fs)]))]
-    (loop [to-visit #{fn-id}
-           visited #{fn-id}
-           fns {}
-           fn-slots-acc []
-           bindings-acc []
-           items-acc []
-           iter-count 0]
-      (when (> iter-count 10000)
-        (throw (ex-info "Execution graph resolution exceeded maximum iterations"
-                        {:type :execution-error/graph-too-large
-                         :fn-id fn-id
-                         :iteration-count iter-count})))
-      (if (empty? to-visit)
-        {:fns fns :slots slots :fn-slots fn-slots-acc
-         :bindings bindings-acc :list-items items-acc}
-        (let [current (first to-visit)
-              rest-to-visit (disj to-visit current)]
-          (if-let [fn-rec (get all-fns current)]
-            (let [fn-fs (get fn-slots-by-fn current [])
-                  fn-bs (get bindings-by-fn current [])
-                  fn-binding-ids (set (map :id fn-bs))
-                  fn-items (mapcat #(get items-by-binding % []) fn-binding-ids)
-                  new-to-visit (set/difference
-                                 (collect-fn-refs fn-rec fn-fs fn-bs fn-items)
-                                 visited)]
-              (recur (set/union rest-to-visit new-to-visit)
-                     (set/union visited new-to-visit)
-                     (assoc fns current fn-rec)
-                     (into fn-slots-acc fn-fs)
-                     (into bindings-acc fn-bs)
-                     (into items-acc fn-items)
-                     (inc iter-count)))
-            (recur rest-to-visit visited fns fn-slots-acc bindings-acc
-                   items-acc (inc iter-count))))))))
+  (execution-graph-from-index fn-id (branch-graph base-storage branch-id)))
 
 
 (defn grouped-query?

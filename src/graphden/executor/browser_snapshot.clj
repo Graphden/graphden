@@ -230,8 +230,8 @@
     (registry/record-rich-types-raw! id (:name signature) signature)))
 
 
-(defn- check-closure!
-  [snapshot entries original-rich recovery]
+(defn- prepare-check-closure
+  [snapshot entries]
   (let [graph (:graph snapshot)
         {:keys [forward-deps reverse-deps]} (deps/build-deps-state graph)
         reachable (set/difference (deps/forward-closure forward-deps (vals entries))
@@ -241,29 +241,46 @@
         {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
     (when (> (count reachable) 2048) (reject! :type-closure-limit {}))
     (when (seq cyclic) (reject! :type-cycle {:fn-id (first cyclic)}))
-    ;; Dependencies are final before consumers run in this isolated registry.
-    ;; Never reuse an ambient memo: another snapshot may use the same identities
-    ;; with different source, aliases, markers or primitive signatures.
+    {:storage storage :fingerprints source-fingerprints :ordered ordered}))
+
+
+(defn- prepare-checked-definition
+  [{:keys [storage fingerprints]} original-rich recovery id]
+  (when-let [definition (type-check/reconstruct-fn-def storage id)]
+    (when-not (let [signature (get-in original-rich [:by-id id])]
+                (or (provenance/matches? signature (check/checker-view definition))
+                    (provenance/matches-storage-input? signature (get fingerprints id))))
+      (let [{:keys [status pending-ids]} recovery]
+        (if (and (contains? #{:pending :running} status)
+                 (not (owned/owned-fn-id? id))
+                 (or (nil? pending-ids) (contains? pending-ids id)))
+          (reject! :policy-refresh-required {:fn-id id})
+          (reject! :type-source-mismatch {:fn-id id}))))
+    definition))
+
+
+(defn- check-definition!
+  [id definition]
+  (try
+    (check/check-fn-def! definition)
+    (catch Exception _
+      ;; Checker diagnostics may contain literal data. Export errors do
+      ;; not carry their message, cause, or original ex-data.
+      (reject! :type-check-failed {:fn-id id})))
+  (when-not (registry/rich-type-of-id id)
+    (reject! :type-unresolved {:fn-id id})))
+
+
+(defn- check-closure!
+  [snapshot entries original-rich recovery]
+  (let [{:keys [ordered] :as prepared} (prepare-check-closure snapshot entries)]
+    ;; Keep the default path's prepare/check interleaving: a preceding custom
+    ;; rule could mutate a later literal, which its fresh provenance must see.
+    ;; The memo is always pass-local; no ambient registry evidence is reused.
     (binding [check/*ref-return-memo* (atom {})]
       (doseq [id ordered]
-        (when-let [definition (type-check/reconstruct-fn-def storage id)]
-          (when-not (let [signature (get-in original-rich [:by-id id])]
-                      (or (provenance/matches? signature (check/checker-view definition))
-                          (provenance/matches-storage-input? signature (get source-fingerprints id))))
-            (let [{:keys [status pending-ids]} recovery]
-              (if (and (contains? #{:pending :running} status)
-                       (not (owned/owned-fn-id? id))
-                       (or (nil? pending-ids) (contains? pending-ids id)))
-                (reject! :policy-refresh-required {:fn-id id})
-                (reject! :type-source-mismatch {:fn-id id}))))
-          (try
-            (check/check-fn-def! definition)
-            (catch Exception _
-              ;; Checker diagnostics may contain literal data. Export errors do
-              ;; not carry their message, cause, or original ex-data.
-              (reject! :type-check-failed {:fn-id id})))
-          (when-not (registry/rich-type-of-id id)
-            (reject! :type-unresolved {:fn-id id})))))))
+        (when-let [definition (prepare-checked-definition prepared original-rich recovery id)]
+          (check-definition! id definition))))))
 
 
 (defn- checked-source

@@ -105,7 +105,8 @@
                                   (let [rows (util/exec-read! ds
                                                               {:select-distinct [:owner_id]
                                                                :from [(keyword jt)]
-                                                               :where [:= :target_id target-id]})]
+                                                               :where [:= :target_id target-id]}
+                                                              {:quoted true})]
                                     (mapv :owner_id rows)))))
 
 
@@ -127,7 +128,7 @@
                                           (reduce (fn [rows row]
                                                     (update rows (:owner_id row) (fnil conj []) (:target_id row)))
                                                   acc
-                                                  (util/exec-read! ds query))))
+                                                  (util/exec-read! ds query {:quoted true}))))
                                       {}
                                       (partition-all util/*max-statement-params* (distinct owner-ids)))))))
 

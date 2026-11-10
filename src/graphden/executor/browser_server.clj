@@ -35,6 +35,70 @@
 (defonce ^:private issuances (atom {}))
 
 
+(def ^:dynamic ^:private *client-fingerprint-memo* nil)
+
+
+(def ^:private fingerprint-container-kinds
+  {clojure.lang.PersistentArrayMap :map clojure.lang.PersistentHashMap :map
+   clojure.lang.PersistentVector :vector clojure.lang.APersistentVector$SubVector :vector
+   clojure.lang.PersistentHashSet :set
+   clojure.lang.PersistentList :sequence clojure.lang.PersistentList$EmptyList :sequence})
+
+
+(def ^:private fingerprint-leaf-classes
+  #{nil String Boolean Character java.util.UUID clojure.lang.Keyword clojure.lang.Symbol
+    Long Integer Short Byte Double Float java.math.BigDecimal java.math.BigInteger
+    clojure.lang.BigInt clojure.lang.Ratio})
+
+
+(defn- fingerprint-map-key?
+  [value]
+  (or (keyword? value) (string? value) (uuid? value)))
+
+
+(defn- same-fingerprint-input?
+  "Conservative digest equivalence, not Clojure equality: vector/list and
+   printed numeric representations differ. Unknown/mutable values always miss,
+   even when identical. Call only under fingerprint-data's print bindings."
+  [left right]
+  (let [kind (get fingerprint-container-kinds (class left))]
+    (and (= kind (get fingerprint-container-kinds (class right)))
+         (case kind
+           :map (and (= (count left) (count right))
+                     (every? (fn [[k v]]
+                               (when (fingerprint-map-key? k)
+                                 (when-let [entry (find right k)]
+                                   (and (fingerprint-map-key? (key entry))
+                                        (same-fingerprint-input? k (key entry))
+                                        (same-fingerprint-input? v (val entry)))))) left))
+           :set (and (= (count left) (count right))
+                     (every? (fn [item]
+                               (and (contains? right item)
+                                    (same-fingerprint-input? item (get right item)))) left))
+           (:vector :sequence) (and (= (count left) (count right))
+                                    (every? true? (map same-fingerprint-input? left right)))
+           (and (contains? fingerprint-leaf-classes (class left))
+                (contains? fingerprint-leaf-classes (class right))
+                (or (identical? left right) (= (pr-str left) (pr-str right))))))))
+
+
+(defn- client-fingerprint
+  [input]
+  (let [memo *client-fingerprint-memo*
+        previous (when memo @memo)]
+    (if (and (map? previous)
+             (binding [*print-length* nil *print-level* nil *print-meta* false
+                       *print-readably* true *print-dup* false *print-namespace-maps* false]
+               (same-fingerprint-input? (:input previous) input)))
+      (:digest previous)
+      (let [digest (provenance/fingerprint-data input)]
+        ;; A timed-out worker may still unwind. It cannot reopen the request's
+        ;; closed memo or retain another captured graph after invoke returns.
+        (when (and memo (not= ::closed previous))
+          (compare-and-set! memo previous {:input input :digest digest}))
+        digest))))
+
+
 (defn- reject!
   [reason]
   (throw (ex-info "Server call is unavailable"
@@ -144,7 +208,7 @@
         signatures (into {} (map (fn [[id evidence]] [id (:signature evidence)])) targets)
         captured {:graph graph :namespaces (source/collect-namespaces storage graph)
                   :server-signatures signatures}
-        evidence (provenance/fingerprint-data
+        evidence (client-fingerprint
                    {:graph (normalized-graph graph) :anchor anchor-row
                     :targets (into {} (map (fn [[id proof]] [id (:fingerprint proof)])) targets)})]
     {:snapshot captured :targets targets :calls calls :evidence evidence}))
@@ -318,7 +382,11 @@
     (let [issued (get @issuances (get-in input [:descriptor :token]))]
       (when-not (and issued (> (:expires issued) (System/currentTimeMillis)))
         (reject! :server-descriptor-expired))
-      (recheck/call-with-ctx-slices ctx #(execute-current ctx request issued (:input input))))
+      (let [memo (atom nil)]
+        (binding [*client-fingerprint-memo* memo]
+          (try
+            (recheck/call-with-ctx-slices ctx #(execute-current ctx request issued (:input input)))
+            (finally (reset! memo ::closed))))))
     (catch Exception error
       (log/warn "Read-only server call refused"
                 {:type :browser-server/refused

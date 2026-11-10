@@ -11,7 +11,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.resolution :as res]))
+    [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.small-graph :as small-graph]))
 
 
 (defn resolve-fn-version-id
@@ -121,31 +122,22 @@
 
 
 (defn- executor-lookups
-  "The executor's compile lookups over `root-fn-id`'s reachable closure —
-   loaded through the storage's OWN graph resolver
-   (`sp/resolve-execution-graph`: the recursive-CTE / batch path the
-   executor compiles from, a constant handful of round trips; the app
-   root's closure is ~5k rows). Slot type-fn rows (the `[:fn {ARGS}
-   RET]` constraint `hof-lambda-params` reads) are topped up explicitly —
-   the resolver does not chase `slot.type-fn-id`. The free-arg surface
-   is then the SAME walk the compiler runs (`surface/public-free-entries`),
-   so the Run form, the service create-guard and the layout's deep-free
-   placeholders agree by construction. A root that does not resolve
-   yields empty lookups.
+  "Canonical execution lookups for the free-argument surface. A small known
+   dependency closure selects fresh bounded version resolution; large or cold
+   contexts use the storage's ordinary graph resolver. Context data never
+   supplies the bounded graph's function, binding or membership values.
 
-   The top-up reads the ctx's `:graph-cache` first — the snapshot the
-   compiler primes (`prime-graph-cache!`) and every CRUD write splices —
-   and hits storage only for ids that snapshot lacks (a cold ctx, a
-   test ctx without the atom). Type rows are identity-level structure,
-   so the snapshot is as truthful as a fresh read; going to storage for
-   them costs four round trips (fn, fn_version, fn_parent_ids, the
-   branch chain) on top of the resolver's constant handful — the
-   `:sql/execute-popover-app-root` budget is what noticed (22 / 18,
-   ). Read directly off the atom: `executor.context` requires
-   `compile-runtime`, which requires this ns."
+   The ordinary resolver includes all slots. Type rows outside its reachable
+   functions retain the existing graph-cache top-up; missing entries are read
+   from storage. Bounded acquisition reads reachable slots and rename sources."
   [ctx storage root-fn-id]
   (let [g (try
-            (sp/resolve-execution-graph storage root-fn-id)
+            (or (when (vs/versioned-storage? storage)
+                  (when-let [hints (small-graph/hinted-ids
+                                     (:forward-deps (some-> (:compile-deps ctx) deref)) root-fn-id)]
+                    (small-graph/resolve-hinted (vs/unwrap storage)
+                                                (vs/current-branch-id storage) root-fn-id hints)))
+                (sp/resolve-execution-graph storage root-fn-id))
             (catch clojure.lang.ExceptionInfo e
               (when-not (= :not-found (:type (ex-data e))) (throw e))))
         fns-by-id (or (:fns g) {})

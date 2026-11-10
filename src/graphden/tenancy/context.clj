@@ -92,6 +92,7 @@
          ;; addon active" fact — the server-side twin of the editor's
          ;; capability-header probe (graphdenTenancyActive).
          :org-cap-installed? false
+         :unscoped-source-replay-policy {:generation (Object.) :authority-fields []}
          :personal-namespace-fn nil
          :notify-fn nil}))
 
@@ -179,6 +180,7 @@
   [f]
   (swap! (seams-atom) assoc
          :org-cap-installed? (some? f)
+         :unscoped-source-replay-policy {:generation (Object.) :authority-fields []}
          :org-cap-fn (or f (constantly false))))
 
 
@@ -215,6 +217,16 @@
   ((seam :graph-read-filter-fn) graph))
 
 
+(def ^:private source-replay-policy-key (Object.))
+
+
+(def ^:private source-replay-policy-seal (Object.))
+
+
+(deftype ^:private SourceReplayPolicyWitness
+  [seal generation owns-policy?])
+
+
 (defn install-browser-source-policy!
   "Install `(fn [snapshot-storage] (fn [fn-row & [permissions]] ...))`.
    Pass true for the selected configuration's execute permission, or a fixed
@@ -223,21 +235,75 @@
    identity plus private server-side closure inspection, never source export.
    Other extra permissions never relax read/source visibility. The policy
    must authorize source disclosure before the reader loads bindings/literals.
-   Its grant reads belong to the same immutable database snapshot."
-  [f]
-  (swap! (seams-atom) assoc :browser-source-policy-fn f))
+   Its grant reads belong to the same immutable database snapshot.
+
+   The optional replay adapter explicitly declares a known snapshot-local
+   policy's narrow authority fields and storage/datasource wrapper classifiers.
+   Classifiers must do no I/O and return nil for unknown implementations. This
+   is an opt-in contract, never permission to cache authorization decisions."
+  ([f] (install-browser-source-policy! f nil))
+  ([f replay-adapter]
+   (when (and replay-adapter
+              (not (and (fn? f) (map? replay-adapter)
+                        (every? #{:authority-fields :unwrap-storage :unwrap-datasource}
+                                (keys replay-adapter))
+                        (vector? (:authority-fields replay-adapter))
+                        (every? #{:id :org-id :namespace-id :concealed}
+                                (:authority-fields replay-adapter))
+                        (every? #(or (nil? %) (fn? %))
+                                ((juxt :unwrap-storage :unwrap-datasource) replay-adapter)))))
+     (throw (ex-info "Invalid browser source replay adapter" {})))
+   (swap! (seams-atom) assoc
+          :browser-source-policy-fn f
+          :unscoped-source-replay-policy {:generation (Object.) :authority-fields []}
+          :browser-source-replay-adapter (when replay-adapter
+                                           (assoc replay-adapter :generation (Object.))))))
+
+
+(defn- replayable-source-policy
+  [policy adapter]
+  (if (and adapter (fn? policy))
+    (let [owner (volatile! nil)
+          witness (SourceReplayPolicyWitness. source-replay-policy-seal (:generation adapter)
+                                              #(identical? @owner %))
+          tagged (with-meta policy (assoc (meta policy) source-replay-policy-key witness))]
+      ;; Seal the exact returned function. Copying its metadata cannot admit a
+      ;; different function. The owner cell stays private to this witness and
+      ;; the collectable policy/witness cycle; no global policy registry.
+      (vreset! owner tagged)
+      tagged)
+    policy))
+
+
+(defn source-replay-policy-info
+  "Return an explicit current adapter, not authority to reuse source rows.
+   Unknown factories and policies from replaced/uninstalled registrations are
+   ineligible. Every cached read still needs its own snapshot and fresh guard."
+  [policy]
+  (let [policies @(seams-atom)
+        current (if (:browser-source-policy-fn policies)
+                  (:browser-source-replay-adapter policies)
+                  (when-not (:org-cap-installed? policies) (:unscoped-source-replay-policy policies)))
+        witness (get (meta policy) source-replay-policy-key)]
+    (when (and (fn? policy) current
+               (instance? SourceReplayPolicyWitness witness)
+               (identical? source-replay-policy-seal (.-seal ^SourceReplayPolicyWitness witness))
+               (identical? (:generation current) (.-generation ^SourceReplayPolicyWitness witness))
+               ((.-owns-policy? ^SourceReplayPolicyWitness witness) policy))
+      current)))
 
 
 (defn browser-source-policy
   "A request/snapshot-local source-disclosure guard. An active tenancy addon
    without this policy fails closed; addon-less installations permit source."
   [storage]
-  (if-let [factory (seam :browser-source-policy-fn)]
-    (factory storage)
-    (if (seam :org-cap-installed?)
-      (throw (ex-info "Browser source is unavailable"
-                      {:type :authz/forbidden}))
-      (constantly nil))))
+  (let [policies @(seams-atom)]
+    (if-let [factory (:browser-source-policy-fn policies)]
+      (replayable-source-policy (factory storage) (:browser-source-replay-adapter policies))
+      (if (:org-cap-installed? policies)
+        (throw (ex-info "Browser source is unavailable"
+                        {:type :authz/forbidden}))
+        (replayable-source-policy (constantly nil) (:unscoped-source-replay-policy policies))))))
 
 
 ;; Notification SEAM. Core raises a few domain EVENTS whose delivery is a

@@ -149,7 +149,7 @@
       (when-not component (reject! :invalid-request))
       (let [epoch (context/invalidation-epoch ctx)
             policy (snapshot/capture-context-policy ctx)]
-        (source/with-hinted-snapshot (request/require-storage ctx) (context/cached-graph ctx)
-                                     #(export-in-snapshot ctx component %1 %2 policy epoch))))
+        (source/with-snapshot (request/require-storage ctx)
+                              #(export-in-snapshot ctx component %1 %2 policy epoch))))
     (catch Exception error
       (failure-facts error))))

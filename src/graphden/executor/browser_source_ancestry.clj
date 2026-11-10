@@ -1,9 +1,8 @@
 (ns graphden.executor.browser-source-ancestry
-  "Acquire actual function ancestry before owner payloads. Advisory metadata
-   never introduces source reachability; only freshly read function rows do."
+  "Acquire actual function ancestry before owner payloads. Only freshly read,
+   authorized function rows introduce source reachability."
   (:require
-    [clojure.set :as set]
-    [graphden.executor.browser-source-prefetch :as prefetch]))
+    [clojure.set :as set]))
 
 
 (defn structural-ids
@@ -18,23 +17,9 @@
   (let [missing (remove #(contains? (:rows @cache) %) ids)]
     (when (seq missing)
       (let [rows (read-fns (set missing))]
-        ;; Cache missing metadata too, but refuse it only if the actual fresh
-        ;; traversal reaches that ID. A stale hint cannot deny the request.
         (swap! cache update :rows merge
                (merge (zipmap missing (repeat nil)) (into {} (map (juxt :id identity)) rows))))))
   (mapv #(get-in @cache [:rows %]) ids))
-
-
-(defn- prefetch-identities!
-  [cache hint-fns known-hints seeds read-fns limit]
-  (when (seq hint-fns)
-    (when-let [ids (prefetch/bounded-closure seeds known-hints
-                                             #(structural-ids [(get hint-fns %)]) limit)]
-      (let [missing (remove #(contains? (:rows @cache) %) ids)
-            remaining (- limit (:speculative-count @cache))]
-        (when (<= (count missing) remaining)
-          (read-fresh! cache read-fns missing)
-          (swap! cache update :speculative-count + (count missing)))))))
 
 
 (defn- payload-barrier?
@@ -62,13 +47,10 @@
 
 
 (defn collector
-  "Return a request-local metadata collector. No bindings, slot payloads or
-   list items are read here. At most `limit` speculative identities are loaded
-   across all frontiers; actual source retains the independent function limit.
-   `seen` contains owners whose payloads already passed the ordinary collector."
-  [{:keys [hint-fns read-fns limit] :as options}]
-  (let [cache (atom {:rows {} :speculative-count 0})
-        known-hints (set (keys hint-fns))]
+  "Return a collection-local reader for actual function ancestry. No advisory
+   identities, bindings, slot payloads or list items are loaded here. `seen`
+   contains owners whose payloads already passed the ordinary collector."
+  [options]
+  (let [cache (atom {:rows {}})]
     (fn [seeds seen pending]
-      (prefetch-identities! cache hint-fns known-hints seeds read-fns limit)
       (expand seeds (set/union seen pending) (assoc options :cache cache :seen seen)))))

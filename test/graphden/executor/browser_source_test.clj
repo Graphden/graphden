@@ -370,7 +370,7 @@
                   (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))
 
 
-(deftest stale-ancestry-hints-cannot-open-server-target-bodies
+(deftest actual-ancestry-cannot-open-server-target-bodies
   (let [root (random-uuid) target (random-uuid) capture (random-uuid)
         primitive capabilities/server-call-id
         slot capabilities/server-call-slot-id
@@ -385,17 +385,14 @@
                    :binding (keyed [{:id (random-uuid) :fn-id root :slot-id slot :ref-fn-id target}
                                     {:id (random-uuid) :fn-id target :value "private target"}
                                     {:id (random-uuid) :fn-id capture :value "private capture"}])}
-                  calls)
-        hint {:fns (assoc (keyed rows) root {:id root :parent-ids [target]})}]
-    (with-redefs [source/with-snapshot (fn [_ f] (f storage (constantly nil)))]
-      (let [graph (source/with-hinted-snapshot storage hint
-                                               #(source/collect-client-closure %1 [root] %2))]
-        (is (contains? (:identity-target-ids graph) target))
-        (is (not (contains? (set (map :id (:fns graph))) capture)))
-        (is (some #{[:read :fn capture]} @calls) "The stale metadata hint was exercised")
-        (is (not-any? (fn [[operation entity where]]
-                        (and (= operation :candidates) (contains? #{:binding :fn-slot} entity)
-                             (some #{target capture} (:fn-id where)))) @calls))))))
+                  calls)]
+    (let [graph (source/collect-client-closure storage [root] (constantly nil))]
+      (is (contains? (:identity-target-ids graph) target))
+      (is (not (contains? (set (map :id (:fns graph))) capture)))
+      (is (not-any? #{[:read :fn capture]} @calls) "Even capture function metadata remains unread")
+      (is (not-any? (fn [[operation entity where]]
+                      (and (= operation :candidates) (contains? #{:binding :fn-slot} entity)
+                           (some #{target capture} (:fn-id where)))) @calls)))))
 
 
 (deftest strict-collector-interface-rejection-precedes-ancestry-payload

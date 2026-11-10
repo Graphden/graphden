@@ -45,9 +45,6 @@
 (def ^:dynamic ^:private *prefetched* nil)
 
 
-(def ^:dynamic ^:private *function-hints* nil)
-
-
 (defn- reject!
   [reason]
   (throw (ex-info "Component source is unavailable"
@@ -129,8 +126,7 @@
   [storage roots authorize! manifest? server? & [budget]]
   (let [budget (or budget (atom 0))
         metadata-frontier (when (or manifest? server?)
-                            (ancestry/collector {:hint-fns *function-hints*
-                                                 :read-fns #(read-rows storage :fn %)
+                            (ancestry/collector {:read-fns #(read-rows storage :fn %)
                                                  :authorize! authorize! :limit max-functions :reject! reject!}))]
     (loop [pending (set roots)
            seen #{}
@@ -326,16 +322,6 @@
                              (check-snapshot!)
                              (let [storage (tx/with-connection storage connection)]
                                (f storage (tenancy/browser-source-policy storage)))))))
-
-
-(defn with-hinted-snapshot
-  "Like with-snapshot, with advisory function IDs for fresh metadata batching.
-   Hinted rows never supply source values, edges or authorization decisions."
-  [storage graph-hint f]
-  (let [rows (:fns graph-hint)
-        hints (if (map? rows) rows (into {} (map (juxt :id identity)) rows))]
-    (binding [*function-hints* hints]
-      (with-snapshot storage f))))
 
 
 (defn collect-namespaces

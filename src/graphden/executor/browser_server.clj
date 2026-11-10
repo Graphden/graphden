@@ -258,9 +258,8 @@
   (current-auth! ctx request (:scope issued))
   (execute-guard! ctx (:target issued))
   (let [policy (snapshot/capture-context-policy ctx)]
-    (source/with-hinted-snapshot
+    (source/with-snapshot
       (:storage ctx)
-      (context/cached-graph ctx)
       (fn [storage authorize!]
         (components/assert-current-policy! storage)
         (let [captured (current-call! ctx storage authorize! policy issued)
@@ -299,9 +298,8 @@
         (execute-guard! ctx (:target issued))
         ;; A new transaction and a newly resolved auth subject are essential:
         ;; the worker snapshot cannot observe a grant, role or source revocation.
-        (source/with-hinted-snapshot
+        (source/with-snapshot
           (:storage ctx)
-          (context/cached-graph ctx)
           (fn [storage authorize!]
             (components/assert-current-policy! storage)
             (current-call! ctx storage authorize! (snapshot/capture-context-policy ctx) issued)))))

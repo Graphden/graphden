@@ -148,3 +148,30 @@
          (identical? witness-seal (.-seal ^StorageWitness witness))
          (= (::input metadata) (.-authored-input ^StorageWitness witness))
          (= source-fingerprint (.-source-fingerprint ^StorageWitness witness)))))
+
+
+^{:splint/disable [lint/prefer-method-values]}
+(defn retained-checker-metadata
+  "Expose all data retained by known sealed provenance for immutable admission
+   and conservative memory accounting. Nil means unknown metadata: refuse the
+   optimization. This is neither a fresh source check nor an authority grant."
+  [value]
+  (let [metadata (meta value)
+        marker (get metadata marker-key)
+        storage (::storage-input metadata)]
+    (when (and (every? #{::input ::storage-input marker-key} (keys metadata))
+               (or (not (contains? metadata marker-key))
+                   (and (instance? MarkerWitness marker)
+                        (identical? witness-seal (.-seal ^MarkerWitness marker))))
+               (or (not (contains? metadata ::storage-input))
+                   (and (instance? StorageWitness storage)
+                        (identical? witness-seal (.-seal ^StorageWitness storage)))))
+      (cond-> [(::input metadata)]
+        marker (conj [(.-input ^MarkerWitness marker)
+                      (.-fn-id ^MarkerWitness marker)
+                      (.-signature ^MarkerWitness marker)
+                      (.-flags ^MarkerWitness marker)
+                      (.-args ^MarkerWitness marker)
+                      (.-return-value ^MarkerWitness marker)])
+        storage (conj [(.-authored-input ^StorageWitness storage)
+                       (.-source-fingerprint ^StorageWitness storage)])))))

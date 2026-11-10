@@ -65,6 +65,8 @@
       (is (= 100 (:charged-bytes (recipes/stats store))))
       (is (= :value (recipes/lease-value store lease)))
       (is (false? (recipes/publish! store pending :oversized 61)))
+      (is (= 100 (:charged-bytes (recipes/stats store))))
+      (recipes/abort! store pending)
       (is (= 40 (:charged-bytes (recipes/stats store))))
       (recipes/release! store lease))))
 
@@ -82,6 +84,8 @@
     (is (= family (recipes/create-family! store family 200)))
     (is (nil? (recipes/reserve! store family physical 10)) "Old builder remains bounded until unwind")
     (is (false? (recipes/publish! store ticket :late 80)))
+    (is (= 80 (:pending-bytes (recipes/stats store))))
+    (recipes/abort! store ticket)
     (is (zero? (:charged-bytes (recipes/stats store))))
     (let [fresh (recipes/reserve! store family physical 20)]
       (is (some? fresh))
@@ -100,6 +104,7 @@
       (recipes/create-family! store family 100)
       (is (nil? (recipes/reserve! store family (Object.) 1)))
       (is (false? (recipes/publish! store ticket :late 60)))
+      (recipes/abort! store ticket)
       (is (= :leased (recipes/lease-value store lease)))
       (is (nil? (recipes/acquire! store family a)))
       (recipes/release! store lease)
@@ -117,6 +122,7 @@
       (is (nil? (recipes/reserve! store family b 1)))
       (is (= 90 (:charged-bytes (recipes/stats store))))
       (is (false? (recipes/publish! store ticket :closed 60)))
+      (recipes/abort! store ticket)
       (is (= :one (recipes/lease-value store lease)))
       (recipes/release! store lease)
       (is (zero? (:charged-bytes (recipes/stats store)))))))
@@ -197,3 +203,21 @@
     (is (nil? (recipes/reserve! store family (Object.) 1)))
     (is (= Long/MAX_VALUE (:charged-bytes (recipes/stats store))))
     (recipes/abort! store ticket)))
+
+
+(deftest cancellation-revokes-only-its-ticket-until-builder-finally
+  (let [{:keys [store]} (fixture)
+        family (family! store) a (Object.) b (Object.)]
+    (put! store family a :shared 30)
+    (let [ticket (recipes/reserve! store family b 70)]
+      (is (true? (recipes/revoke! store ticket)))
+      (is (false? (recipes/publish! store ticket :late 70)))
+      (is (= 100 (:charged-bytes (recipes/stats store))))
+      (is (nil? (recipes/reserve! store family b 1)))
+      (let [lease (recipes/acquire! store family a)]
+        (try (is (= :shared (recipes/lease-value store lease)))
+             (finally (recipes/release! store lease))))
+      ;; Actual worker on-done releases the reservation, independently of caller cancellation.
+      (is (true? (recipes/abort! store ticket)))
+      (is (= 30 (:charged-bytes (recipes/stats store))))
+      (is (false? (recipes/revoke! store ticket))))))

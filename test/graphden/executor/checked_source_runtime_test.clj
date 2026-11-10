@@ -56,27 +56,27 @@
                                            (deliver entered true)
                                            ;; Model a worker that still owns its source after
                                            ;; the waiting HTTP thread has been cancelled.
-                                           (try (.await finish)
-                                                (catch InterruptedException _ (.await finish)))
+                                           (try (CountDownLatch/.await finish)
+                                                (catch InterruptedException _ (CountDownLatch/.await finish)))
                                            :late)
                                 :fallback (constantly :unexpected-fallback)
                                 :check-cancel compile/check-cancel!}))
                           (catch InterruptedException _ :interrupted)))]
           (is (true? (deref entered 2000 false)))
-          (.interrupt ^Thread @caller)
+          (Thread/.interrupt @caller)
           (is (= :interrupted (deref waiting 2000 :waiting)))
           (is (= {:pending 1 :entries 0 :charged-bytes (* 256 1024 1024)}
                  (select-keys (memo/stats cache) [:pending :entries :charged-bytes])))
           (testing "runtime retirement cannot free a still-running reservation"
             (memo/retire! cache)
             (is (= 1 (:pending (memo/stats cache)))))
-          (.countDown finish)
-          (.shutdown ^ExecutorService pool)
-          (is (.awaitTermination ^ExecutorService pool 2 TimeUnit/SECONDS))
+          (CountDownLatch/.countDown finish)
+          (ExecutorService/.shutdown pool)
+          (is (ExecutorService/.awaitTermination pool 2 TimeUnit/SECONDS))
           (is (= {:pending 0 :entries 0 :leases 0 :charged-bytes 0}
                  (select-keys (memo/stats cache) [:pending :entries :leases :charged-bytes])))))
       (finally
-        (.countDown finish)
-        (.shutdown ^ExecutorService pool)
-        (.awaitTermination ^ExecutorService pool 2 TimeUnit/SECONDS)
+        (CountDownLatch/.countDown finish)
+        (ExecutorService/.shutdown pool)
+        (ExecutorService/.awaitTermination pool 2 TimeUnit/SECONDS)
         (memo/retire! cache)))))

@@ -151,7 +151,7 @@
       (doseq [ast [(assoc all-rows :order-by [[[:random]]])
                    (assoc all-rows :limit [:raw "random()"])
                    (assoc all-rows :select [[[:raw "random()"] :value]])
-                   (assoc all-rows :where [:= :value (apply str (repeat 262145 \x))])]]
+                   (assoc all-rows :where [:= :value (str/join (repeat 262145 \x))])]]
         (let [answer (observed #(miss-reason
                                   (fn [] (certificate/prepare-operation guard ast (sql/format ast {:quoted true})))))]
           (is (keyword? (:result answer)))
@@ -170,8 +170,8 @@
         captured (snapshot
                    (fn [connection guard]
                      (let [prepared (prepare-and-read connection guard ast)]
-                       (.setTime stamp 0)
-                       (.setNanos stamp 123456789)
+                       (Timestamp/.setTime stamp 0)
+                       (Timestamp/.setNanos stamp 123456789)
                        (certificate/capture guard [prepared]))))]
     (is (= 1 (:rows (certificate/stats captured))))
     (is (unchanged? captured))
@@ -197,7 +197,7 @@
            (jdbc/with-transaction [tx *connection* {:isolation :repeatable-read :read-only true}]
                                   (certificate/call-with-guard tx #{:missing_certificate_table} (constantly nil) identity))
            nil
-           (catch SQLException error (.getSQLState error))))))
+           (catch SQLException error (SQLException/.getSQLState error))))))
 
 
 (deftest lock-happens-before-snapshot-and-remains-held-test
@@ -212,13 +212,13 @@
         (is (= "55P03"
                (try (jdbc/execute! other ["ALTER TABLE certificate_row ADD COLUMN blocked text"])
                     nil
-                    (catch SQLException error (.getSQLState error)))))))))
+                    (catch SQLException error (SQLException/.getSQLState error)))))))))
 
 
 (deftest schema-byte-budget-prevents-large-default-transfer-test
   (jdbc/execute! *pool* ["ALTER TABLE certificate_row ADD COLUMN huge_default text"])
   (jdbc/execute! *pool* [(str "ALTER TABLE certificate_row ALTER COLUMN huge_default SET DEFAULT '"
-                              (apply str (repeat 1100000 \x)) "'")])
+                              (str/join (repeat 1100000 \x)) "'")])
   (let [answer (observed #(miss-reason (fn [] (snapshot (fn [_ _] true)))))]
     (is (= :unsupported-schema-or-session (:result answer)))
     (is (= 4 (count (:queries answer))))))
@@ -329,7 +329,7 @@
                          (is (= "57014"
                                 (try (snapshot (fn [_ _] true))
                                      nil
-                                     (catch SQLException error (.getSQLState error))))))
+                                     (catch SQLException error (SQLException/.getSQLState error))))))
   (is (unchanged? (capture [all-rows])) "Ordinary recovery begins in a new transaction"))
 
 
@@ -345,7 +345,7 @@
   (let [value (Timestamp/valueOf "2026-01-01 00:00:00.123456789")
         before (prepared-key value)
         same (prepared-key (Timestamp/valueOf "2026-01-01 00:00:00.123456789"))]
-    (.setNanos value 987654321)
+    (Timestamp/.setNanos value 987654321)
     (is (= before same))
     (is (= (hash before) (hash same)))
     (is (= :found (get {before :found} same)))
@@ -358,8 +358,8 @@
   (snapshot
     (fn [_ guard]
       (doseq [[value reason] [[(vec (repeat 9000 :id)) :plan-complexity]
-                              [(vec (repeat 10 (apply str (repeat 30000 "x")))) :parameter-byte-limit]
-                              [[(.shiftLeft java.math.BigInteger/ONE 262145)] :parameter-byte-limit]]]
+                              [(vec (repeat 10 (str/join (repeat 30000 "x")))) :parameter-byte-limit]
+                              [[(java.math.BigInteger/.shiftLeft java.math.BigInteger/ONE 262145)] :parameter-byte-limit]]]
         (let [ast (assoc all-rows :where [:in :id value])]
           (is (= reason
                  (miss-reason #(certificate/prepare-operation guard ast ["SELECT 1"]))))))

@@ -33,7 +33,7 @@
                                   (into [(str "EXPLAIN (ANALYZE, FORMAT JSON) " (first query))] (rest query))
                                   (pg/query-opts)))
         value (first (vals row))
-        plan (get (first (json/parse-string (.getValue ^PGobject value))) "Plan")]
+        plan (get (first (json/parse-string (PGobject/.getValue value))) "Plan")]
     (tree-seq #(seq (get % "Plans")) #(get % "Plans") plan)))
 
 

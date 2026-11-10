@@ -106,7 +106,7 @@
     ;; insufficient capacity uses the ordinary path before preparing any key.
     (is (= 1 (memo/call-with-artifact m ops)))
     (is (= 1 @prepares))
-    (is (= 0 (:pending (memo/stats m))))))
+    (is (zero? (:pending (memo/stats m))))))
 
 
 (deftest retire-disables-publication-without-releasing-a-running-builder
@@ -122,7 +122,7 @@
                 :restore identity :consume (constantly :result)
                 :fallback (constantly :fallback) :check-cancel (constantly nil)})))
     (is (= 100000 (:pending-bytes @during)))
-    (is (= 0 (:charged-bytes (memo/stats m))))
+    (is (zero? (:charged-bytes (memo/stats m))))
     (is (= :fallback
            (memo/call-with-artifact
              m {:family [:root] :original-rich original

@@ -109,22 +109,22 @@
 (deftest one-recipe-replays-through-eight-distinct-pool-handles
   (let [pool (tx/datasource (:storage *ctx*))
         held (atom (vec (repeatedly 8 #(jdbc/get-connection pool))))
-        identities (mapv #(.unwrap ^Connection % PGConnection) @held)
+        identities (mapv #(Connection/.unwrap % PGConnection) @held)
         samples (atom [])]
     (try
       (is (= 8 (count (set identities))))
       (dotimes [i 8]
-        (.close ^Connection (nth @held i))
+        (Connection/.close (nth @held i))
         (swap! samples conj (observed request))
         (let [replacement (jdbc/get-connection pool)]
-          (is (identical? (nth identities i) (.unwrap ^Connection replacement PGConnection)))
+          (is (identical? (nth identities i) (Connection/.unwrap replacement PGConnection)))
           (swap! held assoc i replacement)))
       (is (= (repeat 8 "original") (map #(get-in % [:value :value :name]) @samples)))
       (is (= [1 0 0 0 0 0 0 0] (mapv :source-reads @samples)))
       (is (= (repeat 8 1) (map :guards @samples)))
       (is (= {:entries 1 :leases 0 :pending 0}
              (select-keys (replay/stats (:source-replay *ctx*)) [:entries :leases :pending])))
-      (finally (doseq [connection @held] (.close ^Connection connection))))))
+      (finally (doseq [connection @held] (Connection/.close connection))))))
 
 
 (deftest source-change-fallback-uses-fresh-slot-cache-and-new-transaction
@@ -190,7 +190,7 @@
                                                                      (jdbc/execute! (tx/datasource storage) ["SELECT 1/0"])
                                                                      {:ok true})))
                 nil
-                (catch SQLException error (.getSQLState error)))]
+                (catch SQLException error (SQLException/.getSQLState error)))]
     (is (= "22012" state))
     (is (= 1 @calls))
     (is (= {:entries 0 :pending 0 :charged-bytes 0}

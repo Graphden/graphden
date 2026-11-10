@@ -111,11 +111,11 @@
 (defn- connection
   [state calls]
   (Proxy/newProxyInstance
-    (.getClassLoader Connection) (into-array Class [Connection])
+    (Class/.getClassLoader Connection) (into-array Class [Connection])
     (reify InvocationHandler
       (invoke
         [_ _ method _]
-        (let [method-name (.getName method)]
+        (let [method-name (java.lang.reflect.Method/.getName method)]
           (swap! calls conj method-name)
           (case method-name
             "getAutoCommit" (:auto-commit @state)

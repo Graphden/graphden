@@ -2,9 +2,17 @@
   "Anonymous fn identity is per ORG on a tenant path and unchanged on the
    platform tier — the ids package sync has always produced."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.packages.records.ids :as ids]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.util.hex :as hex]))
+
+
+(deftest hex-byte-encoding-is-runtime-independent
+  (is (= "" (hex/encode (byte-array 0))))
+  (is (= (str/join (map #(format "%02x" %) (range 256)))
+         (hex/encode (byte-array (map unchecked-byte (range 256)))))))
 
 
 (deftest anonymous-fn-id-is-per-org

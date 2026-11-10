@@ -113,6 +113,60 @@ function racingRoutes(ctxRef, typesBody) {
 }
 
 (async () => {
+  for (const scenario of ['rename', 'undo', 'navigate', 'auth', 'management']) {
+    const id = '00000000-0000-0000-0000-000000000001';
+    const other = '00000000-0000-0000-0000-000000000002';
+    const nextName = scenario === 'undo' ? 'original' : 'renamed';
+    let release;
+    const tree = new Promise(resolve => { release = resolve; });
+    const rendered = [];
+    const inspected = [];
+    const b = boot({routes: url => {
+      if (url.includes('scope=tree')) return tree;
+      if (url.includes('scope=subtree')) {
+        const fnId = new URL(url, 'http://test').searchParams.get('root-id');
+        return json({fns: [{id: fnId, name: fnId === id ? nextName : 'other'}],
+          slots: [], 'fn-slots': [], bindings: [], 'list-items': []});
+      }
+      return json({});
+    }});
+    const c = b.ctx;
+    c.selectedFnId = id;
+    c.location.hash = '#app.' + (scenario === 'undo' ? 'renamed' : 'original');
+    c.expansionState = new Map(); c.previewState = new Map();
+    c.userMovedNodes = new Set(); c.expandedNamespaces = new Set();
+    c.document.querySelector = () => null;
+    c.getQualifiedFnName = fn => 'app.' + fn.name;
+    c.gdInspectorRender = fnId => inspected.push(c.lookups.fnMap.get(fnId)?.name);
+    c.renderGraph = async () => rendered.push(c.lookups.fnMap.get(c.selectedFnId)?.name);
+    c.history = {replaceState: (_, __, hash) => { c.location.hash = hash; }};
+    c.gdRouteSurfaceHash = hash => hash.startsWith('@');
+    vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-ui.js'), 'utf8'), c);
+    const refresh = c.initGraph({preserveSelection: true});
+    if (scenario === 'navigate') {
+      c.selectedFnId = other;
+      c.location.hash = '#fn:' + other;
+    } else if (scenario === 'auth') {
+      c.window.dispatchEvent(new Event('gd-auth-changed'));
+    } else if (scenario === 'management') {
+      c.location.hash = '#@services';
+    }
+    release(json(TREE));
+    await refresh;
+    if (scenario === 'rename' || scenario === 'undo') {
+      assert(rendered.join() === nextName && inspected.join() === nextName,
+        scenario + ': refresh resolves the same identity and updates canvas and Inspector');
+      assert(c.location.hash === '#app.' + nextName && c.selectedFnId === id,
+        scenario + ': bookmark uses the fresh name without losing selection');
+    } else if (scenario === 'navigate') {
+      assert(rendered.join() === 'other' && c.selectedFnId === other,
+        'new navigation during rename refresh wins');
+      assert(c.location.hash === '#fn:' + other, 'rename does not replace a newer bookmark');
+    } else {
+      assert(rendered.length === 0 && inspected.length === 0,
+        scenario + ': stale rename refresh does not restore the selected graph');
+    }
+  }
   for (const progressive of [false, true]) {
     console.log(` initGraph progressive=${progressive}: replace a cancelled selection-clear render`);
     const requests = [];

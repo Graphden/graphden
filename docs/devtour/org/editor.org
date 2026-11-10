@@ -7,19 +7,19 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~189 min
+[[file:index.org][index]] · ~190 min
 
 * 1. initGraph
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
 :LINE: 459
-:MINS: 7.0
+:MINS: 7.5
 :END:
 
 Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first requests the namespace tree to determine [[file:glossary.org::#term/auth][authentication]] state. Boot exposes Explorer navigation as soon as the tree arrives; metadata keeps editing fenced while selected subtrees and layouts load. Card sizing waits for fresh types locally, and services annotate the Explorer in the background. Mutation refreshes retain the full fence; gdWaitForGraphReady never means only tree-ready. A 401 opens sign-in. See the [[file:../../../docs/EDITOR_MODULES.md][module map]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph({progressive = false} = {}) {][resources/packages/app/editor/editor-main.js:459]]
+- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph({progressive = false, preserveSelection = false} = {}) {][resources/packages/app/editor/editor-main.js:459]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 
 * 2. buildLookups

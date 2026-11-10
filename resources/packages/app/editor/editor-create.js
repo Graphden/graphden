@@ -651,7 +651,7 @@ function startFnRename(itemEl, fnId, currentName) {
       const response = await putEntity('fn', fnId, { name: newName });
       if (response.status >= 200 && response.status < 300) {
         row.remove();
-        await initGraph();
+        await initGraph({preserveSelection: true});
       } else {
         throw new Error(await extractResponseError(response));
       }

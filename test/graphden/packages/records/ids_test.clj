@@ -4,7 +4,14 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.packages.records.ids :as ids]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.util.hex :as hex]))
+
+
+(deftest hex-byte-encoding-is-runtime-independent
+  (is (= "" (hex/encode (byte-array 0))))
+  (is (= (apply str (map #(format "%02x" %) (range 256)))
+         (hex/encode (byte-array (map unchecked-byte (range 256)))))))
 
 
 (deftest anonymous-fn-id-is-per-org

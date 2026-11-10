@@ -80,7 +80,16 @@
 
   sp/StorageCRUD
 
+  (create-entity [_ e data] (sp/create-entity base-storage e data))
+
+
   (read-entity [_ e id] (sp/read-entity base-storage e id))
+
+
+  (update-entity [_ e id data] (sp/update-entity base-storage e id data))
+
+
+  (delete-entity [_ e id] (sp/delete-entity base-storage e id))
 
 
   (query-entities [_ e where] (sp/query-entities base-storage e where))
@@ -94,7 +103,22 @@
 
   sp/StorageBatchCRUD
 
+  (create-entities [_ e data] (sp/create-entities base-storage e data))
+
+
   (read-entities [_ e ids] (sp/read-entities base-storage e ids))
+
+
+  (update-entities [_ e data] (sp/update-entities base-storage e data))
+
+
+  (upsert-entities [_ e data] (sp/upsert-entities base-storage e data))
+
+
+  (delete-entities [_ e ids] (sp/delete-entities base-storage e ids))
+
+
+  (query-ref-many-owners [_ e field target] (sp/query-ref-many-owners base-storage e field target))
 
 
   sp/StorageBoundedQuery

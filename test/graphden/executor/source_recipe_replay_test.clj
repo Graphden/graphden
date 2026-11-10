@@ -31,13 +31,25 @@
 
   sp/StorageCRUD
 
+  (create-entity [_ entity data] (sp/create-entity base-storage entity data))
+
+
   (read-entity [_ entity id] (sp/read-entity base-storage entity id))
+
+
+  (update-entity [_ entity id data] (sp/update-entity base-storage entity id data))
+
+
+  (delete-entity [_ entity id] (sp/delete-entity base-storage entity id))
 
 
   (query-entities [_ entity where] (sp/query-entities base-storage entity where))
 
 
-  (query-entities [_ entity where opts] (sp/query-entities base-storage entity where opts)))
+  (query-entities [_ entity where opts] (sp/query-entities base-storage entity where opts))
+
+
+  (query-latest-per-group [_ entity where cols] (sp/query-latest-per-group base-storage entity where cols)))
 
 
 (defn- fixture

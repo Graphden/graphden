@@ -374,11 +374,19 @@
 (defn- grouped-fixture
   [base calls candidate-reader]
   (reify sp/StorageCRUD
+    (create-entity [_ entity data] (sp/create-entity base entity data))
+
     (read-entity [_ entity id] (sp/read-entity base entity id))
+
+    (update-entity [_ entity id data] (sp/update-entity base entity id data))
+
+    (delete-entity [_ entity id] (sp/delete-entity base entity id))
 
     (query-entities [_ entity where] (sp/query-entities base entity where))
 
     (query-entities [_ entity where opts] (sp/query-entities base entity where opts))
+
+    (query-latest-per-group [_ entity where cols] (sp/query-latest-per-group base entity where cols))
 
 
     sp/StorageBoundedQuery

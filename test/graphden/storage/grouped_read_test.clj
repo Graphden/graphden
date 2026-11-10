@@ -14,6 +14,12 @@
 (defn- scalar-storage
   [calls]
   (reify sp/StorageCRUD
+    (create-entity [_ _ _] (throw (UnsupportedOperationException. "read-only fixture")))
+
+    (update-entity [_ _ _ _] (throw (UnsupportedOperationException. "read-only fixture")))
+
+    (delete-entity [_ _ _] (throw (UnsupportedOperationException. "read-only fixture")))
+
     (read-entity
       [_ entity id]
       (swap! calls conj [:read entity id])
@@ -36,6 +42,8 @@
 
 
     sp/StorageBoundedQuery
+
+    (query-bounded-entities [_ _ _ _] (throw (UnsupportedOperationException. "unexpected bounded read")))
 
     (query-identity-candidates
       [_ _ _ _ limit]
@@ -71,6 +79,8 @@
 
 
                   sp/StorageBoundedQuery
+
+                  (query-bounded-entities [_ e w n] (sp/query-bounded-entities scalar e w n))
 
                   (query-identity-candidates
                     [_ e w v n]

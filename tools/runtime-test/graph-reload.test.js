@@ -315,7 +315,9 @@ function racingRoutes(ctxRef, typesBody) {
       return json(url.includes('scope=tree') ? TREE : {});
     }});
     b.ctx.location.hash = '';
-    b.ctx.initPrefsLate = () => {};
+    b.ctx.initPrefsLate = () => {
+      assert(!!b.ctx.gdAccountsReady, 'preference boot sees the account-discovery promise');
+    };
     let finishAuth;
     b.ctx.initAuthLock = () => {
       b.ctx.gdAccountsReady = new Promise(resolve => { finishAuth = resolve; });

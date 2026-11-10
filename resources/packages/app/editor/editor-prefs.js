@@ -244,7 +244,8 @@ function initPrefsLate() {
   gdPrefApply('keymap');
   installViewportWatcher();
   // the per-user server copy (theme + keymap) — wins over the mirror
-  void gdPrefsRefresh(true).finally(() => _prefsInitialReady());
+  _prefsStarted = true;
+  void refreshPrefsAfterAuth();
 }
 
 // Re-apply auto-collapse decision when the viewport crosses the
@@ -420,6 +421,9 @@ const _prefWrittenGen = {};
 const _prefPendingGen = {};
 let _prefsIdentityGen = 0;
 let _prefsRefreshGen = 0;
+let _prefsStarted = false;
+let _prefsInitialPending = true;
+let _prefsAuthRefresh = null;
 let _prefsInitialReady;
 window.gdPrefsInitialReady = new Promise(resolve => { _prefsInitialReady = resolve; });
 window.gdPrefsReady = false;
@@ -440,6 +444,34 @@ function gdPrefApply(key) {
 
 function gdPrefNotify(key, detail) {
   for (const fn of _prefListeners) { try { fn(key, gdPrefRead(key), detail); } catch (_) {} }
+}
+
+// Boot and its account-discovery event share one refresh for the current
+// identity. Explicit refreshes remain fresh requests (including PUT conflicts).
+function refreshPrefsAfterAuth() {
+  const identity = _prefsIdentityGen;
+  if (_prefsAuthRefresh?.identity === identity) return _prefsAuthRefresh.promise;
+  const request = {identity};
+  request.promise = Promise.resolve(window.gdAccountsReady).catch(() => {}).then(() => {
+    if (identity === _prefsIdentityGen) return gdPrefsRefresh(_prefsInitialPending);
+  }).finally(() => {
+    if (_prefsAuthRefresh !== request) return;
+    _prefsAuthRefresh = null;
+    _prefsInitialPending = false;
+    _prefsInitialReady();
+  });
+  _prefsAuthRefresh = request;
+  return request.promise;
+}
+
+// Preferences are JSON data; object member order does not change a selection.
+function samePreferenceValue(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object'
+    || Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length
+    && keys.every(key => Object.hasOwn(b, key) && samePreferenceValue(a[key], b[key]));
 }
 
 // Component plans resolve the server's selection, so publish that preference
@@ -504,6 +536,7 @@ async function gdPrefsRefresh(initial = false) {
     if (identity !== _prefsIdentityGen || refresh !== _prefsRefreshGen) return;
     if (!map || typeof map !== 'object') return;
     const owner = r.headers?.get('X-Graphden-Preference-Owner') || null;
+    const identityReady = window.gdPrefsReady && owner === window.gdPrefOwner;
     // A cookie can change in another tab before this tab probes /auth/me.
     // Do not merge writes from its previous owner into this server response.
     if (window.gdPrefOwner && owner !== window.gdPrefOwner) {
@@ -519,6 +552,10 @@ async function gdPrefsRefresh(initial = false) {
       if (gen > startedAt || pendingAtStart[key] === gen || _prefPendingGen[key] === gen)
         merged[key] = _prefs?.[key] ?? null;
     }
+    const componentsChanged = !samePreferenceValue(gdPrefRead('components'), merged.components ?? null);
+    // Root scope stamps include this JSON value. Retain its member order when
+    // unchanged, so suppressing a notification cannot silently stale the root.
+    if (!componentsChanged && Object.hasOwn(merged, 'components')) merged.components = gdPrefRead('components');
     _prefs = merged;
     window.gdPrefOwner = owner;
     window.gdPrefsReady = true;
@@ -527,7 +564,7 @@ async function gdPrefsRefresh(initial = false) {
     gdPrefApply('keymap');
     gdPrefNotify('theme');
     gdPrefNotify('keymap');
-    gdPrefNotify('components', {initial});
+    if (componentsChanged || !identityReady) gdPrefNotify('components', {initial});
   } catch (_) { /* offline / signed out — the mirror stands */ }
 }
 
@@ -549,6 +586,9 @@ window.addEventListener('gd-auth-changed', () => {
   gdPrefNotify('theme');
   gdPrefNotify('keymap');
   gdPrefNotify('components');
+  if (_prefsStarted && (_prefsInitialPending
+      || (typeof isAuthenticated === 'function' && isAuthenticated())
+      || (typeof accountsAuthed !== 'undefined' && accountsAuthed))) void refreshPrefsAfterAuth();
 });
 
 window.gdThemeTokens = THEME_TOKENS;

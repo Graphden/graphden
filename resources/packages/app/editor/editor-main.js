@@ -684,8 +684,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Landing demo entry (?demo=1) — may store a fresh bearer and reload;
   // in that case skip the rest of the boot (the reload re-runs it authed).
   if (typeof maybeStartLandingDemo === 'function' && (await maybeStartLandingDemo())) return;
-  initPrefsLate();
   initAuthLock();
+  initPrefsLate();
   if (typeof initBranchSelector === 'function') initBranchSelector();
   if (typeof initOrgSwitcher === 'function') initOrgSwitcher();
   // Management deep links do not need the graph. Route them before the

@@ -200,6 +200,10 @@
   (let [present (filter #(contains? ast %) [:select :select-distinct :select-distinct-on])
         kind (first present) columns (get ast kind)]
     (and (= 1 (count present)) (seq columns)
+         ;; ORDER BY may resolve a projected alias, while a window PARTITION BY
+         ;; resolves input columns. Do not attest two different sort keys.
+         (or (empty? (:order-by ast))
+             (not-any? vector? (if (= :select-distinct-on kind) (rest columns) columns)))
          (if (= :select-distinct-on kind)
            (and (vector? (first columns)) (seq (first columns)) (seq (rest columns))
                 (every? identifier? (first columns)) (every? projected-column? (rest columns)))

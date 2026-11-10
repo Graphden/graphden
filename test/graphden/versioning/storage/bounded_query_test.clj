@@ -29,17 +29,6 @@
                    (jdbc/execute-one! ds sql opts))})
 
 
-(defn- measure-source
-  [collect!]
-  (let [calls (atom [])
-        graph (binding [util/*jdbc-override* (jdbc-spy calls)
-                        resolution/*branch-chain-cache* (atom {})
-                        resolution/*merges-memo* (atom {})
-                        resolution/*graph-load-memo* (atom {})]
-                (collect!))]
-    {:graph graph :queries (count @calls)}))
-
-
 (defn- two-bindings
   [storage]
   (let [a (sp/create-entity storage :fn {:name "bounded-a" :parent-ids []})
@@ -185,15 +174,16 @@
             (sp/create-entity storage :fn-slot {:fn-id (:id owner) :slot-id (:id slot) :position 0})
             (sp/create-entity storage :binding {:fn-id (:id owner) :slot-id (:id slot) :value 1}))
         collect (fn [hint]
-                  (measure-source #(source/collect-closure storage [root] (constantly nil) hint)))
+                  (let [calls (atom [])
+                        result (binding [util/*jdbc-override* (jdbc-spy calls)
+                                         resolution/*branch-chain-cache* (atom {})
+                                         resolution/*merges-memo* (atom {})
+                                         resolution/*graph-load-memo* (atom {})]
+                                 (source/collect-closure storage [root] (constantly nil) hint))]
+                    {:graph result :queries (count @calls)}))
         ordinary (collect nil)
-        hinted (collect (:graph ordinary))
-        client (measure-source #(source/collect-client-closure storage [root] (constantly nil)))]
+        hinted (collect (:graph ordinary))]
     (is (= (update-vals (:graph ordinary) set) (update-vals (:graph hinted) set)))
     (is (> (:queries ordinary) 100) "The spy observes the actual versioned frontier SQL path")
     (is (<= 1 (:queries hinted) 40) "A complete hint keeps this closure within tens of exchanges")
-    (is (< (:queries hinted) (/ (:queries ordinary) 3)))
-    (is (= (update-vals (:graph ordinary) set)
-           (update-vals (select-keys (:graph client) (keys (:graph ordinary))) set)))
-    (is (< (:queries client) (/ (:queries ordinary) 2))
-        "Actual ancestry saturation reduces owner queries without any speculative reads")))
+    (is (< (:queries hinted) (/ (:queries ordinary) 3)))))

@@ -4,7 +4,6 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.browser-contracts :as contracts]
-    [graphden.executor.browser-source-ancestry :as ancestry]
     [graphden.executor.browser-source-prefetch :as prefetch]
     [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.bindings :as bindings]
@@ -91,9 +90,11 @@
 
 (defn- related-ids
   [fns slots bindings items]
-  (into (ancestry/structural-ids fns)
+  (into #{}
         (remove nil?)
-        (concat (map :type-fn-id slots)
+        (concat (mapcat :parent-ids fns)
+                (mapcat #(map % [:base-fn-id :return-type-fn-id :element-fn-id]) fns)
+                (map :type-fn-id slots)
                 (mapcat #(map % [:ref-fn-id :type-override-fn-id :resolver-fn-id]) bindings)
                 (map :ref-fn-id items))))
 
@@ -124,10 +125,7 @@
    Callers must supply an immutable storage/policy pair; HTTP code uses
    `with-snapshot`, not a live context's whole-graph cache."
   [storage roots authorize! manifest? server? & [budget]]
-  (let [budget (or budget (atom 0))
-        metadata-frontier (when (or manifest? server?)
-                            (ancestry/collector {:read-fns #(read-rows storage :fn %)
-                                                 :authorize! authorize! :limit max-functions :reject! reject!}))]
+  (let [budget (or budget (atom 0))]
     (loop [pending (set roots)
            seen #{}
            graph {:fns [] :slots [] :fn-slots [] :bindings [] :list-items []}]
@@ -159,14 +157,10 @@
             (attach-identity-targets storage authorize! graph seen
                                      {:terminal terminal :server-targets server-targets
                                       :server-bindings server-bindings :manifest? manifest? :server? server?})))
-        (let [seeds (set (take batch-size pending))
-              {:keys [ids fns authorizations]}
-              (if metadata-frontier
-                (metadata-frontier seeds seen pending)
-                {:ids seeds :fns (vec (read-rows storage :fn seeds))})]
+        (let [ids (set (take batch-size pending))
+              fns (vec (read-rows storage :fn ids))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
-          (let [authorizations (or authorizations
-                                   (into {} (map (fn [row] [(:id row) (authorize! row)])) fns))
+          (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
                 bare-types (into #{} (keep (fn [[id kind]] (when (= :bare-type kind) id))) authorizations)
                 fn-slots (limited-query storage :fn-slot {:fn-id (vec ids)} budget)
                 bindings (limited-query storage :binding {:fn-id (vec ids)} budget)

@@ -187,3 +187,13 @@
     (let [lease (recipes/acquire! store family physical)]
       (is (some? lease))
       (recipes/release! store lease))))
+
+
+(deftest very-large-charges-deny-capacity-without-overflow
+  (let [{:keys [store]} (fixture {:max-bytes Long/MAX_VALUE})
+        family (family! store)
+        ticket (recipes/reserve! store family (Object.) Long/MAX_VALUE)]
+    (is (some? ticket))
+    (is (nil? (recipes/reserve! store family (Object.) 1)))
+    (is (= Long/MAX_VALUE (:charged-bytes (recipes/stats store))))
+    (recipes/abort! store ticket)))

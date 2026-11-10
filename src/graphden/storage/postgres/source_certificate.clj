@@ -102,6 +102,12 @@
    clojure.lang.BigInt #(bigint (java.math.BigInteger. ^String %))})
 
 
+(defn- text-bytes
+  [^String value]
+  (when (> (.length value) max-packet-bytes) (miss! :parameter-byte-limit))
+  (alength (.getBytes value "UTF-8")))
+
+
 (defn- frozen-parameter
   "Typed immutable representation: numeric printing, Timestamp nanos and SQL
    date/time classes cannot collapse under Clojure numeric/Date equality."
@@ -109,7 +115,18 @@
   (let [kind (class value)]
     (cond
       (or (nil? value) (string? value) (boolean? value) (uuid? value)) [:scalar value]
-      (contains? number-readers kind) [:number kind (str value)]
+      (contains? number-readers kind)
+      (let [integer (cond
+                      (= java.math.BigDecimal kind) (.unscaledValue ^java.math.BigDecimal value)
+                      (= java.math.BigInteger kind) value
+                      (= clojure.lang.BigInt kind) (biginteger value))]
+        ;; Reject oversized precision before decimal string conversion itself
+        ;; can allocate an arbitrarily large temporary representation.
+        (when (and integer (> (.bitLength ^java.math.BigInteger integer) max-packet-bytes))
+          (miss! :parameter-byte-limit))
+        (let [printed (str value)]
+          (text-bytes printed)
+          [:number kind printed]))
       (= Timestamp kind) [:timestamp (.getTime ^Timestamp value) (.getNanos ^Timestamp value)]
       (contains? #{java.util.Date java.sql.Date java.sql.Time} kind) [:date kind (.getTime ^java.util.Date value)]
       (= Instant kind) [:instant (.getEpochSecond ^Instant value) (.getNano ^Instant value)]
@@ -130,10 +147,15 @@
     (throw (ex-info "Invalid prepared parameter" {:type ::invalid-parameter :kind (first frozen)}))))
 
 
-(defn- text-bytes
-  [^String value]
-  (when (> (.length value) max-packet-bytes) (miss! :parameter-byte-limit))
-  (alength (.getBytes value "UTF-8")))
+(defn- parameter-bytes
+  [[kind a b]]
+  (+ 32 (text-bytes
+          (case kind
+            :scalar (if (nil? a) "" (str a))
+            :number b
+            :timestamp (str a ":" b)
+            :date (str b)
+            :instant (str a ":" b)))))
 
 
 (defn- freeze-query
@@ -141,14 +163,16 @@
   (when-not (and (vector? query) (string? (first query))
                  (< (count query) max-packet-params))
     (miss! :query-shape))
-  (let [params (mapv frozen-parameter (rest query))
-        query-bytes (reduce (fn [total value]
-                              ;; Framing/type overhead also bounds non-string values.
-                              (let [total (+ total 32 (text-bytes (if (nil? value) "" (str value))))]
-                                (when (> total max-packet-bytes) (miss! :parameter-byte-limit))
-                                total))
-                            (text-bytes (first query)) (rest query))]
-    {:sql (first query) :params params :bytes query-bytes}))
+  (let [initial (text-bytes (first query))]
+    (when (> initial max-packet-bytes) (miss! :parameter-byte-limit))
+    ;; Check each addition before retaining it, not after mapv has allocated
+    ;; all typed parameters. This also bounds repeated large numeric leaves.
+    (reduce (fn [{params :params query-bytes :bytes :as prepared} value]
+              (let [frozen (frozen-parameter value)
+                    total (+ query-bytes (parameter-bytes frozen))]
+                (when (> total max-packet-bytes) (miss! :parameter-byte-limit))
+                (assoc prepared :params (conj params frozen) :bytes total)))
+            {:sql (first query) :params [] :bytes initial} (rest query))))
 
 
 (defn- freeze-ast
@@ -156,17 +180,16 @@
   (let [nodes (volatile! 0) ast-bytes (volatile! 0)]
     (letfn [(visit
               [value depth]
-              (when (or (> depth 32) (> (vswap! nodes inc) 65536)) (miss! :plan-complexity))
+              (when (or (> depth 32) (> (vswap! nodes inc) 8192)) (miss! :plan-complexity))
               (cond
                 (map? value) (into {} (map (fn [[k v]] [(visit k (inc depth)) (visit v (inc depth))])) value)
                 (sequential? value) (mapv #(visit % (inc depth)) value)
                 (keyword? value) value
-                :else (do
-                        (when (string? value)
-                          (when (> (vswap! ast-bytes + (text-bytes value)) max-packet-bytes)
-                            (miss! :parameter-byte-limit)))
-                        (parameter (frozen-parameter value)))))]
-      (visit ast 0))))
+                :else (let [frozen (frozen-parameter value)]
+                        (when (> (vswap! ast-bytes + (parameter-bytes frozen)) max-packet-bytes)
+                          (miss! :parameter-byte-limit))
+                        (parameter frozen))))]
+      (let [copied (visit ast 0)] {:ast copied :nodes @nodes}))))
 
 
 (defn- atom-expression?
@@ -439,7 +462,7 @@
    The caller separately owns replay-key options/builder identity and results."
   [guard ast sql-params]
   (let [{:keys [locked scope]} (check-guard guard)
-        ast (freeze-ast ast)
+        {ast :ast nodes :nodes} (freeze-ast ast)
         parts (participants ast locked)
         actual (freeze-query sql-params)
         expected (freeze-query (sql/format ast {:quoted true}))]
@@ -447,7 +470,9 @@
       (miss! :plan-query-mismatch))
     (check-guard guard)
     (Operation. {:ast ast :parts parts :scope scope
-                 :key (OperationKey. (select-keys actual [:sql :params]))})))
+                 :query (select-keys actual [:sql :params])
+                 :key (OperationKey. (select-keys actual [:sql :params]))
+                 :charge-bytes (+ 4096 (* 16 (:bytes actual)) (* 256 nodes))})))
 
 
 (defn operation-key
@@ -457,6 +482,25 @@
   [operation]
   (when-not (instance? Operation operation) (miss! :operation-missing))
   (:key (.-state ^Operation operation)))
+
+
+(defn operation-query
+  "Fresh executable query from exactly the immutable values attested during
+   prepare-operation. Never execute the caller's mutable Date/Timestamp leaves
+   after preparation; a later mutation cannot change this operation's predicate."
+  [operation]
+  (when-not (instance? Operation operation) (miss! :operation-missing))
+  (let [{:keys [sql params]} (:query (.-state ^Operation operation))]
+    (into [sql] (map parameter params))))
+
+
+(defn operation-charge-bytes
+  "Conservative allowance for the prepared AST, typed receipt key and their
+   immutable parameters. Consumers charge this before retaining an operation;
+   certificate capture has its own separate bounded metadata allowance."
+  [operation]
+  (when-not (instance? Operation operation) (miss! :operation-missing))
+  (:charge-bytes (.-state ^Operation operation)))
 
 
 (defn- witness-member

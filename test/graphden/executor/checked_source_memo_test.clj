@@ -142,3 +142,18 @@
     (doseq [root [:a :b :a :b]] (is (= :result (run root))))
     (is (= 2 @builds))
     (is (= 2 (:families (memo/stats m))))))
+
+
+(deftest reader-locations-are-fully-admitted-and-charged
+  (let [m (memo/create-memo (options (atom 0)))
+        positions {:source "fixture.edn" :line 1 :column 2 :end-line 1 :end-column 3}
+        input (with-meta 'argument positions)]
+    (is (memo/admitted? m input))
+    (is (< (data/charge 'argument (:admission m))
+           (data/charge input (:admission m))))
+    (doseq [metadata [(assoc positions :source (atom "mutable"))
+                      (assoc positions :line (java.util.Date. 0))
+                      (assoc positions :unknown "unreviewed")]]
+      (is (not (memo/admitted? m (with-meta 'argument metadata)))))
+    (is (not (data/same-input? input (with-meta 'argument (into {} positions))))
+        "Reader metadata admission does not weaken metadata identity")))

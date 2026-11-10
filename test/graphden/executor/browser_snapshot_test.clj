@@ -647,10 +647,10 @@
                               (swap! called conj (:fn-id definition))
                               (let [result (check! definition)]
                                 (when (= (get-in f [:ids :inner]) (:fn-id definition))
-                                  (.setTime literal 1000))
+                                  (java.util.Date/.setTime literal 1000))
                                 result))]
                 (failure #(export f)))]
-    (is (= 1000 (.getTime literal)))
+    (is (= 1000 (java.util.Date/.getTime literal)))
     (is (= [(get-in f [:ids :inner])] @called)
         "Changed later source is rejected before its checker runs")
     (is (= :type-source-mismatch (:reason error)))
@@ -684,7 +684,7 @@
                    (:reason (failure #(export (assoc f :policy policy)))))))
           (is (= first-count @calls) "Fresh policy can veto a checker cache hit")
           (is (= :type-source-mismatch (:reason (failure #(export changed)))))
-          (is (= 0 (:leases (checker-memo/stats m)))))))))
+          (is (zero? (:leases (checker-memo/stats m)))))))))
 
 
 (deftest mutable-source-and-unknown-rule-never-eagerly-prepare
@@ -698,11 +698,11 @@
                       (swap! called conj (:fn-id definition))
                       (let [result (check! definition)]
                         (when (= (get-in f [:ids :inner]) (:fn-id definition))
-                          (.setTime literal 1000))
+                          (java.util.Date/.setTime literal 1000))
                         result))]
         (is (= :type-source-mismatch (:reason (failure #(export f)))))
         (is (= [(get-in f [:ids :inner])] @called))
-        (is (= 0 (:entries (checker-memo/stats m))))))))
+        (is (zero? (:entries (checker-memo/stats m))))))))
 
 
 (deftest checker-artifact-key-includes-alias-marker-and-recheck-inputs
@@ -747,8 +747,8 @@
     (binding [checker-memo/*memo* m
               runtime/*cancel-check* #(throw (InterruptedException. "cancelled"))]
       (is (thrown-with-msg? InterruptedException #"cancelled" (export f))))
-    (is (= 0 (:entries (checker-memo/stats m))))
-    (is (= 0 (:pending (checker-memo/stats m))))))
+    (is (zero? (:entries (checker-memo/stats m))))
+    (is (zero? (:pending (checker-memo/stats m))))))
 
 
 (deftest runtime-policy-carries-checker-cache-into-real-execution-worker

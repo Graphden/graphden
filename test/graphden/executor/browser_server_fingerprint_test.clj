@@ -42,7 +42,7 @@
         after-execute (atom (constantly nil))
         events (atom [])
         fingerprint provenance/fingerprint-data
-        record! #(swap! events conj [% (.getId (Thread/currentThread))])
+        record! #(swap! events conj [% (Thread/.getId (Thread/currentThread))])
         authorize! (fn [& _]
                      (record! :authorize)
                      (when-not @allowed?
@@ -109,7 +109,7 @@
         (is (= (* 2 (inc i)) (event-count events :snapshot)))
         (is (= (* 2 (inc i)) (event-count events :source)))
         (is (= (* 2 (inc i)) (event-count events :target))))
-      (let [owner (.getId (Thread/currentThread))
+      (let [owner (Thread/.getId (Thread/currentThread))
             threads (set (map second (filter #(= :source (first %)) @events)))]
         (is (contains? threads owner))
         (is (seq (disj threads owner)) "Actual bounded worker and owner postcheck both ran")))))

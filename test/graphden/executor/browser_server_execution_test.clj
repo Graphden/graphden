@@ -78,22 +78,22 @@
                                                                             (recipes/track-reservation! ticket)
                                                                             (deliver started true)
                                                                             ;; A cancelled JDBC worker may still own resources.
-                                                                            (try (.await finish) (catch InterruptedException _ (.await finish)))
+                                                                            (try (CountDownLatch/.await finish) (catch InterruptedException _ (CountDownLatch/.await finish)))
                                                                             (deliver late-recorded (recipes/complete-record! ticket :late 40))
                                                                             {:ok true})))))
                           (catch InterruptedException _ :interrupted)))]
           (is (true? (deref started 2000 false)))
-          (.interrupt ^Thread @caller)
+          (Thread/.interrupt @caller)
           (is (= :interrupted (deref waiting 2000 :still-waiting)))
           (is (= {:entries 0 :pending 1 :charged-bytes 80}
                  (select-keys (recipe-store/stats cache) [:entries :pending :charged-bytes])))
-          (.countDown finish)
-          (.shutdown ^ExecutorService pool)
-          (is (.awaitTermination ^ExecutorService pool 2 TimeUnit/SECONDS))
+          (CountDownLatch/.countDown finish)
+          (ExecutorService/.shutdown pool)
+          (is (ExecutorService/.awaitTermination pool 2 TimeUnit/SECONDS))
           (is (false? (deref late-recorded 1000 :missing)))
           (is (= {:entries 0 :pending 0 :charged-bytes 0}
                  (select-keys (recipe-store/stats cache) [:entries :pending :charged-bytes])))))
       (finally
-        (.countDown finish)
-        (.shutdown ^ExecutorService pool)
-        (.awaitTermination ^ExecutorService pool 2 TimeUnit/SECONDS)))))
+        (CountDownLatch/.countDown finish)
+        (ExecutorService/.shutdown pool)
+        (ExecutorService/.awaitTermination pool 2 TimeUnit/SECONDS)))))

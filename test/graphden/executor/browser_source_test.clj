@@ -144,7 +144,7 @@
 (deftest oversized-hint-does-not-expand-the-request-or-its-function-budget
   (let [root (random-uuid)
         extras (vec (repeatedly 2048 random-uuid))
-        hint {:fns (cons {:id root :parent-ids extras} (map #(hash-map :id %) extras))}
+        hint {:fns (cons {:id root :parent-ids extras} (for [id extras] {:id id}))}
         calls (atom [])
         storage (fixture-storage {:fn {root {:id root}}} calls)]
     (is (= [{:id root}]

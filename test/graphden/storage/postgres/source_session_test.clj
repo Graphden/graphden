@@ -134,8 +134,8 @@
       (is (false? (live? token destination)))
       (is (nil? (capture marker origin)))
       (is (nil? (session/ensure-marker! owner origin (constantly nil))))
-      (is (= 0 (lock-count origin)))
-      (.close origin)
+      (is (zero? (lock-count origin)))
+      (Connection/.close origin)
       (is (false? (live? token destination)))
       (with-open [replacement (connect "source_session_same")]
         (let [new-marker (session/ensure-marker! owner replacement (constantly nil))
@@ -177,7 +177,7 @@
                                            (session/close-manager! owner))
                                          result))}]
                   (session/ensure-marker! owner pending (constantly nil)))))
-          (is (= 0 (lock-count pending)) "Cleanup cannot resolve the shadow unlock function")))
+          (is (zero? (lock-count pending)) "Cleanup cannot resolve the shadow unlock function")))
       (finally
         (jdbc/execute! admin ["DROP FUNCTION public.pg_try_advisory_lock(bigint)"])
         (jdbc/execute! admin ["DROP FUNCTION public.pg_advisory_unlock(bigint)"])))))
@@ -190,7 +190,7 @@
     (let [owner (manager)
           marker (session/ensure-marker! owner origin (constantly nil))
           token (capture marker origin)
-          pid (.getBackendPID (.unwrap ^Connection origin PGConnection))]
+          pid (PGConnection/.getBackendPID (Connection/.unwrap origin PGConnection))]
       (session/ensure-marker! owner destination (constantly nil))
       (snapshot destination
                 (fn [tx]
@@ -207,7 +207,7 @@
       (jdbc/execute! blocker ["SELECT pg_advisory_lock(?)" (first lock-keys)])
       (with-redefs [session/random-keys (constantly lock-keys)]
         (is (nil? (session/ensure-marker! owner origin (constantly nil)))))
-      (is (= 0 (lock-count origin)))
+      (is (zero? (lock-count origin)))
       (is (= 1 (lock-count blocker)) "Cleanup never releases another backend's collision")
       (is (nil? (session/ensure-marker! owner origin (constantly nil))))
       (is (= {:registered 1 :active 0 :closed? false} (session/stats owner))))))
@@ -225,7 +225,7 @@
                                      result))}]
               (try (session/ensure-marker! owner origin (constantly nil)) nil
                    (catch SQLException e e)))))
-      (is (= 0 (lock-count origin)))
+      (is (zero? (lock-count origin)))
       (is (nil? (session/ensure-marker! owner origin (constantly nil)))))))
 
 
@@ -234,7 +234,7 @@
   (is (nil? (session/create-manager {:max-sessions 8})))
   (is (thrown? clojure.lang.ExceptionInfo (session/create-manager {:mode :direct :max-sessions 0})))
   (let [unknown (Proxy/newProxyInstance
-                  (.getClassLoader Connection) (into-array Class [Connection])
+                  (Class/.getClassLoader Connection) (into-array Class [Connection])
                   (reify InvocationHandler
                     (invoke [_ _ _ _] (throw (AssertionError. "No duck typing")))))]
     (is (nil? (session/ensure-marker! (manager) unknown (constantly nil)))))
@@ -242,9 +242,9 @@
     (let [owner (session/create-manager {:mode :session :max-sessions 1})]
       (is (some? (session/ensure-marker! owner a (constantly nil))))
       (is (nil? (session/ensure-marker! owner b (constantly nil))))
-      (is (= 0 (lock-count b)))
-      (.close a)
-      (is (= 0 (:registered (session/stats owner))))
+      (is (zero? (lock-count b)))
+      (Connection/.close a)
+      (is (zero? (:registered (session/stats owner))))
       (is (some? (session/ensure-marker! owner b (constantly nil)))))))
 
 
@@ -261,9 +261,9 @@
                    (try (session/ensure-marker! owner origin (constantly nil)) nil
                         (catch SQLException error error)))]
       (is (identical? primary result))
-      (is (= [cleanup] (vec (.getSuppressed ^Throwable result))))
-      (is (.isClosed origin))
-      (is (= 0 (:registered (session/stats owner)))))))
+      (is (= [cleanup] (vec (Throwable/.getSuppressed result))))
+      (is (Connection/.isClosed origin))
+      (is (zero? (:registered (session/stats owner)))))))
 
 
 (deftest close-during-acquisition-unwinds-pending-markers
@@ -277,7 +277,7 @@
                                        (session/close-manager! owner))
                                      result))}]
               (session/ensure-marker! owner origin (constantly nil)))))
-      (is (= 0 (lock-count origin)))
+      (is (zero? (lock-count origin)))
       (is (= {:registered 1 :active 0 :closed? true} (session/stats owner))))))
 
 
@@ -298,7 +298,7 @@
                                                 (session/close-manager! owner))
                                               result))}]
                        (if (= operation :seal) (capture marker origin) (live? token destination)))]
-          (is (= (if (= operation :seal) nil false) result))
+          (is (= (when-not (= operation :seal) false) result))
           (is (true? (:closed? (session/stats owner)))))))))
 
 

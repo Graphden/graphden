@@ -143,7 +143,7 @@
         attempt (observed #(restart-reason (fn [] (snapshot (fn [scope] (trace/replay scope recipe run authorize!))))))]
     (is (= :unrecorded-read (:value attempt)))
     (is (not-any? #(str/starts-with? % "SELECT * FROM \"trace_row\"") (:queries attempt)))
-    (is (.getAutoCommit ^java.sql.Connection *connection*) "Failed replay RR has unwound before ordinary retry")
+    (is (java.sql.Connection/.getAutoCommit *connection*) "Failed replay RR has unwound before ordinary retry")
     (is (= 1 (count (:value (snapshot #(trace/record % run authorize!))))))))
 
 
@@ -196,10 +196,10 @@
         answer (binding [pg/*jdbc-override*
                          {:execute! (fn [connection query opts]
                                       (when (str/starts-with? (first query) "SELECT * FROM \"trace_row\"")
-                                        (.setTime stamp 0))
+                                        (Timestamp/.setTime stamp 0))
                                       (jdbc/execute! connection query opts))}]
                  (snapshot #(trace/record % (fn [_] (pg/exec-read! *connection* ast {:quoted true})) authorize!)))]
-    (is (zero? (.getTime stamp)))
+    (is (zero? (Timestamp/.getTime stamp)))
     (is (= [row-id] (mapv :id (:value answer))))
     (is (some? (:recipe answer)))
     (is (= [row-id]

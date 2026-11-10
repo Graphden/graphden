@@ -149,7 +149,7 @@
     (is (= "55P03"
            (try (jdbc/execute! other ["ALTER TABLE sample ADD COLUMN after_snapshot text"])
                 nil
-                (catch SQLException error (.getSQLState error))))
+                (catch SQLException error (SQLException/.getSQLState error))))
         "Physical shape inspection holds ACCESS SHARE until transaction end")))
 
 

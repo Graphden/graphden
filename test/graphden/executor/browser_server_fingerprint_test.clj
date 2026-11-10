@@ -145,8 +145,42 @@
         (is (= 2 (event-count events :outer-digest)))))))
 
 
+(deftest printed-map-key-collisions-never-reuse-order-sensitive-evidence
+  (doseq [[a b] [[(keyword nil "a/b") (keyword "a" "b")]
+                 [(keyword "a/b" "c") (keyword "a" "b/c")]
+                 [(symbol nil "a/b") (symbol "a" "b")]]]
+    (let [before (array-map a 1 b 2)
+          after (array-map b 2 a 1)]
+      (is (not= a b))
+      (is (= (pr-str a) (pr-str b)))
+      (is (= before after))
+      (is (not= (provenance/fingerprint-data before) (provenance/fingerprint-data after)))
+      (fixture
+        before
+        (fn [{:keys [invoke graph after-execute events]}]
+          (reset! after-execute #(swap! graph assoc-in [:bindings 1 :value] after))
+          (is (false? (:ok (invoke))))
+          (is (= 2 (event-count events :outer-digest))))))))
+
+
+(deftest injective-map-keys-and-set-print-ties-retain-canonical-bytes
+  (let [id (random-uuid)
+        keys-and-values [":a/b" 1 :a/b 2 id 3 (pr-str id) 4]
+        mapping (apply array-map keys-and-values)
+        symbols [(symbol nil "a/b") (symbol "a" "b")]]
+    (doseq [[before after] [[mapping (into (array-map) (reverse mapping))]
+                            [(set symbols) (set (reverse symbols))]]]
+      (is (= (provenance/fingerprint-data before) (provenance/fingerprint-data after)))
+      (fixture
+        before
+        (fn [{:keys [invoke graph after-execute events]}]
+          (reset! after-execute #(swap! graph assoc-in [:bindings 1 :value] after))
+          (is (:ok (invoke)))
+          (is (= 1 (event-count events :outer-digest))))))))
+
+
 (deftest unsupported-values-always-miss-including-identical-mutable-values
-  (doseq [value [(java.util.Date. 0) (sorted-map :value 1) {1 :unsupported-key}]]
+  (doseq [value [(java.util.Date. 0) (sorted-map :value 1) {1 :unsupported-key} {'symbol :unsupported-key}]]
     (fixture value
              (fn [{:keys [invoke events]}]
                (is (:ok (invoke)))

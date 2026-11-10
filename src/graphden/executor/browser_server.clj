@@ -3,6 +3,7 @@
    the original source binding under fresh principal/session/branch policy."
   (:require
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.provider :as accounts]
@@ -53,7 +54,14 @@
 
 (defn- fingerprint-map-key?
   [value]
-  (or (keyword? value) (string? value) (uuid? value)))
+  ;; canonical sorts map keys by their printed form. Distinct keywords can
+  ;; print alike when a component contains '/'; stable-sort ties then expose
+  ;; map iteration order. Admit only injectively printed keyword components.
+  (or (string? value) (uuid? value)
+      (and (keyword? value)
+           (not (str/includes? (name value) "/"))
+           (let [namespace (namespace value)]
+             (or (nil? namespace) (not (str/includes? namespace "/")))))))
 
 
 (defn- same-fingerprint-input?

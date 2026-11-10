@@ -464,16 +464,6 @@ function refreshPrefsAfterAuth() {
   return request.promise;
 }
 
-// Preferences are JSON data; object member order does not change a selection.
-function samePreferenceValue(a, b) {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== 'object' || typeof b !== 'object'
-    || Array.isArray(a) !== Array.isArray(b)) return false;
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length
-    && keys.every(key => Object.hasOwn(b, key) && samePreferenceValue(a[key], b[key]));
-}
-
 // Component plans resolve the server's selection, so publish that preference
 // only after persistence. Other preferences retain their immediate tab effect.
 async function gdPrefWrite(key, value, options) {
@@ -536,7 +526,6 @@ async function gdPrefsRefresh(initial = false) {
     if (identity !== _prefsIdentityGen || refresh !== _prefsRefreshGen) return;
     if (!map || typeof map !== 'object') return;
     const owner = r.headers?.get('X-Graphden-Preference-Owner') || null;
-    const identityReady = window.gdPrefsReady && owner === window.gdPrefOwner;
     // A cookie can change in another tab before this tab probes /auth/me.
     // Do not merge writes from its previous owner into this server response.
     if (window.gdPrefOwner && owner !== window.gdPrefOwner) {
@@ -552,10 +541,6 @@ async function gdPrefsRefresh(initial = false) {
       if (gen > startedAt || pendingAtStart[key] === gen || _prefPendingGen[key] === gen)
         merged[key] = _prefs?.[key] ?? null;
     }
-    const componentsChanged = !samePreferenceValue(gdPrefRead('components'), merged.components ?? null);
-    // Root scope stamps include this JSON value. Retain its member order when
-    // unchanged, so suppressing a notification cannot silently stale the root.
-    if (!componentsChanged && Object.hasOwn(merged, 'components')) merged.components = gdPrefRead('components');
     _prefs = merged;
     window.gdPrefOwner = owner;
     window.gdPrefsReady = true;
@@ -564,7 +549,9 @@ async function gdPrefsRefresh(initial = false) {
     gdPrefApply('keymap');
     gdPrefNotify('theme');
     gdPrefNotify('keymap');
-    if (componentsChanged || !identityReady) gdPrefNotify('components', {initial});
+    // An unchanged selection can resolve different source or permissions after
+    // a package install. Explicit refresh must still revalidate its plans.
+    gdPrefNotify('components', {initial});
   } catch (_) { /* offline / signed out — the mirror stands */ }
 }
 

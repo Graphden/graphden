@@ -1,4 +1,7 @@
-(ns ^:integration graphden.storage.postgres.source-certificate-test
+;; Certificates require every tuple xmin below the global snapshot xmin.
+;; A concurrent namespace can hold that cluster-wide horizon behind fixture rows,
+;; even in a different database, causing a correct fail-closed cache miss.
+(ns ^:integration ^:serial graphden.storage.postgres.source-certificate-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]

@@ -348,3 +348,13 @@
                    (count (filter #(= :run (first %)) @calls)))))))
       {:auth-provider (reify auth/AuthProvider
                         (authenticate [_ _] {:authenticated? true :user-id "owner-a"}))})))
+
+
+(deftest refusal-log-categories-are-finite
+  (let [classify #'server/refusal-log-reason]
+    (is (= :server-timeout (classify (ex-info "secret" {:type :browser-plan/unsupported :reason :server-timeout}))))
+    (is (= :server-capacity (classify (ex-info "secret" {:type :browser-plan/unsupported :reason :server-capacity}))))
+    (is (= :server-epoch-changed (classify (ex-info "secret" {:type :browser-plan/unsupported :reason :server-epoch-changed}))))
+    (is (= :forbidden (classify (ex-info "secret" {:type :authz/forbidden :reason :private}))))
+    (is (= :unavailable (classify (ex-info "secret" {:type :other :reason :server-timeout}))))
+    (is (= :unavailable (classify (ex-info "secret" {:type :browser-plan/unsupported :reason :private}))))))

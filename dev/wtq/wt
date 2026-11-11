@@ -1409,7 +1409,7 @@ prior_failed_stage() {
     [ -f "$FAILURE_DIR/$m" ] || continue
     IFS=$'\t' read -r branch sha base stage receipt extra < "$FAILURE_DIR/$m" || continue
     [ -z "$extra" ] && [ "$branch" = "${M_BRANCH[$m]}" ] || continue
-    case "$stage" in ci|build|e2e|visual|integration|fleet) ;; *) continue ;; esac
+    case "$stage" in ci|build|priority|e2e|visual|integration|fleet) ;; *) continue ;; esac
     # Reject reused names, rebases/resets, missing objects and rewritten target.
     git -C "$MAIN_WT" merge-base --is-ancestor "$sha" "${M_SHA[$m]}" 2>/dev/null || continue
     git -C "$MAIN_WT" merge-base --is-ancestor "$base" "$TARGET" 2>/dev/null || continue
@@ -2473,7 +2473,7 @@ train_run() {
   if [ "$grc" = 1 ] && [ "$report_complete" = 1 ]; then
     failure_stage="$(sed -n 's/^WTQ_FAILED_STAGE=//p' "$gate_out" | tail -n1)"
     case "$failure_stage" in
-      ci|build|e2e|visual|integration|fleet) WTQ_FAILURE_RECEIPT="$LOG_DIR/_train-$ts" record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
+      ci|build|priority|e2e|visual|integration|fleet) WTQ_FAILURE_RECEIPT="$LOG_DIR/_train-$ts" record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
     esac
   elif [ "$grc" = 0 ]; then
     for m in "${gated[@]}"; do rm -f "$FAILURE_DIR/$m"; done

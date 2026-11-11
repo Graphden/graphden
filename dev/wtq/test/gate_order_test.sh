@@ -605,6 +605,20 @@ unset FAIL_DISK
   [ "$(prior_failed_stage test)" = e2e ]
   [ "$(WTQ_HINT_RECEIPT=1 prior_failed_stage test)" = "$LOG_DIR/_train-inflight" ]
   unset EXPECT_PROGRESS_POINTER
+  # A host precondition immediately before visual leaves the last dispatched
+  # priority pointer, whose completed passes must remain discoverable.
+  boundary="$LOG_DIR/_train-before-visual"
+  printf '{:schema 1 :kind "stages" :sha "%s" :roster ["ci" "build" "priority" "visual"] :status {"ci" :passed "build" :passed "priority" :passed "visual" :pending} :sources {"priority" :local}}\n' "$member" > "$boundary.stages.edn"
+  printf '{:schema 1 :sha "%s" :complete true :exit 3 :failed-stage nil}\n' "$member" > "$boundary.report.edn"
+  printf '{:schema 1 :sha "%s" :scope {:since "%s"}}\n' "$member" "$base" > "$boundary.ci-expected.edn"
+  WTQ_FAILURE_RECEIPT="$boundary" record_failed_stage priority "$base" test
+  [ "$(prior_failed_stage test)" = priority ]
+  [ "$(WTQ_HINT_RECEIPT=1 prior_failed_stage test)" = "$boundary" ]
+  bb scripts/ci_resume_cli.clj eligible gate "$boundary.report.edn" "$boundary.ci-expected.edn" "$member" "$base"
+  if bb scripts/ci_resume_cli.clj eligible gate "$boundary.report.edn" "$boundary.ci-expected.edn" "$root" "$base"; then exit 1; fi
+  credits="$(bb scripts/ci_resume_cli.clj credited stages "$boundary.stages.edn" "$member" ci build priority visual | sort | paste -sd,)"
+  [ "$credits" = build,ci,priority ]
+  [ -z "$(bb scripts/ci_resume_cli.clj credited stages "$boundary.stages.edn" "$root" ci build priority visual)" ]
   record_failed_stage invalid "$base" test
   [ -z "$(prior_failed_stage test)" ]
 )

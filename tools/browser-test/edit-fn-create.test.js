@@ -54,6 +54,7 @@ async function openCreateMenuForNs(page, nsName) {
       (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
     const plus = target?.querySelector('.ns-plus-btn');
     if (!plus) throw new Error('ns-plus-btn not found for ' + name);
+    plus.scrollIntoView({block: 'nearest', inline: 'nearest'});
     plus.click();
   }, nsName);
   await page.waitForSelector('.create-menu', {timeout: 5000});

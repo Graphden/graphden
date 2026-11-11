@@ -1,4 +1,6 @@
-(ns ^:integration graphden.executor.source-recipe-replay-test
+;; Certificate admission depends on PostgreSQL cluster-wide snapshot xmin.
+;; Other integration snapshots can pin it behind rows created by this fixture.
+(ns ^:integration ^:serial graphden.executor.source-recipe-replay-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]

@@ -1,4 +1,6 @@
-(ns ^:integration graphden.executor.source-recipe-trace-test
+;; Certificate admission depends on PostgreSQL cluster-wide snapshot xmin.
+;; Other integration snapshots can pin it behind rows created by this fixture.
+(ns ^:integration ^:serial graphden.executor.source-recipe-trace-test
   (:require
     [clojure.datafy :as datafy]
     [clojure.string :as str]

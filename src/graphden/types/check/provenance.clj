@@ -170,12 +170,14 @@
                (or (not (contains? metadata ::storage-input))
                    (and (instance? StorageWitness storage)
                         (identical? witness-seal (.-seal ^StorageWitness storage)))))
-      (cond-> [(::input metadata) positions]
-        marker (conj [(.-input ^MarkerWitness marker)
-                      (.-fn-id ^MarkerWitness marker)
-                      (.-signature ^MarkerWitness marker)
-                      (.-flags ^MarkerWitness marker)
-                      (.-args ^MarkerWitness marker)
-                      (.-return-value ^MarkerWitness marker)])
-        storage (conj [(.-authored-input ^StorageWitness storage)
-                       (.-source-fingerprint ^StorageWitness storage)])))))
+      ;; Runtime construction avoids inheriting source metadata from tooling
+      ;; that instruments collection literals; admission walks this value too.
+      (cond-> (vector (::input metadata) positions)
+        marker (conj (vector (.-input ^MarkerWitness marker)
+                             (.-fn-id ^MarkerWitness marker)
+                             (.-signature ^MarkerWitness marker)
+                             (.-flags ^MarkerWitness marker)
+                             (.-args ^MarkerWitness marker)
+                             (.-return-value ^MarkerWitness marker)))
+        storage (conj (vector (.-authored-input ^StorageWitness storage)
+                              (.-source-fingerprint ^StorageWitness storage)))))))

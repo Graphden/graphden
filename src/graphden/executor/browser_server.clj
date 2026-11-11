@@ -386,6 +386,21 @@
     result))
 
 
+(defn- refusal-log-reason
+  "Return only fixed, non-sensitive categories; never log arbitrary exception data."
+  [error]
+  (let [{:keys [type reason]} (ex-data error)]
+    (case type
+      :authz/forbidden :forbidden
+      :browser-plan/unsupported
+      (case reason
+        :server-timeout :server-timeout
+        :server-capacity :server-capacity
+        :server-epoch-changed :server-epoch-changed
+        :unavailable)
+      :unavailable)))
+
+
 (defn- invoke-current-value
   "Request accepts only opaque descriptor plus tagged data. No client target,
    capture, binding, principal or branch can be supplied as authority."
@@ -406,7 +421,7 @@
     (catch Exception error
       (log/warn "Read-only server call refused"
                 {:type :browser-server/refused
-                 :reason (if (= :authz/forbidden (:type (ex-data error))) :forbidden :unavailable)})
+                 :reason (refusal-log-reason error)})
       (components/failure-facts error))))
 
 

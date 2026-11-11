@@ -37,6 +37,9 @@
     (is (zero? @meta-reads))
     ;; A plain authored digest retains no definition, so it is safe metadata.
     (is (memo/admitted? m stamped))
+    ;; The retained projection must not recursively acquire source metadata
+    ;; when coverage instruments collection literals.
+    (is (nil? (meta (provenance/retained-checker-metadata stamped))))
     (let [issuer (provenance/capture-marker-stamp
                    {:args {} :return-type :text} :example)
           marker (issuer (provenance/stamp {:fn-id :example :args {:x mutable} :return :text}

@@ -44,20 +44,20 @@
 
 
 (deftest bounded-ascii-character-class-does-not-wait-for-regex-worker
-  (let [replace (impls/impl-of :re-replace)
+  (let [replace-fn (impls/impl-of :re-replace)
         timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)
         cache @(ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)]
     (java.util.concurrent.ConcurrentHashMap/.remove cache "[^a-z0-9-]")
     (binding [sp-config/*regex-compile-timeout-ms* 1]
       (with-redefs-fn {timed (fn [_] (throw (ex-info "safe class entered regex worker" {})))}
         #(is (= "graph_den-42_"
-                (replace {:string (delay "graph den-42!")
-                          :pattern (delay "[^a-z0-9-]")
-                          :replacement (delay "_")} nil)))))))
+                (replace-fn {:string (delay "graph den-42!")
+                             :pattern (delay "[^a-z0-9-]")
+                             :replacement (delay "_")} nil)))))))
 
 
 (deftest bounded-ascii-character-class-routing-and-grammar
-  (let [compile (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
+  (let [compile-fn (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
         timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)
         cache @(ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)
         calls (atom [])
@@ -66,7 +66,7 @@
                      (with-redefs-fn {timed (fn [p]
                                               (swap! calls conj p)
                                               #"x")}
-                       #(compile pattern)))]
+                       #(compile-fn pattern)))]
     (doseq [pattern ["[a-z]+" "[a][b]" "[a&&b]" "[\\d]" "[é]"
                      "[a_]" "[a/]" "(?i)[a]" "[a]\n"]]
       (is (instance? java.util.regex.Pattern (via-timed? pattern))
@@ -87,7 +87,7 @@
       (is (= 64 (count length-64)))
       (is (= 65 (count length-65)))
       (java.util.concurrent.ConcurrentHashMap/.remove cache length-64)
-      (is (instance? java.util.regex.Pattern (compile length-64)))
+      (is (instance? java.util.regex.Pattern (compile-fn length-64)))
       (is (= 9 (count @calls)) "64-character classes compile synchronously")
       (is (instance? java.util.regex.Pattern (via-timed? length-65)))
       (is (= 10 (count @calls)) "65-character class adds one timed compilation")
@@ -95,15 +95,15 @@
 
 
 (deftest dynamic-regex-length-cap-is-checked-after-cache-hit
-  (let [compile (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
+  (let [compile-fn (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
         cache @(ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)
         pattern "[a-z]"]
     (java.util.concurrent.ConcurrentHashMap/.remove cache pattern)
-    (is (instance? java.util.regex.Pattern (compile pattern)))
+    (is (instance? java.util.regex.Pattern (compile-fn pattern)))
     (is (instance? java.util.regex.Pattern
                    (java.util.concurrent.ConcurrentHashMap/.get cache pattern)))
     (binding [sp-config/*max-regex-length* (dec (count pattern))]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too long" (compile pattern))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too long" (compile-fn pattern))))
     (is (instance? java.util.regex.Pattern
                    (java.util.concurrent.ConcurrentHashMap/.get cache pattern))
         "the per-call dynamic cap rejects a cached pattern without evicting it")))

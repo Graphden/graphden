@@ -64,15 +64,15 @@
 
 (defn- throw-regex-compile-error
   [pattern-str result]
-  (or (when (= (:error result) :syntax)
-        (throw (ex-info "Invalid regex pattern syntax"
-                        {:type :execution-error/invalid-regex
-                         :separator pattern-str
-                         :cause (:cause result)})))
-      (throw (ex-info "Regex engine error"
-                      {:type :execution-error/regex-engine-error
-                       :separator pattern-str
-                       :cause (:cause result)}))))
+  (if (= (:error result) :syntax)
+    (throw (ex-info "Invalid regex pattern syntax"
+                    {:type :execution-error/invalid-regex
+                     :separator pattern-str
+                     :cause (:cause result)}))
+    (throw (ex-info "Regex engine error"
+                    {:type :execution-error/regex-engine-error
+                     :separator pattern-str
+                     :cause (:cause result)}))))
 
 
 (defn- compile-regex-timed
@@ -149,9 +149,8 @@
    compiler's public error mapping."
   [pattern-str]
   (let [result (compile-regex-result pattern-str)]
-    (if (:pattern result)
-      (:pattern result)
-      (throw-regex-compile-error pattern-str result))))
+    (or (:pattern result)
+        (throw-regex-compile-error pattern-str result))))
 
 
 (defn- safe-compile-regex

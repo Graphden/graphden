@@ -152,6 +152,31 @@
                          (contains? #{:binding :fn-slot} entity))) @calls))))
 
 
+(deftest witness-prepares-namespace-paths-before-individual-authorizations
+  (let [ids (vec (repeatedly 3 random-uuid))
+        graph {:fns (mapv #(hash-map :id %) ids)}
+        events (atom [])
+        authorize! (with-meta #(swap! events conj [:authorize (:id %)])
+                     {:graphden.tenancy.context/prepare-namespaces
+                      #(swap! events conj [:prepare (set (map :id %))])})]
+    (source/capture-nodes (fixture-storage (graph-tables graph) (atom [])) ids authorize!)
+    (is (= [:prepare (set ids)] (first @events)))
+    (is (= (set ids) (set (map second (rest @events)))))))
+
+
+(deftest client-frontier-prepares-namespace-paths-before-authorization
+  (let [root (random-uuid) parent (random-uuid)
+        graph {:fns [{:id root :parent-ids [parent]} {:id parent}]}
+        events (atom [])
+        authorize! (with-meta #(swap! events conj [:authorize (:id %)])
+                     {:graphden.tenancy.context/prepare-namespaces
+                      #(swap! events conj [:prepare (set (map :id %))])})]
+    (source/collect-client-closure (fixture-storage (graph-tables graph) (atom []))
+                                   [root] authorize! graph)
+    (is (= [[:prepare #{root}] [:authorize root]
+            [:prepare #{parent}] [:authorize parent]] @events))))
+
+
 (deftest client-identity-hints-never-prefetch-unreachable-owned-payload
   (let [root (random-uuid) old (random-uuid) fresh (random-uuid)
         hint {:fns [{:id root :parent-ids [old]} {:id old}]}

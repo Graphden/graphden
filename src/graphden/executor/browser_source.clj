@@ -55,6 +55,13 @@
                   {:type :browser-plan/unsupported :reason reason})))
 
 
+(defn- prepare-authorizations!
+  [authorize! rows]
+  (when (seq rows)
+    (when-let [prepare (:graphden.tenancy.context/prepare-namespaces (meta authorize!))]
+      (prepare rows))))
+
+
 (defn- read-rows
   [storage entity ids]
   (check-snapshot!)
@@ -147,6 +154,7 @@
             (reject! :source-function-limit))
         rows (vec (read-rows storage :fn targets))]
     (when-not (= targets (set (map :id rows))) (reject! :source-missing))
+    (prepare-authorizations! authorize! rows)
     (doseq [row rows]
       (condp contains? (:id row)
         server-targets (authorize! row {:execute? true :server-target? true})
@@ -232,11 +240,13 @@
                          (frontier/prepare
                            pending seen
                            {:read-fns #(read-rows storage :fn %)
+                            :prepare-authorizations! #(prepare-authorizations! authorize! %)
                             :authorize! authorize! :validate-owner! validate-owner-metadata!
                             :max-functions max-functions}))
               ids (or (:ids prepared) (set (take batch-size pending)))
               fns (or (:fns prepared) (vec (read-rows storage :fn ids)))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
+          (when-not prepared (prepare-authorizations! authorize! fns))
           (let [authorizations (or (:authorizations prepared)
                                    (into {} (map (fn [row] [(:id row) (authorize! row)])) fns))
                 [fn-slots bindings] (owner-rows storage ids budget)
@@ -297,6 +307,7 @@
       (fn [graph batch]
         (let [fns (vec (read-rows storage :fn batch))]
           (when-not (= (set batch) (set (map :id fns))) (reject! :source-missing))
+          (prepare-authorizations! authorize! fns)
           (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
                 [fn-slots bindings] (owner-rows storage batch budget)
                 items (if (seq bindings)

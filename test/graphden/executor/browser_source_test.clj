@@ -121,6 +121,36 @@
     (is (= "current" (:value (first (:bindings hinted)))))))
 
 
+(deftest client-identity-hints-never-prefetch-unreachable-owned-payload
+  (let [root (random-uuid) old (random-uuid) fresh (random-uuid)
+        hint {:fns [{:id root :parent-ids [old]} {:id old}]}
+        current {:fns [{:id root :parent-ids [fresh]} {:id fresh} {:id old}]
+                 :bindings [{:id (random-uuid) :fn-id old :value "hidden old payload"}
+                            {:id (random-uuid) :fn-id fresh :value "fresh reachable payload"}]}
+        calls (atom [])
+        authorize! (fn [row & _]
+                     (swap! calls conj [:authorize (:id row)])
+                     (when (= old (:id row)) (throw (ex-info "Denied old hint" {:type :authz/forbidden}))))
+        result (source/collect-client-closure (fixture-storage (graph-tables current) calls) [root] authorize! hint)]
+    (is (= #{root fresh} (set (map :id (:fns result)))))
+    (is (= ["fresh reachable payload"] (mapv :value (:bindings result))))
+    (is (not-any? #{[:authorize old]} @calls))
+    (is (not-any? (fn [[op entity where]]
+                    (and (contains? #{:query :candidates} op)
+                         (contains? #{:binding :fn-slot} entity)
+                         (some #{old} (:fn-id where)))) @calls))))
+
+
+(deftest unknown-and-oversized-client-hints-retain-ordinary-reads
+  (let [root (random-uuid) extras (vec (repeatedly 2048 random-uuid))]
+    (doseq [hint [nil {:fns []}
+                  {:fns (cons {:id root :parent-ids extras} (for [id extras] {:id id}))}]]
+      (let [calls (atom [])
+            storage (fixture-storage {:fn {root {:id root}}} calls)]
+        (is (= [{:id root}] (:fns (source/collect-client-closure storage [root] (constantly nil) hint))))
+        (is (= [[:read :fn root]] (filterv #(= :read (first %)) @calls)))))))
+
+
 (deftest denied-or-missing-stale-hints-fall-back-before-body-reads
   (let [root (random-uuid) extra (random-uuid)
         hint {:fns [{:id root :parent-ids [extra]} {:id extra}]}
@@ -290,6 +320,19 @@
     (is (not-any? (fn [[operation entity where]]
                     (and (= operation :query) (contains? #{:binding :fn-slot} entity)
                          (some #{target} (:fn-id where)))) @calls))
+    (let [ordinary (source/collect-manifest storage root (constantly nil))]
+      (reset! calls [])
+      (is (= (graph-rows ordinary)
+             (graph-rows
+               (source/collect-manifest storage root
+                                        (fn [row & [permission]]
+                                          (when (= target (:id row))
+                                            (is (= {:identity-only? true} permission))))
+                                        graph))))
+      (is (not-any? (fn [[operation entity where]]
+                      (and (contains? #{:query :candidates} operation)
+                           (contains? #{:binding :fn-slot} entity)
+                           (some #{target} (:fn-id where)))) @calls)))
     (reset! calls [])
     (is (= :source-missing
            (try (source/collect-closure storage [root] (constantly nil))
@@ -358,6 +401,18 @@
     (is (not-any? (fn [[operation entity where]]
                     (and (= operation :query) (contains? #{:binding :fn-slot} entity)
                          (some #{target} (:fn-id where)))) @calls))
+    (reset! calls [])
+    (let [hinted (source/collect-client-closure
+                   (fixture-storage tables calls) [root]
+                   (fn [row & [permissions]]
+                     (when (= target (:id row))
+                       (is (= {:execute? true :server-target? true} permissions))))
+                   graph)]
+      (is (= (graph-rows graph) (graph-rows hinted)))
+      (is (not-any? (fn [[operation entity where]]
+                      (and (contains? #{:query :candidates} operation)
+                           (contains? #{:binding :fn-slot} entity)
+                           (some #{target} (:fn-id where)))) @calls)))
     (let [ordinary-slot (random-uuid)
           junction (random-uuid)
           binding (random-uuid)

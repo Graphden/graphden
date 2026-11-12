@@ -168,14 +168,14 @@
    (root-choice storage authorize! policy nil))
   ([storage authorize! policy graph-hint]
    (let [scope (current-scope storage (tenancy/current-personal-namespace) "editor-root")
-        resolver (captured-source storage authorize! root-resolver-id graph-hint)
-        _ (assert-protected-root-source! resolver)
-        _ (snapshot/validate-source! resolver root-resolver-id policy)
-        id (if (:principal-id scope)
-             (:id (resolve-root-identity resolver scope
-                                         (metadata/function-lookup storage authorize! scope)))
-             default-root-id)]
-    {:id id :scope scope})))
+         resolver (captured-source storage authorize! root-resolver-id graph-hint)
+         _ (assert-protected-root-source! resolver)
+         _ (snapshot/validate-source! resolver root-resolver-id policy)
+         id (if (:principal-id scope)
+              (:id (resolve-root-identity resolver scope
+                                          (metadata/function-lookup storage authorize! scope)))
+              default-root-id)]
+     {:id id :scope scope})))
 
 
 (defn source-revision

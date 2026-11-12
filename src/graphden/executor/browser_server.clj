@@ -172,9 +172,11 @@
 
 
 (defn- capture-root-anchor
-  [storage authorize! policy]
+  [ctx storage authorize! policy]
   (let [{handler-root :root :keys [root-row selector-row]} (root-binding/capture! storage)
-        choice (resolution/root-choice storage authorize! policy)
+        choice (if-let [hint (some-> (:graph-cache ctx) deref)]
+                 (resolution/root-choice storage authorize! policy hint)
+                 (resolution/root-choice storage authorize! policy))
         selected-root (root-binding/selected-root handler-root choice)]
     {:anchor {:handler-root handler-root :selected-root selected-root}
      :evidence {:root-binding root-row :selector-binding selector-row
@@ -182,9 +184,9 @@
 
 
 (defn- anchor!
-  [storage authorize! policy {:keys [fn-id slot-id ref-fn-id handler-root selected-root] :as anchor}]
+  [ctx storage authorize! policy {:keys [fn-id slot-id ref-fn-id handler-root selected-root] :as anchor}]
   (if (contains? anchor :selected-root)
-    (let [captured (capture-root-anchor storage authorize! policy)]
+    (let [captured (capture-root-anchor ctx storage authorize! policy)]
       (when-not (= {:handler-root handler-root :selected-root selected-root} (:anchor captured))
         (reject! :server-binding-changed))
       (:evidence captured))
@@ -199,7 +201,9 @@
 
 (defn- capture-client-source-value
   [ctx storage authorize! policy entries anchor-row]
-  (let [graph (source/collect-client-closure storage (vals entries) authorize!)
+  (let [graph (if-let [hint (some-> (:graph-cache ctx) deref)]
+                (source/collect-client-closure storage (vals entries) authorize! hint)
+                (source/collect-client-closure storage (vals entries) authorize!))
         _ (doseq [id (vals entries)]
             (let [row (some #(when (= id (:id %)) %) (:fns graph))]
               (when-not row (reject! :server-root-missing))
@@ -234,7 +238,7 @@
 (defn- capture-client
   [ctx storage authorize! policy entries anchor]
   (capture-client-source ctx storage authorize! policy entries
-                         (anchor! storage authorize! policy anchor)))
+                         (anchor! ctx storage authorize! policy anchor)))
 
 
 (defn- issue!
@@ -281,7 +285,7 @@
    The callback receives its identity and a zero-argument exporter; no caller
    can supply prevalidated anchor evidence. Invocations still recapture it."
   [ctx storage authorize! policy request consume]
-  (let [{:keys [anchor evidence]} (capture-root-anchor storage authorize! policy)
+  (let [{:keys [anchor evidence]} (capture-root-anchor ctx storage authorize! policy)
         root (:selected-root anchor)
         entries {:root root}]
     (consume root
@@ -312,7 +316,7 @@
    selected target is freshly authorized before its owned source is read."
   [ctx storage authorize! policy issued]
   (let [{:keys [ids evidence target-fingerprint]} (:site-proof issued)
-        anchor-evidence (anchor! storage authorize! policy (:anchor issued))
+        anchor-evidence (anchor! ctx storage authorize! policy (:anchor issued))
         graph (source/capture-nodes storage ids authorize!)
         expected (server-site/fingerprint graph ids anchor-evidence target-fingerprint)]
     (when-not (= evidence expected) (reject! :server-binding-changed))

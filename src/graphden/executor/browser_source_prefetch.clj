@@ -1,7 +1,8 @@
 (ns graphden.executor.browser-source-prefetch
   "Request-local hints for general source collection. Hints select IDs only;
    fresh decorated storage and source authorization supply every cached row.
-   Manifest and client collectors deliberately do not use this optimization."
+   Only the general collector prefetches owned values. Constrained collectors use
+   bounded identity hints/read-through without preloading owned payload."
   (:require
     [clojure.set :as set]))
 

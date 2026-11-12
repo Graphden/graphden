@@ -45,6 +45,7 @@
 
 
 (def ^:dynamic ^:private *prefetched* nil)
+(def ^:dynamic ^:private *identity-hints* nil)
 
 
 (defn- reject!
@@ -56,9 +57,14 @@
 (defn- read-rows
   [storage entity ids]
   (check-snapshot!)
-  (if *prefetched*
+  (cond
+    (and *identity-hints* (= :fn entity))
+    (prefetch/read-through *identity-hints* entity ids
+                           #(binding [*identity-hints* nil] (read-rows storage entity %)))
+    *prefetched*
     (prefetch/read-through *prefetched* entity ids
                            #(binding [*prefetched* nil] (read-rows storage entity %)))
+    :else
     (if (satisfies? sp/StorageBatchCRUD storage)
       (vals (sp/read-entities storage entity ids))
       (keep #(sp/read-entity storage entity %) ids))))
@@ -244,16 +250,21 @@
 
 
 (defn- hinted-ids
-  [graph roots]
+  [graph roots & [mode]]
   (when graph
-    (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]}
+    (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding] :as index}
           (deps/index-graph graph)
-          dependencies (fn [id]
-                         (let [bindings (get bindings-by-fn id)]
-                           (related-ids [(get fn-map id)]
-                                        (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
-                                        bindings
-                                        (mapcat #(get items-by-binding (:id %)) bindings))))]
+          dependencies (if (= :manifest mode)
+                         #(deps/forward-deps-of % index)
+                         (fn [id]
+                           (let [bindings (get bindings-by-fn id)]
+                             (related-ids [(get fn-map id)]
+                                          (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
+                                          (if (= :client mode)
+                                            (map #(if (capabilities/server-call-slot? (:slot-id %))
+                                                    (dissoc % :ref-fn-id) %) bindings)
+                                            bindings)
+                                          (mapcat #(get items-by-binding (:id %)) bindings)))))]
       (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions))))
 
 
@@ -330,11 +341,25 @@
    (collect-hinted-closure storage roots authorize! graph-hint)))
 
 
+(defn- call-with-identity-hints
+  [storage roots graph-hint mode consume]
+  (let [ids (hinted-ids graph-hint roots mode)
+        rows (when (seq ids) (vec (read-rows storage :fn ids)))
+        cache (when (= ids (set (map :id rows)))
+                {:rows {:fn (into {} (map (juxt :id identity)) rows)}})]
+    (binding [*identity-hints* cache] (consume))))
+
+
 (defn collect-client-closure
   "Collect browser source with explicit server-call bindings terminal. Their
-   source is separately checked by the server boundary, never exported."
-  [storage roots authorize!]
-  (collect-source storage roots authorize! false true))
+   source is separately checked by the server boundary, never exported.
+   Optional hints batch fresh function identities only. Owned payload still
+   requires actual fresh reachability and authorization in collect-source."
+  ([storage roots authorize!]
+   (collect-source storage roots authorize! false true))
+  ([storage roots authorize! graph-hint]
+   (call-with-identity-hints storage roots graph-hint :client
+                             #(collect-source storage roots authorize! false true))))
 
 
 (defn collect-component-identities
@@ -361,8 +386,11 @@
 
 (defn collect-manifest
   "Single-root form of the constrained manifest collector."
-  [storage root authorize!]
-  (collect-manifests storage [root] authorize!))
+  ([storage root authorize!]
+   (collect-manifests storage [root] authorize!))
+  ([storage root authorize! graph-hint]
+   (call-with-identity-hints storage [root] graph-hint :manifest
+                             #(collect-manifests storage [root] authorize!))))
 
 
 (defn- ordinary-snapshot

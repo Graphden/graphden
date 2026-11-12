@@ -91,6 +91,20 @@
                 (nil? (:failed-stage gate))))))
 
 
+(defn retryable-heap-oom-gate?
+  "The operator may retry an identified test-JVM heap failure. Only previously
+   passed stages are credited; the failed integration stage must run again."
+  [gate expected stages sha base]
+  (and (= 1 (:schema gate)) (= sha (:sha gate) (:sha expected))
+       (= base (get-in expected [:scope :since]))
+       (true? (:complete gate)) (= 1 (:exit gate))
+       (= :integration (:failed-stage gate))
+       (= :integration-jvm-heap-oom (:failure-signature gate))
+       (valid-receipt? stages "stages") (= sha (:sha stages))
+       (= :failed (get-in stages [:status "integration"]))
+       (not (:inherited stages))))
+
+
 (defn carry-hints!
   "Carry detailed scheduling hints across a run that never reaches that kind.
    The caller has validated the source member/base lineage. Keep the original

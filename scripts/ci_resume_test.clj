@@ -299,5 +299,21 @@
     (is (not (resume/interrupted-gate? gate expected (str/join (repeat 40 "b")) "base")))))
 
 
+(deftest heap-oom-retry-is-exact-and-never-credits-the-failed-suite
+  (let [expected {:schema 1 :sha sha :scope {:since "base"}}
+        gate {:schema 1 :sha sha :complete true :exit 1 :failed-stage :integration
+              :failure-signature :integration-jvm-heap-oom}
+        stages {:schema 1 :sha sha :kind "stages" :roster ["ci" "integration" "e2e"]
+                :status {"ci" :passed "integration" :failed "e2e" :passed}}]
+    (is (resume/retryable-heap-oom-gate? gate expected stages sha "base"))
+    (is (= #{"ci" "e2e"} (resume/credited stages sha (:roster stages))))
+    (is (not (resume/retryable-heap-oom-gate? (dissoc gate :failure-signature) expected stages sha "base")))
+    (is (not (resume/retryable-heap-oom-gate? (assoc gate :failed-stage :e2e) expected stages sha "base")))
+    (is (not (resume/retryable-heap-oom-gate? gate expected (assoc-in stages [:status "integration"] :passed) sha "base")))
+    (is (not (resume/retryable-heap-oom-gate? gate expected (assoc stages :inherited true) sha "base")))
+    (is (not (resume/retryable-heap-oom-gate? gate expected stages sha "different")))
+    (is (not (resume/retryable-heap-oom-gate? gate expected stages (str/join (repeat 40 "b")) "base")))))
+
+
 (let [{:keys [fail error]} (run-tests)]
   (when (pos? (+ fail error)) (System/exit 1)))

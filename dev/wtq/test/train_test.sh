@@ -103,6 +103,40 @@ log_has()  { local out; out="$(wt_main log "$1" 2>/dev/null | plain)"; grep -Fq 
 on_develop() { git -C "$REPO" cat-file -e "develop:$1" 2>/dev/null; }
 
 # --- scenarios ----------------------------------------------------------------
+echo "== only pure integration heap OOM may be classified for a retry"
+oom_report="$ROOT_T/oom.report.edn"
+oom_log="$ROOT_T/oom.log"
+cat > "$oom_log" <<'EOF'
+>>> bb test-integration: remaining namespaces  [t+2s]
+ERROR in sample/test (test.clj:1)
+Uncaught exception, not in assertion.
+Exception: java.lang.OutOfMemoryError: Java heap space
+ at sample
+2 tests, 3 assertions, 1 errors, 0 failures.
+WTQ_FAILED_STAGE=integration
+── where the gate spent its time ──
+  2s  bb test-integration
+  ------
+  2s  TOTAL
+EOF
+bb "$SRC/report.clj" init "$oom_report" "$(printf '%040d' 0)" 0
+bb "$SRC/report.clj" finish "$oom_report" "$(printf '%040d' 0)" 0 \
+  "$oom_log" "$ROOT_T/missing.ci.edn" "$ROOT_T/resources.csv" 1
+check "uncaught heap OOM is classified" env WTQ_REPORT_TEST="$oom_report" bb -e \
+  '(require (quote clojure.edn)) (when-not (= :integration-jvm-heap-oom (:failure-signature (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST"))))) (System/exit 1))'
+sed -i 's/0 failures/1 failures/' "$oom_log"
+bb "$SRC/report.clj" init "$oom_report" "$(printf '%040d' 0)" 0
+bb "$SRC/report.clj" finish "$oom_report" "$(printf '%040d' 0)" 0 \
+  "$oom_log" "$ROOT_T/missing.ci.edn" "$ROOT_T/resources.csv" 1
+check "mixed test failure is not classified" env WTQ_REPORT_TEST="$oom_report" bb -e \
+  '(require (quote clojure.edn)) (when (:failure-signature (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST")))) (System/exit 1))'
+sed -i 's/1 errors, 1 failures/2 errors, 0 failures/' "$oom_log"
+bb "$SRC/report.clj" init "$oom_report" "$(printf '%040d' 0)" 0
+bb "$SRC/report.clj" finish "$oom_report" "$(printf '%040d' 0)" 0 \
+  "$oom_log" "$ROOT_T/missing.ci.edn" "$ROOT_T/resources.csv" 1
+check "unidentified additional error is not classified" env WTQ_REPORT_TEST="$oom_report" bb -e \
+  '(require (quote clojure.edn)) (when (:failure-signature (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST")))) (System/exit 1))'
+
 echo "== timing receipt reads the gate summary, not a nested E2E summary"
 timing_report="$ROOT_T/timing.report.edn"
 timing_log="$ROOT_T/timing.log"

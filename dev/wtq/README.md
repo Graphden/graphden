@@ -177,7 +177,13 @@ Details that are deliberate:
   within the required phase and producer dependencies. A browser file failure
   moves that file and its unrun tail before earlier passing files. New checks
   join the unrun set; deleted or out-of-scope checks leave the current roster.
-  A completed failed-check run lends ordering hints only. An interrupted run or
+  A completed failed-check run lends ordering hints only, except an explicit
+  `WTQ_RETRY_HEAP_OOM=1 bb wt merge` after reviewing a classified JVM heap OOM
+  in integration. The receipt must show only uncaught heap OOM errors and no
+  assertion failures; the exact SHA, base, roster and image proof still apply,
+  and the entire failed integration stage runs again. An OOM can also expose a
+  product leak, so this flag is an operator decision, not an automatic waiver.
+  An interrupted run or
   a completed host PRECOND between stages may credit completed passes when the
   assembled SHA, base, selected roster and image proof match exactly; in-flight
   checks and provisional browser verdicts run again. The gate checks that visual

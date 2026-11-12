@@ -34,10 +34,13 @@
                        (throw (ex-info "Invalid hosted integration receipt" {}))))
     "proof-source" (let [[path id] args]
                      (println (name (resume/stage-proof-source (resume/read-hint path kind) id))))
-    "eligible" (let [[gate-path expected-path sha base] args
+    "eligible" (let [[gate-path expected-path sha base stages-path] args
                      gate (try (report/read-report gate-path) (catch Exception _ nil))
-                     expected (try (report/read-report expected-path) (catch Exception _ nil))]
-                 (when-not (resume/interrupted-gate? gate expected sha base)
+                     expected (try (report/read-report expected-path) (catch Exception _ nil))
+                     stages (resume/read-hint stages-path "stages")]
+                 (when-not (or (resume/interrupted-gate? gate expected sha base)
+                               (and (= "1" (System/getenv "WTQ_RETRY_HEAP_OOM"))
+                                    (resume/retryable-heap-oom-gate? gate expected stages sha base)))
                    (System/exit 1)))
     "credited" (let [[path sha & roster] args
                      prior (resume/read-hint path kind)]

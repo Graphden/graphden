@@ -73,6 +73,22 @@
     {:id id :jar-sha256 jar-sha}))
 
 
+(defn- heap-oom-integration?
+  "Recognize only integration reports with uncaught heap OOM errors and no
+   test failures. Unknown output stays a failure; the suite must run again."
+  [output]
+  (let [plain (str/replace output #"\u001b\[[0-9;]*[mK]" "")
+        parts (str/split plain #"(?m)^>>> bb test-integration: remaining namespaces[^\n]*\n")
+        integration (last parts)
+        summaries (re-seq #"(?m)^(\d+) tests, (\d+) assertions, (\d+) errors?, 0 failures\.$" integration)
+        headings (re-seq #"(?m)^ERROR in [^\n]+\nUncaught exception, not in assertion\.\nException: java\.lang\.OutOfMemoryError: Java heap space(?:\n|$)" integration)
+        all-headings (re-seq #"(?m)^ERROR in " integration)]
+    (when (and (= 2 (count parts)) (= 1 (count summaries)))
+      (let [errors (parse-long (nth (first summaries) 3))]
+        (and (pos? errors) (= errors (count headings) (count all-headings))
+             (not (re-find #"(?m)^FAIL in " integration)))))))
+
+
 (defn- report
   [base output ci-path resources exit]
   (let [ci (when (java.io.File/.exists (io/file ci-path))
@@ -82,6 +98,10 @@
     (assoc base
            :complete true
            :exit exit
+           :failure-signature (when (and (= 1 exit)
+                                              (re-find #"(?m)^WTQ_FAILED_STAGE=integration$" output)
+                                              (heap-oom-integration? output))
+                                     :integration-jvm-heap-oom)
            :failed-stage (when (= 1 exit)
                            (some->> (re-seq #"(?m)^WTQ_FAILED_STAGE=(ci|build|e2e|visual|integration|fleet)$" output)
                                     last second keyword))

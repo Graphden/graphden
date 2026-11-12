@@ -58,7 +58,7 @@
   [storage entity ids]
   (check-snapshot!)
   (cond
-    (and *identity-hints* (= :fn entity))
+    (and *identity-hints* (= :fn entity) (identical? storage (:storage *identity-hints*)))
     (prefetch/read-through *identity-hints* entity ids
                            #(binding [*identity-hints* nil] (read-rows storage entity %)))
     *prefetched*
@@ -343,10 +343,16 @@
 
 (defn- call-with-identity-hints
   [storage roots graph-hint mode consume]
-  (let [ids (hinted-ids graph-hint roots mode)
+  (let [ids (try
+              (let [ids (hinted-ids graph-hint roots mode)]
+                (when (every? uuid? ids) ids))
+              (catch InterruptedException error (throw error))
+              ;; A hint is not an execution authority. Malformed/unavailable
+              ;; advisory indexes retain ordinary fresh collection.
+              (catch Exception _ nil))
         rows (when (seq ids) (vec (read-rows storage :fn ids)))
         cache (when (= ids (set (map :id rows)))
-                {:rows {:fn (into {} (map (juxt :id identity)) rows)}})]
+                {:storage storage :rows {:fn (into {} (map (juxt :id identity)) rows)}})]
     (binding [*identity-hints* cache] (consume))))
 
 

@@ -143,12 +143,33 @@
 
 (deftest unknown-and-oversized-client-hints-retain-ordinary-reads
   (let [root (random-uuid) extras (vec (repeatedly 2048 random-uuid))]
-    (doseq [hint [nil {:fns []}
+    (doseq [hint [nil {:fns []} {:fns {root 42}}
                   {:fns (cons {:id root :parent-ids extras} (for [id extras] {:id id}))}]]
       (let [calls (atom [])
             storage (fixture-storage {:fn {root {:id root}}} calls)]
         (is (= [{:id root}] (:fns (source/collect-client-closure storage [root] (constantly nil) hint))))
         (is (= [[:read :fn root]] (filterv #(= :read (first %)) @calls)))))))
+
+
+(deftest identity-hints-never-cross-storage-or-cache-authorization
+  (let [root (random-uuid)
+        graph {:fns [{:id root :name "outer"}]}
+        outer (fixture-storage (graph-tables graph) (atom []))
+        inner (fixture-storage {:fn {root {:id root :name "inner"}}} (atom []))
+        nested-name (atom nil)
+        nested-denied? (atom false)]
+    (source/collect-client-closure
+      outer [root]
+      (fn [_]
+        (reset! nested-name (:name (first (:fns (source/collect-client-closure inner [root] (constantly nil))))))
+        (try
+          (source/collect-client-closure outer [root]
+                                         (fn [_] (throw (ex-info "New policy denies" {:type :authz/forbidden}))))
+          (catch clojure.lang.ExceptionInfo error
+            (reset! nested-denied? (= :authz/forbidden (:type (ex-data error)))))))
+      graph)
+    (is (= "inner" @nested-name))
+    (is (true? @nested-denied?))))
 
 
 (deftest denied-or-missing-stale-hints-fall-back-before-body-reads

@@ -145,8 +145,8 @@
         storage (fixture-storage (graph-tables graph) calls)
         denied (last ids)]
     (is (thrown? clojure.lang.ExceptionInfo
-                 (source/capture-nodes storage ids
-                                       #(when (= denied (:id %)) (throw (ex-info "denied" {}))))))
+          (source/capture-nodes storage ids
+                                #(when (= denied (:id %)) (throw (ex-info "denied" {}))))))
     (is (not-any? (fn [[op entity]]
                     (and (contains? #{:query :candidates} op)
                          (contains? #{:binding :fn-slot} entity))) @calls))))

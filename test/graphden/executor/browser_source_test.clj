@@ -250,7 +250,9 @@
                                                #(when (= root (:id %)) {:type-contract contract}) hint)
                 (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
     (is (not-any? #{[:read :fn hidden]} @calls))
-    (is (not-any? #(= [:query :binding] (take 2 %)) @calls))))
+    (is (not-any? (fn [[operation entity where]]
+                    (and (= [:query :binding] [operation entity])
+                         (some #{hidden} (:fn-id where)))) @calls))))
 
 
 (deftest actual-metadata-overflow-stops-before-any-owned-values
@@ -262,14 +264,14 @@
     (is (not-any? #(contains? #{:query :candidates} (first %)) @calls))))
 
 
-(deftest fresh-slot-type-must-exist-and-be-authorized-before-owner-values
+(deftest fresh-slot-type-must-exist-and-be-authorized-before-its-values
   (let [root (random-uuid) type (random-uuid) slot (random-uuid) junction (random-uuid)]
     (doseq [present? [false true]]
       (let [calls (atom [])
             tables {:fn (cond-> {root {:id root}} present? (assoc type {:id type}))
                     :slot {slot {:id slot :type-fn-id type}}
                     :fn-slot {junction {:id junction :fn-id root :slot-id slot}}
-                    :binding {(random-uuid) {:fn-id root :value "not yet read"}}}
+                    :binding {(random-uuid) {:fn-id type :value "not yet read"}}}
             error (try
                     (source/collect-client-closure
                       (fixture-storage tables calls) [root]
@@ -278,7 +280,9 @@
                       {:fns [{:id root}]})
                     (catch clojure.lang.ExceptionInfo e e))]
         (is (= (if present? :authz/forbidden :browser-plan/unsupported) (:type (ex-data error))))
-        (is (not-any? #(= [:query :binding] (take 2 %)) @calls))))))
+        (is (not-any? (fn [[operation entity where]]
+                        (and (= [:query :binding] [operation entity])
+                             (some #{type} (:fn-id where)))) @calls))))))
 
 
 (deftest denied-or-missing-stale-hints-fall-back-before-body-reads

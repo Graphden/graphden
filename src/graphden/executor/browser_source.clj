@@ -230,28 +230,22 @@
                                       :server-bindings server-bindings :manifest? manifest? :server? server?})))
         (let [prepared (when metadata-frontier?
                          (frontier/prepare
-                           pending seen graph
+                           pending seen
                            {:read-fns #(read-rows storage :fn %)
-                            :read-fn-slots #(query-rows storage :fn-slot {:fn-id (vec %)} budget)
-                            :read-slots #(read-rows storage :slot %)
                             :authorize! authorize! :validate-owner! validate-owner-metadata!
-                            :validate-structure! validate-owned-source! :max-functions max-functions}))
+                            :max-functions max-functions}))
               ids (or (:ids prepared) (set (take batch-size pending)))
               fns (or (:fns prepared) (vec (read-rows storage :fn ids)))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
           (let [authorizations (or (:authorizations prepared)
                                    (into {} (map (fn [row] [(:id row) (authorize! row)])) fns))
-                [fn-slots bindings] (if prepared
-                                      [(:fn-slots prepared)
-                                       (limited-query storage :binding {:fn-id (vec ids)} budget)]
-                                      (owner-rows storage ids budget))
+                [fn-slots bindings] (owner-rows storage ids budget)
                 items (if (seq bindings)
                         (limited-query storage :binding-list-item
                                        {:binding-id (mapv :id bindings)} budget)
                         [])
                 slot-ids (set (map :slot-id fn-slots))
-                slots (or (:slots prepared)
-                          (if (seq slot-ids) (vec (read-rows storage :slot slot-ids)) []))
+                slots (if (seq slot-ids) (vec (read-rows storage :slot slot-ids)) [])
                 seen (into seen ids)
                 refs (related-ids fns slots
                                   (cond

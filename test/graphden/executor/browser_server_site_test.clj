@@ -55,6 +55,12 @@
     (is (nil? (site/prepare graph {:root root} [owner (random-uuid)] {} {})))))
 
 
+(deftest an-external-slot-rename-chain-keeps-full-recapture
+  (let [{:keys [root owner graph]} (graph-fixture)]
+    (is (nil? (site/prepare (assoc-in graph [:slots 0 :source-slot-id] (random-uuid))
+                            {:root root} [owner (random-uuid)] {} {})))))
+
+
 (deftest terminal-identity-cannot-prove-reachability-to-its-parent
   (let [{:keys [root owner ancestor graph]} (graph-fixture)
         graph (assoc graph :identity-target-ids #{owner})]

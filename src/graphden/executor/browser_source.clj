@@ -14,6 +14,7 @@
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.source-projection :as projection]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
     [graphden.versioning.branch-local :as branch-local]
@@ -392,6 +393,55 @@
                             #(collect-source storage roots authorize! false false)))
 
 
+(defn- collect-projected-client
+  [storage roots authorize!]
+  (when (and *identity-hints* (satisfies? sp/StorageSourceProjection storage))
+    (try
+      (let [fns (vec (vals (get-in *identity-hints* [:rows :fn])))
+            _ (prepare-authorizations! authorize! fns)
+            scope (projection/authorize-scope! storage fns authorize! validate-owner-metadata!)
+            owners (:owners (projection/scope-data scope storage))
+            edges (sp/read-source-projection storage {:op :source-edges :scope scope})
+            slot-ids (set (map :slot-id (:fn-slots edges)))
+            slots (if (seq slot-ids) (vec (read-rows storage :slot slot-ids)) [])
+            graph (assoc edges :fns fns :slots slots)
+            permissions (into {} (map (fn [[id receipt]] [id (:permission receipt)])) owners)
+            _ (validate-owned-source! graph permissions)
+            {:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]} (deps/index-graph graph)
+            reachable (prefetch/bounded-closure
+                        roots (set (keys fn-map))
+                        (fn [id]
+                          (let [bindings (get bindings-by-fn id)]
+                            (related-ids [(get fn-map id)]
+                                         (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
+                                         (map #(if (capabilities/server-call-slot? (:slot-id %))
+                                                 (dissoc % :ref-fn-id) %) bindings)
+                                         (mapcat #(get items-by-binding (:id %)) bindings)))) max-functions)]
+        (when reachable
+          (let [budget (atom 0)
+                checked-authorize (fn [row & [permission]]
+                                    (if permission
+                                      (authorize! row permission)
+                                      (let [receipt (get owners (:id row))]
+                                        (projection/scope-data scope storage)
+                                        (when-not (= row (:row receipt)) (projection/unavailable!))
+                                        (:permission receipt))))
+                prepared (prefetch/prepare reachable #(read-rows storage %1 %2)
+                                           #(query-rows storage %1 %2 budget) checked-authorize)]
+            (when prepared
+              (binding [*prefetched* prepared]
+                (collect-source storage roots checked-authorize false true budget))))))
+      (catch clojure.lang.ExceptionInfo error
+        ;; Projection is optional and bounded. Only unsupported/advisory
+        ;; failures retry the WHOLE ordinary collector, never a full-row
+        ;; implementation of the physical projection request.
+        (if (contains? #{:storage-error/source-projection-unsupported :storage-error/candidate-limit
+                         :storage-error/bounded-query-unsupported :authz/forbidden :browser-plan/unsupported}
+                       (:type (ex-data error)))
+          nil
+          (throw error))))))
+
+
 (defn collect-client-closure
   "Collect browser source with explicit server-call bindings terminal. Their
    source is separately checked by the server boundary, never exported.
@@ -401,7 +451,8 @@
    (collect-source storage roots authorize! false true))
   ([storage roots authorize! graph-hint]
    (call-with-identity-hints storage roots graph-hint :client
-                             #(collect-source storage roots authorize! false true nil (some? *identity-hints*)))))
+                             #(or (collect-projected-client storage roots authorize!)
+                                  (collect-source storage roots authorize! false true nil (some? *identity-hints*))))))
 
 
 (defn collect-component-identities

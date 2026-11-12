@@ -26,7 +26,7 @@
 
 
 (defn- expand-functions
-  [pending seen state {:keys [read-fns authorize! validate-owner! max-functions]}]
+  [pending seen state {:keys [read-fns prepare-authorizations! authorize! validate-owner! max-functions]}]
   (loop [pending (set/difference (set pending) seen (set (keys (:fns state))))
          state state]
     (check-functions! seen (:fns state) pending max-functions)
@@ -35,6 +35,7 @@
       (let [rows (vec (read-fns pending))]
         (when-not (and (= pending (set (map :id rows))) (= (count rows) (count pending)))
           (reject! :source-missing))
+        (prepare-authorizations! rows)
         (let [permissions (into {} (map (fn [row]
                                           (let [permission (authorize! row)]
                                             (validate-owner! row permission)

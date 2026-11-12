@@ -57,8 +57,9 @@
 
 (defn- prepare-authorizations!
   [authorize! rows]
-  (when-let [prepare (:graphden.tenancy.context/prepare-namespaces (meta authorize!))]
-    (prepare rows)))
+  (when (seq rows)
+    (when-let [prepare (:graphden.tenancy.context/prepare-namespaces (meta authorize!))]
+      (prepare rows))))
 
 
 (defn- read-rows
@@ -239,6 +240,7 @@
                          (frontier/prepare
                            pending seen
                            {:read-fns #(read-rows storage :fn %)
+                            :prepare-authorizations! #(prepare-authorizations! authorize! %)
                             :authorize! authorize! :validate-owner! validate-owner-metadata!
                             :max-functions max-functions}))
               ids (or (:ids prepared) (set (take batch-size pending)))

@@ -121,6 +121,37 @@
     (is (= "current" (:value (first (:bindings hinted)))))))
 
 
+(deftest server-identity-hints-never-load-stale-owned-source
+  (let [root (random-uuid) old (random-uuid) fresh (random-uuid)
+        hint {:fns [{:id root :parent-ids [old]} {:id old}]}
+        graph {:fns [{:id root :parent-ids [fresh]} {:id old} {:id fresh}]
+               :bindings [{:id (random-uuid) :fn-id old :value "stale private body"}
+                          {:id (random-uuid) :fn-id fresh :value "fresh body"}]}
+        calls (atom [])
+        actual (source/collect-identity-hinted-closure
+                 (fixture-storage (graph-tables graph) calls) [root] (constantly nil) hint)]
+    (is (= #{root fresh} (set (map :id (:fns actual)))))
+    (is (= ["fresh body"] (mapv :value (:bindings actual))))
+    (is (not-any? (fn [[op entity where]]
+                    (and (contains? #{:query :candidates} op)
+                         (contains? #{:binding :fn-slot} entity)
+                         (some #{old} (:fn-id where)))) @calls))))
+
+
+(deftest witness-batch-authorizes-all-owners-before-reading-values
+  (let [ids (vec (repeatedly 100 random-uuid))
+        graph {:fns (mapv #(hash-map :id %) ids)}
+        calls (atom [])
+        storage (fixture-storage (graph-tables graph) calls)
+        denied (last ids)]
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (source/capture-nodes storage ids
+                                       #(when (= denied (:id %)) (throw (ex-info "denied" {}))))))
+    (is (not-any? (fn [[op entity]]
+                    (and (contains? #{:query :candidates} op)
+                         (contains? #{:binding :fn-slot} entity))) @calls))))
+
+
 (deftest client-identity-hints-never-prefetch-unreachable-owned-payload
   (let [root (random-uuid) old (random-uuid) fresh (random-uuid)
         hint {:fns [{:id root :parent-ids [old]} {:id old}]}

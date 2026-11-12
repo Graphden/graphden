@@ -1,9 +1,11 @@
-(ns ^:integration graphden.versioning.storage.source-projection-test
+(ns ^:integration ^:serial graphden.versioning.storage.source-projection-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.executor.browser-source :as source]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.grouped-read :as grouped]
+    [graphden.storage.postgres.source-projection :as projected-pg]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.source-projection :as projection]
@@ -51,14 +53,85 @@
 
 (defn- observed
   [f]
-  (let [calls (atom [])]
+  (let [calls (atom []) queries (atom [])]
     {:answer (binding [util/*jdbc-override*
                        {:execute! (fn [connection params opts]
-                                    (swap! calls conj (first params)) (jdbc/execute! connection params opts))
+                                    (swap! calls conj (first params))
+                                    (swap! queries conj params)
+                                    (jdbc/execute! connection params opts))
                         :execute-one! (fn [connection params opts]
-                                        (swap! calls conj (first params)) (jdbc/execute-one! connection params opts))}]
+                                        (swap! calls conj (first params))
+                                        (swap! queries conj params)
+                                        (jdbc/execute-one! connection params opts))}]
                (f))
-     :calls @calls}))
+     :calls @calls :queries @queries}))
+
+
+(deftest readable-stale-owner-is-projected-without-loading-its-values
+  (let [storage (setup/create-versioned-test-storage)
+        {:keys [owner slot]} (fixture-rows storage)
+        extra (sp/create-entity storage :fn {:name "unreachable-readable-owner"})
+        _ (sp/create-entity storage :fn-slot {:fn-id (:id extra) :slot-id (:id slot) :position 0})
+        extra-binding (sp/create-entity storage :binding {:fn-id (:id extra) :slot-id (:id slot)
+                                                          :value "unreachable private literal"})]
+    (snapshot storage
+              (fn [scoped]
+                (let [ordinary (source/collect-client-closure scoped [(:id owner)] (constantly nil))
+                      hint (update ordinary :fns
+                                   #(conj (mapv (fn [row]
+                                                  (if (= (:id owner) (:id row))
+                                                    (update row :parent-ids conj (:id extra)) row)) %) extra))
+                      {:keys [answer queries]} (observed #(source/collect-client-closure scoped [(:id owner)]
+                                                                                         (constantly nil) hint))
+                      owned-payload? (fn [[sql & parameters]]
+                                       (and (re-find #"(?i)SELECT .*\*" sql)
+                                            (re-find #"\"binding(?:_version|_list_item(?:_version)?)?\"" sql)
+                                            (some #{(:id extra-binding)} parameters)))]
+                  (is (seq queries))
+                  (is (not-any? #(= (:id extra) (:id %)) (:fns answer)))
+                  (is (not-any? #(= (:id extra-binding) (:id %)) (:bindings answer)))
+                  (is (not-any? owned-payload? queries)))))))
+
+
+(deftest projected-client-preserves-complete-authorized-body
+  (let [storage (setup/create-versioned-test-storage)
+        {:keys [owner]} (fixture-rows storage)
+        projected-var (ns-resolve 'graphden.executor.browser-source 'collect-projected-client)
+        original @projected-var
+        successes (atom 0)]
+    (snapshot storage
+              (fn [scoped]
+                (let [ordinary (source/collect-client-closure scoped [(:id owner)] (constantly nil))
+                      projected (with-redefs-fn
+                                  {projected-var (fn [& args]
+                                                   (let [result (apply original args)]
+                                                     (when result (swap! successes inc))
+                                                     result))}
+                                  #(source/collect-client-closure scoped [(:id owner)] (constantly nil) ordinary))
+                      rows #(into {} (map (fn [key] [key (set (get % key))]))
+                                  [:fns :slots :fn-slots :bindings :list-items])]
+                  (is (= 1 @successes))
+                  (is (= (rows ordinary) (rows projected)))
+                  (is (= "secret binding payload" (:value (first (:bindings projected)))))
+                  (is (= "secret item payload" (:value (first (:list-items projected))))))))))
+
+
+(deftest deadline-refuses-projection-before-any-owned-body
+  (let [storage (setup/create-versioned-test-storage)
+        {:keys [owner other]} (fixture-rows storage)]
+    (snapshot storage
+              (fn [scoped]
+                (let [cancelled? (atom false)
+                      witness (projection/authorize-scope!
+                                scoped (vals (sp/read-entities scoped :fn [(:id owner) (:id other)]))
+                                (constantly nil) (fn [& _])
+                                #(when @cancelled? (throw (InterruptedException. "cancelled projection"))))]
+                  (reset! cancelled? true)
+                  (let [{:keys [answer calls]}
+                        (observed #(try (sp/read-source-projection scoped {:op :source-edges :scope witness})
+                                        (catch InterruptedException _ :cancelled)))]
+                    (is (= :cancelled answer))
+                    (is (empty? calls))))))))
 
 
 (deftest projected-edges-preserve-ordinary-rows-without-value-transfer
@@ -95,14 +168,15 @@
 (deftest ^:serial ambiguous-version-timestamps-refuse-without-projecting-references
   (let [storage (setup/create-versioned-test-storage)
         {:keys [owner other]} (fixture-rows storage)
-        original sp/read-source-projection]
+        original projected-pg/read-projection
+        injected (atom 0)]
     ;; The normal SQL unique index excludes ties. Simulate a legacy/corrupt
     ;; backend receipt to prove the defensive path refuses before edge reads.
-    (with-redefs [sp/read-source-projection
-                  (fn [backend request]
-                    (let [rows (original backend request)]
+    (with-redefs [projected-pg/read-projection
+                  (fn [backend connection fields-for request]
+                    (let [rows (original backend connection fields-for request)]
                       (if (and (= :query (:op request)) (= :binding-version (:entity request)) (seq rows))
-                        (conj rows (assoc (first rows) :id (random-uuid)))
+                        (do (swap! injected inc) (conj rows (assoc (first rows) :id (random-uuid))))
                         rows)))]
       (snapshot storage
                 (fn [scoped]
@@ -128,18 +202,21 @@
 
 (deftest projection-keeps-merge-cutoff-tombstones-and-item-ownership
   (let [storage (setup/create-versioned-test-storage)
-        {:keys [owner other binding item junction]} (fixture-rows storage)
+        {:keys [owner other item junction] binding-row :binding} (fixture-rows storage)
         feature (vs/switch-branch storage (:id (vs/create-branch! storage "projection-source")))
         target (vs/switch-branch storage (:id (vs/create-branch! storage "projection-target")))]
-    (sp/update-entity feature :binding (:id binding) {:ref-fn-id (:id owner)})
+    (sp/update-entity feature :binding (:id binding-row) {:ref-fn-id (:id owner)})
     (sp/update-entity feature :binding-list-item (:id item) {:ref-fn-id (:id owner)})
     (binding [vs/*tombstone-delete?* true] (sp/delete-entity feature :fn-slot (:id junction)))
     (snapshot feature
               (fn [scoped]
-                (is (empty? (:fn-slots (edges scoped [(:id owner) (:id other)] (constantly nil)))))))
+                (let [ordinary (sp/query-bounded-entities scoped :fn-slot {:fn-id [(:id owner) (:id other)]} 100)
+                      projected (edges scoped [(:id owner) (:id other)] (constantly nil))]
+                  (is (empty? ordinary))
+                  (is (empty? (:fn-slots projected))))))
     (vs/merge-branch! target (:branch-id feature))
     ;; A later unmerged source edit must not cross the stored merge cutoff.
-    (sp/update-entity feature :binding (:id binding) {:ref-fn-id (:id other)})
+    (sp/update-entity feature :binding (:id binding-row) {:ref-fn-id (:id other)})
     (snapshot target
               (fn [scoped]
                 (let [answer (edges scoped [(:id owner) (:id other)] (constantly nil))]

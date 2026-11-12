@@ -13,21 +13,27 @@
 
 
 (deftype ^:private Scope
-  [storage snapshot owners identities branches versions phase])
+  [storage snapshot check! owners identities branches versions phase])
 
 
 (defn authorize-scope!
   "Authorize every fresh metadata owner before any structural source query."
-  [storage rows authorize! validate-owner!]
-  (let [snapshot (grouped/snapshot-cache (tx/datasource storage))]
-    (when-not snapshot (unavailable!))
-    (let [owners (into {} (map (fn [row]
-                                 (let [permission (authorize! row)]
-                                   (validate-owner! row permission)
-                                   [(:id row) {:row row :permission permission}]))) rows)]
-      (Scope. storage snapshot owners {} #{} {} :owners))))
+  ([storage rows authorize! validate-owner!]
+   (authorize-scope! storage rows authorize! validate-owner! (fn [])))
+  ([storage rows authorize! validate-owner! check!]
+   (check!)
+   (let [snapshot (grouped/snapshot-cache (tx/datasource storage))]
+     (when-not snapshot (unavailable!))
+     (let [owners (into {} (map (fn [row]
+                                  (check!)
+                                  (let [permission (authorize! row)]
+                                    (validate-owner! row permission)
+                                    [(:id row) {:row row :permission permission}]))) rows)]
+       (Scope. storage snapshot check! owners {} #{} {} :owners)))))
 
 
+;; Generated deftype fields have no equivalent method-value accessor.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn scope-data
   "Only the exact decorated immutable snapshot may consume a witness."
   [scope storage]
@@ -35,7 +41,9 @@
                  (identical? (.-snapshot ^Scope scope)
                              (grouped/snapshot-cache (tx/datasource storage))))
     (unavailable!))
-  {:snapshot (.-snapshot ^Scope scope) :owners (.-owners ^Scope scope) :identities (.-identities ^Scope scope)
+  ((.-check! ^Scope scope))
+  {:snapshot (.-snapshot ^Scope scope) :check! (.-check! ^Scope scope)
+   :owners (.-owners ^Scope scope) :identities (.-identities ^Scope scope)
    :branches (.-branches ^Scope scope) :versions (.-versions ^Scope scope)
    :phase (.-phase ^Scope scope)})
 
@@ -43,26 +51,26 @@
 (defn retarget
   "A known decorator explicitly preserves the seal when delegating inward."
   [scope from to]
-  (let [{:keys [snapshot owners identities branches versions phase]} (scope-data scope from)]
+  (let [{:keys [snapshot check! owners identities branches versions phase]} (scope-data scope from)]
     (when-not (identical? snapshot (grouped/snapshot-cache (tx/datasource to))) (unavailable!))
-    (Scope. to snapshot owners identities branches versions phase)))
+    (Scope. to snapshot check! owners identities branches versions phase)))
 
 
 (defn resolution-scope
   "Called only by the branch resolver, with its own fresh chain/merge branches."
   [scope outer storage identities branches]
-  (let [{:keys [snapshot owners phase]} (scope-data scope outer)]
+  (let [{:keys [snapshot check! owners phase]} (scope-data scope outer)]
     (when-not (= :owners phase) (unavailable!))
     (when-not (identical? snapshot (grouped/snapshot-cache (tx/datasource storage))) (unavailable!))
-    (Scope. storage snapshot owners identities (set branches) {} :ownership)))
+    (Scope. storage snapshot check! owners identities (set branches) {} :ownership)))
 
 
 (defn versions-scope
   "Freeze version UUIDs only after their complete physical ownership proof."
   [scope storage versions]
-  (let [{:keys [snapshot owners identities branches phase]} (scope-data scope storage)]
+  (let [{:keys [snapshot check! owners identities branches phase]} (scope-data scope storage)]
     (when-not (= :ownership phase) (unavailable!))
-    (Scope. storage snapshot owners identities branches versions :edges)))
+    (Scope. storage snapshot check! owners identities branches versions :edges)))
 
 
 (def physical-fields

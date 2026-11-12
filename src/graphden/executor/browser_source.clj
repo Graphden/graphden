@@ -399,7 +399,8 @@
     (try
       (let [fns (vec (vals (get-in *identity-hints* [:rows :fn])))
             _ (prepare-authorizations! authorize! fns)
-            scope (projection/authorize-scope! storage fns authorize! validate-owner-metadata!)
+            scope (projection/authorize-scope! storage fns authorize! validate-owner-metadata!
+                                               (bound-fn [] (check-snapshot!)))
             owners (:owners (projection/scope-data scope storage))
             edges (sp/read-source-projection storage {:op :source-edges :scope scope})
             slot-ids (set (map :slot-id (:fn-slots edges)))
@@ -435,10 +436,9 @@
         ;; Projection is optional and bounded. Only unsupported/advisory
         ;; failures retry the WHOLE ordinary collector, never a full-row
         ;; implementation of the physical projection request.
-        (if (contains? #{:storage-error/source-projection-unsupported :storage-error/candidate-limit
-                         :storage-error/bounded-query-unsupported :authz/forbidden :browser-plan/unsupported}
-                       (:type (ex-data error)))
-          nil
+        (when-not (contains? #{:storage-error/source-projection-unsupported :storage-error/candidate-limit
+                               :storage-error/bounded-query-unsupported :authz/forbidden :browser-plan/unsupported}
+                             (:type (ex-data error)))
           (throw error))))))
 
 

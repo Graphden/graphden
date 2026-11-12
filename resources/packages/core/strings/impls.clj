@@ -114,9 +114,50 @@
   (every? #(neg? (String/.indexOf regex-metacharacters (int %))) pattern-str))
 
 
+(defn- bounded-ascii-class?
+  "True only for one short, flat ASCII character class. This deliberately
+   excludes nested classes, escapes, flags, and all regex operators."
+  [pattern-str]
+  (let [length (count pattern-str)]
+    (and (<= length 64)
+         (>= length 3)
+         (= \[ (nth pattern-str 0))
+         (= \] (nth pattern-str (dec length)))
+         (let [start (if (= \^ (nth pattern-str 1)) 2 1)]
+           (< start (dec length)))
+         (every? (fn [ch]
+                   (or (<= (int \a) (int ch) (int \z))
+                       (<= (int \A) (int ch) (int \Z))
+                       (<= (int \0) (int ch) (int \9))
+                       (= \- ch)))
+                 (let [interior (subs pattern-str 1 (dec length))]
+                   (if (str/starts-with? interior "^")
+                     (subs interior 1)
+                     interior))))))
+
+
+(defn- compile-regex-direct
+  "Compile a constrained safe regex synchronously, preserving the timed
+   compiler's public error mapping."
+  [pattern-str]
+  (try
+    (re-pattern pattern-str)
+    (catch java.util.regex.PatternSyntaxException e
+      (throw (ex-info "Invalid regex pattern syntax"
+                      {:type :execution-error/invalid-regex
+                       :separator pattern-str
+                       :cause (Throwable/.getMessage e)})))
+    (catch Exception e
+      (throw (ex-info "Regex engine error"
+                      {:type :execution-error/regex-engine-error
+                       :separator pattern-str
+                       :cause (Throwable/.getMessage e)})))))
+
+
 (defn- safe-compile-regex
-  "Literal patterns compile on the caller; regex syntax uses
-   `compile-regex-timed`. Both share a bounded pattern-string cache. Uncached,
+  "Literal patterns and short flat ASCII character classes compile on the
+   caller; other regex syntax uses `compile-regex-timed`. All share a bounded
+   pattern-string cache. Uncached,
    every query-string parse,
    URI split, Prometheus metric and `:filter` element paid one (measured
    ~16 µs vs ~4 µs per `re-find` over a cached pattern). The length cap
@@ -127,9 +168,10 @@
   [pattern-str]
   (check-regex-length! pattern-str)
   (or (java.util.concurrent.ConcurrentHashMap/.get regex-cache pattern-str)
-      (let [p (if (literal-regex? pattern-str)
-                (re-pattern pattern-str)
-                (compile-regex-timed pattern-str))]
+      (let [p (cond
+                (literal-regex? pattern-str) (re-pattern pattern-str)
+                (bounded-ascii-class? pattern-str) (compile-regex-direct pattern-str)
+                :else (compile-regex-timed pattern-str))]
         (when (>= (java.util.concurrent.ConcurrentHashMap/.size regex-cache) regex-cache-cap)
           (java.util.concurrent.ConcurrentHashMap/.clear regex-cache))
         (java.util.concurrent.ConcurrentHashMap/.put regex-cache pattern-str p)

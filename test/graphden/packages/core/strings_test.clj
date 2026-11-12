@@ -43,6 +43,46 @@
                    :limit (delay nil)} nil)))))
 
 
+(deftest bounded-ascii-character-class-does-not-wait-for-regex-worker
+  (let [replace (impls/impl-of :re-replace)
+        timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)]
+    (binding [sp-config/*regex-compile-timeout-ms* 1]
+      (with-redefs-fn {timed (fn [_] (throw (ex-info "safe class entered regex worker" {})))}
+        #(is (= "graph_den-42_"
+                (replace {:string (delay "graph den-42!")
+                          :pattern (delay "[^a-z0-9-]")
+                          :replacement (delay "_")} nil)))))))
+
+
+(deftest bounded-ascii-character-class-routing-and-grammar
+  (let [compile (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
+        timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)
+        calls (atom [])
+        via-timed? (fn [pattern]
+                     (with-redefs-fn {timed (fn [p]
+                                              (swap! calls conj p)
+                                              (re-pattern "x"))}
+                       #(compile pattern)))]
+    (doseq [pattern ["[]" "[^]" "[a-z" "[a-z]x" "[[a]" "[\\w]" "[a^]"]]
+      (is (instance? java.util.regex.Pattern (via-timed? (str pattern (random-uuid))))
+          (str "fallback pattern compiles: " pattern)))
+    (is (= 7 (count @calls)) "all grammar exclusions route through the timed compiler")
+    (let [bad-range "[z-a]"
+          error (try (via-timed? bad-range) nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :execution-error/invalid-regex (:type (ex-data error))))
+      (is (= bad-range (:separator (ex-data error))))
+      (is (string? (:cause (ex-data error))))
+      (is (= 7 (count @calls)) "invalid ranges use direct compilation, not the worker"))
+    (let [length-64 (str "[" (apply str (repeat 62 "a")) "]")
+          length-65 (str "[" (apply str (repeat 63 "a")) "]")]
+      (is (= 64 (count length-64)))
+      (is (= 65 (count length-65)))
+      (is (instance? java.util.regex.Pattern (compile length-64)))
+      (is (= 7 (count @calls)) "64-character classes compile synchronously")
+      (is (instance? java.util.regex.Pattern (via-timed? length-65)))
+      (is (= length-65 (last @calls)) "65-character classes use the timed compiler"))))
+
+
 ;; ============================================================================
 ;; :re-replace — regex replace (the regex sibling of literal :str-replace).
 ;; Added for the :render-prometheus graph decomposition (key sanitising).

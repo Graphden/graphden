@@ -8,7 +8,7 @@
 ;; so day-to-day local runs don't pay the cloverage instrumentation
 ;; cost.
 ;;
-;; UNIT SUITE ONLY: the integration suite is deliberately omitted from
+;; The full integration suite is deliberately omitted from
 ;; this config. Empirical 2026-06-23 finding: every CRUD NS that
 ;; integration tests exercise (`crud.entities`, `crud.fn-execution.*`,
 ;; etc.) reports 0% form/line coverage anyway because cr/execute's
@@ -20,7 +20,9 @@
 ;; → Adding integration to the cloverage pass paid ~30 min wall for
 ;;   ~0% useful per-NS attribution. Integration tests run via `bb test`
 ;;   / `bb test-integration` un-instrumented; that's the signal we use
-;;   for those code paths.
+;;   for those code paths. The narrowly selected certificate suite below
+;;   directly exercises security-critical storage code; it does yield
+;;   instrumented coverage and runs in the same report as the unit suite.
 #kaocha/v1
 {:tests
  [{:id :unit
@@ -34,7 +36,12 @@
    ;; a stable "4 errors, 35 failures" under cloverage that the
    ;; workflow's un-pipefail'd `| tee` then swallowed for days.
    :skip-meta [:integration :container-e2e :perf]
-   :kaocha/parallelism 6}]
+   :kaocha/parallelism 6}
+  {:id :certificate-integration
+   :test-paths ["test"]
+   :ns-patterns ["^graphden\\.storage\\.postgres\\.source-certificate-test$"]
+   :focus-meta [:integration]
+   :kaocha/parallelism 1}]
 
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/parallel

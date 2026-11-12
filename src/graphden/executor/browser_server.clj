@@ -14,6 +14,7 @@
     [graphden.editor.root-binding :as root-binding]
     [graphden.executor.browser-plan :as wire]
     [graphden.executor.browser-server-execution :as server-execution]
+    [graphden.executor.browser-server-site :as server-site]
     [graphden.executor.browser-server-source :as server-source]
     [graphden.executor.browser-server-values :as values]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -220,7 +221,7 @@
         evidence (client-fingerprint
                    {:graph (normalized-graph graph) :anchor anchor-row
                     :targets (into {} (map (fn [[id proof]] [id (:fingerprint proof)])) targets)})]
-    {:snapshot captured :targets targets :calls calls :evidence evidence}))
+    {:snapshot captured :targets targets :calls calls :evidence evidence :anchor-evidence anchor-row}))
 
 
 (defn- capture-client-source
@@ -250,12 +251,14 @@
 
 
 (defn- export-captured-plan
-  [ctx request policy entries anchor {:keys [snapshot calls targets evidence]}]
+  [ctx request policy entries anchor {:keys [snapshot calls targets evidence anchor-evidence]}]
   (let [epoch (context/invalidation-epoch ctx)
+        site-proofs (server-site/prepare-all (:graph snapshot) entries calls targets anchor-evidence)
         descriptors (into {}
                           (map (fn [[site target]]
                                  [site (issue! {:scope (scope ctx request) :anchor anchor
                                                 :entries entries :site site :target target
+                                                :site-proof (get site-proofs site)
                                                 :evidence evidence :epoch epoch
                                                 :contract (select-keys (get targets target)
                                                                        [:input-type :output-type])})]))
@@ -303,10 +306,43 @@
     (when-let [guard (:execute-guard ctx)] (guard ctx target))))
 
 
+(defn- capture-site
+  "Refresh only the selected issued path and target in this new snapshot.
+   Witnesses establish provenance, never permissions: every path owner and
+   selected target is freshly authorized before its owned source is read."
+  [ctx storage authorize! policy issued]
+  (let [{:keys [ids evidence target-fingerprint]} (:site-proof issued)
+        anchor-evidence (anchor! storage authorize! policy (:anchor issued))
+        graph (source/capture-nodes storage ids authorize!)
+        expected (server-site/fingerprint graph ids anchor-evidence target-fingerprint)]
+    (when-not (= evidence expected) (reject! :server-binding-changed))
+    (doseq [id (vals (:entries issued))]
+      (let [row (some #(when (= id (:id %)) %) (:fns graph))]
+        (when-not row (reject! :server-root-missing))
+        (authorize! row {:execute? true})))
+    (let [[owner slot] (:site issued)
+          index (lookups/build-lookups graph)
+          binding (filterv #(= slot (:slot-id %)) (bindings/collect-bindings owner index))
+          target (:target issued)]
+      (when-not (and (= 1 (count binding)) (= :ref (:kind (first binding)))
+                     (= target (:ref-id (first binding))))
+        (reject! :server-binding-changed))
+      (let [target-source (server-source/capture ctx storage authorize! policy target)]
+        (when-not (and (= target-fingerprint (:fingerprint target-source))
+                       (= (:contract issued) (select-keys target-source [:input-type :output-type])))
+          (reject! :server-binding-changed))
+        {:snapshot {:graph (update graph :fns conj
+                                   (some #(when (= target (:id %)) %) (:fns (:graph target-source))))}
+         :targets {target target-source} :calls {(:site issued) target} :evidence evidence}))))
+
+
 (defn- current-call!
   [ctx storage authorize! policy issued]
-  (let [captured (capture-client ctx storage authorize! policy (:entries issued) (:anchor issued))]
-    (when-not (and (= (:evidence issued) (:evidence captured))
+  (let [captured (if (:site-proof issued)
+                   (capture-site ctx storage authorize! policy issued)
+                   (capture-client ctx storage authorize! policy (:entries issued) (:anchor issued)))
+        evidence (or (get-in issued [:site-proof :evidence]) (:evidence issued))]
+    (when-not (and (= evidence (:evidence captured))
                    (= (:target issued) (get-in captured [:calls (:site issued)])))
       (reject! :server-binding-changed))
     (let [row (some #(when (= (:target issued) (:id %)) %) (get-in captured [:snapshot :graph :fns]))]

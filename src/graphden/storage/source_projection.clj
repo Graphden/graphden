@@ -91,7 +91,7 @@
         owner-fields (cond-> #{:id :org-id :branch-id :created-at :deleted-at :fn-id :binding-id}
                        identity-field (conj identity-field))]
     (when-not (and (contains? #{:ownership :edges} phase)
-                   (seq requested) (every? allowed requested)
+                   (seq allowed) (seq requested) (every? allowed requested)
                    (integer? max-rows) (<= 0 max-rows 65536)
                    (case op
                      :read-ids (and (coll? ids)

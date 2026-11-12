@@ -27,7 +27,7 @@
   (projection/validate-physical! storage request)
   (let [columns (set (physical-columns connection entity))
         physical #(keyword (util/kw->snake-case %))
-        optional #{:fn-id :org-id}
+        optional #{:fn-id}
         selected (mapv (fn [field]
                          (let [column (physical field)]
                            (cond (contains? columns column) column

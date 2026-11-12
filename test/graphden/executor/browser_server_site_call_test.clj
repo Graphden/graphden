@@ -20,10 +20,13 @@
 (defn- fixture-graph
   []
   (let [root (random-uuid) owner (random-uuid) target (random-uuid) sibling (random-uuid)
+        type (random-uuid) helper (random-uuid)
         ref-slot (random-uuid) sibling-slot (random-uuid) site-slot capabilities/server-call-slot-id]
-    {:root root :owner owner :target target :sibling sibling :site-slot site-slot
-     :graph {:fns (mapv #(hash-map :id %) [root owner target sibling])
-             :slots [{:id ref-slot :name "selected"} {:id sibling-slot :name "other"} {:id site-slot :name "func"}]
+    {:root root :owner owner :target target :sibling sibling :site-slot site-slot :type type
+     :graph {:fns (into (mapv #(hash-map :id %) [root owner target sibling])
+                        [{:id type :parent-ids [helper]} {:id helper :constraint {:kind :original}}])
+             :slots [{:id ref-slot :name "selected"} {:id sibling-slot :name "other"}
+                     {:id site-slot :name "func" :type-fn-id type}]
              :fn-slots [{:id (random-uuid) :fn-id root :slot-id ref-slot :position 0}
                         {:id (random-uuid) :fn-id root :slot-id sibling-slot :position 1}
                         {:id (random-uuid) :fn-id owner :slot-id site-slot :position 0}]
@@ -90,7 +93,7 @@
 
 
 (deftest root-path-and-target-revocation-refuse-before-or-after-execution
-  (doseq [which [:root :owner :target] stage [:before :after]]
+  (doseq [which [:root :owner :target :type] stage [:before :after]]
     (with-site-call
       (fn [{:keys [invoke denied after] :as fixture}]
         (let [revoke #(swap! denied conj (which fixture))]
@@ -99,13 +102,15 @@
 
 
 (deftest source-anchor-and-target-changes-never-release-a-result
-  (doseq [change [:binding :parent :slot-type :anchor :target] stage [:before :after]]
+  (doseq [change [:binding :parent :slot-type :type-body :type-dependency-body :anchor :target] stage [:before :after]]
     (with-site-call
       (fn [{:keys [invoke graph after anchor target-digest]}]
         (let [mutate #(case change
                         :binding (swap! graph assoc-in [:bindings 2 :ref-fn-id] (random-uuid))
                         :parent (swap! graph assoc-in [:fns 1 :parent-ids] [(random-uuid)])
                         :slot-type (swap! graph assoc-in [:slots 2 :type-fn-id] (random-uuid))
+                        :type-body (swap! graph assoc-in [:fns 4 :constraint] {:kind :changed})
+                        :type-dependency-body (swap! graph assoc-in [:fns 5 :constraint] {:kind :changed})
                         :anchor (swap! anchor assoc :description "changed")
                         :target (reset! target-digest "changed"))]
           (if (= :before stage) (mutate) (reset! after mutate))

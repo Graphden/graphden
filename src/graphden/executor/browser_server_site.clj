@@ -1,8 +1,22 @@
 (ns graphden.executor.browser-server-site
   "Bounded witnesses connecting a trusted exported entry to one server site."
   (:require
+    [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.deps :as deps]
     [graphden.types.check.provenance :as provenance]))
+
+
+(defn- source-dependencies
+  [index id]
+  (let [row (get-in index [:fn-map id] {})
+        bs (get-in index [:bindings-by-fn id])
+        slots (keep #(get-in index [:slot-map (:slot-id %)]) (get-in index [:fn-slots-by-fn id]))]
+    (into #{} (remove nil?)
+          (concat (:parent-ids row) (keep row [:base-fn-id :return-type-fn-id :element-fn-id])
+                  (keep :type-fn-id slots)
+                  (mapcat #(keep % [:type-override-fn-id :resolver-fn-id]) bs)
+                  (keep #(when-not (capabilities/server-call-slot? (:slot-id %)) (:ref-fn-id %)) bs)
+                  (keep :ref-fn-id (mapcat #(get-in index [:items-by-binding (:id %)]) bs))))))
 
 
 (defn- predecessor-map
@@ -12,7 +26,7 @@
     (if-let [id (peek pending)]
       (let [next-ids (remove #(contains? predecessors %)
                              (filter #(contains? (:fn-map index) %)
-                                     (deps/forward-deps-of id index)))]
+                                     (source-dependencies index id)))]
         (recur (into (pop pending) next-ids)
                (reduce #(assoc %1 %2 id) predecessors next-ids)))
       predecessors)))
@@ -34,6 +48,31 @@
                    (remove seen (get-in index [:fn-map id :parent-ids])))
              (conj seen id))
       seen)))
+
+
+(defn- type-dependencies
+  [index id]
+  (let [row (get-in index [:fn-map id] {})
+        bs (get-in index [:bindings-by-fn id])
+        slots (keep #(get-in index [:slot-map (:slot-id %)]) (get-in index [:fn-slots-by-fn id]))]
+    (into #{} (remove nil?)
+          (concat (keep row [:base-fn-id :return-type-fn-id :element-fn-id])
+                  (keep :type-fn-id slots)
+                  (mapcat #(keep % [:type-override-fn-id :resolver-fn-id]) bs)))))
+
+
+(defn- with-type-closure
+  [index ids]
+  (loop [pending (into #{} (mapcat #(type-dependencies index %)) ids)
+         expanded #{}
+         seen (set ids)]
+    (when (<= (count (into seen pending)) 128)
+      (if-let [id (first pending)]
+        (when (contains? (:fn-map index) id)
+          (let [expanded (conj expanded id)]
+            (recur (into (disj pending id) (remove expanded (source-dependencies index id)))
+                   expanded (conj seen id))))
+        seen))))
 
 
 (defn- canonical-rows
@@ -78,7 +117,7 @@
 (defn- prepare-indexed
   [graph index predecessors site target anchor]
   (when-let [path (path-to predecessors (first site))]
-    (let [ids (with-ancestors index path)]
+    (when-let [ids (with-type-closure index (with-ancestors index path))]
       (when (and (<= (count ids) 128) (every? #(contains? (:fn-map index) %) ids))
         {:ids (vec (sort-by str ids)) :site site :target-fingerprint (:fingerprint target)
          :evidence (fingerprint graph ids anchor (:fingerprint target))}))))

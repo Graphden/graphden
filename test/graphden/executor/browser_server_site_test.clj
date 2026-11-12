@@ -46,6 +46,15 @@
     (is (nil? (site/prepare graph {:root root :other sibling} [owner (random-uuid)] {} {})))))
 
 
+(deftest an-oversized-type-closure-keeps-full-recapture
+  (let [{:keys [root owner graph]} (graph-fixture)
+        types (vec (repeatedly 130 random-uuid))
+        rows (mapv (fn [id parent] (cond-> {:id id} parent (assoc :parent-ids [parent])))
+                   types (concat (rest types) [nil]))
+        graph (-> graph (update :fns into rows) (assoc-in [:slots 0 :type-fn-id] (first types)))]
+    (is (nil? (site/prepare graph {:root root} [owner (random-uuid)] {} {})))))
+
+
 (deftest terminal-identity-cannot-prove-reachability-to-its-parent
   (let [{:keys [root owner ancestor graph]} (graph-fixture)
         graph (assoc graph :identity-target-ids #{owner})]

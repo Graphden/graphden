@@ -20,7 +20,8 @@
 
 
 (defn- candidate-ids
-  [storage entity where budget]
+  [storage entity where budget check!]
+  (check!)
   (let [remaining (- 16384 @budget)
         ids (bounded/candidate-ids storage entity where
                                    (select-keys (get resolution/entity-config entity)
@@ -106,12 +107,13 @@
 (defn collect-edges
   "Only a fresh, live owner authorization witness can request all edge kinds."
   [outer storage branch-id scope]
-  (let [{:keys [owners phase]} (projection/scope-data scope outer)
+  (let [{:keys [owners phase check!]} (projection/scope-data scope outer)
         _ (when-not (= phase :owners) (projection/unavailable!))
         owner-ids (set (keys owners)) budget (atom 0) physical-budget (atom 0)
         where {:fn-id (vec owner-ids)}
-        candidates (into {} (map #(vector % (candidate-ids storage % where budget))) [:fn-slot :binding])
+        candidates (into {} (map #(vector % (candidate-ids storage % where budget check!))) [:fn-slot :binding])
         plans (into {} (map (fn [[entity ids]]
+                              (check!)
                               [entity (resolution/source-projection-plan storage entity ids branch-id)])) candidates)
         scope* (projection/resolution-scope scope outer storage candidates (apply set/union (map branches (vals plans))))
         probes (into {} (map (fn [[entity ids]]
@@ -128,7 +130,8 @@
         _ (when (some #(and (:fn-id %) (not (contains? owner-ids (:fn-id %)))) raw-bindings)
             (projection/unavailable!))
         item-where {:binding-id (vec binding-ids)}
-        item-ids (if (seq binding-ids) (candidate-ids storage :binding-list-item item-where budget) #{})
+        item-ids (if (seq binding-ids) (candidate-ids storage :binding-list-item item-where budget check!) #{})
+        _ (check!)
         item-plan (resolution/source-projection-plan storage :binding-list-item item-ids branch-id)
         item-scope (projection/resolution-scope scope outer storage (assoc candidates :binding-list-item item-ids)
                                                 (branches item-plan))

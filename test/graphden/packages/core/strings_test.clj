@@ -79,11 +79,11 @@
                                               (swap! calls conj p)
                                               #"x")}
                        #(compile-fn pattern)))]
-    (doseq [pattern ["[a-z]+" "[a][b]" "[a&&b]" "[\\d]" "[é]"
+    (doseq [pattern ["[]" "[^]" "[a^]" "[[a]" "[a-z]+" "[a][b]" "[a&&b]" "[\\d]" "[é]"
                      "[a_]" "[a/]" "(?i)[a]" "[a]\n"]]
       (is (instance? java.util.regex.Pattern (via-timed? pattern))
           (str "grammar exclusion routes through the timed compiler: " (pr-str pattern))))
-    (is (= 9 (count @calls)) "all exact grammar exclusions route through the timed compiler")
+    (is (= 13 (count @calls)) "all exact grammar exclusions route through the timed compiler")
     (doseq [bad-range ["[z-a]" "[a--]"]]
       (dotimes [_ 2]
         (let [error (try (via-timed? bad-range) nil
@@ -93,16 +93,16 @@
           (is (string? (:cause (ex-data error))))
           (is (nil? (java.util.concurrent.ConcurrentHashMap/.get cache bad-range))
               "invalid classes are not cached")))
-      (is (= 9 (count @calls)) "invalid ranges use direct compilation, not the worker"))
+      (is (= 13 (count @calls)) "invalid ranges use direct compilation, not the worker"))
     (let [length-64 (str "[" (str/join (repeat 62 "a")) "]")
           length-65 (str "[" (str/join (repeat 63 "a")) "]")]
       (is (= 64 (count length-64)))
       (is (= 65 (count length-65)))
       (java.util.concurrent.ConcurrentHashMap/.remove cache length-64)
       (is (instance? java.util.regex.Pattern (compile-fn length-64)))
-      (is (= 9 (count @calls)) "64-character classes compile synchronously")
+      (is (= 13 (count @calls)) "64-character classes compile synchronously")
       (is (instance? java.util.regex.Pattern (via-timed? length-65)))
-      (is (= 10 (count @calls)) "65-character class adds one timed compilation")
+      (is (= 14 (count @calls)) "65-character class adds one timed compilation")
       (is (= length-65 (last @calls)) "65-character classes use the timed compiler"))))
 
 

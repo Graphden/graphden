@@ -89,7 +89,15 @@
         identities (if (seq ids)
                      (physical storage scope budget
                                {:op :read-ids :entity entity :fields [:id :org-id] :ids (vec ids)}) [])]
-    (when-not (= (set (map :id probes)) (set (map :id versions))) (projection/unavailable!))
+    (let [{:keys [id-field owner-field]} (get configs entity)
+          metadata [:id id-field owner-field :branch-id :created-at :deleted-at]
+          proof (into {} (map (juxt :id #(select-keys % metadata))) probes)]
+      (when-not (and (= (count probes) (count versions))
+                     (= (set (keys proof)) (set (map :id versions)))
+                     (every? #(= (get proof (:id %)) (select-keys % metadata)) versions)
+                     (= ids (set (map :id identities)))
+                     (= (count ids) (count identities)))
+        (projection/unavailable!)))
     (resolution/resolve-source-projection storage entity plan versions
                                           (into {} (map (juxt :id identity)) identities)
                                           binding-owners where)))

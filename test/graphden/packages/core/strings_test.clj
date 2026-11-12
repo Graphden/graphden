@@ -56,6 +56,18 @@
                              :replacement (delay "_")} nil)))))))
 
 
+(deftest bounded-ascii-character-class-preserves-java-matching
+  (let [compile-fn (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
+        timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)
+        cache @(ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)]
+    (doseq [[pattern input expected] [["[a]" "a" "a"] ["[a-z]" "m" "m"]
+                                      ["[-a]" "-" "-"] ["[a-]" "-" "-"]
+                                      ["[-]" "-" "-"] ["[^a]" "é" "é"]]]
+      (java.util.concurrent.ConcurrentHashMap/.remove cache pattern)
+      (with-redefs-fn {timed (fn [_] (throw (ex-info "safe class entered regex worker" {})))}
+        #(is (= expected (re-find (compile-fn pattern) input)) (str "pattern " pattern))))))
+
+
 (deftest bounded-ascii-character-class-routing-and-grammar
   (let [compile-fn (ns-resolve 'graphden.packages.core.strings.impls 'safe-compile-regex)
         timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)

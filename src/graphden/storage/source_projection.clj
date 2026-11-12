@@ -13,18 +13,18 @@
 
 
 (deftype ^:private Scope
-  [storage owners identities branches versions phase])
+  [storage snapshot owners identities branches versions phase])
 
 
 (defn authorize-scope!
   "Authorize every fresh metadata owner before any structural source query."
   [storage rows authorize! validate-owner!]
-  (let [owners (into {} (map (fn [row]
-                               (let [permission (authorize! row)]
-                                 (validate-owner! row permission)
-                                 [(:id row) {:row row :permission permission}]))) rows)]
-    (let [snapshot (grouped/snapshot-cache (tx/datasource storage))]
-      (when-not snapshot (unavailable!))
+  (let [snapshot (grouped/snapshot-cache (tx/datasource storage))]
+    (when-not snapshot (unavailable!))
+    (let [owners (into {} (map (fn [row]
+                                 (let [permission (authorize! row)]
+                                   (validate-owner! row permission)
+                                   [(:id row) {:row row :permission permission}]))) rows)]
       (Scope. storage snapshot owners {} #{} {} :owners))))
 
 

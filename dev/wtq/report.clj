@@ -99,9 +99,9 @@
            :complete true
            :exit exit
            :failure-signature (when (and (= 1 exit)
-                                              (re-find #"(?m)^WTQ_FAILED_STAGE=integration$" output)
-                                              (heap-oom-integration? output))
-                                     :integration-jvm-heap-oom)
+                                         (re-find #"(?m)^WTQ_FAILED_STAGE=integration$" output)
+                                         (heap-oom-integration? output))
+                                :integration-jvm-heap-oom)
            :failed-stage (when (= 1 exit)
                            (some->> (re-seq #"(?m)^WTQ_FAILED_STAGE=(ci|build|e2e|visual|integration|fleet)$" output)
                                     last second keyword))

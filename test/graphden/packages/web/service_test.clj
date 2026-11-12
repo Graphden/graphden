@@ -30,7 +30,7 @@
         rows-f (impls/impl-of :_service-rows)
         facts-f (impls/impl-of :_service-instance-facts)
         ctx {:storage storage :executor-id "local"}
-        now (java.time.Instant/now)
+        now (java.time.Instant/ofEpochMilli (System/currentTimeMillis))
         now-ms (java.time.Instant/.toEpochMilli now)]
     (try
       (let [svc-fn (setup/create-base-fn! storage "se-listener" :any)

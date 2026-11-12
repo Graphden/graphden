@@ -23,6 +23,7 @@
     [graphden.storage.postgres.metadata :as metadata]
     [graphden.storage.postgres.migration :as migration]
     [graphden.storage.postgres.pool :as pool]
+    [graphden.storage.postgres.source-projection :as source-projection]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
@@ -280,6 +281,14 @@
     [_this entity-name where group-cols]
     (crud/query-latest-per-group pool entity-name where group-cols
                                  (get-entity-fields pool metadata-cache lock entity-name)))
+
+
+  sp/StorageSourceProjection
+
+  (read-source-projection
+    [this request]
+    (source-projection/read-projection
+      this pool #(get-entity-fields pool metadata-cache lock %) request))
 
 
   sp/StorageBoundedQuery

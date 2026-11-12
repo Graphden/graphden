@@ -114,6 +114,41 @@
       (finally (sp/close storage)))))
 
 
+(deftest mixed-bounded-and-history-reads-retain-complete-history-and-order
+  (let [storage (setup/create-test-storage)
+        fields (into {} (map (fn [[field type]] [field {:uuid (random-uuid) :type type :nullable? true}]))
+                     {:binding-id :uuid :branch-id :uuid :name :text :created-at :timestamptz})]
+    (try
+      (sp/initialize storage (th/make-schema :entity-name :binding-version :fields fields))
+      (let [owner (random-uuid) branch (random-uuid)
+            old (sp/create-entity storage :binding-version
+                                  {:binding-id owner :branch-id branch :name "old"
+                                   :created-at (Instant/parse "2026-01-01T00:00:00Z")})
+            newer (sp/create-entity storage :binding-version
+                                    {:binding-id owner :branch-id branch :name "new"
+                                     :created-at (Instant/parse "2026-01-02T00:00:00Z")})
+            latest {:op :latest :entity :binding-version :where {:binding-id [owner] :branch-id [branch]}
+                    :group-cols [:binding-id :branch-id]}
+            history {:op :query :entity :binding-version :where {:binding-id [owner] :branch-id [branch]}}
+            operations [latest history latest]]
+        (snapshot storage
+                  (fn [scoped _]
+                    (let [expected (mapv #(grouped/scalar-operation scoped %) operations)
+                          _ (grouped/read-operations scoped operations)
+                          warm (observed #(grouped/read-operations scoped operations))]
+                      (is (= (mapv bag expected) (mapv bag (:result warm))))
+                      (is (= #{(:id old) (:id newer)} (set (map :id (get-in warm [:result 1])))))
+                      (is (= 2 (count (:calls warm))))
+                      (is (= 1 (count (filter #(str/includes? (first %) "UNION ALL") (:calls warm)))))
+                      (is (not-any? #(str/includes? (str/upper-case (first %)) "LIMIT") (:calls warm)))
+                      (let [ordered [latest (assoc history :opts {:order-by [[:name :desc]]}) latest]
+                            answer (observed #(grouped/read-operations scoped ordered))]
+                        (is (= (mapv #(grouped/scalar-operation scoped %) ordered) (:result answer)))
+                        (is (= 3 (count (:calls answer))))
+                        (is (not-any? #(str/includes? (first %) "UNION ALL") (:calls answer))))))))
+      (finally (sp/close storage)))))
+
+
 (deftest grouped-identities-restore-junction-order-without-field-double-decode
   (let [storage (setup/create-test-storage)]
     (try

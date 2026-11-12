@@ -45,7 +45,9 @@
 
 (deftest bounded-ascii-character-class-does-not-wait-for-regex-worker
   (let [replace (impls/impl-of :re-replace)
-        timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)]
+        timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)
+        cache @(ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)]
+    (java.util.concurrent.ConcurrentHashMap/.remove cache "[^a-z0-9-]")
     (binding [sp-config/*regex-compile-timeout-ms* 1]
       (with-redefs-fn {timed (fn [_] (throw (ex-info "safe class entered regex worker" {})))}
         #(is (= "graph_den-42_"
@@ -86,8 +88,9 @@
       (is (= 65 (count length-65)))
       (java.util.concurrent.ConcurrentHashMap/.remove cache length-64)
       (is (instance? java.util.regex.Pattern (compile length-64)))
-      (is (= 7 (count @calls)) "64-character classes compile synchronously")
+      (is (= 9 (count @calls)) "64-character classes compile synchronously")
       (is (instance? java.util.regex.Pattern (via-timed? length-65)))
+      (is (= 10 (count @calls)) "65-character class adds one timed compilation")
       (is (= length-65 (last @calls)) "65-character classes use the timed compiler"))))
 
 

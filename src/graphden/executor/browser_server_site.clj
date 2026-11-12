@@ -119,8 +119,14 @@
   (when-let [path (path-to predecessors (first site))]
     (when-let [ids (with-type-closure index (with-ancestors index path))]
       (when (and (<= (count ids) 128) (every? #(contains? (:fn-map index) %) ids))
-        {:ids (vec (sort-by str ids)) :site site :target-fingerprint (:fingerprint target)
-         :evidence (fingerprint graph ids anchor (:fingerprint target))}))))
+        (let [witness (project graph ids)
+              slot-ids (set (map :id (:slots witness)))]
+          ;; A rename-view may consult its source slot even without another
+          ;; function dependency. Unknown external slot chains keep full capture.
+          (when (every? #(or (nil? (:source-slot-id %)) (contains? slot-ids (:source-slot-id %)))
+                        (:slots witness))
+            {:ids (vec (sort-by str ids)) :site site :target-fingerprint (:fingerprint target)
+             :evidence (fingerprint witness ids anchor (:fingerprint target))}))))))
 
 
 (defn prepare-all

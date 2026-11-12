@@ -44,8 +44,8 @@
 
 
 (defn- with-site-call
-  [consume]
-  (let [{:keys [root owner target site-slot] :as fixture} (fixture-graph)
+  [consume & [customize]]
+  (let [{:keys [root owner target site-slot] :as fixture} ((or customize identity) (fixture-graph))
         graph (atom (:graph fixture)) branch (random-uuid)
         anchor (atom {:id (random-uuid) :fn-id (random-uuid) :slot-id (random-uuid) :ref-fn-id root})
         denied (atom #{}) target-digest (atom "target")
@@ -129,3 +129,33 @@
       (let [result (invoke)]
         (is (= "forbidden" (:failure-type result)))
         (is (false? (:server-stale? result)))))))
+
+
+(defn- change-row
+  [rows id changes]
+  (mapv #(if (= id (:id %)) (merge % changes) %) rows))
+
+
+(deftest inherited-site-bindings-and-multiple-parent-order-remain-pinned
+  (doseq [change [:binding :parent-order :rename] stage [:before :after]]
+    (let [parent (random-uuid) other-parent (random-uuid)]
+      (with-site-call
+        (fn [{:keys [invoke graph after owner]}]
+          (is (true? (:ok (invoke))) "The inherited site is callable before modification")
+          (let [binding-id (:id (first (filter #(= parent (:fn-id %)) (:bindings @graph))))
+                mutate #(case change
+                          :binding (swap! graph update :bindings change-row binding-id {:ref-fn-id (random-uuid)})
+                          :parent-order (swap! graph update :fns change-row owner {:parent-ids [other-parent parent]})
+                          :rename (swap! graph update :slots change-row capabilities/server-call-slot-id
+                                         {:source-slot-id (random-uuid) :name "renamed"}))]
+            (if (= :before stage) (mutate) (reset! after mutate))
+            (is (false? (:ok (invoke))))))
+        (fn [{:keys [graph owner site-slot] :as fixture}]
+          (assoc fixture :graph
+                 (-> graph
+                     (update :fns #(into (change-row % owner {:parent-ids [parent other-parent]})
+                                         [{:id parent} {:id other-parent}]))
+                     (update :fn-slots #(mapv (fn [row]
+                                                (if (= owner (:fn-id row)) (assoc row :fn-id parent) row)) %))
+                     (update :bindings #(mapv (fn [row]
+                                                (if (= site-slot (:slot-id row)) (assoc row :fn-id parent) row)) %)))))))))

@@ -1,5 +1,5 @@
 (ns graphden.executor.browser-source-frontier
-  "Expand only fresh function/slot declarations before reading owner values.
+  "Expand only fresh function declarations before reading owner values.
    References stored in binding/list-item payload never participate here.
    All callbacks must use the same decorated immutable source snapshot."
   (:require
@@ -46,40 +46,10 @@
 
 
 (defn prepare
-  "Return all actual metadata-reachable owners, fresh authorization receipts and
-   declarations. The caller shares its normal candidate budget through callbacks
-   and must still validate complete source after loading bindings/list items."
-  [roots seen graph {:keys [read-fn-slots read-slots validate-structure!] :as callbacks}]
-  (loop [pending roots
-         state {:fns {} :authorizations {} :fn-slots []
-                :slots (into {} (map (juxt :id identity)) (:slots graph)) :scanned #{}}]
-    (let [state (expand-functions pending seen state callbacks)
-          ids (set/difference (set (keys (:fns state))) (:scanned state))]
-      (if (empty? ids)
-        (let [needed (set (map :slot-id (:fn-slots state)))]
-          (-> state
-              (assoc :ids (set (keys (:fns state)))
-                     :fns (vec (sort-by (comp str :id) (vals (:fns state))))
-                     :slots (vec (vals (select-keys (:slots state) needed))))
-              (dissoc :scanned)))
-        (let [junctions (vec (read-fn-slots ids))
-              _ (when-not (every? #(contains? ids (:fn-id %)) junctions)
-                  (reject! :source-owner-mismatch))
-              slot-ids (set (map :slot-id junctions))
-              missing (set/difference slot-ids (set (keys (:slots state))))
-              fresh-slots (if (seq missing) (vec (read-slots missing)) [])
-              _ (when-not (and (= missing (set (map :id fresh-slots)))
-                               (= (count missing) (count fresh-slots)))
-                  (reject! :source-slot-missing))
-              slots (into (:slots state) (map (juxt :id identity)) fresh-slots)
-              selected-slots (vec (vals (select-keys slots slot-ids)))
-              owners (mapv (:fns state) ids)]
-          ;; Validate public/bare type declarations before following their types.
-          ;; Own values are deliberately absent and checked again after loading.
-          (validate-structure! {:fns owners :fn-slots junctions :slots selected-slots :bindings []}
-                               (:authorizations state))
-          (recur (keep :type-fn-id selected-slots)
-                 (-> state
-                     (assoc :slots slots)
-                     (update :fn-slots into junctions)
-                     (update :scanned into ids))))))))
+  "Expand fresh function declarations before one grouped owner read. Slot type
+   and binding edges remain the caller's next ordinary source frontier."
+  [roots seen {:keys [max-functions] :as callbacks}]
+  (let [state (expand-functions roots seen {:fns {} :authorizations {}} callbacks)]
+    (check-functions! seen (:fns state) #{} max-functions)
+    (assoc state :ids (set (keys (:fns state)))
+           :fns (vec (sort-by (comp str :id) (vals (:fns state)))))))

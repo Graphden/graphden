@@ -65,7 +65,7 @@
                      (java.util.concurrent.ConcurrentHashMap/.remove cache pattern)
                      (with-redefs-fn {timed (fn [p]
                                               (swap! calls conj p)
-                                              (re-pattern "x"))}
+                                              #"x")}
                        #(compile pattern)))]
     (doseq [pattern ["[a-z]+" "[a][b]" "[a&&b]" "[\\d]" "[é]"
                      "[a_]" "[a/]" "(?i)[a]" "[a]\n"]]
@@ -82,8 +82,8 @@
           (is (nil? (java.util.concurrent.ConcurrentHashMap/.get cache bad-range))
               "invalid classes are not cached")))
       (is (= 9 (count @calls)) "invalid ranges use direct compilation, not the worker"))
-    (let [length-64 (str "[" (apply str (repeat 62 "a")) "]")
-          length-65 (str "[" (apply str (repeat 63 "a")) "]")]
+    (let [length-64 (str "[" (str/join (repeat 62 "a")) "]")
+          length-65 (str "[" (str/join (repeat 63 "a")) "]")]
       (is (= 64 (count length-64)))
       (is (= 65 (count length-65)))
       (java.util.concurrent.ConcurrentHashMap/.remove cache length-64)

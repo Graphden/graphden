@@ -1,6 +1,9 @@
 (ns graphden.storage.source-projection
   "Sealed, snapshot-local authority for structural source discovery.
-   These witnesses are internal objects, never accepted from EDN/HTTP graphs.")
+   These witnesses are internal objects, never accepted from EDN/HTTP graphs."
+  (:require
+    [graphden.storage.grouped-read :as grouped]
+    [graphden.storage.tx :as tx]))
 
 
 (defn unavailable!
@@ -20,15 +23,19 @@
                                (let [permission (authorize! row)]
                                  (validate-owner! row permission)
                                  [(:id row) {:row row :permission permission}]))) rows)]
-    (Scope. storage owners {} #{} #{} :owners)))
+    (let [snapshot (grouped/snapshot-cache (tx/datasource storage))]
+      (when-not snapshot (unavailable!))
+      (Scope. storage snapshot owners {} #{} {} :owners))))
 
 
 (defn scope-data
   "Only the exact decorated immutable snapshot may consume a witness."
   [scope storage]
-  (when-not (and (instance? Scope scope) (identical? storage (.-storage ^Scope scope)))
+  (when-not (and (instance? Scope scope) (identical? storage (.-storage ^Scope scope))
+                 (identical? (.-snapshot ^Scope scope)
+                             (grouped/snapshot-cache (tx/datasource storage))))
     (unavailable!))
-  {:owners (.-owners ^Scope scope) :identities (.-identities ^Scope scope)
+  {:snapshot (.-snapshot ^Scope scope) :owners (.-owners ^Scope scope) :identities (.-identities ^Scope scope)
    :branches (.-branches ^Scope scope) :versions (.-versions ^Scope scope)
    :phase (.-phase ^Scope scope)})
 
@@ -36,28 +43,30 @@
 (defn retarget
   "A known decorator explicitly preserves the seal when delegating inward."
   [scope from to]
-  (let [{:keys [owners identities branches versions phase]} (scope-data scope from)]
-    (Scope. to owners identities branches versions phase)))
+  (let [{:keys [snapshot owners identities branches versions phase]} (scope-data scope from)]
+    (when-not (identical? snapshot (grouped/snapshot-cache (tx/datasource to))) (unavailable!))
+    (Scope. to snapshot owners identities branches versions phase)))
 
 
 (defn resolution-scope
   "Called only by the branch resolver, with its own fresh chain/merge branches."
   [scope outer storage identities branches]
-  (let [{:keys [owners phase]} (scope-data scope outer)]
+  (let [{:keys [snapshot owners phase]} (scope-data scope outer)]
     (when-not (= :owners phase) (unavailable!))
-    (Scope. storage owners identities (set branches) #{} :ownership)))
+    (when-not (identical? snapshot (grouped/snapshot-cache (tx/datasource storage))) (unavailable!))
+    (Scope. storage snapshot owners identities (set branches) {} :ownership)))
 
 
 (defn versions-scope
   "Freeze version UUIDs only after their complete physical ownership proof."
   [scope storage versions]
-  (let [{:keys [owners identities branches phase]} (scope-data scope storage)]
+  (let [{:keys [snapshot owners identities branches phase]} (scope-data scope storage)]
     (when-not (= :ownership phase) (unavailable!))
-    (Scope. storage owners identities branches (set versions) :edges)))
+    (Scope. storage snapshot owners identities branches versions :edges)))
 
 
 (def physical-fields
-  {:fn-slot #{:id :org-id :fn-id :slot-id :position}
+  {:fn-slot #{:id :org-id :fn-id}
    :binding #{:id :org-id :fn-id}
    :binding-list-item #{:id :org-id :binding-id}
    :fn-slot-version #{:id :fn-slot-id :branch-id :created-at :deleted-at :fn-id :slot-id :position}
@@ -79,14 +88,14 @@
         [identity-entity identity-field] (get version-identities entity)
         allowed (get physical-fields entity)
         requested (set fields)
-        owner-fields (cond-> #{:id :branch-id :created-at :deleted-at :fn-id :binding-id}
-                       identity-field (conj identity-field)
-                       (= entity :fn-slot-version) (into [:slot-id :position]))]
+        owner-fields (cond-> #{:id :org-id :branch-id :created-at :deleted-at :fn-id :binding-id}
+                       identity-field (conj identity-field))]
     (when-not (and (contains? #{:ownership :edges} phase)
                    (seq requested) (every? allowed requested)
                    (integer? max-rows) (<= 0 max-rows 65536)
                    (case op
                      :read-ids (and (coll? ids)
+                                    (or (= :edges phase) (every? owner-fields requested))
                                     (every? (if identity-entity versions (get identities entity #{})) ids))
                      :query (and identity-entity (= :ownership phase)
                                  (= #{identity-field :branch-id} (set (keys where)))

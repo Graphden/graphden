@@ -319,7 +319,7 @@
                 (update :bindings into bindings)
                 (update :list-items into items)))))
       {:fns [] :fn-slots [] :slots [] :bindings [] :list-items []}
-      (partition-all batch-size ids))))
+      (partition-all 128 ids))))
 
 
 (defn- row-limit?
@@ -377,6 +377,14 @@
           cache (when (= ids (set (map :id rows)))
                   {:storage storage :rows {:fn (into {} (map (juxt :id identity)) rows)}})]
       (binding [*identity-hints* cache] (consume)))))
+
+
+(defn collect-identity-hinted-closure
+  "Collect a full closure with fresh function identities batched from a hint.
+   Owned source is still read only when freshly reached by the collector."
+  [storage roots authorize! graph-hint]
+  (call-with-identity-hints storage roots graph-hint nil
+                            #(collect-source storage roots authorize! false false)))
 
 
 (defn collect-client-closure

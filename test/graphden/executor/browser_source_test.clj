@@ -121,6 +121,195 @@
     (is (= "current" (:value (first (:bindings hinted)))))))
 
 
+(deftest server-identity-hints-never-load-stale-owned-source
+  (let [root (random-uuid) old (random-uuid) fresh (random-uuid)
+        hint {:fns [{:id root :parent-ids [old]} {:id old}]}
+        graph {:fns [{:id root :parent-ids [fresh]} {:id old} {:id fresh}]
+               :bindings [{:id (random-uuid) :fn-id old :value "stale private body"}
+                          {:id (random-uuid) :fn-id fresh :value "fresh body"}]}
+        calls (atom [])
+        actual (source/collect-identity-hinted-closure
+                 (fixture-storage (graph-tables graph) calls) [root] (constantly nil) hint)]
+    (is (= #{root fresh} (set (map :id (:fns actual)))))
+    (is (= ["fresh body"] (mapv :value (:bindings actual))))
+    (is (not-any? (fn [[op entity where]]
+                    (and (contains? #{:query :candidates} op)
+                         (contains? #{:binding :fn-slot} entity)
+                         (some #{old} (:fn-id where)))) @calls))))
+
+
+(deftest witness-batch-authorizes-all-owners-before-reading-values
+  (let [ids (vec (repeatedly 100 random-uuid))
+        graph {:fns (mapv #(hash-map :id %) ids)}
+        calls (atom [])
+        storage (fixture-storage (graph-tables graph) calls)
+        denied (last ids)]
+    (is (thrown? clojure.lang.ExceptionInfo
+          (source/capture-nodes storage ids
+                                #(when (= denied (:id %)) (throw (ex-info "denied" {}))))))
+    (is (not-any? (fn [[op entity]]
+                    (and (contains? #{:query :candidates} op)
+                         (contains? #{:binding :fn-slot} entity))) @calls))))
+
+
+(deftest witness-prepares-namespace-paths-before-individual-authorizations
+  (let [ids (vec (repeatedly 3 random-uuid))
+        graph {:fns (mapv #(hash-map :id %) ids)}
+        events (atom [])
+        authorize! (with-meta #(swap! events conj [:authorize (:id %)])
+                     {:graphden.tenancy.context/prepare-namespaces
+                      #(swap! events conj [:prepare (set (map :id %))])})]
+    (source/capture-nodes (fixture-storage (graph-tables graph) (atom [])) ids authorize!)
+    (is (= [:prepare (set ids)] (first @events)))
+    (is (= (set ids) (set (map second (rest @events)))))))
+
+
+(deftest client-frontier-prepares-namespace-paths-before-authorization
+  (let [root (random-uuid) parent (random-uuid)
+        graph {:fns [{:id root :parent-ids [parent]} {:id parent}]}
+        events (atom [])
+        authorize! (with-meta #(swap! events conj [:authorize (:id %)])
+                     {:graphden.tenancy.context/prepare-namespaces
+                      #(swap! events conj [:prepare (set (map :id %))])})]
+    (source/collect-client-closure (fixture-storage (graph-tables graph) (atom []))
+                                   [root] authorize! graph)
+    (is (= [[:prepare #{root}] [:authorize root]
+            [:prepare #{parent}] [:authorize parent]] @events))))
+
+
+(deftest client-identity-hints-never-prefetch-unreachable-owned-payload
+  (let [root (random-uuid) old (random-uuid) fresh (random-uuid)
+        hint {:fns [{:id root :parent-ids [old]} {:id old}]}
+        current {:fns [{:id root :parent-ids [fresh]} {:id fresh} {:id old}]
+                 :bindings [{:id (random-uuid) :fn-id old :value "hidden old payload"}
+                            {:id (random-uuid) :fn-id fresh :value "fresh reachable payload"}]}
+        calls (atom [])
+        authorize! (fn [row & _]
+                     (swap! calls conj [:authorize (:id row)])
+                     (when (= old (:id row)) (throw (ex-info "Denied old hint" {:type :authz/forbidden}))))
+        result (source/collect-client-closure (fixture-storage (graph-tables current) calls) [root] authorize! hint)]
+    (is (= #{root fresh} (set (map :id (:fns result)))))
+    (is (= ["fresh reachable payload"] (mapv :value (:bindings result))))
+    (is (not-any? #{[:authorize old]} @calls))
+    (is (not-any? (fn [[op entity where]]
+                    (and (contains? #{:query :candidates} op)
+                         (contains? #{:binding :fn-slot} entity)
+                         (some #{old} (:fn-id where)))) @calls))))
+
+
+(deftest unknown-and-oversized-client-hints-retain-ordinary-reads
+  (let [root (random-uuid) extras (vec (repeatedly 2048 random-uuid))]
+    (doseq [hint [nil {:fns []} {:fns {root 42}}
+                  {:fns (cons {:id root :parent-ids extras} (for [id extras] {:id id}))}]]
+      (let [calls (atom [])
+            storage (fixture-storage {:fn {root {:id root}}} calls)]
+        (is (= [{:id root}] (:fns (source/collect-client-closure storage [root] (constantly nil) hint))))
+        (is (= [[:read :fn root]] (filterv #(= :read (first %)) @calls)))))))
+
+
+(deftest identity-hints-never-cross-storage-or-cache-authorization
+  (let [root (random-uuid)
+        graph {:fns [{:id root :name "outer"}]}
+        outer (fixture-storage (graph-tables graph) (atom []))
+        inner (fixture-storage {:fn {root {:id root :name "inner"}}} (atom []))
+        nested-name (atom nil)
+        nested-denied? (atom false)]
+    (source/collect-client-closure
+      outer [root]
+      (fn [_]
+        (reset! nested-name (:name (first (:fns (source/collect-client-closure inner [root] (constantly nil))))))
+        (try
+          (source/collect-client-closure outer [root]
+                                         (fn [_] (throw (ex-info "New policy denies" {:type :authz/forbidden}))))
+          (catch clojure.lang.ExceptionInfo error
+            (reset! nested-denied? (= :authz/forbidden (:type (ex-data error)))))))
+      graph)
+    (is (= "inner" @nested-name))
+    (is (true? @nested-denied?))))
+
+
+(deftest fresh-metadata-frontier-batches-only-actually-reached-owners
+  (let [ids (vec (repeatedly 20 random-uuid))
+        graph {:fns (conj (mapv (fn [id parent] {:id id :parent-ids [parent]})
+                                (butlast ids) (rest ids)) {:id (peek ids)})
+               :bindings [{:id (random-uuid) :fn-id (peek ids) :value "reachable"}]}
+        calls (atom []) storage (fixture-storage (graph-tables graph) calls)
+        ordinary (source/collect-client-closure storage [(first ids)] (constantly nil))
+        owner-candidate? #(and (= :candidates (first %)) (contains? #{:fn-slot :binding} (second %)))
+        old-candidates (count (filter owner-candidate? @calls))]
+    (reset! calls [])
+    (let [result (source/collect-client-closure storage [(first ids)] (constantly nil) graph)]
+      (is (= (graph-rows ordinary) (graph-rows result)))
+      (is (= 40 old-candidates))
+      (is (= 2 (count (filter owner-candidate? @calls))))
+      (is (= (set ids) (set (get-in (first (filter #(= [:query :binding] (take 2 %)) @calls)) [2 :fn-id])))))))
+
+
+(deftest malformed-interface-owner-is-refused-before-traversing-its-parent
+  (let [root (random-uuid) hidden (random-uuid) calls (atom [])
+        row {:id root :parent-ids []}
+        contract {:fn row :slots [] :fn-slots []}
+        storage (fixture-storage {:fn {root (assoc row :parent-ids [hidden]) hidden {:id hidden}}
+                                  :binding {(random-uuid) {:fn-id hidden :value "private"}}} calls)]
+    (is (= :public-type-contract-mismatch
+           (try (source/collect-client-closure storage [root] (constantly {:type-contract contract}) {:fns [row]})
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+    (is (not-any? #{[:read :fn hidden]} @calls))
+    (is (not-any? #(= :query (first %)) @calls))))
+
+
+(deftest malformed-interface-slot-is-refused-before-traversing-its-type
+  (let [root (random-uuid) allowed (random-uuid) hidden (random-uuid)
+        slot (random-uuid) junction (random-uuid) calls (atom [])
+        row {:id root :parent-ids []}
+        declaration {:id slot :type-fn-id allowed}
+        edge {:id junction :fn-id root :slot-id slot}
+        hint {:fns [row {:id allowed}] :fn-slots [edge] :slots [declaration]}
+        contract {:fn row :fn-slots [edge] :slots [declaration]}
+        storage (fixture-storage {:fn {root row allowed {:id allowed} hidden {:id hidden}}
+                                  :slot {slot (assoc declaration :type-fn-id hidden)}
+                                  :fn-slot {junction edge}
+                                  :binding {(random-uuid) {:fn-id hidden :value "private"}}} calls)]
+    (is (= :public-type-contract-mismatch
+           (try (source/collect-client-closure storage [root]
+                                               #(when (= root (:id %)) {:type-contract contract}) hint)
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+    (is (not-any? #{[:read :fn hidden]} @calls))
+    (is (not-any? (fn [[operation entity where]]
+                    (and (= [:query :binding] [operation entity])
+                         (some #{hidden} (:fn-id where)))) @calls))))
+
+
+(deftest actual-metadata-overflow-stops-before-any-owned-values
+  (let [root (random-uuid) parents (vec (repeatedly 2048 random-uuid)) calls (atom [])
+        storage (fixture-storage {:fn {root {:id root :parent-ids parents}}} calls)]
+    (is (= :source-function-limit
+           (try (source/collect-client-closure storage [root] (constantly nil) {:fns [{:id root}]})
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+    (is (not-any? #(contains? #{:query :candidates} (first %)) @calls))))
+
+
+(deftest fresh-slot-type-must-exist-and-be-authorized-before-its-values
+  (let [root (random-uuid) type (random-uuid) slot (random-uuid) junction (random-uuid)]
+    (doseq [present? [false true]]
+      (let [calls (atom [])
+            tables {:fn (cond-> {root {:id root}} present? (assoc type {:id type}))
+                    :slot {slot {:id slot :type-fn-id type}}
+                    :fn-slot {junction {:id junction :fn-id root :slot-id slot}}
+                    :binding {(random-uuid) {:fn-id type :value "not yet read"}}}
+            error (try
+                    (source/collect-client-closure
+                      (fixture-storage tables calls) [root]
+                      (fn [row]
+                        (when (= type (:id row)) (throw (ex-info "Denied type" {:type :authz/forbidden}))))
+                      {:fns [{:id root}]})
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= (if present? :authz/forbidden :browser-plan/unsupported) (:type (ex-data error))))
+        (is (not-any? (fn [[operation entity where]]
+                        (and (= [:query :binding] [operation entity])
+                             (some #{type} (:fn-id where)))) @calls))))))
+
+
 (deftest denied-or-missing-stale-hints-fall-back-before-body-reads
   (let [root (random-uuid) extra (random-uuid)
         hint {:fns [{:id root :parent-ids [extra]} {:id extra}]}
@@ -290,6 +479,19 @@
     (is (not-any? (fn [[operation entity where]]
                     (and (= operation :query) (contains? #{:binding :fn-slot} entity)
                          (some #{target} (:fn-id where)))) @calls))
+    (let [ordinary (source/collect-manifest storage root (constantly nil))]
+      (reset! calls [])
+      (is (= (graph-rows ordinary)
+             (graph-rows
+               (source/collect-manifest storage root
+                                        (fn [row & [permission]]
+                                          (when (= target (:id row))
+                                            (is (= {:identity-only? true} permission))))
+                                        graph))))
+      (is (not-any? (fn [[operation entity where]]
+                      (and (contains? #{:query :candidates} operation)
+                           (contains? #{:binding :fn-slot} entity)
+                           (some #{target} (:fn-id where)))) @calls)))
     (reset! calls [])
     (is (= :source-missing
            (try (source/collect-closure storage [root] (constantly nil))
@@ -358,6 +560,18 @@
     (is (not-any? (fn [[operation entity where]]
                     (and (= operation :query) (contains? #{:binding :fn-slot} entity)
                          (some #{target} (:fn-id where)))) @calls))
+    (reset! calls [])
+    (let [hinted (source/collect-client-closure
+                   (fixture-storage tables calls) [root]
+                   (fn [row & [permissions]]
+                     (when (= target (:id row))
+                       (is (= {:execute? true :server-target? true} permissions))))
+                   graph)]
+      (is (= (graph-rows graph) (graph-rows hinted)))
+      (is (not-any? (fn [[operation entity where]]
+                      (and (contains? #{:query :candidates} operation)
+                           (contains? #{:binding :fn-slot} entity)
+                           (some #{target} (:fn-id where)))) @calls)))
     (let [ordinary-slot (random-uuid)
           junction (random-uuid)
           binding (random-uuid)
@@ -368,7 +582,23 @@
                     (assoc-in [:binding binding] {:id binding :fn-id root :slot-id ordinary-slot :ref-fn-id target}))]
       (is (= :mixed-server-target
              (try (source/collect-client-closure (fixture-storage mixed (atom [])) [root] (constantly nil))
-                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+      (is (= :mixed-server-target
+             (try (source/collect-client-closure (fixture-storage mixed (atom [])) [root] (constantly nil) graph)
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+      (doseq [hinted? [false true]]
+        (let [calls (atom [])
+              storage (fixture-storage mixed calls)
+              guard (fn [row & [permission]]
+                      (when (and (= target (:id row)) (not (:server-target? permission)))
+                        (throw (ex-info "Private ordinary dependency" {:type :authz/forbidden}))))]
+          (is (= :authz/forbidden
+                 (try (if hinted? (source/collect-client-closure storage [root] guard graph)
+                          (source/collect-client-closure storage [root] guard))
+                      (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))
+          (is (not-any? (fn [[operation entity where]]
+                          (and (= operation :query) (= :binding entity)
+                               (some #{target} (:fn-id where)))) @calls)))))))
 
 
 (defn- grouped-fixture

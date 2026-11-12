@@ -63,7 +63,9 @@
         ;; Only the target execute grant authorizes this private inspection.
         ;; Dependency rows never enter the browser source/export graph.
         _ (authorize! row {:execute? true :server-target? true})
-        graph (source/collect-closure storage [target] (constantly nil))
+        graph (if-let [hint (some-> (:graph-cache ctx) deref)]
+                (source/collect-identity-hinted-closure storage [target] (constantly nil) hint)
+                (source/collect-closure storage [target] (constantly nil)))
         signature (get-in policy [:rich :by-id target])
         captured {:graph graph :namespaces (source/collect-namespaces storage graph)}
         natives (filter #(and (empty? (:parent-ids %)) (:return-type-fn-id %)) (:fns graph))]

@@ -157,25 +157,73 @@
     (if read? (into {} (map (juxt :id identity)) populated) populated)))
 
 
+(defn- grouped-or-scalar
+  [connection cache requests fields-for scalar-operation]
+  (let [fallback #(mapv scalar-operation requests)]
+    (if-let [planned (plan-requests requests fields-for)]
+      (let [shapes (physical-shapes! connection (:shapes cache) (map :entity planned))]
+        (if-let [{:keys [params columns]} (carrier planned shapes)]
+          (util/with-sql-error-handling
+            "Database error" :read-operations {:operation-count (count requests)}
+            (let [rows (util/exec! connection params)
+                  groups (split-rows (count planned) columns rows)]
+              (mapv #(decode connection %1 %2) planned groups)))
+          (fallback)))
+      (fallback))))
+
+
+(defn- finite-transport?
+  [{:keys [op opts] :as request}]
+  (let [bound (row-bound request)]
+    (and bound (pos? bound) (<= bound max-cells)
+         (or (not= op :query) (empty? opts)))))
+
+
+(def ^:private history-id-fields
+  {:fn-version :fn-id :fn-slot-version :fn-slot-id :binding-version :binding-id
+   :binding-list-item-version :item-id :resource-override-version :override-id})
+
+
+(defn- version-history?
+  [{:keys [op entity where opts]}]
+  (when-let [id-field (get history-id-fields entity)]
+    (and (= :query op) (empty? opts) (map? where)
+         (= #{id-field :branch-id} (set (keys where)))
+         (every? #(and (coll? %) (not (map? %))) (vals where)))))
+
+
+(defn- version-latest?
+  [{:keys [op entity where group-cols] :as request}]
+  (when-let [id-field (get history-id-fields entity)]
+    (and (= :latest op) (= [id-field :branch-id] group-cols)
+         (= #{id-field :branch-id} (set (keys where)))
+         (finite-transport? request))))
+
+
 (defn read-operations
   "Group bounded reads under the matching active RR cache. Latest-per-group
    carries an explicit scalar-order ordinal; ordinary ordered queries fallback.
-   Unsupported groups stay scalar; candidate barriers never perform a shape
-   read or payload query here. Actual physical columns preserve SELECT * rows,
-   including legacy columns absent from schema metadata."
+   Independently bounded requests may share transport even when adjacent merge
+   history reads need scalar execution. Returned results preserve request order.
+   Candidate barriers never perform shape reads or payload queries here."
   [connection requests fields-for scalar-operation]
   (let [fallback #(mapv scalar-operation requests)]
     (if-let [cache (and (<= 2 (count requests) grouped/max-group-size)
                         (not-any? #(= :candidates (:op %)) requests)
                         (grouped/snapshot-cache connection))]
-      (if-let [planned (plan-requests requests fields-for)]
-        (let [shapes (physical-shapes! connection (:shapes cache) (map :entity planned))]
-          (if-let [{:keys [params columns]} (carrier planned shapes)]
-            (util/with-sql-error-handling
-              "Database error" :read-operations {:operation-count (count requests)}
-              (let [rows (util/exec! connection params)
-                    groups (split-rows (count planned) columns rows)]
-                (mapv #(decode connection %1 %2) planned groups)))
-            (fallback)))
-        (fallback))
+      (let [indexed (mapv vector (range) requests)
+            mixed-version? (and (some version-history? requests)
+                                (every? #(or (version-history? %) (version-latest? %)) requests))
+            finite (if mixed-version?
+                     (filterv (comp version-latest? second) indexed)
+                     (when (every? finite-transport? requests) indexed))]
+        (if (<= 2 (count finite))
+          (let [grouped-results (grouped-or-scalar connection cache (mapv second finite)
+                                                   fields-for scalar-operation)
+                results (into {} (map (fn [[[index _] value]] [index value]))
+                              (map vector finite grouped-results))]
+            (mapv (fn [[index request]]
+                    (if (contains? results index) (get results index) (scalar-operation request)))
+                  indexed))
+          (fallback)))
       (fallback))))

@@ -144,9 +144,13 @@
 
 
 (defn- captured-source
-  [storage authorize! id]
-  (let [graph (source/collect-manifest storage id authorize!)]
-    {:graph graph :namespaces (source/collect-namespaces storage graph)}))
+  ([storage authorize! id]
+   (captured-source storage authorize! id nil))
+  ([storage authorize! id graph-hint]
+   (let [graph (if graph-hint
+                 (source/collect-manifest storage id authorize! graph-hint)
+                 (source/collect-manifest storage id authorize!))]
+     {:graph graph :namespaces (source/collect-namespaces storage graph)})))
 
 
 (defn- current-scope
@@ -160,16 +164,18 @@
   "Resolve the handler's protected graph selector in this authenticated
    snapshot. Discovery supplies identity only; the caller checks source and
    execute permission for the selected HOF separately."
-  [storage authorize! policy]
-  (let [scope (current-scope storage (tenancy/current-personal-namespace) "editor-root")
-        resolver (captured-source storage authorize! root-resolver-id)
-        _ (assert-protected-root-source! resolver)
-        _ (snapshot/validate-source! resolver root-resolver-id policy)
-        id (if (:principal-id scope)
-             (:id (resolve-root-identity resolver scope
-                                         (metadata/function-lookup storage authorize! scope)))
-             default-root-id)]
-    {:id id :scope scope}))
+  ([storage authorize! policy]
+   (root-choice storage authorize! policy nil))
+  ([storage authorize! policy graph-hint]
+   (let [scope (current-scope storage (tenancy/current-personal-namespace) "editor-root")
+         resolver (captured-source storage authorize! root-resolver-id graph-hint)
+         _ (assert-protected-root-source! resolver)
+         _ (snapshot/validate-source! resolver root-resolver-id policy)
+         id (if (:principal-id scope)
+              (:id (resolve-root-identity resolver scope
+                                          (metadata/function-lookup storage authorize! scope)))
+              default-root-id)]
+     {:id id :scope scope})))
 
 
 (defn source-revision

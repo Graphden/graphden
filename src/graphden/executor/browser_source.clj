@@ -4,6 +4,7 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.browser-source-frontier :as frontier]
     [graphden.executor.browser-source-prefetch :as prefetch]
     [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.bindings :as bindings]
@@ -13,6 +14,7 @@
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.source-projection :as projection]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
     [graphden.versioning.branch-local :as branch-local]
@@ -45,6 +47,7 @@
 
 
 (def ^:dynamic ^:private *prefetched* nil)
+(def ^:dynamic ^:private *identity-hints* nil)
 
 
 (defn- reject!
@@ -53,12 +56,24 @@
                   {:type :browser-plan/unsupported :reason reason})))
 
 
+(defn- prepare-authorizations!
+  [authorize! rows]
+  (when (seq rows)
+    (when-let [prepare (:graphden.tenancy.context/prepare-namespaces (meta authorize!))]
+      (prepare rows))))
+
+
 (defn- read-rows
   [storage entity ids]
   (check-snapshot!)
-  (if *prefetched*
+  (cond
+    (and *identity-hints* (= :fn entity) (identical? storage (:storage *identity-hints*)))
+    (prefetch/read-through *identity-hints* entity ids
+                           #(binding [*identity-hints* nil] (read-rows storage entity %)))
+    *prefetched*
     (prefetch/read-through *prefetched* entity ids
                            #(binding [*prefetched* nil] (read-rows storage entity %)))
+    :else
     (if (satisfies? sp/StorageBatchCRUD storage)
       (vals (sp/read-entities storage entity ids))
       (keep #(sp/read-entity storage entity %) ids))))
@@ -140,6 +155,7 @@
             (reject! :source-function-limit))
         rows (vec (read-rows storage :fn targets))]
     (when-not (= targets (set (map :id rows))) (reject! :source-missing))
+    (prepare-authorizations! authorize! rows)
     (doseq [row rows]
       (condp contains? (:id row)
         server-targets (authorize! row {:execute? true :server-target? true})
@@ -152,12 +168,43 @@
         (update :slots #(vec (vals (into {} (map (juxt :id identity)) %)))))))
 
 
+(defn- validate-owner-metadata!
+  [row permission]
+  (when (and (= :bare-type permission)
+             (or (seq (:parent-ids row)) (:base-fn-id row)
+                 (:element-fn-id row) (:return-type-fn-id row) (:constraint row)))
+    (reject! :primitive-type-source-mismatch))
+  (when-let [contract (:type-contract permission)]
+    (when-not (contracts/matches-owner? contract row)
+      (reject! :public-type-contract-mismatch))))
+
+
+(defn- validate-owned-source!
+  [{:keys [fns slots fn-slots bindings]} authorizations]
+  (let [bare-types (into #{} (keep (fn [[id kind]] (when (= :bare-type kind) id))) authorizations)
+        slot-ids (set (map :slot-id fn-slots))]
+    (when (or (some #(contains? bare-types (:fn-id %)) fn-slots)
+              (some #(contains? bare-types (:fn-id %)) bindings))
+      (reject! :primitive-type-source-mismatch))
+    (doseq [row fns]
+      (validate-owner-metadata! row (get authorizations (:id row)))
+      (when-let [contract (:type-contract (get authorizations (:id row)))]
+        (let [owned-junctions (filterv #(= (:id row) (:fn-id %)) fn-slots)
+              owned-slot-ids (set (map :slot-id owned-junctions))]
+          (when-not (contracts/matches? contract row
+                                        (filterv #(contains? owned-slot-ids (:id %)) slots)
+                                        owned-junctions
+                                        (filterv #(= (:id row) (:fn-id %)) bindings))
+            (reject! :public-type-contract-mismatch)))))
+    (when-not (= slot-ids (set (map :id slots))) (reject! :source-slot-missing))))
+
+
 (defn- collect-source
   "Collect only requested roots and their source/type dependencies. `authorize!`
    receives each fn row BEFORE any of its binding/item values are loaded.
    Callers must supply an immutable storage/policy pair; HTTP code uses
    `with-snapshot`, not a live context's whole-graph cache."
-  [storage roots authorize! manifest? server? & [budget]]
+  [storage roots authorize! manifest? server? & [budget metadata-frontier?]]
   (let [budget (or budget (atom 0))]
     (loop [pending (set roots)
            seen #{}
@@ -190,11 +237,19 @@
             (attach-identity-targets storage authorize! graph seen
                                      {:terminal terminal :server-targets server-targets
                                       :server-bindings server-bindings :manifest? manifest? :server? server?})))
-        (let [ids (set (take batch-size pending))
-              fns (vec (read-rows storage :fn ids))]
+        (let [prepared (when metadata-frontier?
+                         (frontier/prepare
+                           pending seen
+                           {:read-fns #(read-rows storage :fn %)
+                            :prepare-authorizations! #(prepare-authorizations! authorize! %)
+                            :authorize! authorize! :validate-owner! validate-owner-metadata!
+                            :max-functions max-functions}))
+              ids (or (:ids prepared) (set (take batch-size pending)))
+              fns (or (:fns prepared) (vec (read-rows storage :fn ids)))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
-          (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
-                bare-types (into #{} (keep (fn [[id kind]] (when (= :bare-type kind) id))) authorizations)
+          (when-not prepared (prepare-authorizations! authorize! fns))
+          (let [authorizations (or (:authorizations prepared)
+                                   (into {} (map (fn [row] [(:id row) (authorize! row)])) fns))
                 [fn-slots bindings] (owner-rows storage ids budget)
                 items (if (seq bindings)
                         (limited-query storage :binding-list-item
@@ -210,23 +265,8 @@
                                                     (dissoc % :ref-fn-id) %) bindings)
                                     :else bindings)
                                   (if manifest? [] items))]
-            (when (or (some #(contains? bare-types (:fn-id %)) fn-slots)
-                      (some #(contains? bare-types (:fn-id %)) bindings)
-                      (some #(and (contains? bare-types (:id %))
-                                  (or (seq (:parent-ids %)) (:base-fn-id %)
-                                      (:element-fn-id %) (:return-type-fn-id %) (:constraint %)))
-                            fns))
-              (reject! :primitive-type-source-mismatch))
-            (doseq [row fns]
-              (when-let [contract (:type-contract (get authorizations (:id row)))]
-                (let [owned-junctions (filterv #(= (:id row) (:fn-id %)) fn-slots)
-                      owned-slot-ids (set (map :slot-id owned-junctions))]
-                  (when-not (contracts/matches? contract row
-                                                (filterv #(contains? owned-slot-ids (:id %)) slots)
-                                                owned-junctions
-                                                (filterv #(= (:id row) (:fn-id %)) bindings))
-                    (reject! :public-type-contract-mismatch)))))
-            (when-not (= slot-ids (set (map :id slots))) (reject! :source-slot-missing))
+            (validate-owned-source! {:fns fns :slots slots :fn-slots fn-slots :bindings bindings}
+                                    authorizations)
             (recur (into (apply disj pending ids) (remove seen refs)) seen
                    (-> graph
                        (update :fns into fns)
@@ -237,17 +277,55 @@
 
 
 (defn- hinted-ids
-  [graph roots]
+  [graph roots & [mode]]
   (when graph
-    (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]}
+    (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding] :as index}
           (deps/index-graph graph)
-          dependencies (fn [id]
-                         (let [bindings (get bindings-by-fn id)]
-                           (related-ids [(get fn-map id)]
-                                        (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
-                                        bindings
-                                        (mapcat #(get items-by-binding (:id %)) bindings))))]
+          dependencies (if (= :manifest mode)
+                         #(deps/forward-deps-of % index)
+                         (fn [id]
+                           (let [bindings (get bindings-by-fn id)]
+                             (related-ids [(get fn-map id)]
+                                          (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
+                                          (if (= :client mode)
+                                            (map #(if (capabilities/server-call-slot? (:slot-id %))
+                                                    (dissoc % :ref-fn-id) %) bindings)
+                                            bindings)
+                                          (mapcat #(get items-by-binding (:id %)) bindings)))))]
       (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions))))
+
+
+(defn capture-nodes
+  "Read exact server-owned witness IDs without traversing sibling dependencies.
+   This is raw evidence, not a checked executable/export graph. Every owner is
+   freshly authorized before any owned value is read; ordinary source limits
+   and decorated snapshot storage remain mandatory."
+  [storage ids authorize!]
+  (let [ids (set ids)
+        budget (atom 0)]
+    (when (> (count ids) max-functions) (reject! :source-function-limit))
+    (reduce
+      (fn [graph batch]
+        (let [fns (vec (read-rows storage :fn batch))]
+          (when-not (= (set batch) (set (map :id fns))) (reject! :source-missing))
+          (prepare-authorizations! authorize! fns)
+          (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
+                [fn-slots bindings] (owner-rows storage batch budget)
+                items (if (seq bindings)
+                        (limited-query storage :binding-list-item {:binding-id (mapv :id bindings)} budget)
+                        [])
+                slot-ids (set (map :slot-id fn-slots))
+                slots (vec (read-rows storage :slot slot-ids))]
+            (validate-owned-source! {:fns fns :slots slots :fn-slots fn-slots :bindings bindings}
+                                    authorizations)
+            (-> graph
+                (update :fns into fns)
+                (update :fn-slots into fn-slots)
+                (update :slots into slots)
+                (update :bindings into bindings)
+                (update :list-items into items)))))
+      {:fns [] :fn-slots [] :slots [] :bindings [] :list-items []}
+      (partition-all 128 ids))))
 
 
 (defn- row-limit?
@@ -291,11 +369,90 @@
    (collect-hinted-closure storage roots authorize! graph-hint)))
 
 
+(defn- call-with-identity-hints
+  [storage roots graph-hint mode consume]
+  (binding [*prefetched* nil *identity-hints* nil]
+    (let [ids (try
+                (let [ids (hinted-ids graph-hint roots mode)]
+                  (when (every? uuid? ids) ids))
+                (catch InterruptedException error (throw error))
+                ;; A hint is not an execution authority. Malformed/unavailable
+                ;; advisory indexes retain ordinary fresh collection.
+                (catch Exception _ nil))
+          rows (when (seq ids) (vec (read-rows storage :fn ids)))
+          cache (when (= ids (set (map :id rows)))
+                  {:storage storage :rows {:fn (into {} (map (juxt :id identity)) rows)}})]
+      (binding [*identity-hints* cache] (consume)))))
+
+
+(defn collect-identity-hinted-closure
+  "Collect a full closure with fresh function identities batched from a hint.
+   Owned source is still read only when freshly reached by the collector."
+  [storage roots authorize! graph-hint]
+  (call-with-identity-hints storage roots graph-hint nil
+                            #(collect-source storage roots authorize! false false)))
+
+
+(defn- collect-projected-client
+  [storage roots authorize!]
+  (when (and *identity-hints* (satisfies? sp/StorageSourceProjection storage))
+    (try
+      (let [fns (vec (vals (get-in *identity-hints* [:rows :fn])))
+            _ (prepare-authorizations! authorize! fns)
+            scope (projection/authorize-scope! storage fns authorize! validate-owner-metadata!
+                                               (bound-fn [] (check-snapshot!)))
+            owners (:owners (projection/scope-data scope storage))
+            edges (sp/read-source-projection storage {:op :source-edges :scope scope})
+            slot-ids (set (map :slot-id (:fn-slots edges)))
+            slots (if (seq slot-ids) (vec (read-rows storage :slot slot-ids)) [])
+            graph (assoc edges :fns fns :slots slots)
+            permissions (into {} (map (fn [[id receipt]] [id (:permission receipt)])) owners)
+            _ (validate-owned-source! graph permissions)
+            {:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]} (deps/index-graph graph)
+            reachable (prefetch/bounded-closure
+                        roots (set (keys fn-map))
+                        (fn [id]
+                          (let [bindings (get bindings-by-fn id)]
+                            (related-ids [(get fn-map id)]
+                                         (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
+                                         (map #(if (capabilities/server-call-slot? (:slot-id %))
+                                                 (dissoc % :ref-fn-id) %) bindings)
+                                         (mapcat #(get items-by-binding (:id %)) bindings)))) max-functions)]
+        (when reachable
+          (let [budget (atom 0)
+                checked-authorize (fn [row & [permission]]
+                                    (if permission
+                                      (authorize! row permission)
+                                      (let [receipt (get owners (:id row))]
+                                        (projection/scope-data scope storage)
+                                        (when-not (= row (:row receipt)) (projection/unavailable!))
+                                        (:permission receipt))))
+                prepared (prefetch/prepare reachable #(read-rows storage %1 %2)
+                                           #(query-rows storage %1 %2 budget) checked-authorize)]
+            (when prepared
+              (binding [*prefetched* prepared]
+                (collect-source storage roots checked-authorize false true budget))))))
+      (catch clojure.lang.ExceptionInfo error
+        ;; Projection is optional and bounded. Only unsupported/advisory
+        ;; failures retry the WHOLE ordinary collector, never a full-row
+        ;; implementation of the physical projection request.
+        (when-not (contains? #{:storage-error/source-projection-unsupported :storage-error/candidate-limit
+                               :storage-error/bounded-query-unsupported :authz/forbidden :browser-plan/unsupported}
+                             (:type (ex-data error)))
+          (throw error))))))
+
+
 (defn collect-client-closure
   "Collect browser source with explicit server-call bindings terminal. Their
-   source is separately checked by the server boundary, never exported."
-  [storage roots authorize!]
-  (collect-source storage roots authorize! false true))
+   source is separately checked by the server boundary, never exported.
+   Optional hints batch fresh identities; fresh metadata-reachable owners then
+   share bounded owned-value reads after authorization in the same snapshot."
+  ([storage roots authorize!]
+   (collect-source storage roots authorize! false true))
+  ([storage roots authorize! graph-hint]
+   (call-with-identity-hints storage roots graph-hint :client
+                             #(or (collect-projected-client storage roots authorize!)
+                                  (collect-source storage roots authorize! false true nil (some? *identity-hints*))))))
 
 
 (defn collect-component-identities
@@ -322,8 +479,11 @@
 
 (defn collect-manifest
   "Single-root form of the constrained manifest collector."
-  [storage root authorize!]
-  (collect-manifests storage [root] authorize!))
+  ([storage root authorize!]
+   (collect-manifests storage [root] authorize!))
+  ([storage root authorize! graph-hint]
+   (call-with-identity-hints storage [root] graph-hint :manifest
+                             #(collect-manifests storage [root] authorize!))))
 
 
 (defn- ordinary-snapshot

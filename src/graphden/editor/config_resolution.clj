@@ -257,22 +257,24 @@
    immutable snapshot. Freeze policy before opening that snapshot. Missing
    personal identity selects the ordinary shared defaults; denied/invalid
    source never becomes absence. No provisioning or migration occurs here."
-  [storage authorize! policy]
-  (let [home (tenancy/current-personal-namespace)
-        scope (current-scope storage home "editor")
-        resolver (captured-source storage authorize! resolver-id)
-        _ (assert-protected-source! resolver)
-        _ (snapshot/validate-source! resolver resolver-id policy)
-        lookup (metadata/function-lookup storage authorize! scope)
-        selected-reference (resolve-identity resolver scope lookup)
-        id (:id selected-reference)
-        row (sp/read-entity storage :fn id)
-        _ (when-not row
-            (throw (ex-info "Editor configuration source is unavailable"
-                            {:type :browser-plan/unsupported :reason :source-missing})))
-        _ (authorize! row {:execute? true})
-        selected (captured-source storage authorize! id)
-        _ (snapshot/validate-source! selected id policy)]
-    {:id id :home home :scope scope :snapshot selected
-     :configuration (config/configuration (:graph selected) id)
-     :revision (source-revision id selected scope)}))
+  ([storage authorize! policy]
+   (capture storage authorize! policy nil))
+  ([storage authorize! policy graph-hint]
+   (let [home (tenancy/current-personal-namespace)
+         scope (current-scope storage home "editor")
+         resolver (captured-source storage authorize! resolver-id graph-hint)
+         _ (assert-protected-source! resolver)
+         _ (snapshot/validate-source! resolver resolver-id policy)
+         lookup (metadata/function-lookup storage authorize! scope)
+         selected-reference (resolve-identity resolver scope lookup)
+         id (:id selected-reference)
+         row (sp/read-entity storage :fn id)
+         _ (when-not row
+             (throw (ex-info "Editor configuration source is unavailable"
+                             {:type :browser-plan/unsupported :reason :source-missing})))
+         _ (authorize! row {:execute? true})
+         selected (captured-source storage authorize! id graph-hint)
+         _ (snapshot/validate-source! selected id policy)]
+     {:id id :home home :scope scope :snapshot selected
+      :configuration (config/configuration (:graph selected) id)
+      :revision (source-revision id selected scope)})))

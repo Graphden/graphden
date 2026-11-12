@@ -14,7 +14,8 @@
              :edges [:id :fn-slot-id :branch-id :created-at :deleted-at :fn-id :slot-id :position]}
    :binding {:version :binding-version :id-field :binding-id :owner-field :fn-id
              :edges [:id :binding-id :branch-id :created-at :deleted-at :fn-id :slot-id
-                     :ref-fn-id :type-override-fn-id :resolver-fn-id]}
+                     :ref-fn-id :type-override-fn-id :resolver-fn-id
+                     :value-present :list-append :list-closed :terminal :required]}
    :binding-list-item {:version :binding-list-item-version :id-field :item-id :owner-field :binding-id
                        :edges [:id :item-id :branch-id :created-at :deleted-at :binding-id :position :ref-fn-id]}})
 

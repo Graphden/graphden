@@ -79,7 +79,8 @@
    :binding-list-item #{:id :org-id :binding-id}
    :fn-slot-version #{:id :fn-slot-id :branch-id :created-at :deleted-at :fn-id :slot-id :position}
    :binding-version #{:id :binding-id :branch-id :created-at :deleted-at :fn-id :slot-id
-                      :ref-fn-id :type-override-fn-id :resolver-fn-id}
+                      :ref-fn-id :type-override-fn-id :resolver-fn-id
+                      :value-present :list-append :list-closed :terminal :required}
    :binding-list-item-version #{:id :item-id :branch-id :created-at :deleted-at :binding-id :position :ref-fn-id}})
 
 

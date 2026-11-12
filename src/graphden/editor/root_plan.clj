@@ -76,7 +76,9 @@
                        required (:required input)
                        argument (first required)
                        selected (when selected-configuration?
-                                  (resolution/capture storage authorize! policy))
+                                  (if-let [hint (some-> (:graph-cache ctx) deref)]
+                                    (resolution/capture storage authorize! policy hint)
+                                    (resolution/capture storage authorize! policy)))
                        editable (when (and migrated? selected)
                                   (editable-role-ids storage authorize! row (:configuration selected)))]
                    ;; This first slice exports closed static roots with at most

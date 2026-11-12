@@ -4,6 +4,7 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.browser-source-discovery :as discovery]
     [graphden.executor.browser-source-frontier :as frontier]
     [graphden.executor.browser-source-prefetch :as prefetch]
     [graphden.executor.capabilities :as capabilities]
@@ -279,11 +280,11 @@
 (defn- hinted-ids
   [graph roots & [mode]]
   (when graph
-    (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding] :as index}
-          (deps/index-graph graph)
-          dependencies (if (= :manifest mode)
-                         #(deps/forward-deps-of % index)
-                         (fn [id]
+    (if (= :manifest mode)
+      (:ids (discovery/closure graph roots :manifest related-ids max-functions))
+      (let [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]}
+            (deps/index-graph graph)
+            dependencies (fn [id]
                            (let [bindings (get bindings-by-fn id)]
                              (related-ids [(get fn-map id)]
                                           (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
@@ -291,8 +292,8 @@
                                             (map #(if (capabilities/server-call-slot? (:slot-id %))
                                                     (dissoc % :ref-fn-id) %) bindings)
                                             bindings)
-                                          (mapcat #(get items-by-binding (:id %)) bindings)))))]
-      (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions))))
+                                          (mapcat #(get items-by-binding (:id %)) bindings))))]
+        (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions)))))
 
 
 (defn capture-nodes
@@ -393,8 +394,8 @@
                             #(collect-source storage roots authorize! false false)))
 
 
-(defn- collect-projected-client
-  [storage roots authorize!]
+(defn- collect-projected-source
+  [storage roots authorize! mode]
   (when (and *identity-hints* (satisfies? sp/StorageSourceProjection storage))
     (try
       (let [fns (vec (vals (get-in *identity-hints* [:rows :fn])))
@@ -408,30 +409,25 @@
             graph (assoc edges :fns fns :slots slots)
             permissions (into {} (map (fn [[id receipt]] [id (:permission receipt)])) owners)
             _ (validate-owned-source! graph permissions)
-            {:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding]} (deps/index-graph graph)
-            reachable (prefetch/bounded-closure
-                        roots (set (keys fn-map))
-                        (fn [id]
-                          (let [bindings (get bindings-by-fn id)]
-                            (related-ids [(get fn-map id)]
-                                         (keep #(get slot-map (:slot-id %)) (get fn-slots-by-fn id))
-                                         (map #(if (capabilities/server-call-slot? (:slot-id %))
-                                                 (dissoc % :ref-fn-id) %) bindings)
-                                         (mapcat #(get items-by-binding (:id %)) bindings)))) max-functions)]
+            {:keys [ids terminal]} (discovery/closure graph roots mode related-ids max-functions)
+            reachable ids]
         (when reachable
           (let [budget (atom 0)
                 checked-authorize (fn [row & [permission]]
                                     (if permission
                                       (authorize! row permission)
-                                      (let [receipt (get owners (:id row))]
-                                        (projection/scope-data scope storage)
-                                        (when-not (= row (:row receipt)) (projection/unavailable!))
-                                        (:permission receipt))))
+                                      (if-let [receipt (get owners (:id row))]
+                                        (do (projection/scope-data scope storage)
+                                            (when-not (= row (:row receipt)) (projection/unavailable!))
+                                            (:permission receipt))
+                                        (if (contains? terminal (:id row))
+                                          (authorize! row)
+                                          (projection/unavailable!)))))
                 prepared (prefetch/prepare reachable #(read-rows storage %1 %2)
                                            #(query-rows storage %1 %2 budget) checked-authorize)]
             (when prepared
               (binding [*prefetched* prepared]
-                (collect-source storage roots checked-authorize false true budget))))))
+                (collect-source storage roots checked-authorize (= mode :manifest) (= mode :client) budget))))))
       (catch clojure.lang.ExceptionInfo error
         ;; Projection is optional and bounded. Only unsupported/advisory
         ;; failures retry the WHOLE ordinary collector, never a full-row
@@ -440,6 +436,16 @@
                                :storage-error/bounded-query-unsupported :authz/forbidden :browser-plan/unsupported}
                              (:type (ex-data error)))
           (throw error))))))
+
+
+(defn- collect-projected-client
+  [storage roots authorize!]
+  (collect-projected-source storage roots authorize! :client))
+
+
+(defn- collect-projected-manifest
+  [storage roots authorize!]
+  (collect-projected-source storage roots authorize! :manifest))
 
 
 (defn collect-client-closure
@@ -483,7 +489,8 @@
    (collect-manifests storage [root] authorize!))
   ([storage root authorize! graph-hint]
    (call-with-identity-hints storage [root] graph-hint :manifest
-                             #(collect-manifests storage [root] authorize!))))
+                             #(or (collect-projected-manifest storage [root] authorize!)
+                                  (collect-manifests storage [root] authorize!)))))
 
 
 (defn- ordinary-snapshot

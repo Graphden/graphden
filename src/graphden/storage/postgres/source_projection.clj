@@ -27,12 +27,12 @@
   (let [capacity (dec util/*max-statement-params*)]
     (when (< capacity 2) (projection/unavailable!))
     (case op
-      :read-ids (map #(assoc request :ids (vec %)) (partition-all capacity (distinct ids)))
+      :read-ids (map #(assoc request :ids (vec %)) (partition-all capacity (distinct (seq ids))))
       :query (let [id-field (first (remove #{:branch-id} (keys where)))
-                   branches (distinct (:branch-id where))
+                   branches (distinct (seq (:branch-id where)))
                    branch-size (max 1 (min (count branches) (quot capacity 2)))]
                (for [branch-chunk (partition-all branch-size branches)
-                     id-chunk (partition-all (- capacity (count branch-chunk)) (distinct (get where id-field)))]
+                     id-chunk (partition-all (- capacity (count branch-chunk)) (distinct (seq (get where id-field))))]
                  (assoc request :where {id-field (vec id-chunk) :branch-id (vec branch-chunk)}))))))
 
 

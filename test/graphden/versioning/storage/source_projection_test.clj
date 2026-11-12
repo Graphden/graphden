@@ -177,7 +177,7 @@
 
 (deftest physical-projection-scales-in-parameter-chunks-with-one-total-row-budget
   (let [storage (setup/create-versioned-test-storage)
-        {:keys [owner]} (fixture-rows storage)
+        {owner :owner binding-row :binding} (fixture-rows storage)
         base (vs/unwrap storage)
         ids (vec (repeatedly 20 random-uuid))]
     (doseq [id ids]
@@ -187,7 +187,8 @@
               (fn [scoped]
                 (let [backend (vs/unwrap scoped)
                       owner-scope (scope scoped [(:id owner)] (constantly nil))
-                      sealed (projection/resolution-scope owner-scope scoped backend {:binding (set ids)} #{(:branch-id scoped)})
+                      sealed (projection/resolution-scope owner-scope scoped backend
+                                                          {:binding (conj (set ids) (:id binding-row))} #{(:branch-id scoped)})
                       request {:scope sealed :op :read-ids :entity :binding :fields [:id :org-id]
                                :ids ids :max-rows 20}
                       {:keys [answer queries]} (binding [util/*max-statement-params* 8]
@@ -196,6 +197,15 @@
                   (is (= (set ids) (set (map :id answer))))
                   (is (= 3 (count body-queries)) "20 IDs use ceil(20/(8-1)) queries, including LIMIT parameter")
                   (is (every? #(<= (dec (count %)) 8) body-queries))
+                  (is (= (set ids) (set (map :id (sp/read-source-projection backend (assoc request :ids (set ids))))))
+                      "identity reads accept sets as well as vectors")
+                  (let [versions (sp/read-source-projection
+                                   backend {:scope sealed :op :query :entity :binding-version
+                                            :fields [:id :binding-id :branch-id :fn-id]
+                                            :where {:binding-id #{(:id binding-row)} :branch-id #{(:branch-id scoped)}}
+                                            :max-rows 20})]
+                    (is (= #{(:id binding-row)} (set (map :binding-id versions)))
+                        "version history accepts sets for both IDs and branches"))
                   (is (= :storage-error/source-projection-unsupported
                          (binding [util/*max-statement-params* 8]
                            (refusal #(sp/read-source-projection backend (assoc request :max-rows 19)))))))))))

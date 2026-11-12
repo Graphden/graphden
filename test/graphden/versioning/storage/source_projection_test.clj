@@ -134,6 +134,73 @@
                     (is (empty? calls))))))))
 
 
+(defn- measured-chain
+  [length]
+  (let [storage (setup/create-versioned-test-storage)
+        ids (vec (repeatedly length random-uuid))
+        _ (sp/create-entities storage :fn
+                              (mapv (fn [index id] {:id id :name (str "budget-node-" index) :parent-ids []})
+                                    (range) ids))
+        slot (sp/create-entity storage :slot {:name "next" :type-fn-id (peek ids)})
+        _ (sp/create-entities storage :fn-slot
+                              (mapv #(hash-map :fn-id % :slot-id (:id slot) :position 0) ids))
+        _ (sp/create-entities storage :binding
+                              (mapv (fn [index id]
+                                      (cond-> {:fn-id id :slot-id (:id slot)}
+                                        (< index (dec length)) (assoc :ref-fn-id (get ids (inc index)))
+                                        (= index (dec length)) (assoc :value "leaf"))) (range) ids))
+        hint (source/collect-client-closure storage [(first ids)] (constantly nil))
+        projected-var (ns-resolve 'graphden.executor.browser-source 'collect-projected-client)
+        original @projected-var
+        successes (atom 0)]
+    (snapshot storage
+              (fn [scoped]
+                (let [{:keys [answer calls]}
+                      (observed #(with-redefs-fn
+                                   {projected-var (fn [& args]
+                                                    (let [result (apply original args)]
+                                                      (when result (swap! successes inc))
+                                                      result))}
+                                   (fn [] (source/collect-client-closure scoped [(first ids)] (constantly nil) hint))))]
+                  (is (= 1 @successes))
+                  (is (= (set ids) (set (map :id (:fns answer)))))
+                  {:owners length :queries (count calls)})))))
+
+
+(deftest eligible-client-acquisition-sql-does-not-follow-reference-depth
+  (let [twenty (measured-chain 20)
+        forty (measured-chain 40)]
+    (is (pos? (:queries twenty)))
+    (is (= (:queries twenty) (:queries forty))
+        (str "doubling reference depth adds in-memory work, not SQL rounds: " [twenty forty]))))
+
+
+(deftest physical-projection-scales-in-parameter-chunks-with-one-total-row-budget
+  (let [storage (setup/create-versioned-test-storage)
+        {:keys [owner]} (fixture-rows storage)
+        base (vs/unwrap storage)
+        ids (vec (repeatedly 20 random-uuid))]
+    (doseq [id ids]
+      (let [slot (sp/create-entity storage :slot {:name (str "chunk-" id) :type-fn-id (:id owner)})]
+        (sp/create-entity base :binding {:id id :org-id nil :fn-id (:id owner) :slot-id (:id slot)})))
+    (snapshot storage
+              (fn [scoped]
+                (let [backend (vs/unwrap scoped)
+                      owner-scope (scope scoped [(:id owner)] (constantly nil))
+                      sealed (projection/resolution-scope owner-scope scoped backend {:binding (set ids)} #{(:branch-id scoped)})
+                      request {:scope sealed :op :read-ids :entity :binding :fields [:id :org-id]
+                               :ids ids :max-rows 20}
+                      {:keys [answer queries]} (binding [util/*max-statement-params* 8]
+                                                 (observed #(sp/read-source-projection backend request)))
+                      body-queries (filter #(str/includes? (first %) "FROM \"binding\"") queries)]
+                  (is (= (set ids) (set (map :id answer))))
+                  (is (= 3 (count body-queries)) "20 IDs use ceil(20/(8-1)) queries, including LIMIT parameter")
+                  (is (every? #(<= (dec (count %)) 8) body-queries))
+                  (is (= :storage-error/source-projection-unsupported
+                         (binding [util/*max-statement-params* 8]
+                           (refusal #(sp/read-source-projection backend (assoc request :max-rows 19)))))))))))
+
+
 (deftest projected-edges-preserve-ordinary-rows-without-value-transfer
   (let [storage (setup/create-versioned-test-storage)
         {:keys [owner other binding item junction]} (fixture-rows storage)]

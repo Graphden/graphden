@@ -85,7 +85,9 @@
                       (when (and (map? input) (= #{:graph :anchor :targets} (set (keys input))))
                         (record! :outer-digest))
                       (fingerprint input))]
-        (let [descriptors (server/export-client-plan ctx storage authorize! {} {:root root} request @anchor)
+        ;; Exercise the retained full-capture digest path: multi-entry exports
+        ;; deliberately keep this conservative boundary.
+        (let [descriptors (server/export-client-plan ctx storage authorize! {} {:root root :second-root root} request @anchor)
               input {:descriptor (get descriptors site) :input (wire/encode-value {:query ""})}]
           (is (some? (:descriptor input)))
           (reset! events [])

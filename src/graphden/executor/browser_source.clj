@@ -152,6 +152,29 @@
         (update :slots #(vec (vals (into {} (map (juxt :id identity)) %)))))))
 
 
+(defn- validate-owned-source!
+  [{:keys [fns slots fn-slots bindings]} authorizations]
+  (let [bare-types (into #{} (keep (fn [[id kind]] (when (= :bare-type kind) id))) authorizations)
+        slot-ids (set (map :slot-id fn-slots))]
+    (when (or (some #(contains? bare-types (:fn-id %)) fn-slots)
+              (some #(contains? bare-types (:fn-id %)) bindings)
+              (some #(and (contains? bare-types (:id %))
+                          (or (seq (:parent-ids %)) (:base-fn-id %)
+                              (:element-fn-id %) (:return-type-fn-id %) (:constraint %)))
+                    fns))
+      (reject! :primitive-type-source-mismatch))
+    (doseq [row fns]
+      (when-let [contract (:type-contract (get authorizations (:id row)))]
+        (let [owned-junctions (filterv #(= (:id row) (:fn-id %)) fn-slots)
+              owned-slot-ids (set (map :slot-id owned-junctions))]
+          (when-not (contracts/matches? contract row
+                                        (filterv #(contains? owned-slot-ids (:id %)) slots)
+                                        owned-junctions
+                                        (filterv #(= (:id row) (:fn-id %)) bindings))
+            (reject! :public-type-contract-mismatch)))))
+    (when-not (= slot-ids (set (map :id slots))) (reject! :source-slot-missing))))
+
+
 (defn- collect-source
   "Collect only requested roots and their source/type dependencies. `authorize!`
    receives each fn row BEFORE any of its binding/item values are loaded.
@@ -194,7 +217,6 @@
               fns (vec (read-rows storage :fn ids))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
           (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
-                bare-types (into #{} (keep (fn [[id kind]] (when (= :bare-type kind) id))) authorizations)
                 [fn-slots bindings] (owner-rows storage ids budget)
                 items (if (seq bindings)
                         (limited-query storage :binding-list-item
@@ -210,23 +232,8 @@
                                                     (dissoc % :ref-fn-id) %) bindings)
                                     :else bindings)
                                   (if manifest? [] items))]
-            (when (or (some #(contains? bare-types (:fn-id %)) fn-slots)
-                      (some #(contains? bare-types (:fn-id %)) bindings)
-                      (some #(and (contains? bare-types (:id %))
-                                  (or (seq (:parent-ids %)) (:base-fn-id %)
-                                      (:element-fn-id %) (:return-type-fn-id %) (:constraint %)))
-                            fns))
-              (reject! :primitive-type-source-mismatch))
-            (doseq [row fns]
-              (when-let [contract (:type-contract (get authorizations (:id row)))]
-                (let [owned-junctions (filterv #(= (:id row) (:fn-id %)) fn-slots)
-                      owned-slot-ids (set (map :slot-id owned-junctions))]
-                  (when-not (contracts/matches? contract row
-                                                (filterv #(contains? owned-slot-ids (:id %)) slots)
-                                                owned-junctions
-                                                (filterv #(= (:id row) (:fn-id %)) bindings))
-                    (reject! :public-type-contract-mismatch)))))
-            (when-not (= slot-ids (set (map :id slots))) (reject! :source-slot-missing))
+            (validate-owned-source! {:fns fns :slots slots :fn-slots fn-slots :bindings bindings}
+                                    authorizations)
             (recur (into (apply disj pending ids) (remove seen refs)) seen
                    (-> graph
                        (update :fns into fns)
@@ -248,6 +255,38 @@
                                         bindings
                                         (mapcat #(get items-by-binding (:id %)) bindings))))]
       (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions))))
+
+
+(defn capture-nodes
+  "Read exact server-owned witness IDs without traversing sibling dependencies.
+   This is raw evidence, not a checked executable/export graph. Every owner is
+   freshly authorized before any owned value is read; ordinary source limits
+   and decorated snapshot storage remain mandatory."
+  [storage ids authorize!]
+  (let [ids (set ids)
+        budget (atom 0)]
+    (when (> (count ids) max-functions) (reject! :source-function-limit))
+    (reduce
+      (fn [graph batch]
+        (let [fns (vec (read-rows storage :fn batch))]
+          (when-not (= (set batch) (set (map :id fns))) (reject! :source-missing))
+          (let [authorizations (into {} (map (fn [row] [(:id row) (authorize! row)])) fns)
+                [fn-slots bindings] (owner-rows storage batch budget)
+                items (if (seq bindings)
+                        (limited-query storage :binding-list-item {:binding-id (mapv :id bindings)} budget)
+                        [])
+                slot-ids (set (map :slot-id fn-slots))
+                slots (vec (read-rows storage :slot slot-ids))]
+            (validate-owned-source! {:fns fns :slots slots :fn-slots fn-slots :bindings bindings}
+                                    authorizations)
+            (-> graph
+                (update :fns into fns)
+                (update :fn-slots into fn-slots)
+                (update :slots into slots)
+                (update :bindings into bindings)
+                (update :list-items into items)))))
+      {:fns [] :fn-slots [] :slots [] :bindings [] :list-items []}
+      (partition-all batch-size ids))))
 
 
 (defn- row-limit?

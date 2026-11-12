@@ -96,7 +96,9 @@
                    (case op
                      :read-ids (and (coll? ids)
                                     (or (= :edges phase) (every? owner-fields requested))
-                                    (every? (if identity-entity versions (get identities entity #{})) ids))
+                                    (if identity-entity
+                                      (every? #(= identity-entity (:entity (get versions %))) ids)
+                                      (every? (get identities entity #{}) ids)))
                      :query (and identity-entity (= :ownership phase)
                                  (= #{identity-field :branch-id} (set (keys where)))
                                  (every? owner-fields requested)

@@ -1196,3 +1196,22 @@
           (recur (next requests) (next resolved) (conj result (first resolved)))
           (recur (next requests) resolved (conj result [])))
         result))))
+
+
+(defn source-projection-plan
+  "The ordinary fresh branch/merge plan, reused by structural discovery."
+  [base-storage entity ids branch-id]
+  (let [{:keys [version-entity version-id-field]} (get entity-config entity)]
+    (cache-read-plan base-storage version-entity version-id-field ids branch-id nil)))
+
+
+(defn resolve-source-projection
+  "Use the normal winner/tombstone/branch-local resolver on projected rows.
+   Ownership and tie validation must already have completed. No row acquisition
+   occurs here except ordinary function metadata for branch-local decisions."
+  [base-storage entity plan versions identities binding-fn-ids where]
+  (let [id-field (:version-id-field plan)
+        cache {:versions-by-id (group-by id-field versions)
+               :merges-by-target (group-by :target-branch-id (:all-merges plan))
+               :branch-chain (:branch-chain plan) :binding-fn-ids binding-fn-ids}]
+    (vec (resolve-query-rows base-storage entity cache identities where id-field))))

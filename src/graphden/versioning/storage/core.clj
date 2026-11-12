@@ -40,6 +40,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
+    [graphden.storage.source-projection :as projection]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy-context]
     [graphden.types.diagnostics :as diag]
@@ -47,6 +48,7 @@
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.purge :as purge]
     [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.source-projection :as source-projection]
     [graphden.versioning.storage.stamp :as stamp]
     [graphden.versioning.storage.uniqueness :as uniq])
   (:import
@@ -946,6 +948,15 @@
     ;; versioned IDENTITY entity, we'd need a parallel resolution
     ;; path — defer until that materialises.
     (sp/query-latest-per-group base-storage entity-name where group-cols))
+
+
+  sp/StorageSourceProjection
+
+  (read-source-projection
+    [this {:keys [op scope]}]
+    (if (= op :source-edges)
+      (source-projection/collect-edges this base-storage branch-id scope)
+      (projection/unavailable!)))
 
 
   sp/StorageBoundedQuery

@@ -51,19 +51,37 @@
                        :hint "Use simpler separator or literal string"})))))
 
 
+(defn- compile-regex-result
+  "Return a compiled Pattern or a normalized syntax/engine error result."
+  [pattern-str]
+  (try
+    {:pattern (re-pattern pattern-str)}
+    (catch java.util.regex.PatternSyntaxException e
+      {:error :syntax :cause (Throwable/.getMessage e)})
+    (catch Exception e
+      {:error :engine :cause (Throwable/.getMessage e)})))
+
+
+(defn- throw-regex-compile-error
+  [pattern-str result]
+  (if (= (:error result) :syntax)
+    (throw (ex-info "Invalid regex pattern syntax"
+                    {:type :execution-error/invalid-regex
+                     :separator pattern-str
+                     :cause (:cause result)}))
+    (throw (ex-info "Regex engine error"
+                    {:type :execution-error/regex-engine-error
+                     :separator pattern-str
+                     :cause (:cause result)}))))
+
+
 (defn- compile-regex-timed
   "Compiles regex pattern under a timeout (on a future, so a pathological
    pattern cannot hang the caller). Returns the compiled pattern or throws
    with a descriptive error."
   [pattern-str]
   (let [timeout-ms sp-config/*regex-compile-timeout-ms*
-        fut (future
-              (try
-                {:pattern (re-pattern pattern-str)}
-                (catch java.util.regex.PatternSyntaxException e
-                  {:error :syntax :cause (Throwable/.getMessage e)})
-                (catch Exception e
-                  {:error :engine :cause (Throwable/.getMessage e)})))
+        fut (future (compile-regex-result pattern-str))
         result (deref fut timeout-ms ::timeout)]
     (cond
       (= result ::timeout)
@@ -77,17 +95,7 @@
       (:pattern result)
       (:pattern result)
 
-      (= (:error result) :syntax)
-      (throw (ex-info "Invalid regex pattern syntax"
-                      {:type :execution-error/invalid-regex
-                       :separator pattern-str
-                       :cause (:cause result)}))
-
-      :else
-      (throw (ex-info "Regex engine error"
-                      {:type :execution-error/regex-engine-error
-                       :separator pattern-str
-                       :cause (:cause result)})))))
+      :else (throw-regex-compile-error pattern-str result))))
 
 
 (def ^:private regex-cache-cap
@@ -140,18 +148,10 @@
   "Compile a constrained safe regex synchronously, preserving the timed
    compiler's public error mapping."
   [pattern-str]
-  (try
-    (re-pattern pattern-str)
-    (catch java.util.regex.PatternSyntaxException e
-      (throw (ex-info "Invalid regex pattern syntax"
-                      {:type :execution-error/invalid-regex
-                       :separator pattern-str
-                       :cause (Throwable/.getMessage e)})))
-    (catch Exception e
-      (throw (ex-info "Regex engine error"
-                      {:type :execution-error/regex-engine-error
-                       :separator pattern-str
-                       :cause (Throwable/.getMessage e)})))))
+  (let [result (compile-regex-result pattern-str)]
+    (if (:pattern result)
+      (:pattern result)
+      (throw-regex-compile-error pattern-str result))))
 
 
 (defn- safe-compile-regex

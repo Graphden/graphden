@@ -97,6 +97,7 @@
       ;; One runtime budget, never a separate cache per branch. Branch eviction
       ;; must not retire the shared cache; the owning Integrant context does.
       (:checker-cache base-ctx) (assoc :checker-cache (:checker-cache base-ctx))
+      (:source-manifest base-ctx) (assoc :source-manifest (:source-manifest base-ctx))
       ;; Privileged structural-read storage for THIS branch (§4 Design B): the
       ;; raw PG re-wrapped at branch-id, so `rebuild!` compiles every org's fns
       ;; in this executor's shard (isolation stays on the org-scoped `:storage`

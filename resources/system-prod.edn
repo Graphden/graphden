@@ -95,6 +95,7 @@
  {;; Pure checker artifacts only; raw source replay remains disabled.
   ;; Restart after changing this flag. Development hot reload leaves it off.
   :checker-cache? #or [#env GRAPHDEN_CHECKER_CACHE "true"]
+  :source-manifest? #or [#env GRAPHDEN_SOURCE_MANIFEST "false"]
   :storage #ig/ref :db/versioned
   :vault-client #ig/ref :vault/client
   ;; NOTIFY listener — event-driven SSE (`:sse-stream`'s

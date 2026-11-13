@@ -442,6 +442,25 @@
             (miss! :policy-context-mismatch)))))))
 
 
+(defn verify-policy-context!
+  "Verify the existing trusted RLS policy contract in a caller-owned RR after
+   the caller has locked the complete source roster. Returns only the supplied
+   request context, never source or authorization evidence."
+  [connection locked contract check!]
+  (when-not (and (set? locked) (seq locked) (<= (count locked) max-tables)) (miss! :lock-set))
+  (doseq [table locked] (relation table))
+  (let [session (first (execute! connection check! [session-query]))
+        schema (execute! connection check! (schema-query locked))]
+    (when-not (and (= "public" (:schema session)) (= "\"$user\", public" (:search_path session))
+                   (= "{pg_catalog,public}" (:schemas session)) (= "UTF8" (:encoding session))
+                   (= "repeatable read" (:isolation session)) (= "on" (:readonly session))
+                   (= (set (map name locked)) (set (map :relname schema)))
+                   (every? schema-supported? schema))
+      (miss! :unsupported-schema-or-session))
+    (policy-contract! connection locked session schema contract check!)
+    (:required-gucs contract)))
+
+
 (defn call-with-guard
   "First action in a newly owned read-only RR transaction. The caller must
    have borrowed in autocommit and must not commit/restart inside consume.

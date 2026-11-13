@@ -3,6 +3,7 @@
    Ordinary execution is the default. No authorization result or checked graph
    is retained: only guarded raw source recipes enter the bounded store."
   (:require
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.executor.source-recipe-lifecycle :as lifecycle]
     [graphden.executor.source-recipe-storage :as storage]
     [graphden.executor.source-recipe-store :as store]
@@ -88,7 +89,9 @@
    Only a Controller supplied in trusted ctx configuration enables replay."
   [ctx f]
   (let [controller (controller-state (:source-replay ctx))]
-    (lifecycle/call-with-operation (when (and controller (not @(:closed? controller))) controller) f)))
+    (manifest/call-with-controller
+      (:source-manifest ctx)
+      #(lifecycle/call-with-operation (when (and controller (not @(:closed? controller))) controller) f))))
 
 
 (defn- unavailable!

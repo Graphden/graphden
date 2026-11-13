@@ -26,6 +26,8 @@
   [table]
   (when-not (string? table)
     (throw (ex-info "Physical source table name required" {:type ::invalid-table})))
+  (when (= table "graphden_source_revision")
+    (throw (ex-info "Revision table cannot trigger its own update" {:type ::invalid-table})))
   (pg/validate-sql-identifier! table {:operation :source-revision-install})
   (str "public.\"" table "\""))
 

@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.storage.postgres.source-revision :as revision]
+    [graphden.storage.postgres.source-revision-snapshot :as snapshot]
     [graphden.storage.postgres.test-setup :as setup]
     [next.jdbc :as jdbc]))
 
@@ -77,7 +78,46 @@
   (is (revision/roster-installed? *datasource* ["revision_fixture"]) "Rollback restores the verified definition"))
 
 
+(deftest owned-snapshot-pairs-loaded-data-with-its-revision
+  (let [before (revision/current *datasource*)
+        result (snapshot/call-with-snapshot
+                 *datasource* ["revision_fixture"]
+                 (fn [connection]
+                   (jdbc/execute! *datasource* ["INSERT INTO revision_fixture VALUES(201,'after-snapshot')"])
+                   (is (= before (revision/current connection)))
+                   (jdbc/execute! connection ["SELECT * FROM revision_fixture WHERE id=201"])))]
+    (is (= before (:revision result)))
+    (is (empty? (:value result)))
+    (is (= (inc (:revision before)) (:revision (revision/current *datasource*))))))
+
+
+(deftest snapshot-never-retries-loader-errors
+  (let [calls (atom 0)]
+    (is (thrown? java.sql.SQLException
+          (snapshot/call-with-snapshot *datasource* ["revision_fixture"]
+                                       (fn [_]
+                                         (swap! calls inc)
+                                         (throw (java.sql.SQLException. "fixture"))))))
+    (is (= 1 @calls))))
+
+
 (deftest invalid-roster-is-refused-before-sql
   (is (thrown? clojure.lang.ExceptionInfo (revision/install! nil [])))
+  (is (thrown? clojure.lang.ExceptionInfo (revision/install! nil ["graphden_source_revision"])))
   (is (thrown? clojure.lang.ExceptionInfo
         (revision/install! nil ["revision_fixture; DROP TABLE revision_fixture"]))))
+
+
+(deftest snapshot-refuses-unverified-coverage-before-loading-data
+  (let [calls (atom 0)]
+    (jdbc/execute! *datasource* ["ALTER TABLE revision_fixture DISABLE TRIGGER graphden_source_revision_bump"])
+    (try
+      (is (thrown? clojure.lang.ExceptionInfo
+            (snapshot/call-with-snapshot *datasource* ["revision_fixture"]
+                                         (fn [_] (swap! calls inc)))))
+      (is (zero? @calls))
+      (finally
+        (jdbc/execute! *datasource* ["ALTER TABLE revision_fixture ENABLE TRIGGER graphden_source_revision_bump"])))
+    (with-open [connection (jdbc/get-connection *datasource*)]
+      (is (thrown? clojure.lang.ExceptionInfo
+            (snapshot/call-with-snapshot connection ["revision_fixture"] (constantly nil)))))))

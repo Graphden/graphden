@@ -146,9 +146,13 @@
                        :before-lock (fn [connection]
                                       (check!)
                                       (when statement-timeout-ms
+                                        (when-not (and (integer? statement-timeout-ms)
+                                                       (<= 1 statement-timeout-ms 2147483647))
+                                          (throw (ex-info "Invalid source statement deadline" {})))
+                                        ;; SET LOCAL does not establish an MVCC snapshot before LOCK.
                                         (jdbc/execute! connection
-                                                       ["select set_config('statement_timeout', ?, true)"
-                                                        (str statement-timeout-ms)])))}
+                                                       [(str "SET LOCAL statement_timeout = '"
+                                                             statement-timeout-ms "ms'")])))}
                       (fn [connection token]
                         (check!)
                         (let [policy-context (certificate/verify-policy-context! connection tables contract check!)
@@ -191,15 +195,21 @@
                     (swap! cache prune (now-ms))
                     (when-not (:closed? @cache) (get-in @cache [:entries key])))]
         (if entry
-          (let [graph (copy/thaw (:graph entry) connection)]
-            (check!) (validate! graph) (check!) graph)
+          (let [reserved? (locking charged
+                            (when (<= (+ @charged (:charge entry)) (:max-capture-bytes limits))
+                              (swap! charged + (:charge entry)) true))]
+            (if reserved?
+              (let [graph (copy/thaw (:graph entry) connection)]
+                (check!) (validate! graph) (check!) graph)
+              (run)))
           (let [graph (run)]
             (check!)
             (when-not (:closed? @cache)
               (try
-                (let [frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged)) (:max-rows limits))]
-                  (swap! charged + (copy/charge-bytes frozen))
-                  (swap! staged conj [key frozen]))
+                (locking charged
+                  (let [frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged)) (:max-rows limits))]
+                    (swap! charged + (copy/charge-bytes frozen))
+                    (swap! staged conj [key frozen])))
                 (catch clojure.lang.ExceptionInfo error
                   (when-not (contains? #{::copy/ineligible
                                          :graphden.executor.source-recipe-values/ineligible}

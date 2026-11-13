@@ -53,7 +53,7 @@
 
 (defn- fixture-priority-plans
   "Exercise the public planner against real namespace forms in an isolated repo."
-  [requests]
+  [requests & [extra-files]]
   (let [dir (fs/create-temp-dir {:prefix "priority-distance-"})
         scripts (str (fs/absolutize "scripts"))
         files (into {"src/demo/source.clj" "(ns demo.source)"
@@ -74,7 +74,7 @@
                             (when dependency (str " (:require [" dependency "])"))
                             ") (deftest example-test (is true))")]))]
     (try
-      (doseq [[path body] files]
+      (doseq [[path body] (merge files extra-files)]
         (let [file (fs/path dir path)]
           (fs/create-dirs (fs/parent file))
           (spit (str file) body)))
@@ -560,6 +560,38 @@
     (is (= (frequencies (priority/runtime-order nil)) (frequencies runtime)))
     (is (= (frequencies (priority/browser-order nil)) (frequencies browser)))
     (is (= (count (:unit plan)) (count (distinct (:unit plan)))))))
+
+
+(deftest alias-keywords-before-tests-preserve-priority-and-suite-tags
+  (let [fixtures {"alias-unit" ["" "(deftest example (is true))"]
+                  "alias-mixed" ["" "(deftest unit (is true)) (deftest ^:integration pg (is true))"]
+                  "alias-integration-ns" ["^:integration " "(deftest example (is true))"]
+                  "alias-integration-var" ["" "(deftest ^:integration example (is true))"]
+                  "alias-integration-form" ["" "^:integration (deftest example (is true))"]
+                  "alias-perf" ["^:perf " "(deftest example (is true))"]
+                  "alias-container" ["" "(deftest ^:container-e2e example (is true))"]}
+        files (into {}
+                    (map (fn [[stem [ns-meta tests]]]
+                           [(fixture-test-path (str "demo." stem "-test"))
+                            (str "(ns " ns-meta "demo." stem "-test"
+                                 " (:require [unavailable.storage :as sp]))"
+                                 " (def fixture #(hash-map ::sp/candidate-count 1 ::local true)) "
+                                 tests)]))
+                    fixtures)
+        changed (set (keys files))
+        [{automatic :plan} {manual :plan}]
+        (fixture-priority-plans
+          [[changed nil]
+           [changed "unit:demo.alias-unit-test,integration:demo.alias-integration-var-test"]]
+          files)]
+    (is (= ["demo.alias-mixed-test" "demo.alias-unit-test"] (:unit automatic)))
+    (is (= ["demo.alias-integration-form-test" "demo.alias-integration-ns-test"
+            "demo.alias-integration-var-test" "demo.alias-mixed-test"]
+           (:integration automatic)))
+    (is (= ["demo.alias-unit-test" "demo.alias-mixed-test"] (:unit manual)))
+    (is (= ["demo.alias-integration-var-test" "demo.alias-integration-form-test"
+            "demo.alias-integration-ns-test" "demo.alias-mixed-test"]
+           (:integration manual)))))
 
 
 (deftest manual-priority-rejects-typos-before-running

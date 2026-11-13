@@ -7,7 +7,8 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.set :as set]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [edamame.core :as reader]))
 
 
 (declare dependency-distances namespace-entry)
@@ -540,20 +541,26 @@
 (defn- focused-namespace
   [path kind]
   (try
-    (with-open [reader (java.io.PushbackReader. (io/reader path))]
-      (binding [*read-eval* false]
-        (let [form (read reader false ::eof)
-              name (when (and (seq? form) (= 'ns (first form))) (second form))
-              ns-integration? (boolean (and name (contains? (meta name) :integration)))
-              selected? (case kind
-                          :unit (and (unit-eligible? name) unit-test-form?)
-                          :integration #(integration-test-form? % ns-integration?))]
-          (when (and (symbol? name) selected?)
-            (loop [form (read reader false ::eof)]
-              (cond
-                (= ::eof form) nil
-                (selected? form) (str name)
-                :else (recur (read reader false ::eof))))))))
+    (with-open [input (io/reader path)]
+      (let [stream (reader/reader input)
+            ;; Reading an ns form does not install its aliases. This selector
+            ;; only needs test metadata, so preserve alias names without loading code.
+            opts (reader/normalize-opts
+                   {:read-cond :allow :features #{:clj :bb}
+                    :fn true :regex true :var true :deref true :syntax-quote true
+                    :auto-resolve #(or % "ci-priority-core")})
+            form (reader/parse-next stream opts)
+            name (when (and (seq? form) (= 'ns (first form))) (second form))
+            ns-integration? (boolean (and name (contains? (meta name) :integration)))
+            selected? (case kind
+                        :unit (and (unit-eligible? name) unit-test-form?)
+                        :integration #(integration-test-form? % ns-integration?))]
+        (when (and (symbol? name) selected?)
+          (loop [form (reader/parse-next stream opts)]
+            (cond
+              (= ::reader/eof form) nil
+              (selected? form) (str name)
+              :else (recur (reader/parse-next stream opts)))))))
     (catch Exception _ nil)))
 
 

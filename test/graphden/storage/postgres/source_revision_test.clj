@@ -64,6 +64,19 @@
     (is (= (+ 2 (:revision before)) (:revision (revision/current *datasource*))))))
 
 
+(deftest catalog-check-refuses-disabled-missing-and-changed-triggers
+  (is (revision/roster-installed? *datasource* ["revision_fixture"]))
+  (is (false? (revision/roster-installed? *datasource* [])))
+  (is (false? (revision/roster-installed? *datasource* ["revision_fixture" "missing_source_table"])))
+  (jdbc/with-transaction [tx *datasource* {:rollback-only true}]
+                         (jdbc/execute! tx ["ALTER TABLE revision_fixture DISABLE TRIGGER graphden_source_revision_bump"])
+                         (is (false? (revision/roster-installed? tx ["revision_fixture"]))))
+  (jdbc/with-transaction [tx *datasource* {:rollback-only true}]
+                         (jdbc/execute! tx ["CREATE OR REPLACE FUNCTION public.graphden_source_revision_bump() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN RETURN NULL; END $$"])
+                         (is (false? (revision/roster-installed? tx ["revision_fixture"]))))
+  (is (revision/roster-installed? *datasource* ["revision_fixture"]) "Rollback restores the verified definition"))
+
+
 (deftest invalid-roster-is-refused-before-sql
   (is (thrown? clojure.lang.ExceptionInfo (revision/install! nil [])))
   (is (thrown? clojure.lang.ExceptionInfo

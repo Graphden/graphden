@@ -17,6 +17,11 @@
 (def ^:private function-name "public.graphden_source_revision_bump")
 
 
+(def ^:private function-body
+  (str " BEGIN UPDATE " revision-table " SET revision=revision+1 WHERE singleton=true; "
+       "IF NOT FOUND THEN RAISE EXCEPTION 'Source revision missing'; END IF; RETURN NULL; END "))
+
+
 (defn- qualified-table
   [table]
   (when-not (string? table)
@@ -45,10 +50,8 @@
                            (jdbc/execute! tx [(str "INSERT INTO " revision-table
                                                    " VALUES(true,?,0) ON CONFLICT(singleton) DO NOTHING") (UUID/randomUUID)])
                            (jdbc/execute! tx [(str "CREATE OR REPLACE FUNCTION " function-name
-                                                   "() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$ BEGIN "
-                                                   "UPDATE " revision-table " SET revision=revision+1 WHERE singleton=true; "
-                                                   "IF NOT FOUND THEN RAISE EXCEPTION 'Source revision missing'; END IF; "
-                                                   "RETURN NULL; END $$")])
+                                                   "() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$"
+                                                   function-body "$$")])
                            (doseq [table tables]
                              (jdbc/execute! tx [(str "DROP TRIGGER IF EXISTS " trigger-name " ON " table)])
                              (jdbc/execute! tx [(str "CREATE TRIGGER " trigger-name
@@ -64,3 +67,32 @@
   (jdbc/execute-one! connection
                      [(str "SELECT generation,revision FROM " revision-table " WHERE singleton=true")]
                      {:builder-fn rs/as-unqualified-lower-maps}))
+
+
+(defn roster-installed?
+  "Check the exact trigger implementation on every requested physical table.
+   This is a catalog diagnostic, NOT a snapshot/cache certificate: callers
+   must prove roster completeness, lock out concurrent DDL, and establish
+   trusted trigger history before relying on the revision for freshness."
+  [connection tables]
+  (let [tables (vec (sort (distinct (seq tables))))]
+    (doseq [table tables] (qualified-table table))
+    (if (empty? tables)
+      false
+      (let [query (str "SELECT c.relname FROM pg_catalog.pg_class c "
+                       "JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+                       "JOIN pg_catalog.pg_trigger t ON t.tgrelid=c.oid "
+                       "JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid "
+                       "JOIN pg_catalog.pg_namespace pn ON pn.oid=p.pronamespace "
+                       "JOIN pg_catalog.pg_language l ON l.oid=p.prolang "
+                       "WHERE n.nspname='public' AND c.relkind='r' "
+                       "AND c.relname IN (" (str/join "," (repeat (count tables) "?")) ") "
+                       "AND t.tgname=? AND t.tgenabled='O' AND t.tgtype=62 "
+                       "AND NOT t.tgisinternal AND t.tgqual IS NULL AND t.tgnargs=0 "
+                       "AND pn.nspname='public' AND p.proname=? "
+                       "AND NOT p.prosecdef AND l.lanname='plpgsql' AND p.prosrc=? "
+                       "AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]")
+            rows (jdbc/execute! connection
+                                (into [query] (concat tables [trigger-name "graphden_source_revision_bump" function-body]))
+                                {:builder-fn rs/as-unqualified-lower-maps})]
+        (= (set tables) (set (map :relname rows)))))))

@@ -38,3 +38,19 @@
     (java.sql.Timestamp/.setTime timestamp 999)
     (java.sql.Timestamp/.setTime (get-in first-copy [:bindings 0 :value]) 888)
     (is (= 23 (java.sql.Timestamp/.getTime (get-in (copy/thaw frozen nil) [:bindings 0 :value]))))))
+
+
+(deftest type-constraint-sets-round-trip-without-admitting-literal-sets
+  (let [source (update (graph) :fns conj
+                       {:id (random-uuid) :constraint [:fn {:item "a"} :bool #{}]}
+                       {:id (random-uuid) :constraint [:in #{"end" "step"}]}
+                       {:id (random-uuid) :constraint [:fn {} :any :any #{:jvm-server}]}
+                       {:id (random-uuid) :constraint nil})
+        frozen (copy/freeze source 100000 100)]
+    (is (= source (copy/thaw frozen nil)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (copy/freeze (assoc source :bindings [{:value #{"end" "step"}}]) 100000 100)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (copy/freeze (assoc-in source [:fns 0 :constraint] [:in #{(java.util.Date.)}]) 100000 100)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (copy/freeze (assoc-in source [:fns 0 :constraint] [:in (with-meta #{:one} {:unknown true})]) 100000 100)))))

@@ -23,6 +23,7 @@
           fail-commit? (atom false)
           context (atom "a")
           repetitions (atom 1)
+          kind (atom :manifest)
           escaped (atom nil)
           authorize! (fn [_] true)
           graph {:fns [{:id (random-uuid) :parent-ids #{}}]
@@ -36,10 +37,10 @@
                       #(manifest/with-snapshot
                          source (fn [] (swap! checks inc)) nil
                          (fn [fixed policy]
-                           (reset! escaped (bound-fn [] (manifest/capture fixed [root] policy
+                           (reset! escaped (bound-fn [] (manifest/capture fixed @kind [root] policy
                                                                           (fn [] (swap! reads inc) graph) validate!)))
                            (last (mapv (fn [_]
-                                         (manifest/capture fixed [root] policy
+                                         (manifest/capture fixed @kind [root] policy
                                                            (fn [] (swap! reads inc) graph) validate!))
                                        (range @repetitions))))
                          (fn [_] (throw (ex-info "Unexpected fallback" {}))))))]
@@ -53,7 +54,7 @@
                                                     (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
                                                     {:value result}))
                     certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped})))))
+        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind})))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -116,3 +117,18 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Source snapshot expired" (@escaped)))
       (is (= 1 @reads))
       (is (zero? (:pending (manifest/stats controller)))))))
+
+
+(deftest client-and-manifest-collectors-never-share-a-retained-entry
+  (exercise
+    (fn [{:keys [collect kind reads graph]}]
+      (let [validated (atom 0)
+            validate! (fn [_] (swap! validated inc))]
+        (doseq [mode [:manifest :client :client :manifest]]
+          (reset! kind mode)
+          (is (= graph (collect validate!))))
+        (is (= 2 @reads))
+        (is (= 2 @validated))
+        (reset! kind :unknown)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown source collector kind"
+              (collect validate!)))))))

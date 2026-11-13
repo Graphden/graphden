@@ -293,7 +293,7 @@ Executor context for running functions.
 | `:base-fns` | ref | Ctx-scoped base-fns map (`:exec/base-fns`) |
 | `:auth-provider` | ref | Reference to `:auth/provider` |
 | `:checker-cache?` | boolean/string | Enable bounded pure checker artifacts for this runtime |
-| `:source-manifest?` | boolean/string | Enable bounded manifest retention on supported revision-enabled storage |
+| `:source-manifest?` | boolean/string | Enable bounded client-source and manifest retention on supported revision-enabled storage |
 
 ```clojure
 :exec/context
@@ -323,7 +323,8 @@ builds a fresh plan. Raw JDBC/source replay is not enabled by this setting.
 
 `GRAPHDEN_SOURCE_REVISION=true` enables coordinated installation of source
 revision triggers during PostgreSQL schema initialization.
-`GRAPHDEN_SOURCE_MANIFEST=true` enables manifest retention in the executor.
+`GRAPHDEN_SOURCE_MANIFEST=true` enables client-source and manifest retention in
+the executor. The two collectors use separate cache keys even for equal roots.
 Both default to false. The second setting requires the first, a supported
 storage/policy adapter and an owned Hikari pool; unsupported setup fails startup.
 
@@ -332,12 +333,15 @@ updates one of 256 counters; readers compare their MVCC-visible sum and common
 generation. Independent backends usually use different counters, while bucket
 collisions retain normal transaction locking. This certificate does not cache
 authorization: hits read fresh function metadata and repeat policy, namespace
-and source-contract checks. Unrelated source writes also invalidate manifests;
+and source-contract checks. Client server-call targets still require execution
+permission on every hit. Unrelated source writes also invalidate retained source;
 this setting does not accelerate every cold load.
 
 Limits are 64 MiB retained, 64 entries, a 30-second TTL, four admitted snapshots
-and 16 MiB of cumulative copying per snapshot. These charges do not describe
-total JVM memory. Capacity or unsupported values retain ordinary collection.
+and 32 MiB of cumulative copying per snapshot (at most 128 MiB across the four
+admitted snapshots). The client graph uses a columnar row representation that
+stores each schema's field names once. These charges do not describe total JVM
+memory. Capacity or unsupported values retain ordinary collection.
 
 Source DDL and trigger repair require coordinated maintenance. Retire affected
 controllers before maintenance and reinitialize them afterward. The internal

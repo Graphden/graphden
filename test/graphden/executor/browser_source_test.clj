@@ -4,6 +4,7 @@
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-source :as source]
     [graphden.executor.capabilities :as capabilities]
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.grouped-read :as grouped]
@@ -595,6 +596,35 @@
                       (and (contains? #{:query :candidates} operation)
                            (contains? #{:binding :fn-slot} entity)
                            (some #{target} (:fn-id where)))) @calls)))
+    (let [denied? (atom false)
+          guard (fn [row & [permissions]]
+                  (when (= target (:id row))
+                    (is (= {:execute? true :server-target? true} permissions))
+                    (when @denied?
+                      (throw (ex-info "Execute revoked" {:type :authz/forbidden})))))
+          ;; Exercise the hit callback independently of the controller tests.
+          hit (fn [_ kind _ _ _ validate!]
+                (is (= :client kind))
+                (let [retained (dissoc graph :server-bindings)]
+                  (validate! retained)
+                  retained))]
+      (with-redefs [manifest/capture hit
+                    contracts/component-identities (assoc contracts/component-identities target {})]
+        (doseq [hinted? [false true]]
+          (reset! calls [])
+          (let [storage (fixture-storage tables calls)
+                actual (if hinted?
+                         (source/collect-client-closure storage [root] guard {})
+                         (source/collect-client-closure storage [root] guard))]
+            (is (= (graph-rows graph) (graph-rows actual)))
+            (is (every? (fn [[operation entity]] (and (= :read operation) (= :fn entity))) @calls))))
+        (reset! denied? true)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Execute revoked"
+              (source/collect-client-closure (fixture-storage tables calls) [root] guard)))
+        (is (= :source-missing
+               (try (source/collect-client-closure
+                      (fixture-storage (update tables :fn dissoc target) calls) [root] guard)
+                    (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))
     (let [ordinary-slot (random-uuid)
           junction (random-uuid)
           binding (random-uuid)

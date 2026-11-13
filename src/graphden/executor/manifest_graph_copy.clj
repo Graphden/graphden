@@ -10,7 +10,7 @@
 
 
 (deftype ^:private Copy
-  [graph parents targets charge])
+  [graph parents targets constraints charge])
 
 
 (defn- identity-set!
@@ -33,23 +33,34 @@
                                           (if (contains? parents (:id row))
                                             (update row :parent-ids identity-set!) row)) %))
         targets (values/freeze (identity-set! (:identity-target-ids graph)) max-bytes)
+        constraints (into {} (keep-indexed (fn [index row]
+                                             (when (some? (:constraint row)) [index (:constraint row)]))) (:fns plain))
+        base-charge (+ 1024 (values/charge-bytes targets) (* 128 (count parents)))
+        _ (when (>= base-charge max-bytes)
+            (throw (ex-info "Manifest copy exceeds reservation" {:type ::ineligible})))
+        constraints (values/freeze-type-constraints constraints (- max-bytes base-charge))
+        plain (update plain :fns #(mapv (fn [row]
+                                          (cond-> row (some? (:constraint row)) (dissoc :constraint))) %))
         result (reduce-kv (fn [{:keys [charge] :as acc} key value]
-                            (let [copy (rows/freeze value false (- max-bytes charge))]
+                            (let [copy (rows/freeze-columnar value (- max-bytes charge))]
                               (-> acc (assoc-in [:graph key] copy)
                                   (update :charge + (rows/charge-bytes copy)))))
-                          {:graph {} :charge (+ 1024 (values/charge-bytes targets) (* 128 (count parents)))}
+                          {:graph {} :charge (+ base-charge (values/charge-bytes constraints))}
                           (dissoc plain :identity-target-ids))]
-    (Copy. (:graph result) parents targets (:charge result))))
+    (Copy. (:graph result) parents targets constraints (:charge result))))
 
 
 ^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn thaw
   [^Copy copy connection]
-  (-> (update-vals (.-graph copy) #(rows/thaw % connection {}))
-      (update :fns #(mapv (fn [row]
-                            (if (contains? (.-parents copy) (:id row))
-                              (update row :parent-ids set) row)) %))
-      (assoc :identity-target-ids (set (values/thaw (.-targets copy))))))
+  (let [constraints (values/thaw (.-constraints copy))]
+    (-> (update-vals (.-graph copy) #(rows/thaw % connection {}))
+        (update :fns #(mapv (fn [index row]
+                              (cond-> row
+                                (contains? (.-parents copy) (:id row)) (update :parent-ids set)
+                                (contains? constraints index) (assoc :constraint (get constraints index))))
+                            (range) %))
+        (assoc :identity-target-ids (set (values/thaw (.-targets copy)))))))
 
 
 ^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}

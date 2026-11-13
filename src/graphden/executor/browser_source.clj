@@ -443,19 +443,6 @@
           (throw error))))))
 
 
-(defn collect-client-closure
-  "Collect browser source with explicit server-call bindings terminal. Their
-   source is separately checked by the server boundary, never exported.
-   Optional hints batch fresh identities; fresh metadata-reachable owners then
-   share bounded owned-value reads after authorization in the same snapshot."
-  ([storage roots authorize!]
-   (collect-source storage roots authorize! false true))
-  ([storage roots authorize! graph-hint]
-   (call-with-identity-hints storage roots graph-hint :client
-                             #(or (collect-projected-client storage roots authorize!)
-                                  (collect-source storage roots authorize! false true nil (some? *identity-hints*))))))
-
-
 (defn collect-component-identities
   "Read only server-allowlisted shipped component discriminator metadata.
    An identity-only grant never authorizes binding or implementation reads."
@@ -469,8 +456,13 @@
       rows)))
 
 
-(defn- validate-manifest!
-  [storage authorize! graph]
+(defn- client-server-bindings
+  [graph]
+  (filterv #(capabilities/server-call-slot? (:slot-id %)) (:bindings graph)))
+
+
+(defn- validate-retained-source!
+  [storage authorize! graph kind]
   (let [fresh (binding [*identity-hints* nil *prefetched* nil]
                 (vec (read-rows storage :fn (mapv :id (:fns graph)))))
         _ (when-not (= (into {} (map (juxt :id identity)) (:fns graph))
@@ -478,6 +470,10 @@
             (reject! :source-missing))
         graph (assoc graph :fns fresh)
         terminal (:identity-target-ids graph)
+        server-targets (when (= :client kind)
+                         (into #{} (keep :ref-fn-id) (client-server-bindings graph)))
+        _ (when (and (= :client kind) (not= terminal server-targets))
+            (reject! :mixed-server-target))
         owners (filterv #(not (contains? terminal (:id %))) (:fns graph))
         targets (filterv #(contains? terminal (:id %)) (:fns graph))]
     (prepare-authorizations! authorize! (:fns graph))
@@ -486,10 +482,37 @@
                                       [(:id row) (authorize! row)])) owners)]
       (doseq [row targets]
         (check-snapshot!)
-        (if (contains? contracts/component-identities (:id row))
-          (authorize! row {:identity-only? true})
-          (authorize! row)))
+        (cond
+          (contains? server-targets (:id row)) (authorize! row {:execute? true :server-target? true})
+          (contains? contracts/component-identities (:id row)) (authorize! row {:identity-only? true})
+          :else (authorize! row)))
       (validate-owned-source! (assoc graph :fns owners) permissions))))
+
+
+(defn- capture-client-source
+  [storage roots authorize! collect]
+  (let [graph (manifest/capture storage :client roots authorize!
+                                #(dissoc (collect) :server-bindings)
+                                #(validate-retained-source! storage authorize! % :client))]
+    ;; This vector is derived exactly as in collect-source. Retaining a second
+    ;; copy would duplicate the same binding rows and their byte reservation.
+    (assoc graph :server-bindings (client-server-bindings graph))))
+
+
+(defn collect-client-closure
+  "Collect browser source with server-call targets terminal. Retained source
+   requires fresh metadata, namespace/ACL and contract checks on every hit.
+   Hints and optional projection run only when ordinary collection is needed."
+  ([storage roots authorize!]
+   (capture-client-source storage roots authorize!
+                          #(collect-source storage roots authorize! false true)))
+  ([storage roots authorize! graph-hint]
+   (capture-client-source
+     storage roots authorize!
+     #(call-with-identity-hints storage roots graph-hint :client
+                                (fn []
+                                  (or (collect-projected-client storage roots authorize!)
+                                      (collect-source storage roots authorize! false true nil (some? *identity-hints*))))))))
 
 
 (defn collect-manifests
@@ -501,7 +524,7 @@
   [storage roots authorize!]
   (manifest/capture storage roots authorize!
                     #(collect-source storage roots authorize! true false nil true)
-                    #(validate-manifest! storage authorize! %)))
+                    #(validate-retained-source! storage authorize! % :manifest)))
 
 
 (defn collect-manifest

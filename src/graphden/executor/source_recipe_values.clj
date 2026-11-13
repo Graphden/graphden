@@ -55,13 +55,13 @@
 
 
 (defn- freeze-value
-  [value used limit depth]
+  [value used limit depth structural-sets?]
   (when (> depth 64) (unavailable! :depth-limit))
   ;; Per-node allowance includes collection slots and traversal/copy headroom;
   ;; byte accounting is deliberately conservative, not serialized text length.
   (charge! used limit 128)
   (let [kind (class value)
-        descend #(freeze-value % used limit (inc depth))]
+        descend #(freeze-value % used limit (inc depth) structural-sets?)]
     (cond
       (nil? value) nil
       (= String kind) (do (string-charge! used limit value) value)
@@ -104,6 +104,19 @@
         (when (some? (meta value)) (unavailable! :metadata))
         (mapv descend value))
 
+      (and structural-sets? (= clojure.lang.PersistentHashSet kind))
+      (do
+        (when (some? (meta value)) (unavailable! :metadata))
+        ;; Type constraints use sets for effects, placement and scalar enums.
+        ;; Neither arbitrary literal sets nor mutable/hashable members enter
+        ;; this field-specific representation.
+        (when-not (every? #(or (nil? %) (keyword? %) (= String (class %))
+                               (contains? scalar-classes (class %))
+                               (contains? #{BigInteger BigDecimal clojure.lang.BigInt} (class %))) value)
+          (unavailable! :constraint-set-member))
+        (charge! used limit (+ 512 (* 128 (count value))))
+        (MutableValue. :constraint-set (mapv descend value) nil))
+
       :else (unavailable! :value-type))))
 
 
@@ -116,7 +129,19 @@
   (when-not (and (integer? max-bytes) (pos? max-bytes))
     (throw (ex-info "Source recipe reservation must be positive" {})))
   (let [used (volatile! 256)
-        copied (freeze-value value used max-bytes 0)]
+        copied (freeze-value value used max-bytes 0 false)]
+    (FrozenRows. copied @used)))
+
+
+(defn freeze-type-constraints
+  "Copy only the fn constraint field, additionally supporting closed scalar
+   sets used by type declarations. Ordinary source literal admission stays
+   unchanged. Metadata and unknown/mutable set members remain ineligible."
+  [value max-bytes]
+  (when-not (and (integer? max-bytes) (pos? max-bytes))
+    (throw (ex-info "Source constraint reservation must be positive" {})))
+  (let [used (volatile! 256)
+        copied (freeze-value value used max-bytes 0 true)]
     (FrozenRows. copied @used)))
 
 
@@ -130,6 +155,7 @@
           data (.-value ^MutableValue value)
           extra (.-extra ^MutableValue value)]
       (case kind
+        :constraint-set (set (map thaw-value data))
         :pg-object (doto (PGobject.) (PGobject/.setType extra) (PGobject/.setValue data))
         :timestamp (doto (Timestamp. data) (Timestamp/.setNanos extra))
         :date (condp = extra

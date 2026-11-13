@@ -108,7 +108,10 @@
       (create-controller (:pool description) (:tables installation)
                          {:installation-state installation-state
                           :max-bytes (* 64 1024 1024) :max-entries 64 :max-pending 4
-                          :max-capture-bytes (* 16 1024 1024) :max-rows 16384 :ttl-ms 30000}))))
+                          ;; The complete client graph charges about 23 MiB in
+                          ;; the columnar codec. Keep retention at 64 MiB and
+                          ;; bound four in-flight snapshots to 128 MiB total.
+                          :max-capture-bytes (* 32 1024 1024) :max-rows 16384 :ttl-ms 30000}))))
 
 
 (defn with-snapshot
@@ -178,42 +181,46 @@
 
 
 (defn capture
-  "The manifest collector alone calls this boundary. Reuse still performs the
-   supplied fresh authorization/contract pass before returning a private copy."
-  [source-storage roots authorize! run validate!]
-  (let [scope *snapshot*]
-    (when (and scope (not @(:active? scope)))
-      (throw (ex-info "Source snapshot expired" {:type ::expired})))
-    (if-not (and scope (identical? source-storage (:storage scope))
-                 (identical? authorize! (:authorize! scope))
-                 (identical? (:registration scope) (tenancy/source-replay-policy-info authorize!))
-                 (<= 1 (count roots) 8) (every? uuid? roots))
-      (run)
-      (let [{:keys [controller connection check! staged charged]} scope
-            {:keys [cache limits]} controller
-            key [(:branch scope) (:generation (:registration scope)) (:revision scope) (:policy-context scope) (set roots)]
-            _ (check!)
-            entry (locking cache
-                    (swap! cache prune (now-ms))
-                    (when-not (:closed? @cache) (get-in @cache [:entries key])))]
-        (if entry
-          (if (locking charged
-                (when (<= (+ @charged (:charge entry)) (:max-capture-bytes limits))
-                  (swap! charged + (:charge entry)) true))
-            (let [graph (copy/thaw (:graph entry) connection)]
-              (check!) (validate! graph) (check!) graph)
-            (run))
-          (let [graph (run)]
-            (check!)
-            (when-not (:closed? @cache)
-              (try
-                (locking charged
-                  (let [frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged)) (:max-rows limits))]
-                    (swap! charged + (copy/charge-bytes frozen))
-                    (swap! staged conj [key frozen])))
-                (catch clojure.lang.ExceptionInfo error
-                  (when-not (contains? #{::copy/ineligible
-                                         :graphden.executor.source-recipe-values/ineligible}
-                                       (:type (ex-data error)))
-                    (throw error)))))
-            graph))))))
+  "Retain a bounded private collector graph, partitioned by collector semantics.
+   Reuse always performs fresh authorization and source-contract validation."
+  ([source-storage roots authorize! run validate!]
+   (capture source-storage :manifest roots authorize! run validate!))
+  ([source-storage kind roots authorize! run validate!]
+   (when-not (contains? #{:manifest :client} kind)
+     (throw (ex-info "Unknown source collector kind" {:kind kind})))
+   (let [scope *snapshot*]
+     (when (and scope (not @(:active? scope)))
+       (throw (ex-info "Source snapshot expired" {:type ::expired})))
+     (if-not (and scope (identical? source-storage (:storage scope))
+                  (identical? authorize! (:authorize! scope))
+                  (identical? (:registration scope) (tenancy/source-replay-policy-info authorize!))
+                  (<= 1 (count roots) 8) (every? uuid? roots))
+       (run)
+       (let [{:keys [controller connection check! staged charged]} scope
+             {:keys [cache limits]} controller
+             key [kind (:branch scope) (:generation (:registration scope)) (:revision scope) (:policy-context scope) (set roots)]
+             _ (check!)
+             entry (locking cache
+                     (swap! cache prune (now-ms))
+                     (when-not (:closed? @cache) (get-in @cache [:entries key])))]
+         (if entry
+           (if (locking charged
+                 (when (<= (+ @charged (:charge entry)) (:max-capture-bytes limits))
+                   (swap! charged + (:charge entry)) true))
+             (let [graph (copy/thaw (:graph entry) connection)]
+               (check!) (validate! graph) (check!) graph)
+             (run))
+           (let [graph (run)]
+             (check!)
+             (when-not (:closed? @cache)
+               (try
+                 (locking charged
+                   (let [frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged)) (:max-rows limits))]
+                     (swap! charged + (copy/charge-bytes frozen))
+                     (swap! staged conj [key frozen])))
+                 (catch clojure.lang.ExceptionInfo error
+                   (when-not (contains? #{::copy/ineligible
+                                          :graphden.executor.source-recipe-values/ineligible}
+                                        (:type (ex-data error)))
+                     (throw error)))))
+             graph)))))))

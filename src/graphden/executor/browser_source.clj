@@ -296,7 +296,7 @@
       (prefetch/bounded-closure roots (set (keys fn-map)) dependencies max-functions))))
 
 
-(defn capture-nodes
+(defn- capture-node-rows
   "Read exact server-owned witness IDs without traversing sibling dependencies.
    This is raw evidence, not a checked executable/export graph. Every owner is
    freshly authorized before any owned value is read; ordinary source limits
@@ -461,14 +461,19 @@
   (filterv #(capabilities/server-call-slot? (:slot-id %)) (:bindings graph)))
 
 
-(defn- validate-retained-source!
-  [storage authorize! graph kind]
+(defn- fresh-retained-source
+  [storage graph]
   (let [fresh (binding [*identity-hints* nil *prefetched* nil]
                 (vec (read-rows storage :fn (mapv :id (:fns graph)))))
         _ (when-not (= (into {} (map (juxt :id identity)) (:fns graph))
                        (into {} (map (juxt :id identity)) fresh))
-            (reject! :source-missing))
-        graph (assoc graph :fns fresh)
+            (reject! :source-missing))]
+    (assoc graph :fns fresh)))
+
+
+(defn- validate-retained-source!
+  [storage authorize! graph kind]
+  (let [graph (fresh-retained-source storage graph)
         terminal (:identity-target-ids graph)
         server-targets (when (= :client kind)
                          (into #{} (keep :ref-fn-id) (client-server-bindings graph)))
@@ -487,6 +492,38 @@
           (contains? contracts/component-identities (:id row)) (authorize! row {:identity-only? true})
           :else (authorize! row)))
       (validate-owned-source! (assoc graph :fns owners) permissions))))
+
+
+(defn capture-nodes
+  "Read exact server-owned witness IDs without following dependencies. Hits
+   repeat owner metadata, ACL and source-contract checks in the new snapshot."
+  [storage ids authorize!]
+  (dissoc (manifest/capture storage :nodes ids authorize!
+                            #(assoc (capture-node-rows storage ids authorize!) :identity-target-ids #{})
+                            #(validate-retained-source! storage authorize! % :nodes))
+          :identity-target-ids))
+
+
+(defn collect-server-closure
+  "Server-only source inspection after the target's fresh execute guard. The
+   exact snapshot authorizer gates retention; dependency source inspection
+   retains the execute-only contract. No server evidence is retained here."
+  [storage target authorize! graph-hint]
+  (dissoc
+    (manifest/capture
+      storage :server [target] authorize!
+      #(assoc (if graph-hint
+                (collect-identity-hinted-closure storage [target] (constantly nil) graph-hint)
+                (collect-source storage [target] (constantly nil) false false))
+              :identity-target-ids #{})
+      (fn [graph]
+        (let [graph (fresh-retained-source storage graph)
+              row (some #(when (= target (:id %)) %) (:fns graph))]
+          (when-not row (reject! :source-missing))
+          (check-snapshot!)
+          (prepare-authorizations! authorize! [row])
+          (authorize! row {:execute? true :server-target? true}))))
+    :identity-target-ids))
 
 
 (defn- capture-client-source

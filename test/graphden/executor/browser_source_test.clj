@@ -720,3 +720,41 @@
             (source/collect-closure overflow [root] authorize)))
       (is (not-any? #(contains? #{:query :group} (first %)) @calls)
           "A later candidate overflow prevents even the earlier owner's payload"))))
+
+
+(deftest retained-server-source-preserves-execute-only-inspection
+  (let [target (random-uuid)
+        dependency (random-uuid)
+        rows {:fns [{:id target :parent-ids [dependency]} {:id dependency}]
+              :bindings [{:id (random-uuid) :fn-id dependency :value "private dependency"}]}
+        tables (graph-tables rows)
+        calls (atom [])
+        retained (atom nil)
+        revoked? (atom false)
+        authorized (atom [])
+        guard (fn [row options]
+                (swap! authorized conj [(:id row) options])
+                (when-not (and (= target (:id row)) (= {:execute? true :server-target? true} options)
+                               (not @revoked?))
+                  (throw (ex-info "Execute denied" {:type :authz/forbidden}))))
+        capture (fn [_ kind _ authorizer run validate!]
+                  (is (= :server kind))
+                  (is (identical? guard authorizer))
+                  (if-let [graph @retained]
+                    (do (validate! graph) graph)
+                    (let [graph (run)] (reset! retained graph) graph)))]
+    (with-redefs [manifest/capture capture]
+      (let [cold (source/collect-server-closure (fixture-storage tables calls) target guard nil)]
+        (reset! calls [])
+        (let [warm (source/collect-server-closure (fixture-storage tables calls) target guard {})]
+          (is (= (graph-rows cold) (graph-rows warm)))
+          (is (= [[target {:execute? true :server-target? true}]] @authorized))
+          (is (every? (fn [[operation entity]] (and (= :read operation) (= :fn entity))) @calls))))
+      (reset! revoked? true)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Execute denied"
+            (source/collect-server-closure (fixture-storage tables calls) target guard nil)))
+      (reset! revoked? false)
+      (is (= :source-missing
+             (try (source/collect-server-closure
+                    (fixture-storage (assoc-in tables [:fn dependency :name] "changed") calls) target guard nil)
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))

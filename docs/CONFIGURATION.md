@@ -324,7 +324,10 @@ builds a fresh plan. Raw JDBC/source replay is not enabled by this setting.
 `GRAPHDEN_SOURCE_REVISION=true` enables coordinated installation of source
 revision triggers during PostgreSQL schema initialization.
 `GRAPHDEN_SOURCE_MANIFEST=true` enables client-source and manifest retention in
-the executor. The two collectors use separate cache keys even for equal roots.
+the executor. Client source, manifests, server-only closures and exact witness
+paths use separate cache keys even for equal roots. Server retention stores raw
+rows only: native implementation, type/marker, callable contract and fingerprint
+checks still run, together with the separate fresh post-execution check.
 Both default to false. The second setting requires the first, a supported
 storage/policy adapter and an owned Hikari pool; unsupported setup fails startup.
 
@@ -342,6 +345,8 @@ and 32 MiB of cumulative copying per snapshot (at most 128 MiB across the four
 admitted snapshots). The client graph uses a columnar row representation that
 stores each schema's field names once. These charges do not describe total JVM
 memory. Capacity or unsupported values retain ordinary collection.
+Ordinary closures accept at most eight roots per retained entry; exact witness
+paths accept up to 128 UUIDs, with their key storage included in the charge.
 
 Source DDL and trigger repair require coordinated maintenance. Retire affected
 controllers before maintenance and reinitialize them afterward. The internal

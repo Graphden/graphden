@@ -31,16 +31,17 @@
           reads (atom 0)
           checks (atom 0)
           root (random-uuid)
+          roots (atom [root])
           collect (fn [validate!]
                     (manifest/call-with-controller
                       controller
                       #(manifest/with-snapshot
                          source (fn [] (swap! checks inc)) nil
                          (fn [fixed policy]
-                           (reset! escaped (bound-fn [] (manifest/capture fixed @kind [root] policy
+                           (reset! escaped (bound-fn [] (manifest/capture fixed @kind @roots policy
                                                                           (fn [] (swap! reads inc) graph) validate!)))
                            (last (mapv (fn [_]
-                                         (manifest/capture fixed @kind [root] policy
+                                         (manifest/capture fixed @kind @roots policy
                                                            (fn [] (swap! reads inc) graph) validate!))
                                        (range @repetitions))))
                          (fn [_] (throw (ex-info "Unexpected fallback" {}))))))]
@@ -54,7 +55,7 @@
                                                     (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
                                                     {:value result}))
                     certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind})))))
+        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots})))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -119,16 +120,37 @@
       (is (zero? (:pending (manifest/stats controller)))))))
 
 
-(deftest client-and-manifest-collectors-never-share-a-retained-entry
+(deftest source-collectors-never-share-a-retained-entry
   (exercise
     (fn [{:keys [collect kind reads graph]}]
       (let [validated (atom 0)
             validate! (fn [_] (swap! validated inc))]
-        (doseq [mode [:manifest :client :client :manifest]]
+        (doseq [mode [:manifest :client :client :manifest :server :nodes :server :nodes]]
           (reset! kind mode)
           (is (= graph (collect validate!))))
-        (is (= 2 @reads))
-        (is (= 2 @validated))
+        (is (= 4 @reads))
+        (is (= 4 @validated))
         (reset! kind :unknown)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown source collector kind"
               (collect validate!)))))))
+
+
+(deftest bounded-witness-paths-have-separate-root-key-accounting
+  (exercise
+    (fn [{:keys [collect kind roots reads controller]}]
+      (reset! kind :nodes)
+      (reset! roots (vec (repeatedly 67 random-uuid)))
+      (collect identity)
+      (collect identity)
+      (is (= 1 @reads))
+      (is (> (:bytes (manifest/stats controller)) (* 128 67)))
+      (reset! kind :server)
+      (collect identity)
+      (collect identity)
+      (is (= 3 @reads) "Ordinary closure collectors retain their eight-root bound")
+      (reset! kind :nodes)
+      (reset! roots (vec (repeatedly 129 random-uuid)))
+      (collect identity)
+      (collect identity)
+      (is (= 5 @reads) "Oversized witness paths fall back without retention")
+      (is (= 1 (:entries (manifest/stats controller)))))))

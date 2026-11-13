@@ -76,6 +76,13 @@
     (assoc current :entries entries :bytes (reduce + 0 (map :charge (vals entries))))))
 
 
+(defn- retained-charge
+  [key graph]
+  ;; Witness paths have more roots than ordinary closures. Account for their
+  ;; UUID set independently of the row representation, including key nodes.
+  (+ (copy/charge-bytes graph) (* 128 (count (peek key)))))
+
+
 (defn- publish!
   [{:keys [cache limits]} staged]
   (locking cache
@@ -83,7 +90,7 @@
       (swap! cache
              (fn [current]
                (reduce (fn [current [key graph]]
-                         (let [charge (copy/charge-bytes graph)
+                         (let [charge (retained-charge key graph)
                                current (update current :entries dissoc key)
                                current (assoc current :bytes (reduce + 0 (map :charge (vals (:entries current)))))
                                current (loop [current current]
@@ -186,7 +193,7 @@
   ([source-storage roots authorize! run validate!]
    (capture source-storage :manifest roots authorize! run validate!))
   ([source-storage kind roots authorize! run validate!]
-   (when-not (contains? #{:manifest :client} kind)
+   (when-not (contains? #{:manifest :client :server :nodes} kind)
      (throw (ex-info "Unknown source collector kind" {:kind kind})))
    (let [scope *snapshot*]
      (when (and scope (not @(:active? scope)))
@@ -194,7 +201,7 @@
      (if-not (and scope (identical? source-storage (:storage scope))
                   (identical? authorize! (:authorize! scope))
                   (identical? (:registration scope) (tenancy/source-replay-policy-info authorize!))
-                  (<= 1 (count roots) 8) (every? uuid? roots))
+                  (<= 1 (count roots) (if (= :nodes kind) 128 8)) (every? uuid? roots))
        (run)
        (let [{:keys [controller connection check! staged charged]} scope
              {:keys [cache limits]} controller
@@ -215,8 +222,9 @@
              (when-not (:closed? @cache)
                (try
                  (locking charged
-                   (let [frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged)) (:max-rows limits))]
-                     (swap! charged + (copy/charge-bytes frozen))
+                   (let [key-charge (* 128 (count roots))
+                         frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged key-charge)) (:max-rows limits))]
+                     (swap! charged + (retained-charge key frozen))
                      (swap! staged conj [key frozen])))
                  (catch clojure.lang.ExceptionInfo error
                    (when-not (contains? #{::copy/ineligible

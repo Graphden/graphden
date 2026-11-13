@@ -167,7 +167,7 @@
                                (is (thrown? clojure.lang.ExceptionInfo (revision/claim-snapshot! reader))))))
     (is (not= (:generation before) (:generation (revision/current *datasource*))))
     (jdbc/with-transaction [reader *datasource* {:isolation :repeatable-read :read-only true}]
-                           (revision/claim-snapshot! reader)
+                           (is (true? (revision/claim-snapshot! reader)))
                            (with-open [writer (jdbc/get-connection *datasource*)]
                              (jdbc/execute! writer ["SET lock_timeout='100ms'"])
                              (try

@@ -5,6 +5,7 @@
   (:require
     [graphden.executor.manifest-graph-copy :as copy]
     [graphden.executor.source-recipe-storage :as storage]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.source-certificate :as certificate]
     [graphden.storage.postgres.source-revision-snapshot :as snapshot]
     [graphden.tenancy.context :as tenancy]
@@ -167,7 +168,8 @@
                                      :authorize! authorize! :check! check! :staged staged :charged (atom 0)}]
                           (binding [*snapshot* scope]
                             (try
-                              (storage/call-with-fresh-memos #(consume fixed authorize!))
+                              (storage/call-with-fresh-memos
+                                #(grouped/call-with-snapshot-cache connection (fn [] (consume fixed authorize!))))
                               (finally (reset! active? false)))))))))]
             (check!)
             (publish! controller @staged)
@@ -195,13 +197,12 @@
                     (swap! cache prune (now-ms))
                     (when-not (:closed? @cache) (get-in @cache [:entries key])))]
         (if entry
-          (let [reserved? (locking charged
-                            (when (<= (+ @charged (:charge entry)) (:max-capture-bytes limits))
-                              (swap! charged + (:charge entry)) true))]
-            (if reserved?
-              (let [graph (copy/thaw (:graph entry) connection)]
-                (check!) (validate! graph) (check!) graph)
-              (run)))
+          (if (locking charged
+                (when (<= (+ @charged (:charge entry)) (:max-capture-bytes limits))
+                  (swap! charged + (:charge entry)) true))
+            (let [graph (copy/thaw (:graph entry) connection)]
+              (check!) (validate! graph) (check!) graph)
+            (run))
           (let [graph (run)]
             (check!)
             (when-not (:closed? @cache)

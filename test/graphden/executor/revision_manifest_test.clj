@@ -12,50 +12,51 @@
 
 
 (defn- exercise
-  [f]
-  (with-open [pool (HikariDataSource.)]
-    (let [controller (manifest/create-controller pool ["fn"]
-                                                 {:max-bytes 100000 :max-entries 2 :max-pending 1
-                                                  :max-capture-bytes 100000 :max-rows 100 :ttl-ms 10000})
-          source (Object.)
-          registration {:generation (Object.)}
-          revision (atom 1)
-          fail-commit? (atom false)
-          context (atom "a")
-          repetitions (atom 1)
-          kind (atom :manifest)
-          escaped (atom nil)
-          authorize! (fn [_] true)
-          graph {:fns [{:id (random-uuid) :parent-ids #{}}]
-                 :slots [] :fn-slots [] :bindings [] :list-items [] :identity-target-ids #{}}
-          reads (atom 0)
-          checks (atom 0)
-          root (random-uuid)
-          roots (atom [root])
-          collect (fn [validate!]
-                    (manifest/call-with-controller
-                      controller
-                      #(manifest/with-snapshot
-                         source (fn [] (swap! checks inc)) nil
-                         (fn [fixed policy]
-                           (reset! escaped (bound-fn [] (manifest/capture fixed @kind @roots policy
-                                                                          (fn [] (swap! reads inc) graph) validate!)))
-                           (last (mapv (fn [_]
-                                         (manifest/capture fixed @kind @roots policy
-                                                           (fn [] (swap! reads inc) graph) validate!))
-                                       (range @repetitions))))
-                         (fn [_] (throw (ex-info "Unexpected fallback" {}))))))]
-      (with-redefs [tenancy/source-replay-registration (constantly registration)
-                    tenancy/source-replay-policy-info (constantly registration)
-                    tenancy/browser-source-policy (constantly authorize!)
-                    storage/describe (fn [_ _] {:pool pool :datasource pool :branch-id root})
-                    storage/fresh-storage (fn [_ _] source)
-                    snapshot/call-with-snapshot (fn [_ _ _ loader]
-                                                  (let [result (loader nil @revision)]
-                                                    (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
-                                                    {:value result}))
-                    certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots})))))
+  ([f] (exercise 2 f))
+  ([max-entries f]
+   (with-open [pool (HikariDataSource.)]
+     (let [controller (manifest/create-controller pool ["fn"]
+                                                  {:max-bytes 100000 :max-entries max-entries :max-pending 1
+                                                   :max-capture-bytes 100000 :max-rows 100 :ttl-ms 10000})
+           source (Object.)
+           registration {:generation (Object.)}
+           revision (atom 1)
+           fail-commit? (atom false)
+           context (atom "a")
+           repetitions (atom 1)
+           kind (atom :manifest)
+           escaped (atom nil)
+           authorize! (fn [_] true)
+           graph {:fns [{:id (random-uuid) :parent-ids #{}}]
+                  :slots [] :fn-slots [] :bindings [] :list-items [] :identity-target-ids #{}}
+           reads (atom 0)
+           checks (atom 0)
+           root (random-uuid)
+           roots (atom [root])
+           collect (fn [validate!]
+                     (manifest/call-with-controller
+                       controller
+                       #(manifest/with-snapshot
+                          source (fn [] (swap! checks inc)) nil
+                          (fn [fixed policy]
+                            (reset! escaped (bound-fn [] (manifest/capture fixed @kind @roots policy
+                                                                           (fn [] (swap! reads inc) graph) validate!)))
+                            (last (mapv (fn [_]
+                                          (manifest/capture fixed @kind @roots policy
+                                                            (fn [] (swap! reads inc) graph) validate!))
+                                        (range @repetitions))))
+                          (fn [_] (throw (ex-info "Unexpected fallback" {}))))))]
+       (with-redefs [tenancy/source-replay-registration (constantly registration)
+                     tenancy/source-replay-policy-info (constantly registration)
+                     tenancy/browser-source-policy (constantly authorize!)
+                     storage/describe (fn [_ _] {:pool pool :datasource pool :branch-id root})
+                     storage/fresh-storage (fn [_ _] source)
+                     snapshot/call-with-snapshot (fn [_ _ _ loader]
+                                                   (let [result (loader nil @revision)]
+                                                     (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
+                                                     {:value result}))
+                     certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
+         (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots}))))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -122,7 +123,10 @@
 
 (deftest source-collectors-never-share-a-retained-entry
   (exercise
-    (fn [{:keys [collect kind reads graph]}]
+    ;; Isolate key partitioning from capacity eviction. Equal expiry timestamps
+    ;; do not promise which of two retained entries is evicted first.
+    4
+    (fn [{:keys [collect kind reads graph controller]}]
       (let [validated (atom 0)
             validate! (fn [_] (swap! validated inc))]
         (doseq [mode [:manifest :client :client :manifest :server :nodes :server :nodes]]
@@ -130,6 +134,7 @@
           (is (= graph (collect validate!))))
         (is (= 4 @reads))
         (is (= 4 @validated))
+        (is (= 4 (:entries (manifest/stats controller))))
         (reset! kind :unknown)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown source collector kind"
               (collect validate!)))))))

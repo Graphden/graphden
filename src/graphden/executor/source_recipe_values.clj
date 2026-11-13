@@ -92,12 +92,12 @@
       (contains? map-classes kind)
       (do
         (when (some? (meta value)) (unavailable! :metadata))
-        (into {} (map (fn [[k v]]
-                        (when-not (or (nil? k) (keyword? k)
-                                      (contains? scalar-classes (class k))
-                                      (contains? #{String BigInteger BigDecimal clojure.lang.BigInt} (class k)))
-                          (unavailable! :map-key-type))
-                        [(descend k) (descend v)])) value))
+        (into (hash-map) (map (fn [[k v]]
+                                (when-not (or (nil? k) (keyword? k)
+                                              (contains? scalar-classes (class k))
+                                              (contains? #{String BigInteger BigDecimal clojure.lang.BigInt} (class k)))
+                                  (unavailable! :map-key-type))
+                                [(descend k) (descend v)])) value))
 
       (= clojure.lang.PersistentVector kind)
       (do
@@ -162,7 +162,7 @@
                 Date (Date. data)
                 java.sql.Date (java.sql.Date. data)
                 java.sql.Time (java.sql.Time. data))))
-    (map? value) (into {} (map (fn [[k v]] [(thaw-value k) (thaw-value v)])) value)
+    (map? value) (into (hash-map) (map (fn [[k v]] [(thaw-value k) (thaw-value v)])) value)
     (vector? value) (mapv thaw-value value)
     :else value))
 

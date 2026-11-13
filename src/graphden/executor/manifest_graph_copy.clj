@@ -33,8 +33,8 @@
                                           (if (contains? parents (:id row))
                                             (update row :parent-ids identity-set!) row)) %))
         targets (values/freeze (identity-set! (:identity-target-ids graph)) max-bytes)
-        constraints (into {} (keep-indexed (fn [index row]
-                                             (when (some? (:constraint row)) [index (:constraint row)]))) (:fns plain))
+        constraints (into (hash-map) (keep-indexed (fn [index row]
+                                                     (when (some? (:constraint row)) [index (:constraint row)]))) (:fns plain))
         base-charge (+ 1024 (values/charge-bytes targets) (* 128 (count parents)))
         _ (when (>= base-charge max-bytes)
             (throw (ex-info "Manifest copy exceeds reservation" {:type ::ineligible})))

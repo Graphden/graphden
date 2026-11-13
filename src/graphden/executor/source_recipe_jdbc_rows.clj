@@ -22,7 +22,7 @@
 (def ^:private metadata-classes
   ;; Obtain implementation class facts through the public producer, without
   ;; retaining either specimen or callbacks. No connection is involved.
-  (update-vals (meta (rs/datafiable-row {} nil {})) class))
+  (update-vals (meta (rs/datafiable-row (hash-map) nil (hash-map))) class))
 
 
 (defn- reject!
@@ -84,12 +84,12 @@
                     cells (mapv val row)
                     present (mapv some? cells)
                     schemas (if (= schema-id (count schemas))
-                              (conj schemas [columns present])
+                              (conj schemas (vector columns present))
                               (update-in schemas [schema-id 1]
                                          #(mapv (fn [old new] (or old new)) % present)))]
                 {:dictionary (assoc dictionary columns schema-id)
                  :schemas schemas
-                 :records (conj records [schema-id datafiable? cells])
+                 :records (conj records (vector schema-id datafiable? cells))
                  :overhead overhead})))
           {:dictionary {} :schemas [] :records [] :overhead 512}
           (map vector rows flags)))
@@ -112,15 +112,17 @@
   (let [flags (mapv metadata-kind result)
         {:keys [schemas records overhead]} (columnar-layout result flags max-bytes)
         schemas (mapv (fn [[columns present]]
-                        [columns (into [] (keep-indexed (fn [index live?]
-                                                          (when live? index))) present)])
+                        (vector columns (into (vector) (keep-indexed (fn [index live?]
+                                                                       (when live? index))) present)))
                       schemas)
         records (mapv (fn [[schema-id datafiable? cells]]
-                        [schema-id datafiable?
-                         (mapv #(nth cells %) (second (nth schemas schema-id)))])
+                        (vector schema-id datafiable?
+                                (mapv #(nth cells %) (second (nth schemas schema-id)))))
                       records)]
     (when (>= overhead max-bytes) (reject! :byte-limit))
-    (let [frozen (values/freeze [schemas records] (- max-bytes overhead))]
+    ;; Instrumented collection literals can carry source-location metadata.
+    ;; Build this owned encoding without adding metadata to admitted values.
+    (let [frozen (values/freeze (vector schemas records) (- max-bytes overhead))]
       (ColumnarRows. frozen (+ overhead (values/charge-bytes frozen))))))
 
 

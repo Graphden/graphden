@@ -936,6 +936,10 @@
              (p/shell "bb" "test-integration")
              (p/shell "bb" "test-e2e"))}
 
+  test-source-codec-coverage
+  {:doc "Focused source codec tests under Cloverage, before broad unit and image/browser stages. No database or shared stack."
+   :task (clojure "-M:dev:test:coverage -m kaocha.runner --config-file tests-source-codec-coverage.edn")}
+
   test-unit-coverage
   {:doc "Unit tests and the direct certificate integration suite with cloverage instrumentation. ~15-19 min on a dev host — the full-graph tests (packages.registry / packages.export / executor.effect-gating) recompile the whole graph under instrumentation (~50× amplification); that's also where their real coverage of the loader/compiler comes from. Same as `bb coverage`. Use this for the coverage report; `bb test-unit` for fast feedback without instrumentation."
    :task (do (assert-gate-only! "bb coverage")

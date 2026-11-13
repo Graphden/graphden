@@ -185,7 +185,7 @@
       (is (= (mapv vec (partition-all 8 (filter #(and (= wave (:group %))
                                                       (not= :affected (:stage %))) selected)))
              (get batches wave))))
-    (is (= [["builtin-plans-sync"] ["type-sweep"] ["tests-perf"]]
+    (is (= [["builtin-plans-sync" "source-codec-coverage"] ["type-sweep"] ["tests-perf"]]
            (mapv #(mapv :name %) (:priority batches))))))
 
 
@@ -194,6 +194,30 @@
                          real-registry {:changed #{"src/graphden/executor/browser_plan.clj"}}))
         batches (ci-select/canonical-batches real-registry selected)]
     (is (some #{"builtin-plans-sync"} (map :name (mapcat identity (:priority batches)))))
+    (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
+
+
+(deftest source-codec-instrumentation-runs-before-broad-suites
+  (let [paths ["src/graphden/executor/source_recipe_jdbc_rows.clj"
+               "src/graphden/executor/source_recipe_values.clj"
+               "src/graphden/executor/manifest_graph_copy.clj"
+               "src/graphden/executor/revision_manifest.clj"
+               "test/graphden/executor/source_recipe_jdbc_rows_test.clj"
+               "test/graphden/executor/source_recipe_jdbc_metadata_test.clj"
+               "test/graphden/executor/source_recipe_values_test.clj"
+               "test/graphden/executor/manifest_graph_copy_test.clj"
+               "test/graphden/executor/revision_manifest_test.clj"
+               "tests-source-codec-coverage.edn" "deps.edn" "bb.edn" "scripts/checks.edn"]
+        selected (:run (ci-select/partition-checks real-registry {:changed #{(first paths)}}))
+        batches (ci-select/canonical-batches real-registry selected)
+        check (first (filter #(= "source-codec-coverage" (:name %)) selected))]
+    (doseq [path paths]
+      (is (contains? (run-names #{path}) "source-codec-coverage") path))
+    (is (not (contains? (run-names #{"docs/example.md"}) "source-codec-coverage")))
+    (is (not (contains? (run-names #{"src/graphden/executor/core.clj"}) "source-codec-coverage")))
+    (is (= {:bb "test-source-codec-coverage" :group :priority :timeout 120000}
+           (select-keys check [:bb :group :timeout])))
+    (is (some #{"source-codec-coverage"} (map :name (mapcat identity (:priority batches)))))
     (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
 
 

@@ -63,6 +63,13 @@
              "^resources/packages/app/ui-preview/(browser-runtime\\.js|builtin-plans\\.(json|js))$"
              "^tools/ui_preview/(builtin_plans|generate_builtin_plans)\\.clj$"
              "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ ;; Instrumentation changes literal metadata and can expose codec admission
+ ;; bugs invisible to ordinary units. This small no-DB JVM shares the early
+ ;; priority batch; broad units, images and browsers still run in full later.
+ {:name "source-codec-coverage" :bb "test-source-codec-coverage" :timeout 120000 :group :priority
+  :relevant ["^src/graphden/executor/(source_recipe_(jdbc_rows|values)|manifest_graph_copy|revision_manifest)\\.clj$"
+             "^test/graphden/executor/(source_recipe_(jdbc_(rows|metadata)|values)|manifest_graph_copy|revision_manifest)_test\\.clj$"
+             "^tests-source-codec-coverage\\.edn$" "^(bb|deps)\\.edn$" "^scripts/checks\\.edn$"]}
  {:name "ui-target-lint" :bb "ui-target-lint" :timeout 30000 :group :web
   :relevant ["^src/" "^resources/packages/" "^tools/ui-target-lint(?:\\.test)?\\.mjs$"
              "^scripts/ui_target_lint(?:_test)?\\.clj$" "^package(-lock)?\\.json$" "^bb\\.edn$"]}

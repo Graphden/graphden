@@ -18,6 +18,7 @@
 (def ^:private trigger-name "graphden_source_revision_bump")
 (def ^:private function-name "public.graphden_source_revision_bump")
 (def ^:private maintenance-key [1196573774 20261113])
+(def ^:private bucket-count 256)
 
 
 (defn claim-snapshot!
@@ -49,15 +50,18 @@
                          (let [result (repair tx)
                                updated (jdbc/execute-one! tx
                                                           [(str "UPDATE " revision-table
-                                                                " SET generation=?,revision=revision+1 WHERE singleton=true")
+                                                                " SET generation=?")
                                                            (UUID/randomUUID)])]
-                           (when-not (= 1 (:next.jdbc/update-count updated))
-                             (throw (ex-info "Source revision row missing after maintenance" {:type ::maintenance-failed})))
+                           (when-not (= bucket-count (:next.jdbc/update-count updated))
+                             (throw (ex-info "Source revision buckets missing after maintenance" {:type ::maintenance-failed})))
                            result)))
 
 
 (def ^:private function-body
-  (str " BEGIN UPDATE " revision-table " SET revision=revision+1 WHERE singleton=true; "
+  (str " BEGIN IF NOT pg_catalog.pg_try_advisory_xact_lock_shared("
+       (str/join "," maintenance-key) ") THEN RAISE EXCEPTION 'Source maintenance in progress'; END IF; "
+       "UPDATE " revision-table " SET revision=revision+1 WHERE bucket=pg_catalog.pg_backend_pid()%"
+       bucket-count "; "
        "IF NOT FOUND THEN RAISE EXCEPTION 'Source revision missing'; END IF; RETURN NULL; END "))
 
 
@@ -74,8 +78,10 @@
 (defn install!
   "Install statement triggers for explicit physical tables atomically. Call only
    during a coordinated schema migration, never on a request path. Writers need
-   UPDATE on the revision row: permissions are deliberately not escalated here.
-   BEFORE triggers take the shared revision lock before source tuple writes.
+   UPDATE on revision buckets: permissions are deliberately not escalated here.
+   A backend updates one fixed bucket throughout a transaction. Summing all
+   buckets detects late commits without serializing every independent writer.
+   BEFORE triggers exclude maintenance before source tuple writes.
    The caller must include every identity/version/junction/branch source table."
   [datasource tables]
   (let [tables (mapv qualified-table (sort (distinct (seq tables))))]
@@ -86,10 +92,11 @@
                                         ;; migration leaves both the old trigger set and revision intact.
                                         (jdbc/execute! tx [(str "LOCK TABLE " (str/join "," tables) " IN ACCESS EXCLUSIVE MODE")])
                                         (jdbc/execute! tx [(str "CREATE TABLE IF NOT EXISTS " revision-table
-                                                                " (singleton boolean PRIMARY KEY CHECK(singleton),"
+                                                                " (bucket integer PRIMARY KEY CHECK(bucket>=0 AND bucket<" bucket-count "),"
                                                                 " generation uuid NOT NULL, revision bigint NOT NULL CHECK(revision>=0))")])
                                         (jdbc/execute! tx [(str "INSERT INTO " revision-table
-                                                                " VALUES(true,?,0) ON CONFLICT(singleton) DO NOTHING") (UUID/randomUUID)])
+                                                                " SELECT bucket,?,0 FROM pg_catalog.generate_series(0,"
+                                                                (dec bucket-count) ") AS bucket ON CONFLICT(bucket) DO NOTHING") (UUID/randomUUID)])
                                         (jdbc/execute! tx [(str "CREATE OR REPLACE FUNCTION " function-name
                                                                 "() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$"
                                                                 function-body "$$")])
@@ -105,9 +112,14 @@
    is not a trusted cache certificate: trigger coverage and database identity
    must also be established by the eventual runtime integration."
   [connection]
-  (jdbc/execute-one! connection
-                     [(str "SELECT generation,revision FROM " revision-table " WHERE singleton=true")]
-                     {:builder-fn rs/as-unqualified-lower-maps}))
+  (let [rows (jdbc/execute! connection
+                            [(str "SELECT generation,SUM(revision) AS revision FROM " revision-table
+                                  " GROUP BY generation HAVING COUNT(*)=" bucket-count
+                                  " AND MIN(bucket)=0 AND MAX(bucket)=" (dec bucket-count))]
+                            {:builder-fn rs/as-unqualified-lower-maps})]
+    (when-not (= 1 (count rows))
+      (throw (ex-info "Source revision bucket coverage invalid" {:type ::invalid-revision})))
+    (first rows)))
 
 
 (defn roster-installed?

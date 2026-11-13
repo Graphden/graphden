@@ -8,6 +8,8 @@
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
   (:import
+    (java.sql
+      Connection)
     (java.util
       UUID)))
 
@@ -15,6 +17,42 @@
 (def ^:private revision-table "public.graphden_source_revision")
 (def ^:private trigger-name "graphden_source_revision_bump")
 (def ^:private function-name "public.graphden_source_revision_bump")
+(def ^:private maintenance-key [1196573774 20261113])
+
+
+(defn claim-snapshot!
+  "Protect a live RO/RR snapshot from cooperating source maintenance. Never
+   wait on this lock: waiting could establish a snapshot before a migration
+   commits. Missing permission or maintenance in progress aborts the snapshot."
+  [^Connection connection]
+  (when-not (and (not (Connection/.getAutoCommit connection))
+                 (Connection/.isReadOnly connection)
+                 (= Connection/TRANSACTION_REPEATABLE_READ
+                    (Connection/.getTransactionIsolation connection)))
+    (throw (ex-info "Owned read-only RR required" {:type ::invalid-snapshot})))
+  (let [result (jdbc/execute-one! connection
+                                  (into ["SELECT pg_catalog.pg_try_advisory_xact_lock_shared(?::integer,?::integer) AS acquired"] maintenance-key)
+                                  {:builder-fn rs/as-unqualified-lower-maps})]
+    (when-not (true? (:acquired result))
+      (throw (ex-info "Source maintenance in progress" {:type ::maintenance-active})))))
+
+
+(defn call-with-maintenance
+  "The supported source DDL/trigger-repair boundary. Take the exclusive lock
+   BEFORE any source DDL, execute repair once and rotate generation atomically.
+   Raw trigger disabling/TRUNCATE/schema changes outside this boundary are not
+   supported while revision-backed readers are enabled. No privilege escalation."
+  [datasource repair]
+  (jdbc/with-transaction [tx datasource]
+                         (jdbc/execute! tx (into ["SELECT pg_catalog.pg_advisory_xact_lock(?::integer,?::integer)"] maintenance-key))
+                         (let [result (repair tx)
+                               updated (jdbc/execute-one! tx
+                                                          [(str "UPDATE " revision-table
+                                                                " SET generation=?,revision=revision+1 WHERE singleton=true")
+                                                           (UUID/randomUUID)])]
+                           (when-not (= 1 (:next.jdbc/update-count updated))
+                             (throw (ex-info "Source revision row missing after maintenance" {:type ::maintenance-failed})))
+                           result)))
 
 
 (def ^:private function-body
@@ -42,23 +80,23 @@
   (let [tables (mapv qualified-table (sort (distinct (seq tables))))]
     (when (empty? tables)
       (throw (ex-info "Source table roster cannot be empty" {:type ::empty-roster})))
-    (jdbc/with-transaction [tx datasource]
-                           ;; Lock in deterministic order before changing any trigger. A failed
-                           ;; migration leaves both the old trigger set and revision intact.
-                           (jdbc/execute! tx [(str "LOCK TABLE " (str/join "," tables) " IN ACCESS EXCLUSIVE MODE")])
-                           (jdbc/execute! tx [(str "CREATE TABLE IF NOT EXISTS " revision-table
-                                                   " (singleton boolean PRIMARY KEY CHECK(singleton),"
-                                                   " generation uuid NOT NULL, revision bigint NOT NULL CHECK(revision>=0))")])
-                           (jdbc/execute! tx [(str "INSERT INTO " revision-table
-                                                   " VALUES(true,?,0) ON CONFLICT(singleton) DO NOTHING") (UUID/randomUUID)])
-                           (jdbc/execute! tx [(str "CREATE OR REPLACE FUNCTION " function-name
-                                                   "() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$"
-                                                   function-body "$$")])
-                           (doseq [table tables]
-                             (jdbc/execute! tx [(str "DROP TRIGGER IF EXISTS " trigger-name " ON " table)])
-                             (jdbc/execute! tx [(str "CREATE TRIGGER " trigger-name
-                                                     " BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON " table
-                                                     " FOR EACH STATEMENT EXECUTE FUNCTION " function-name "()")])))))
+    (call-with-maintenance datasource (fn [tx]
+                                        ;; Lock in deterministic order before changing any trigger. A failed
+                                        ;; migration leaves both the old trigger set and revision intact.
+                                        (jdbc/execute! tx [(str "LOCK TABLE " (str/join "," tables) " IN ACCESS EXCLUSIVE MODE")])
+                                        (jdbc/execute! tx [(str "CREATE TABLE IF NOT EXISTS " revision-table
+                                                                " (singleton boolean PRIMARY KEY CHECK(singleton),"
+                                                                " generation uuid NOT NULL, revision bigint NOT NULL CHECK(revision>=0))")])
+                                        (jdbc/execute! tx [(str "INSERT INTO " revision-table
+                                                                " VALUES(true,?,0) ON CONFLICT(singleton) DO NOTHING") (UUID/randomUUID)])
+                                        (jdbc/execute! tx [(str "CREATE OR REPLACE FUNCTION " function-name
+                                                                "() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$"
+                                                                function-body "$$")])
+                                        (doseq [table tables]
+                                          (jdbc/execute! tx [(str "DROP TRIGGER IF EXISTS " trigger-name " ON " table)])
+                                          (jdbc/execute! tx [(str "CREATE TRIGGER " trigger-name
+                                                                  " BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON " table
+                                                                  " FOR EACH STATEMENT EXECUTE FUNCTION " function-name "()")]))))))
 
 
 (defn current

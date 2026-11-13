@@ -21,9 +21,9 @@
       (revision/install! ds ["revision_fixture"])
       (binding [*datasource* ds] (f))
       (finally
-        (jdbc/execute! ds ["DROP TABLE revision_fixture"])
-        (jdbc/execute! ds ["DROP FUNCTION public.graphden_source_revision_bump() CASCADE"])
-        (jdbc/execute! ds ["DROP TABLE public.graphden_source_revision"])))))
+        (jdbc/execute! ds ["DROP TABLE IF EXISTS revision_fixture"])
+        (jdbc/execute! ds ["DROP FUNCTION IF EXISTS public.graphden_source_revision_bump() CASCADE"])
+        (jdbc/execute! ds ["DROP TABLE IF EXISTS public.graphden_source_revision"])))))
 
 
 (use-fixtures :once (setup/container-fixture) fixture)
@@ -43,9 +43,11 @@
                              (is (= (inc (:revision committed)) (:revision (revision/current tx)))))
       (is (= committed (revision/current *datasource*)))
       (revision/install! *datasource* ["revision_fixture"])
-      (is (= committed (revision/current *datasource*)) "Reinstallation never resets generation or revision")
+      (is (not= (:generation committed) (:generation (revision/current *datasource*)))
+          "Reinstallation invalidates evidence from any maintenance gap")
+      (is (= (inc (:revision committed)) (:revision (revision/current *datasource*))))
       (jdbc/execute! *datasource* ["TRUNCATE revision_fixture"])
-      (is (= (inc (:revision committed)) (:revision (revision/current *datasource*)))))))
+      (is (= (+ 2 (:revision committed)) (:revision (revision/current *datasource*)))))))
 
 
 (deftest concurrent-writes-cannot-bypass-the-revision-lock
@@ -154,3 +156,22 @@
            (graph-snapshot/with-current *datasource* ["revision_fixture"] scope evidence use-graph)))
     (is (= 1 @loads))
     (is (= 1 @calls) "Mismatches never reach the graph consumer")))
+
+
+(deftest maintenance-and-certified-readers-exclude-each-other
+  (let [before (revision/current *datasource*)]
+    (revision/call-with-maintenance
+      *datasource*
+      (fn [_]
+        (jdbc/with-transaction [reader *datasource* {:isolation :repeatable-read :read-only true}]
+                               (is (thrown? clojure.lang.ExceptionInfo (revision/claim-snapshot! reader))))))
+    (is (not= (:generation before) (:generation (revision/current *datasource*))))
+    (jdbc/with-transaction [reader *datasource* {:isolation :repeatable-read :read-only true}]
+                           (revision/claim-snapshot! reader)
+                           (with-open [writer (jdbc/get-connection *datasource*)]
+                             (jdbc/execute! writer ["SET lock_timeout='100ms'"])
+                             (try
+                               (revision/call-with-maintenance writer (constantly nil))
+                               (is false "Maintenance must wait until the source reader finishes")
+                               (catch java.sql.SQLException error
+                                 (is (= "55P03" (java.sql.SQLException/.getSQLState error)))))))))

@@ -1,0 +1,14 @@
+;; Mandatory early instrumentation regression check, independent of the full
+;; coverage report and its per-layer floors. Only these four codecs are
+;; instrumented; the five test namespaces need no database or shared fixtures.
+;; For focused diagnostics that yield to the native gate:
+;; WTQ_KAOCHA='clojure -M:dev:test:coverage -m kaocha.runner' \
+;;   bb wt test --config-file tests-source-codec-coverage.edn
+#kaocha/v1
+{:tests [{:id :unit :test-paths ["test"]
+          :ns-patterns ["^graphden\\.executor\\.(source-recipe-(jdbc-(rows|metadata)|values)|manifest-graph-copy|revision-manifest)-test$"]}]
+ :plugins [:kaocha.plugin/cloverage]
+ :cloverage/opts {:src-ns-path ["src"]
+                  :ns-regex ["^graphden\\.executor\\.(source-recipe-jdbc-rows|source-recipe-values|manifest-graph-copy|revision-manifest)$"]
+                  :ns-exclude-regex [".*-test"]
+                  :output "target/source-codec-coverage"}}

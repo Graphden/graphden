@@ -144,6 +144,7 @@ recursive CTEs. The executor auto-migrates its schema on startup.
 | `:password` | string | Database password |
 | `:pool-size` | long | HikariCP pool size |
 | `:schema` | ref | Reference to `:db/schema` |
+| `:source-revision?` | boolean/string | Install transactional source revision triggers; disabled by default |
 
 ```clojure
 :db/postgres
@@ -292,6 +293,7 @@ Executor context for running functions.
 | `:base-fns` | ref | Ctx-scoped base-fns map (`:exec/base-fns`) |
 | `:auth-provider` | ref | Reference to `:auth/provider` |
 | `:checker-cache?` | boolean/string | Enable bounded pure checker artifacts for this runtime |
+| `:source-manifest?` | boolean/string | Enable bounded manifest retention on supported revision-enabled storage |
 
 ```clojure
 :exec/context
@@ -316,6 +318,36 @@ in-flight reservations remain charged until their workers finish.
 Only isolated checker artifacts are reused. Every request still captures fresh
 source, checks authorization, validates provenance and native signatures, and
 builds a fresh plan. Raw JDBC/source replay is not enabled by this setting.
+
+#### Optional manifest retention
+
+`GRAPHDEN_SOURCE_REVISION=true` enables coordinated installation of source
+revision triggers during PostgreSQL schema initialization.
+`GRAPHDEN_SOURCE_MANIFEST=true` enables manifest retention in the executor.
+Both default to false. The second setting requires the first, a supported
+storage/policy adapter and an owned Hikari pool; unsupported setup fails startup.
+
+The revision commits or rolls back with source writes. Each database backend
+updates one of 256 counters; readers compare their MVCC-visible sum and common
+generation. Independent backends usually use different counters, while bucket
+collisions retain normal transaction locking. This certificate does not cache
+authorization: hits read fresh function metadata and repeat policy, namespace
+and source-contract checks. Unrelated source writes also invalidate manifests;
+this setting does not accelerate every cold load.
+
+Limits are 64 MiB retained, 64 entries, a 30-second TTL, four admitted snapshots
+and 16 MiB of cumulative copying per snapshot. These charges do not describe
+total JVM memory. Capacity or unsupported values retain ordinary collection.
+
+Source DDL and trigger repair require coordinated maintenance. Retire affected
+controllers before maintenance and reinitialize them afterward. The internal
+`graphden.storage.postgres.source-revision/call-with-maintenance` boundary
+excludes certified readers and writers and rotates the revision generation in
+the maintenance transaction. Disabling triggers or changing source tables
+outside that boundary is unsupported while manifest retention is enabled.
+Database writers need UPDATE permission on the revision table; installation
+does not elevate their privileges. Turning the flags off stops retention but
+does not remove installed triggers or their table.
 
 ### `:exec/compiled-registry`
 

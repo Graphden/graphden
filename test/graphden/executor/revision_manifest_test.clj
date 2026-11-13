@@ -22,6 +22,7 @@
           revision (atom 1)
           fail-commit? (atom false)
           context (atom "a")
+          repetitions (atom 1)
           authorize! (fn [_] true)
           graph {:fns [{:id (random-uuid) :parent-ids #{}}]
                  :slots [] :fn-slots [] :bindings [] :list-items [] :identity-target-ids #{}}
@@ -34,8 +35,10 @@
                       #(manifest/with-snapshot
                          source (fn [] (swap! checks inc)) nil
                          (fn [fixed policy]
-                           (manifest/capture fixed [root] policy
-                                             (fn [] (swap! reads inc) graph) validate!))
+                           (last (mapv (fn [_]
+                                         (manifest/capture fixed [root] policy
+                                                           (fn [] (swap! reads inc) graph) validate!))
+                                       (range @repetitions))))
                          (fn [_] (throw (ex-info "Unexpected fallback" {}))))))]
       (with-redefs [tenancy/source-replay-registration (constantly registration)
                     tenancy/source-replay-policy-info (constantly registration)
@@ -47,7 +50,7 @@
                                                     (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
                                                     {:value result}))
                     certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit?})))))
+        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions})))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -89,3 +92,15 @@
       (reset! fail-commit? false)
       (collect identity)
       (is (= 1 (:entries (manifest/stats controller)))))))
+
+
+(deftest snapshot-copy-budget-covers-repeated-cache-hit-thaws
+  (exercise
+    (fn [{:keys [collect reads repetitions graph]}]
+      (collect identity)
+      (reset! repetitions 100)
+      (let [validated (atom 0)]
+        (is (= graph (collect (fn [_] (swap! validated inc)))))
+        (is (pos? @validated) "Some bounded hits were used")
+        (is (< @validated 100) "Further hits fell back before allocation")
+        (is (> @reads 1) "Ordinary collector handles the remaining calls")))))

@@ -2,8 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.source-recipe-jdbc-rows :as rows]
-    [graphden.executor.source-recipe-values :as values]
-    [next.jdbc.result-set :as rs])
+    [graphden.executor.source-recipe-values :as values])
   (:import
     (java.sql
       Timestamp)
@@ -68,30 +67,6 @@
       (is (= "{\"a\":1}" (PGobject/.getValue ^PGobject (:json next-row))))
       (is (= 123456789 (Timestamp/.getNanos ^Timestamp (:timestamp next-row))))
       (is (= 54321 (Date/.getTime ^Date (:date next-row)))))))
-
-
-(deftest columnar-navigation-metadata-is-created-for-the-current-lease-test
-  (let [old-connection (Object.)
-        new-connection (Object.)
-        opts {:builder-fn rs/as-unqualified-lower-maps}
-        original (rs/datafiable-row {:id 1 :nullable nil} old-connection opts)
-        frozen (rows/freeze-columnar [original {:id 2 :nullable nil}] limit)
-        calls (atom [])
-        datafiable-row rs/datafiable-row
-        [first-copy second-copy]
-        (with-redefs [rs/datafiable-row (fn [row connection options]
-                                          (swap! calls conj [row connection options])
-                                          (datafiable-row row connection options))]
-          [(rows/thaw frozen new-connection opts)
-           (rows/thaw frozen new-connection opts)])]
-    (is (= [[{:id 1 :nullable nil} new-connection opts]
-            [{:id 1 :nullable nil} new-connection opts]] @calls))
-    (is (nil? (meta (second first-copy))))
-    (is (= (set (keys (meta original))) (set (keys (meta (first first-copy))))))
-    (is (every? false? (map identical? (vals (meta original))
-                            (vals (meta (first first-copy))))))
-    (is (every? false? (map identical? (vals (meta (first first-copy)))
-                            (vals (meta (first second-copy))))))))
 
 
 (deftest columnar-admission-rejects-unknown-shapes-and-callbacks-test

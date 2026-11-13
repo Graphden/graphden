@@ -1,4 +1,4 @@
-(ns graphden.executor.browser-source-test
+(ns ^:serial graphden.executor.browser-source-test
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.executor.browser-contracts :as contracts]

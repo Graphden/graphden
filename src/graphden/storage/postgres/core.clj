@@ -24,10 +24,13 @@
     [graphden.storage.postgres.migration :as migration]
     [graphden.storage.postgres.pool :as pool]
     [graphden.storage.postgres.source-projection :as source-projection]
+    [graphden.storage.postgres.source-revision :as source-revision]
+    [graphden.storage.postgres.source-revision-roster :as revision-roster]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
-    [graphden.storage.tx :as tx])
+    [graphden.storage.tx :as tx]
+    [next.jdbc.transaction :as jdbc-tx])
   (:import
     (java.sql
       SQLException)))
@@ -125,6 +128,27 @@
     (get (:fields-by-entity cached-metadata) entity-name)))
 
 
+(defn- initialize-schema!
+  [storage schema]
+  (if-let [state (:source-revision-state storage)]
+    (do
+      (reset! state nil)
+      (let [tables (vec (revision-roster/tables schema))
+            result (source-revision/call-with-maintenance
+                     (:pool storage)
+                     (fn [connection]
+                       ;; Both helpers open transactions normally; here they
+                       ;; must join this exact connection without an early commit.
+                       (binding [jdbc-tx/*nested-tx* :ignore]
+                         (let [changes (migration/do-initialize connection schema)]
+                           (source-revision/install! connection tables)
+                           changes))))]
+        ;; Publish only AFTER the outer transaction commits successfully.
+        (reset! state {:tables tables :installation-id (java.util.UUID/randomUUID)})
+        result))
+    (migration/do-initialize (:pool storage) schema)))
+
+
 (defrecord PostgresStorage
   [pool metadata-cache lock slot-row-cache]
 
@@ -165,7 +189,7 @@
       ;; (test fixtures DROP SCHEMA CASCADE, deploy
       ;; truncates) — drop the immutable-row cache with it.
       (reset! slot-row-cache {})
-      (migration/do-initialize pool schema)))
+      (initialize-schema! _this schema)))
 
 
   (close
@@ -409,6 +433,7 @@
    - :connection-timeout - connection timeout in ms (default 30000)
    - :idle-timeout - idle connection timeout in ms (default 600000)
    - :max-lifetime - maximum connection lifetime in ms (default 1800000)
+   - :source-revision? - opt-in transactional graph revision installation
 
    Thread safety:
    - Metadata-cache populate / invalidate serialize on one monitor
@@ -416,4 +441,5 @@
    - CRUD operations use PostgreSQL's own transaction isolation"
   [opts]
   (graph-epoch/attach-state
-    (->PostgresStorage (pool/create-pool opts) (atom nil) (Object.) (atom {}))))
+    (cond-> (->PostgresStorage (pool/create-pool opts) (atom nil) (Object.) (atom {}))
+      (true? (:source-revision? opts)) (assoc :source-revision-state (atom nil)))))

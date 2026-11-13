@@ -8,6 +8,7 @@
   :username #or [#env DB_USERNAME "graphden"]
   :password #or [#env DB_PASSWORD "graphden"]
   :pool-size #long #or [#env DB_POOL_SIZE "10"]
+  :source-revision? #or [#env GRAPHDEN_SOURCE_REVISION "false"]
   :schema #ig/ref :db/schema}
 
  ;; Tenancy storage seam (docs/TENANCY_SEAM.md § Storage & schema

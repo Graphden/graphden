@@ -496,10 +496,11 @@
   "Collect manifest source with compiler-classified fn-ref edges terminal.
    Only identity metadata is read for those targets; all other dependencies
    retain the normal bounded ACL-before-values collection. Multiple roots
-   share the SAME function/row budget; this never installs a caller policy."
+   share the SAME function/row budget. Fresh declaration frontiers batch owned
+   reads across inheritance; binding references still wait for classification."
   [storage roots authorize!]
   (manifest/capture storage roots authorize!
-                    #(collect-source storage roots authorize! true false)
+                    #(collect-source storage roots authorize! true false nil true)
                     #(validate-manifest! storage authorize! %)))
 
 

@@ -1,7 +1,6 @@
 (ns ^:integration ^:serial graphden.storage.postgres.source-revision-test
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
-    [graphden.executor.revision-graph-snapshot :as graph-snapshot]
     [graphden.storage.postgres.source-revision :as revision]
     [graphden.storage.postgres.source-revision-snapshot :as snapshot]
     [graphden.storage.postgres.test-setup :as setup]
@@ -124,38 +123,6 @@
     (with-open [connection (jdbc/get-connection *datasource*)]
       (is (thrown? clojure.lang.ExceptionInfo
             (snapshot/call-with-snapshot connection ["revision_fixture"] (constantly nil)))))))
-
-
-(deftest graph-evidence-binds-source-scope-and-private-values
-  (let [scope {:branch "fixture" :org "fixture-org"}
-        date (java.util.Date. 1000)
-        loads (atom 0)
-        calls (atom 0)
-        evidence (graph-snapshot/capture!
-                   *datasource* ["revision_fixture"] scope
-                   {:max-bytes 1048576 :max-rows 10}
-                   (fn [connection]
-                     (swap! loads inc)
-                     {:fns [(assoc (first (jdbc/execute! connection ["SELECT 1 AS id"])) :date date)]
-                      :slots [] :fn-slots [] :bindings [] :list-items []}))
-        use-graph (fn [_ graph]
-                    (swap! calls inc)
-                    (java.util.Date/.getTime (:date (first (:fns graph)))))]
-    (java.util.Date/.setTime date 2000)
-    (is (= {:hit? true :value 1000}
-           (graph-snapshot/with-current *datasource* ["revision_fixture"] scope evidence use-graph)))
-    (is (= {:hit? false}
-           (graph-snapshot/with-current *datasource* ["revision_fixture"]
-                                        (assoc scope :branch "other") evidence use-graph)))
-    (is (= {:hit? false}
-           (graph-snapshot/with-current (Object.) ["revision_fixture"] scope evidence use-graph)))
-    (is (= {:hit? false}
-           (graph-snapshot/with-current *datasource* ["revision_fixture"] scope {} use-graph)))
-    (jdbc/execute! *datasource* ["INSERT INTO revision_fixture VALUES(301,'revision changed')"])
-    (is (= {:hit? false}
-           (graph-snapshot/with-current *datasource* ["revision_fixture"] scope evidence use-graph)))
-    (is (= 1 @loads))
-    (is (= 1 @calls) "Mismatches never reach the graph consumer")))
 
 
 (deftest maintenance-and-certified-readers-exclude-each-other

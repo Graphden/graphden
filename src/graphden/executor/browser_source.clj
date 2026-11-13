@@ -487,10 +487,10 @@
                                       [(:id row) (authorize! row)])) owners)]
       (doseq [row targets]
         (check-snapshot!)
-        (cond
-          (contains? server-targets (:id row)) (authorize! row {:execute? true :server-target? true})
-          (contains? contracts/component-identities (:id row)) (authorize! row {:identity-only? true})
-          :else (authorize! row)))
+        (condp contains? (:id row)
+          server-targets (authorize! row {:execute? true :server-target? true})
+          contracts/component-identities (authorize! row {:identity-only? true})
+          (authorize! row)))
       (validate-owned-source! (assoc graph :fns owners) permissions))))
 
 

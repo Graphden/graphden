@@ -155,7 +155,9 @@
     :else (reject! :frozen-rows-missing)))
 
 
-^{:splint/disable [lint/prefer-method-values]}
+;; The field spelling belongs to two unrelated generated classes. Merging
+;; these typed branches would replace direct field access with reflection.
+^{:splint/disable [lint/prefer-method-values lint/identical-branches]}
 (defn charge-bytes
   [rows]
   (cond

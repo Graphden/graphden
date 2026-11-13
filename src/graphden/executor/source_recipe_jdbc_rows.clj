@@ -11,6 +11,10 @@
   [frozen metadata-flags one? charge])
 
 
+(deftype ^:private ColumnarRows
+  [frozen charge])
+
+
 (def ^:private row-classes
   #{clojure.lang.PersistentArrayMap clojure.lang.PersistentHashMap})
 
@@ -34,7 +38,12 @@
       (nil? metadata) false
       (and (contains? row-classes (class metadata))
            (= (count metadata-classes) (count metadata))
-           (= metadata-classes (update-vals metadata class))) true
+           (every? (fn [[key value]]
+                     ;; Admit keys before lookup: unknown keys must not run
+                     ;; custom hashing while metadata is being rejected.
+                     (and (= clojure.lang.Symbol (class key))
+                          (= (get metadata-classes key ::unknown) (class value))))
+                   metadata)) true
       :else (reject! :jdbc-row-metadata))))
 
 
@@ -55,20 +64,101 @@
       (Rows. frozen flags one? (+ overhead (values/charge-bytes frozen))))))
 
 
+(defn- column-keys
+  [row]
+  (mapv (fn [[key _]]
+          (when-not (or (nil? key) (keyword? key) (= String (class key)))
+            (reject! :jdbc-column-key))
+          key)
+        row))
+
+
+(defn- columnar-layout
+  [rows flags max-bytes]
+  (reduce (fn [{:keys [dictionary schemas records overhead]} [row datafiable?]]
+            (let [overhead (+' overhead 512 (*' 64 (count row)))]
+              (when (>= overhead max-bytes) (reject! :byte-limit))
+              ;; Only admitted scalar keys reach this dictionary's hashing.
+              (let [columns (column-keys row)
+                    schema-id (get dictionary columns (count schemas))
+                    cells (mapv val row)
+                    present (mapv some? cells)
+                    schemas (if (= schema-id (count schemas))
+                              (conj schemas [columns present])
+                              (update-in schemas [schema-id 1]
+                                         #(mapv (fn [old new] (or old new)) % present)))]
+                {:dictionary (assoc dictionary columns schema-id)
+                 :schemas schemas
+                 :records (conj records [schema-id datafiable? cells])
+                 :overhead overhead})))
+          {:dictionary {} :schemas [] :records [] :overhead 512}
+          (map vector rows flags)))
+
+
+(defn freeze-columnar
+  "Copy a multirow JDBC vector using one key dictionary per exact row schema.
+   Columns nil in every row of a schema retain explicit key presence without
+   storing a nil cell per row. The complete encoded payload is charged once,
+   plus conservative per-row map/navigation reconstruction headroom."
+  [result max-bytes]
+  (when-not (= clojure.lang.PersistentVector (class result))
+    (reject! :jdbc-result-shape))
+  (when (some? (meta result)) (reject! :jdbc-result-metadata))
+  (when-not (and (integer? max-bytes) (pos? max-bytes))
+    (throw (ex-info "Source recipe reservation must be positive" {})))
+  (when (>= (+' 512 (*' 512 (count result))) max-bytes)
+    (reject! :byte-limit))
+  ;; Admit ALL row classes and known metadata before inspecting any row keys.
+  (let [flags (mapv metadata-kind result)
+        {:keys [schemas records overhead]} (columnar-layout result flags max-bytes)
+        schemas (mapv (fn [[columns present]]
+                        [columns (into [] (keep-indexed (fn [index live?]
+                                                          (when live? index))) present)])
+                      schemas)
+        records (mapv (fn [[schema-id datafiable? cells]]
+                        [schema-id datafiable?
+                         (mapv #(nth cells %) (second (nth schemas schema-id)))])
+                      records)]
+    (when (>= overhead max-bytes) (reject! :byte-limit))
+    (let [frozen (values/freeze [schemas records] (- max-bytes overhead))]
+      (ColumnarRows. frozen (+ overhead (values/charge-bytes frozen))))))
+
+
+(defn- thaw-columnar
+  [frozen connection opts]
+  (let [[schemas records] (values/thaw frozen)]
+    (mapv (fn [[schema-id datafiable? cells]]
+            (let [[columns indices] (nth schemas schema-id)
+                  row (reduce (fn [row [index value]]
+                                (assoc row (nth columns index) value))
+                              (zipmap columns (repeat nil))
+                              (map vector indices cells))]
+              (if datafiable? (rs/datafiable-row row connection opts) row)))
+          records)))
+
+
 ^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn thaw
   "Fresh mutable leaves and fresh datafy/nav closures bound to THIS connection
    and options. A prior snapshot's closure is never copied into a new lease."
   [rows connection opts]
-  (when-not (instance? Rows rows) (reject! :frozen-rows-missing))
-  (let [result (mapv (fn [row datafiable?]
-                       (if datafiable? (rs/datafiable-row row connection opts) row))
-                     (values/thaw (.-frozen ^Rows rows)) (.-metadata-flags ^Rows rows))]
-    (if (.-one? ^Rows rows) (first result) result)))
+  (cond
+    (instance? ColumnarRows rows)
+    (thaw-columnar (.-frozen ^ColumnarRows rows) connection opts)
+
+    (instance? Rows rows)
+    (let [result (mapv (fn [row datafiable?]
+                         (if datafiable? (rs/datafiable-row row connection opts) row))
+                       (values/thaw (.-frozen ^Rows rows)) (.-metadata-flags ^Rows rows))]
+      (if (.-one? ^Rows rows) (first result) result))
+
+    :else (reject! :frozen-rows-missing)))
 
 
 ^{:splint/disable [lint/prefer-method-values]}
 (defn charge-bytes
   [rows]
-  (when-not (instance? Rows rows) (reject! :frozen-rows-missing))
-  (.-charge ^Rows rows))
+  (cond
+    (instance? Rows rows) (.-charge ^Rows rows)
+    (instance? ColumnarRows rows) (.-charge ^ColumnarRows rows)
+    :else (reject! :frozen-rows-missing)))

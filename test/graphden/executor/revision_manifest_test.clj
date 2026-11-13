@@ -23,6 +23,7 @@
           fail-commit? (atom false)
           context (atom "a")
           repetitions (atom 1)
+          escaped (atom nil)
           authorize! (fn [_] true)
           graph {:fns [{:id (random-uuid) :parent-ids #{}}]
                  :slots [] :fn-slots [] :bindings [] :list-items [] :identity-target-ids #{}}
@@ -35,6 +36,8 @@
                       #(manifest/with-snapshot
                          source (fn [] (swap! checks inc)) nil
                          (fn [fixed policy]
+                           (reset! escaped (bound-fn [] (manifest/capture fixed [root] policy
+                                                                          (fn [] (swap! reads inc) graph) validate!)))
                            (last (mapv (fn [_]
                                          (manifest/capture fixed [root] policy
                                                            (fn [] (swap! reads inc) graph) validate!))
@@ -50,7 +53,7 @@
                                                     (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
                                                     {:value result}))
                     certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions})))))
+        (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped})))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -104,3 +107,12 @@
         (is (pos? @validated) "Some bounded hits were used")
         (is (< @validated 100) "Further hits fell back before allocation")
         (is (> @reads 1) "Ordinary collector handles the remaining calls")))))
+
+
+(deftest escaped-bound-worker-cannot-reuse-an-expired-snapshot
+  (exercise
+    (fn [{:keys [collect escaped reads controller]}]
+      (collect identity)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Source snapshot expired" (@escaped)))
+      (is (= 1 @reads))
+      (is (zero? (:pending (manifest/stats controller)))))))

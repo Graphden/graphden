@@ -4,7 +4,8 @@
     [graphden.storage.postgres.source-revision :as revision]
     [graphden.storage.postgres.source-revision-snapshot :as snapshot]
     [graphden.storage.postgres.test-setup :as setup]
-    [next.jdbc :as jdbc]))
+    [next.jdbc :as jdbc]
+    [next.jdbc.result-set :as rs]))
 
 
 (def ^:dynamic *datasource* nil)
@@ -44,27 +45,73 @@
       (revision/install! *datasource* ["revision_fixture"])
       (is (not= (:generation committed) (:generation (revision/current *datasource*)))
           "Reinstallation invalidates evidence from any maintenance gap")
-      (is (= (inc (:revision committed)) (:revision (revision/current *datasource*))))
+      (is (= (:revision committed) (:revision (revision/current *datasource*))))
       (jdbc/execute! *datasource* ["TRUNCATE revision_fixture"])
-      (is (= (+ 2 (:revision committed)) (:revision (revision/current *datasource*)))))))
+      (is (= (inc (:revision committed)) (:revision (revision/current *datasource*)))))))
 
 
-(deftest concurrent-writes-cannot-bypass-the-revision-lock
+(defn- backend-bucket
+  [connection]
+  (:bucket (jdbc/execute-one! connection ["SELECT pg_backend_pid()%256 AS bucket"]
+                              {:builder-fn rs/as-unqualified-lower-maps})))
+
+
+(defn- independent-writer
+  "Open a different counter bucket, even if backend PIDs happen to collide."
+  [excluded-bucket]
+  (loop [attempt 0]
+    (let [connection (jdbc/get-connection *datasource*)]
+      (if (not= excluded-bucket (backend-bucket connection))
+        connection
+        (do
+          (.close connection)
+          (when (= attempt 15)
+            (throw (ex-info "Could not obtain independent backend bucket" {})))
+          (recur (inc attempt)))))))
+
+
+(deftest independent-writers-commit-out-of-order-without-a-global-mutex
   (let [before (revision/current *datasource*)]
     (jdbc/with-transaction [first-writer *datasource*]
                            (jdbc/execute! first-writer ["INSERT INTO revision_fixture VALUES(101,'first')"])
-                           (with-open [second-writer (jdbc/get-connection *datasource*)]
+                           (with-open [second-writer (independent-writer (backend-bucket first-writer))]
                              (jdbc/execute! second-writer ["SET lock_timeout='100ms'"])
+                             (jdbc/execute! second-writer ["INSERT INTO revision_fixture VALUES(102,'second')"]))
+                           (is (= (inc (:revision before)) (:revision (revision/current *datasource*)))
+                               "Second commit is visible while the earlier writer is still uncommitted")
+                           (is (= [{:id 102}]
+                                  (jdbc/execute! *datasource* ["SELECT id FROM revision_fixture WHERE id IN(101,102)"]
+                                                 {:builder-fn rs/as-unqualified-lower-maps}))))
+    (is (= (+ 2 (:revision before)) (:revision (revision/current *datasource*)))
+        "The late first commit changes SUM too; MAX/sequence would miss this case")))
+
+
+(deftest revision-refuses-incomplete-or-mixed-generation-buckets
+  (jdbc/with-transaction [tx *datasource* {:rollback-only true}]
+                         (jdbc/execute! tx ["DELETE FROM public.graphden_source_revision WHERE bucket=0"])
+                         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"bucket coverage invalid"
+                               (revision/current tx))))
+  (jdbc/with-transaction [tx *datasource* {:rollback-only true}]
+                         (jdbc/execute! tx ["UPDATE public.graphden_source_revision SET generation=? WHERE bucket=0"
+                                            (java.util.UUID/randomUUID)])
+                         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"bucket coverage invalid"
+                               (revision/current tx)))))
+
+
+(deftest unavailable-bucket-aborts-the-source-write
+  (let [before (revision/current *datasource*)]
+    (with-open [writer (jdbc/get-connection *datasource*)]
+      (jdbc/execute! writer ["SET lock_timeout='100ms'"])
+      (jdbc/with-transaction [blocker *datasource*]
+                             (jdbc/execute! blocker ["SELECT bucket FROM public.graphden_source_revision WHERE bucket=? FOR UPDATE"
+                                                     (backend-bucket writer)])
                              (try
-                               (jdbc/execute! second-writer ["INSERT INTO revision_fixture VALUES(102,'second')"])
-                               (is false "Second writer must wait for the uncommitted revision")
+                               (jdbc/execute! writer ["INSERT INTO revision_fixture VALUES(103,'blocked')"])
+                               (is false "A counter collision must wait or abort, never bypass revision")
                                (catch java.sql.SQLException error
                                  (is (= "55P03" (java.sql.SQLException/.getSQLState error)))))))
-    (is (= (inc (:revision before)) (:revision (revision/current *datasource*))))
-    (is (empty? (jdbc/execute! *datasource* ["SELECT * FROM revision_fixture WHERE id=102"]))
-        "Failed revision acquisition aborts the source insert too")
-    (jdbc/execute! *datasource* ["INSERT INTO revision_fixture VALUES(102,'second')"])
-    (is (= (+ 2 (:revision before)) (:revision (revision/current *datasource*))))))
+    (is (= before (revision/current *datasource*)))
+    (is (empty? (jdbc/execute! *datasource* ["SELECT id FROM revision_fixture WHERE id=103"])))))
 
 
 (deftest catalog-check-refuses-disabled-missing-and-changed-triggers
@@ -131,7 +178,10 @@
       *datasource*
       (fn [_]
         (jdbc/with-transaction [reader *datasource* {:isolation :repeatable-read :read-only true}]
-                               (is (thrown? clojure.lang.ExceptionInfo (revision/claim-snapshot! reader))))))
+                               (is (thrown? clojure.lang.ExceptionInfo (revision/claim-snapshot! reader))))
+        (is (thrown-with-msg? java.sql.SQLException #"Source maintenance in progress"
+              (jdbc/execute! *datasource* ["INSERT INTO revision_fixture VALUES(104,'maintenance')"])))))
+    (is (empty? (jdbc/execute! *datasource* ["SELECT id FROM revision_fixture WHERE id=104"])))
     (is (not= (:generation before) (:generation (revision/current *datasource*))))
     (jdbc/with-transaction [reader *datasource* {:isolation :repeatable-read :read-only true}]
                            (is (true? (revision/claim-snapshot! reader)))

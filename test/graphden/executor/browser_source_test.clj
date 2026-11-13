@@ -501,6 +501,29 @@
                      (some #{target} (:fn-id where)))) @calls))))
 
 
+(deftest manifest-batches-inheritance-before-owned-source-reads
+  (let [chain (vec (repeatedly 6 random-uuid))
+        calls (atom [])
+        storage (fixture-storage
+                  {:fn (keyed (map-indexed (fn [index id]
+                                             {:id id :parent-ids (vec (take 1 (drop (inc index) chain)))})
+                                           chain))}
+                  calls)
+        graph (source/collect-manifest storage (first chain) (constantly nil))
+        owner-scans (filter #(= [:candidates :fn-slot] (take 2 %)) @calls)]
+    (is (= (set chain) (set (map :id (:fns graph)))))
+    (is (= [(set chain)] (map #(set (get-in % [2 :fn-id])) owner-scans))
+        "One owner scan covers the freshly reached inheritance chain")
+    (reset! calls [])
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"denied"
+          (source/collect-manifest storage (first chain)
+                                   (fn [row]
+                                     (when (= (second chain) (:id row))
+                                       (throw (ex-info "denied" {:type :authz/forbidden})))))))
+    (is (not-any? #(contains? #{:candidates :query} (first %)) @calls)
+        "A denied metadata ancestor stops before any owned source is acquired")))
+
+
 (deftest manifest-roots-share-one-function-budget
   (let [roots (vec (repeatedly 2049 random-uuid))
         calls (atom [])

@@ -9,6 +9,7 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
+    [graphden.executor.source-recipe-replay :as replay]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as router-epoch]
@@ -139,7 +140,7 @@
      :server-stale? (= {:type :browser-plan/unsupported :reason :server-epoch-changed} data)}))
 
 
-(defn export-resolved
+(defn- export-resolved-value
   "Export default or personal components through the ordinary authorized resolver."
   [ctx input]
   (try
@@ -153,3 +154,9 @@
                               #(export-in-snapshot ctx component %1 %2 policy epoch))))
     (catch Exception error
       (failure-facts error))))
+
+
+(defn export-resolved
+  "Export the freshly authorized configuration with bounded raw-source reuse."
+  [ctx input]
+  (replay/call-with-operation ctx #(export-resolved-value ctx input)))

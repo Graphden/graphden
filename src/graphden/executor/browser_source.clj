@@ -10,6 +10,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.executor.source-recipe-replay :as replay]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.grouped-read :as grouped]
@@ -468,13 +469,38 @@
       rows)))
 
 
+(defn- validate-manifest!
+  [storage authorize! graph]
+  (let [fresh (binding [*identity-hints* nil *prefetched* nil]
+                (vec (read-rows storage :fn (mapv :id (:fns graph)))))
+        _ (when-not (= (into {} (map (juxt :id identity)) (:fns graph))
+                       (into {} (map (juxt :id identity)) fresh))
+            (reject! :source-missing))
+        graph (assoc graph :fns fresh)
+        terminal (:identity-target-ids graph)
+        owners (filterv #(not (contains? terminal (:id %))) (:fns graph))
+        targets (filterv #(contains? terminal (:id %)) (:fns graph))]
+    (prepare-authorizations! authorize! (:fns graph))
+    (let [permissions (into {} (map (fn [row]
+                                      (check-snapshot!)
+                                      [(:id row) (authorize! row)])) owners)]
+      (doseq [row targets]
+        (check-snapshot!)
+        (if (contains? contracts/component-identities (:id row))
+          (authorize! row {:identity-only? true})
+          (authorize! row)))
+      (validate-owned-source! (assoc graph :fns owners) permissions))))
+
+
 (defn collect-manifests
   "Collect manifest source with compiler-classified fn-ref edges terminal.
    Only identity metadata is read for those targets; all other dependencies
    retain the normal bounded ACL-before-values collection. Multiple roots
    share the SAME function/row budget; this never installs a caller policy."
   [storage roots authorize!]
-  (collect-source storage roots authorize! true false))
+  (manifest/capture storage roots authorize!
+                    #(collect-source storage roots authorize! true false)
+                    #(validate-manifest! storage authorize! %)))
 
 
 (defn collect-manifest
@@ -516,7 +542,8 @@
    Explicit replay controllers may add physical guards; ordinary execution and
    unknown storage stacks preserve the existing snapshot path."
   [storage f]
-  (replay/with-snapshot storage check-snapshot! f #(ordinary-snapshot % f)))
+  (manifest/with-snapshot storage check-snapshot! *statement-timeout-ms* f
+                          #(replay/with-snapshot % check-snapshot! f (fn [fixed] (ordinary-snapshot fixed f)))))
 
 
 (defn collect-namespaces

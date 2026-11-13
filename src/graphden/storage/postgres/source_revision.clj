@@ -34,7 +34,8 @@
                                   (into ["SELECT pg_catalog.pg_try_advisory_xact_lock_shared(?::integer,?::integer) AS acquired"] maintenance-key)
                                   {:builder-fn rs/as-unqualified-lower-maps})]
     (when-not (true? (:acquired result))
-      (throw (ex-info "Source maintenance in progress" {:type ::maintenance-active})))))
+      (throw (ex-info "Source maintenance in progress" {:type ::maintenance-active})))
+    true))
 
 
 (defn call-with-maintenance

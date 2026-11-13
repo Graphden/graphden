@@ -182,13 +182,13 @@ Prepares bounded session-incarnation evidence before owning a repeatable-read tr
 :PROPERTIES:
 :CUSTOM_ID: storage/PostgresStorage
 :FILE: src/graphden/storage/postgres/core.clj
-:LINE: 128
+:LINE: 152
 :MINS: 13.7
 :END:
 
 Implements the storage [[file:glossary.org::#term/protocol][protocols]] for PostgreSQL, mostly by delegating each method to a helper. Its ~ExecutionGraph~ implementation selects the optimized PostgreSQL resolver rather than the generic traversal. Read the [[file:glossary.org::#term/protocol][protocol]] headings to distinguish lifecycle, row operations, constraints, and graph resolution.
 
-- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:128]]
+- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:152]]
 
 * 15. do-initialize
 :PROPERTIES:

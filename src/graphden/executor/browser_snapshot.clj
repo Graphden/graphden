@@ -6,6 +6,7 @@
     [graphden.crud.type-check :as type-check]
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
+    [graphden.executor.checked-source-data :as checker-data]
     [graphden.executor.checked-source-memo :as checker-memo]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
@@ -291,9 +292,10 @@
 
 
 (defn- restore-checker-state!
-  [{:keys [rich per-org]}]
-  (reset! registry/*rich-types-override* rich)
-  (reset! registry/*per-org-rich-override* per-org))
+  [artifact]
+  (let [{:keys [rich per-org]} (checker-data/expand-registry-state artifact)]
+    (reset! registry/*rich-types-override* rich)
+    (reset! registry/*per-org-rich-override* per-org)))
 
 
 (defn- prepare-memo-input
@@ -337,7 +339,7 @@
                        (binding [check/*ref-return-memo* (atom {})]
                          (doseq [[id definition] definitions :when definition]
                            (check-definition! id definition)))
-                       (checker-state))
+                       (checker-data/compact-registry-state (checker-state)))
               :restore restore-checker-state! :consume consume :fallback fallback
               :check-cancel runtime/check-cancel!})
       (fallback))))

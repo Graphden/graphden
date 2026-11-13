@@ -101,6 +101,82 @@
       (when (walk value 0) @charged-bytes))))
 
 
+(defn- plain-map?
+  [value]
+  (= :map (get containers (class value))))
+
+
+(defn- registry-key?
+  [value]
+  ;; Compaction precedes admission. Never invoke a user key's hashCode/equals
+  ;; while probing a registry; unsupported keys remain for ordinary refusal.
+  (contains? #{nil String java.util.UUID clojure.lang.Keyword} (class value)))
+
+
+(defn compact-registry-state
+  "Factor identity-shared tenant signatures out of a checker ARTIFACT only.
+   Existing keys remain in place as nil placeholders; nonmirrored values,
+   metadata and name indexes stay intact. Ordinary immutable admission must
+   still inspect the complete resulting artifact, including its rich registry."
+  [state]
+  (let [eligible? (and (plain-map? state) (plain-map? (:rich state))
+                       (plain-map? (get-in state [:rich :by-id]))
+                       (plain-map? (:per-org state)))]
+    (if-not eligible?
+      {:registry state :mirrors {}}
+      (let [global (get-in state [:rich :by-id])
+            [per-org mirrors]
+            (reduce-kv
+              (fn [[per-org mirrors] org registry]
+                (let [by-id (when (plain-map? registry) (:by-id registry))]
+                  (if-not (and (registry-key? org) (plain-map? by-id))
+                    [per-org mirrors]
+                    (let [ids (into #{} (keep (fn [[id signature]]
+                                                (when (and (registry-key? id) (contains? global id)
+                                                           (identical? signature (get global id)))
+                                                  id))) by-id)]
+                      (if (empty? ids)
+                        [per-org mirrors]
+                        [(assoc per-org org
+                                (assoc registry :by-id (reduce #(assoc %1 %2 nil) by-id ids)))
+                         (assoc mirrors org ids)])))))
+              [(:per-org state) {}] (:per-org state))]
+        {:registry (assoc state :per-org per-org) :mirrors mirrors}))))
+
+
+(defn- invalid-registry-artifact!
+  []
+  (throw (ex-info "Invalid compact checker registry" {:type ::invalid-registry-artifact})))
+
+
+(defn expand-registry-state
+  "Restore a privately produced compact artifact. References use THIS artifact's
+   immutable rich registry, never the live global registry. Replacing existing
+   values preserves map order/class and the signature's identity/provenance."
+  [artifact]
+  (when-not (and (plain-map? artifact) (= #{:registry :mirrors} (set (keys artifact)))
+                 (plain-map? (:registry artifact)) (plain-map? (:mirrors artifact)))
+    (invalid-registry-artifact!))
+  (let [{:keys [registry mirrors]} artifact
+        global (when (plain-map? (:rich registry)) (get-in registry [:rich :by-id]))]
+    (reduce-kv
+      (fn [state org ids]
+        (when-not (registry-key? org) (invalid-registry-artifact!))
+        (let [per-org (:per-org state)
+              org-registry (when (plain-map? per-org) (get per-org org))
+              by-id (when (plain-map? org-registry) (:by-id org-registry))]
+          (when-not (and (plain-map? global) (plain-map? by-id)
+                         (= clojure.lang.PersistentHashSet (class ids))
+                         (every? #(and (registry-key? %) (contains? global %) (contains? by-id %)
+                                       (nil? (get by-id %))) ids))
+            (invalid-registry-artifact!))
+          (assoc state :per-org
+                 (assoc per-org org
+                        (assoc org-registry :by-id
+                               (reduce #(assoc %1 %2 (get global %2)) by-id ids))))))
+      registry mirrors)))
+
+
 ;; Direct fields have no Class/.method equivalent; retain typed field access.
 ^{:splint/disable [lint/prefer-method-values]}
 (defn same-input?

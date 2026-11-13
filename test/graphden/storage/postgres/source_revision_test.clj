@@ -5,7 +5,10 @@
     [graphden.storage.postgres.source-revision-snapshot :as snapshot]
     [graphden.storage.postgres.test-setup :as setup]
     [next.jdbc :as jdbc]
-    [next.jdbc.result-set :as rs]))
+    [next.jdbc.result-set :as rs])
+  (:import
+    (java.sql
+      Connection)))
 
 
 (def ^:dynamic *datasource* nil)
@@ -64,7 +67,7 @@
       (if (not= excluded-bucket (backend-bucket connection))
         connection
         (do
-          (.close connection)
+          (Connection/.close connection)
           (when (= attempt 15)
             (throw (ex-info "Could not obtain independent backend bucket" {})))
           (recur (inc attempt)))))))

@@ -8,6 +8,18 @@ function samePlanLoad(reply, success, required = false) {
   if (!required && reply.loadId === undefined && success.loadId === undefined) return true;
   return Number.isSafeInteger(reply.loadId) && reply.loadId > 0 && reply.loadId === success.loadId;
 }
+// A batch has one real network-console event, regardless of logical items.
+// Item refusals inside HTTP 200 never authorize hiding an HTTP 422 error.
+function uniqueConsoleTransports(replies) {
+  const seen = new Set();
+  return replies.filter(reply => {
+    if (reply.transportStatus !== undefined && reply.transportStatus !== reply.status) return false;
+    if (reply.transportId === undefined) return true; // Legacy single receipts.
+    const key = JSON.stringify([reply.documentId, reply.url, reply.transportId]);
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
 function unexpectedPolicyRetryErrors(errors, replies, behaviorVerified, requireLoadIdentity = false) {
   if (!behaviorVerified) return errors;
   const relevant = replies.filter(reply => reply.status === 422);
@@ -17,7 +29,7 @@ function unexpectedPolicyRetryErrors(errors, replies, behaviorVerified, requireL
       && samePlanLoad(reply, success, requireLoadIdentity)
       && success.status === 200 && success.ok === true))) return errors;
   const allowed = new Map();
-  for (const reply of relevant) allowed.set(reply.url, (allowed.get(reply.url) || 0) + 1);
+  for (const reply of uniqueConsoleTransports(relevant)) allowed.set(reply.url, (allowed.get(reply.url) || 0) + 1);
   return errors.filter(error => {
     const count = allowed.get(error.url) || 0;
     if (error.kind !== 'console' || !count
@@ -26,4 +38,4 @@ function unexpectedPolicyRetryErrors(errors, replies, behaviorVerified, requireL
     return false;
   });
 }
-module.exports = {unexpectedPolicyRetryErrors, samePlanLoad};
+module.exports = {unexpectedPolicyRetryErrors, samePlanLoad, uniqueConsoleTransports};

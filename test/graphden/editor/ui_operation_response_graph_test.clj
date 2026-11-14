@@ -81,7 +81,10 @@
     (doseq [[native item] (map vector results (:items out))]
       (is (= (dissoc (response :component native) :http-status)
              (json/parse-string (get-in item [:result :body]) true))))
-    (is (= "1" (get-in out [:items 2 :result :headers "Retry-After"]))))
+    ;; Internal Ring headers can have keyword keys. The batch serializes them
+    ;; before the browser reconstructs each independent Response.
+    (is (= "1" (get-in (json/parse-string (json/generate-string out))
+                       ["items" 2 "result" "headers" "Retry-After"]))))
   (let [out (response :component (failure {:type :authz/forbidden}))]
     (is (= 403 (:http-status out)))
     (is (not (contains? out :items)))))
@@ -129,3 +132,14 @@
     (is (= (assoc receipt :publication-warnings
                   [{:reason "Your UI graphs were created. Refresh the editor to reload their derived state."}])
            (response :apply (assoc receipt :publication-incomplete? true))))))
+
+
+(deftest preference-plan-grouping-is-a-trusted-runtime-hint
+  (let [request {:request-method :get :uri "/api/prefs" :headers {}}
+        ordinary (setup/via-graph *graph* :_prefs-get-handler request)
+        retained (setup/via-graph (update *graph* :ctx assoc :source-manifest (Object.))
+                                  :_prefs-get-handler request)]
+    (is (= "1" (get-in ordinary [:headers "X-Graphden-UI-Plan-Batch-Max"])))
+    (is (= "3" (get-in retained [:headers "X-Graphden-UI-Plan-Batch-Max"])))
+    (is (= (json/parse-string (:body ordinary) true) (json/parse-string (:body retained) true)))
+    (is (= "no-store" (get-in retained [:headers "Cache-Control"])))))

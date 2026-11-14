@@ -1,5 +1,6 @@
 // Persisted canvas-values: real authorization, scoped customization and measured geometry.
 // Exact receipt cleanup leaves existing personal configuration and graphs intact.
+const {componentsForRequest, decode: decodeComponentPlanReplies} = require('./component-plan-replies');
 const { chromium } = require('playwright');
 const {
   assert,
@@ -47,22 +48,15 @@ const {observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRoo
       })());
     }
     if (r.url().endsWith('/ui/configuration/plan')) {
-      const own = ++sequence;
+      const own = new Map(componentsForRequest(r.request().postDataJSON()).map(component => [component, ++sequence]));
       pending.push(
         (async () => {
           const b = await r.json().catch(() => null);
-          plans.push({
-            kind: 'plan',
-            url: r.url(),
-            sequence: own,
-            component: r.request().postDataJSON()?.component,
-            selectionId: b?.['selection-id'],
-            status: r.status(),
-            ok: b?.ok,
-            fallback: b?.fallback,
-            code: b?.code,
-            retryable: b?.retryable === true,
-          });
+          for (const item of decodeComponentPlanReplies(r.request().postDataJSON(), r.status(), b))
+            plans.push({kind: 'plan', url: r.url(), sequence: own.get(item.component), component: item.component,
+              transportId: own.values().next().value, transportStatus: r.status(),
+              selectionId: item.body?.['selection-id'], status: item.status, ok: item.body?.ok,
+              fallback: item.body?.fallback, code: item.body?.code, retryable: item.body?.retryable === true});
         })(),
       );
     }

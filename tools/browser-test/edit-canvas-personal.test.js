@@ -1,5 +1,6 @@
 // Persisted personal canvas: authorized plan, two passive bodies, native ownership.
 // Exact receipt cleanup leaves existing personal configuration and graphs intact.
+const {componentsForRequest, decode: decodeComponentPlanReplies} = require('./component-plan-replies');
 const { chromium } = require('playwright');
 const {
   assert,
@@ -30,8 +31,10 @@ const { observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRo
       errors.push({ kind: 'console', text: m.text(), url: m.location().url });
   });
   page.on('request', (request) => {
-    if (['/api/ui/configuration/plan', '/api/ui/root/plan'].includes(new URL(request.url()).pathname))
-      requestSequences.set(request, ++sequence);
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/ui/root/plan') requestSequences.set(request, ++sequence);
+    if (path === '/api/ui/configuration/plan') requestSequences.set(request, new Map(
+      componentsForRequest(request.postDataJSON()).map(component => [component, ++sequence])));
   });
   page.on('response', (r) => {
     const path = new URL(r.url()).pathname;
@@ -44,17 +47,11 @@ const { observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRo
               ok: b?.ok === true, code: b?.code, retryable: b?.retryable === true});
             return;
           }
-          plans.push({
-            kind: 'plan',
-            url: r.url(),
-            sequence: requestSequences.get(r.request()),
-            component: r.request().postDataJSON()?.component,
-            status: r.status(),
-            ok: b?.ok,
-            fallback: b?.fallback,
-            code: b?.code,
-            retryable: b?.retryable === true,
-          });
+          for (const item of decodeComponentPlanReplies(r.request().postDataJSON(), r.status(), b))
+            plans.push({kind: 'plan', url: r.url(), sequence: requestSequences.get(r.request()).get(item.component),
+              transportId: requestSequences.get(r.request()).values().next().value, transportStatus: r.status(),
+              component: item.component, status: item.status, ok: item.body?.ok, fallback: item.body?.fallback,
+              code: item.body?.code, retryable: item.body?.retryable === true});
         })(),
       );
     }

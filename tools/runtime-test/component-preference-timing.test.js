@@ -20,7 +20,7 @@ function fixture(initial = null) {
     GraphdenBrowser: {createRuntime: () => ({run() {}})},
     authFetch(route, options) {
       if (route.startsWith('/prefs/')) return new Promise((resolve, reject) => writes.push({resolve, reject, value: JSON.parse(options.body).value, body: JSON.parse(options.body)}));
-      if (route === '/prefs') return Promise.resolve({ok: true, headers: {get: () => 'owner-a'}, json: async () => ({components: server})});
+      if (route === '/prefs') return Promise.resolve({ok: true, headers: {get: name => name === 'X-Graphden-Preference-Owner' ? 'owner-a' : name === 'X-Graphden-UI-Plan-Batch-Max' ? '3' : null}, json: async () => ({components: server})});
       if (route === '/prepare') return Promise.resolve({ok: true, json: async () => ({ok: true})});
       plans.push(server);
       const body = server ? {ok: true, 'selection-id': server['fn-id'],
@@ -41,6 +41,7 @@ function fixture(initial = null) {
   vm.runInContext(prefsSource, context);
   window.gdPrefsReady = true;
   window.gdPrefOwner = 'owner-a';
+  window.gdUIPlanBatchMax = 3;
   vm.runInContext(policySource, context);
   vm.runInContext(componentsSource, context);
   window.gdPrefOnChange(key => {

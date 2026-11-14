@@ -113,9 +113,11 @@
       groups.set(entry.started, group);
     }
     for (const group of groups.values()) {
-      // Bound consumers as well as unique component keys and keep late calls
-      // independent of any older in-flight snapshot.
-      for (let index = 0; index < group.length; index += 8) void sendPlans(group.slice(index, index + 8));
+      // Three roles per snapshot preserve parallel work and leave capacity
+      // for a root read beside the eight legacy hosts. Ordinary deployments
+      // keep their individual requests unless the fresh preferences opt in.
+      const size = window.gdUIPlanBatchMax === 3 ? 3 : 1;
+      for (let index = 0; index < group.length; index += size) void sendPlans(group.slice(index, index + size));
     }
   }
   function requestPlan(component, started, signal) {

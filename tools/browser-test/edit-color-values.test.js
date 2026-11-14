@@ -1,6 +1,7 @@
 // Typed color edits through the actual graph, including manual text, native
 // picker, alpha, invalid-value diagnostics and the compact canvas preview.
 // Run with GRAPHDEN_URL/AUTH_TOKEN; all imported fixture graphs are cleaned up.
+const {decode: decodeComponentPlanReplies} = require('./component-plan-replies');
 const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
 const path = require('node:path');
@@ -26,17 +27,22 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
     const url = new URL(response.url());
     if (!['/ui-preview/plan', '/api/ui/configuration/plan'].includes(url.pathname)) return;
     const started = phase;
-    let component = null;
-    try { const name = response.request().postDataJSON()?.component; if (components.has(name)) component = name; } catch (_) {}
     pendingReceipts.push((async () => {
       let body; try { body = await response.json(); } catch (_) {}
-      const row = {phase: started, kind: component ? 'component' : 'review', component, status: response.status(),
-        parsed: !!body, ok: body?.ok === true || body?.format === 1,
-        code: body?.code == null ? null : ['policy-refresh-required', 'component-missing'].includes(body.code) ? body.code : 'other',
-        retryable: body?.retryable === true,
-        reason: body?.reason == null ? null : reasons.has(body.reason) ? body.reason : 'other',
-        target: uuid(body?.['fn-id']), selection: uuid(body?.['selection-id'])};
-      if (receipts.length < 128) receipts.push(row);
+      const items = url.pathname === '/api/ui/configuration/plan'
+        ? decodeComponentPlanReplies(response.request().postDataJSON(), response.status(), body)
+        : [{component: null, status: response.status(), body}];
+      for (const item of items) {
+        const body = item.body, component = item.component;
+        if (component && !components.has(component)) throw Error('Unknown observed UI component');
+        const row = {phase: started, kind: component ? 'component' : 'review', component, status: item.status,
+          parsed: !!body, ok: body?.ok === true || body?.format === 1,
+          code: body?.code == null ? null : ['policy-refresh-required', 'component-missing'].includes(body.code) ? body.code : 'other',
+          retryable: body?.retryable === true,
+          reason: body?.reason == null ? null : reasons.has(body.reason) ? body.reason : 'other',
+          target: uuid(body?.['fn-id']), selection: uuid(body?.['selection-id'])};
+        if (receipts.length < 128) receipts.push(row);
+      }
     })());
   });
   page.on('pageerror', error => errors.push(error.message));

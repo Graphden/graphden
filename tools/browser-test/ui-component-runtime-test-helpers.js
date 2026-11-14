@@ -1,9 +1,9 @@
 'use strict';
 const {components, builtinFallback} = require('./selective-copy-errors');
+const {createComponentPlanDecoder} = require('./component-plan-replies');
 
-// Observe the actual loader invocation, not a later configuration with the
-// same root. Its retries share an AbortSignal; a reload gets a fresh signal.
-// Only finite response metadata crosses this test-only observer.
+// Loader invocation identities outlive transport retries and never conflate
+// sibling consumers just because they share a batch AbortSignal.
 async function observeUIPlanLoads(page) {
   const requests = [], replies = [];
   const bySequence = new Map();
@@ -20,45 +20,66 @@ async function observeUIPlanLoads(page) {
       if (receipt.kind === 'plan') replies.push(receipt);
     }
   });
-  await page.addInitScript(names => {
-    const components = new Set(names), loads = new WeakMap(), pending = new Set();
+  await page.addInitScript(({names, decoderSource}) => {
+    // Only checked-in helper source is evaluated; no server data is executable.
+    const {componentsForRequest, decode} = Function('return (' + decoderSource + ')()')();
+    const components = new Set(names), loads = new Map(), pending = new Set(), failures = [];
     const documentId = crypto.randomUUID();
     let sequence = 0, nextLoad = 0;
     const track = promise => {
       pending.add(promise);
-      promise.finally(() => pending.delete(promise));
+      promise.then(() => pending.delete(promise), error => { failures.push(error); pending.delete(promise); });
       return promise;
     };
     const publish = receipt => track(window.__gdTestPlanReceipt(receipt));
+    for (const [name, componentAt, signalAt] of [
+      ['gdLoadUIComponentRuntime', 0, 3], ['gdCaptureUIConfiguration', null, 0],
+    ]) {
+      let wrapped;
+      Object.defineProperty(window, name, {configurable: true, get: () => wrapped, set(fn) {
+        wrapped = function(...args) {
+          const component = componentAt === null ? 'account-menu' : args[componentAt];
+          if (!components.has(component)) throw Error('Unknown observed UI component');
+          loads.set(component, {id: ++nextLoad, signal: args[signalAt]});
+          return fn.apply(this, args);
+        };
+      }});
+    }
     const original = window.fetch;
     window.fetch = function(input, options) {
       const url = new URL(typeof input === 'string' ? input : input.url, location.href);
       if (url.pathname !== '/api/ui/configuration/plan' || options?.method !== 'POST')
         return original.apply(this, arguments);
-      const component = JSON.parse(options.body)?.component;
-      if (!components.has(component)) throw Error('Unknown observed UI component');
-      const signal = options.signal;
-      if (signal && !loads.has(signal)) loads.set(signal, ++nextLoad);
-      const receipt = {documentId, sequence: ++sequence, component, loadId: signal ? loads.get(signal) : null,
-        url: url.origin + url.pathname};
-      publish({...receipt, kind: 'request'});
-      const response = original.apply(this, arguments);
-      void response.then(result => result.clone().json().catch(() => null).then(body => publish({
-        ...receipt, kind: 'plan', status: result.status, ok: body?.ok === true,
-        code: ['policy-refresh-required', 'component-missing'].includes(body?.code) ? body.code : null,
-        fallback: body?.fallback === 'builtin' ? 'builtin' : null, retryable: body?.retryable === true,
-      })), error => {
-        // Freeze these facts at rejection: a later abort cannot launder a
-        // prior network error into intentional loader supersession.
-        const abortError = error?.name === 'AbortError', signalAborted = signal?.aborted === true;
-        return publish({...receipt, kind: 'failed', status: 'failed', abortError, signalAborted});
+      const request = JSON.parse(options.body);
+      const receipts = componentsForRequest(request).map(component => {
+        if (!components.has(component)) throw Error('Unknown observed UI component');
+        const load = loads.get(component);
+        return {receipt: {documentId, sequence: ++sequence, component, loadId: load?.id ?? null,
+          url: url.origin + url.pathname}, signal: load?.signal || options.signal};
       });
+      for (const {receipt} of receipts) publish({...receipt, kind: 'request'});
+      const response = original.apply(this, arguments);
+      track(response.then(async result => {
+        const body = await result.clone().json().catch(() => null);
+        const items = decode(request, result.status, body);
+        await Promise.all(items.map((item, index) => publish({
+          ...receipts[index].receipt, kind: 'plan', transportId: receipts[0].receipt.sequence, transportStatus: result.status,
+          status: item.status, ok: item.body?.ok === true,
+          code: ['policy-refresh-required', 'component-missing'].includes(item.body?.code) ? item.body.code : null,
+          fallback: item.body?.fallback === 'builtin' ? 'builtin' : null, retryable: item.body?.retryable === true,
+        })));
+      }, async error => {
+        // Capture consumer and transport facts at rejection, before later aborts.
+        await Promise.all(receipts.map(({receipt, signal}) => publish({...receipt, kind: 'failed', status: 'failed',
+          abortError: error?.name === 'AbortError', signalAborted: signal?.aborted === true})));
+      }));
       return response;
     };
     window.__gdTestFlushPlanReceipts = async () => {
-      while (pending.size) await Promise.all([...pending]);
+      while (pending.size) await Promise.allSettled([...pending]);
+      if (failures.length) throw Error('Invalid UI plan observer receipt');
     };
-  }, [...components]);
+  }, {names: [...components], decoderSource: createComponentPlanDecoder.toString()});
   return {requests, replies, flush: () => page.evaluate(() => window.__gdTestFlushPlanReceipts())};
 }
 

@@ -16,7 +16,7 @@ function fixture() {
   const timers = new Map();
   let timerId = 0, clock = 0, currentBranch = 'main';
   const window = {
-    gdPrefsReady: true, gdPrefOwner: 'owner-a', API: {api_ui_configuration_plan: '/api/ui/configuration/plan'},
+    gdPrefsReady: true, gdPrefOwner: 'owner-a', gdUIPlanBatchMax: 3, API: {api_ui_configuration_plan: '/api/ui/configuration/plan'},
     gdPrefRead: () => null,
     gdPrefOnChange(callback) { window.changed = callback; },
     authFetch: (route, options) => new Promise((resolve, reject) => requests.push({route, options, resolve, reject})),
@@ -452,11 +452,25 @@ const deadline = setTimeout(() => { console.error("UI component test did not set
       'canvas-bindings', 'canvas-type-structure', 'explorer', 'inspector', 'feedback'];
     const loads = components.map(component => f.window.gdLoadUIComponentRuntime(component, plan));
     await settle();
-    assert.equal(f.requests.length, 2);
-    assert.equal(JSON.parse(f.requests[0].options.body).components.length, 8);
-    assert.deepEqual(JSON.parse(f.requests[1].options.body), {component: 'feedback'});
-    f.finishBatch(f.requests[0], components.slice(0, 8).map(component => ({component})));
-    f.finish(f.requests[1], {ok: true, 'selection-id': first, plan});
+    assert.equal(f.requests.length, 3);
+    for (const [index, request] of f.requests.entries()) {
+      const names = JSON.parse(request.options.body).components;
+      assert.equal(names.length, 3);
+      assert.deepEqual(names, components.slice(index * 3, index * 3 + 3));
+      f.finishBatch(request, names.map(component => ({component})));
+    }
+    await Promise.all(loads);
+  }
+  {
+    const f = fixture();
+    f.window.gdUIPlanBatchMax = 1;
+    const loads = ['canvas', 'canvas-values'].map(component => f.window.gdLoadUIComponentRuntime(component, plan));
+    await settle();
+    assert.equal(f.requests.length, 2, 'ordinary runtimes retain independent plan requests');
+    for (const [index, request] of f.requests.entries()) {
+      assert.deepEqual(JSON.parse(request.options.body), {component: ['canvas', 'canvas-values'][index]});
+      f.finish(request, {ok: true, 'selection-id': first, plan});
+    }
     await Promise.all(loads);
   }
   console.log('PASS personal UI plans: scoped requests, bounded batches, independent cancellation, partial fallback and input contract');

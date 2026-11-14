@@ -428,6 +428,7 @@ let _prefsInitialReady;
 window.gdPrefsInitialReady = new Promise(resolve => { _prefsInitialReady = resolve; });
 window.gdPrefsReady = false;
 window.gdPrefOwner = null;
+window.gdUIPlanBatchMax = 1;
 
 function gdPrefRead(key) { return _prefs?.[key] ?? null; }
 
@@ -543,6 +544,9 @@ async function gdPrefsRefresh(initial = false) {
     }
     _prefs = merged;
     window.gdPrefOwner = owner;
+    // Grouping helps the bounded retention path. Keep ordinary deployments
+    // parallel, and never restore a hint from a previous owner's response.
+    window.gdUIPlanBatchMax = r.headers?.get('X-Graphden-UI-Plan-Batch-Max') === '3' ? 3 : 1;
     window.gdPrefsReady = true;
     writePrefsMirror(_prefs);
     gdPrefApply('theme');
@@ -568,6 +572,7 @@ window.addEventListener('gd-auth-changed', () => {
   for (const key of Object.keys(_prefPendingGen)) delete _prefPendingGen[key];
   window.gdPrefsReady = false;
   window.gdPrefOwner = null;
+  window.gdUIPlanBatchMax = 1;
   gdPrefApply('theme');
   gdPrefApply('keymap');
   gdPrefNotify('theme');

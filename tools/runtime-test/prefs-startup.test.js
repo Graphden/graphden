@@ -52,8 +52,8 @@ function fixture() {
   return {window, requests, notifications, reloads,
     authChanged() { window.dispatchEvent(new Event('gd-auth-changed')); },
     components() { return notifications.filter(event => event.key === 'components'); },
-    reply(index, prefs = {}, owner = 'owner-a') {
-      requests[index].resolve({ok: true, headers: {get: () => owner}, json: async () => prefs});
+    reply(index, prefs = {}, owner = 'owner-a', batchMax = '1') {
+      requests[index].resolve({ok: true, headers: {get: name => name === 'X-Graphden-Preference-Owner' ? owner : name === 'X-Graphden-UI-Plan-Batch-Max' ? batchMax : null}, json: async () => prefs});
     },
     async refresh(prefs, owner = 'owner-a') {
       const result = window.gdPrefsRefresh();
@@ -176,4 +176,27 @@ test('explicit refresh revalidates unchanged component selection and theme after
   assert.equal(f.components().length, 5, 'unchanged empty selection still revalidates current server defaults');
   await f.refresh({}, 'owner-b');
   assert.equal(f.components().length, 6, 'server owner transition propagates even for an empty selection');
+});
+
+
+test('plan grouping hint belongs to the current preference owner and is not restored by a stale reply', async () => {
+  const f = fixture();
+  const first = f.window.gdPrefsRefresh();
+  f.reply(0, {}, 'owner-a', '3');
+  await first;
+  assert.equal(f.window.gdUIPlanBatchMax, 3);
+  const stale = f.window.gdPrefsRefresh();
+  f.authChanged();
+  assert.equal(f.window.gdUIPlanBatchMax, 1, 'identity retirement drops the old transport hint immediately');
+  const current = f.window.gdPrefsRefresh();
+  f.reply(2, {}, 'owner-b', '1');
+  await current;
+  f.reply(1, {}, 'owner-a', '3');
+  await stale;
+  assert.equal(f.window.gdPrefOwner, 'owner-b');
+  assert.equal(f.window.gdUIPlanBatchMax, 1);
+  const invalid = f.window.gdPrefsRefresh();
+  f.reply(3, {}, 'owner-b', '999');
+  await invalid;
+  assert.equal(f.window.gdUIPlanBatchMax, 1, 'unknown hints keep the independent transport');
 });

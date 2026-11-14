@@ -74,7 +74,7 @@
   ;; --- GET /api/prefs — the current user's map ------------------------
   {:name :_prefs-retention-configured?
    :description "Trusted runtime source-retention configuration, used only to recommend component request grouping. It grants no source access."
-   :args {} :return-type :bool :effects #{:env}}
+   :args {} :return-type :bool}
   {:name :_prefs-plan-batch-max
    :parent :if
    :args {:test :_prefs-retention-configured? :then "3" :else "1"}}

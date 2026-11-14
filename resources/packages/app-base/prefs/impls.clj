@@ -35,9 +35,9 @@
 
 (defbase prefs-retention-configured?
   "Whether this trusted runtime opted into source retention. A transport hint,
-   never source authority or a promise that a particular snapshot is admitted."
+   never source authority or a promise that a particular snapshot is admitted.
+   Reads only the supplied immutable runtime configuration, like other boot facts."
   []
-  (cr/record-effect! :env)
   (some? (:source-manifest ctx)))
 
 

@@ -7,6 +7,7 @@
     [graphden.editor.components :as components]
     [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-server :as server]
+    [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.ids :as ids]))
@@ -136,8 +137,11 @@
 
 (deftest preference-plan-grouping-is-a-trusted-runtime-hint
   (let [request {:request-method :get :uri "/api/prefs" :headers {}}
-        ordinary (setup/via-graph *graph* :_prefs-get-handler request)
-        retained (setup/via-graph (update *graph* :ctx assoc :source-manifest (Object.))
+        ;; This immutable ctx fact must work under the real tenant HTTP effect
+        ;; ceiling. In particular it must never require reading process env.
+        graph (update *graph* :ctx assoc :allowed-effects runtime/cloud-request-allowed-effects)
+        ordinary (setup/via-graph graph :_prefs-get-handler request)
+        retained (setup/via-graph (update graph :ctx assoc :source-manifest (Object.))
                                   :_prefs-get-handler request)]
     (is (= "1" (get-in ordinary [:headers "X-Graphden-UI-Plan-Batch-Max"])))
     (is (= "3" (get-in retained [:headers "X-Graphden-UI-Plan-Batch-Max"])))

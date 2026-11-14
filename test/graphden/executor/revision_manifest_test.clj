@@ -125,16 +125,16 @@
   (exercise
     ;; Isolate key partitioning from capacity eviction. Equal expiry timestamps
     ;; do not promise which of two retained entries is evicted first.
-    4
+    5
     (fn [{:keys [collect kind reads graph controller]}]
       (let [validated (atom 0)
             validate! (fn [_] (swap! validated inc))]
-        (doseq [mode [:manifest :client :client :manifest :server :nodes :server :nodes]]
+        (doseq [mode [:manifest :client :client :manifest :server :nodes :server :nodes :closure :closure]]
           (reset! kind mode)
           (is (= graph (collect validate!))))
-        (is (= 4 @reads))
-        (is (= 4 @validated))
-        (is (= 4 (:entries (manifest/stats controller))))
+        (is (= 5 @reads))
+        (is (= 5 @validated))
+        (is (= 5 (:entries (manifest/stats controller))))
         (reset! kind :unknown)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown source collector kind"
               (collect validate!)))))))

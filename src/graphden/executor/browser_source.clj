@@ -494,6 +494,21 @@
       (validate-owned-source! (assoc graph :fns owners) permissions))))
 
 
+(defn collect-retained-closure
+  "Collect complete component source with bounded raw-row retention. Every
+   retained Fn remains an ordinary source owner; no identity-only terminals.
+   Namespaces, selection, checked plans and current authorization stay fresh."
+  [storage roots authorize! graph-hint]
+  (dissoc
+    (manifest/capture
+      storage :closure roots authorize!
+      #(assoc (collect-closure storage roots authorize! graph-hint) :identity-target-ids (hash-set))
+      (fn [graph]
+        (when-not (= #{} (:identity-target-ids graph)) (reject! :invalid-closure-targets))
+        (validate-retained-source! storage authorize! graph :closure)))
+    :identity-target-ids))
+
+
 (defn capture-nodes
   "Read exact server-owned witness IDs without following dependencies. Hits
    repeat owner metadata, ACL and source-contract checks in the new snapshot."

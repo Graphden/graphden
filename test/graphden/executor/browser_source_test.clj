@@ -758,3 +758,40 @@
              (try (source/collect-server-closure
                     (fixture-storage (assoc-in tables [:fn dependency :name] "changed") calls) target guard nil)
                   (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))
+
+
+(deftest retained-full-closure-keeps-source-authorization-and-original-shape
+  (let [root (random-uuid)
+        target (first (keys contracts/component-identities))
+        graph {:fns [{:id root :parent-ids [target]} {:id target}]
+               :bindings [{:id (random-uuid) :fn-id target :value "source"}]}
+        tables (graph-tables graph)
+        calls (atom []) retained (atom nil) denied? (atom false) authorized (atom [])
+        guard (fn [row & [permission]]
+                (swap! authorized conj [(:id row) permission])
+                (when (and @denied? (= target (:id row)))
+                  (throw (ex-info "Source denied" {:type :authz/forbidden}))))
+        capture (fn [_ kind _ authorizer run validate!]
+                  (is (= :closure kind))
+                  (is (identical? guard authorizer))
+                  (if-let [saved @retained]
+                    (do (validate! saved) saved)
+                    (let [saved (run)] (reset! retained saved) saved)))]
+    (with-redefs [manifest/capture capture]
+      (let [ordinary (source/collect-closure (fixture-storage tables calls) [root] guard)
+            cold (source/collect-retained-closure (fixture-storage tables calls) [root] guard nil)]
+        (reset! calls [])
+        (reset! authorized [])
+        (let [warm (source/collect-retained-closure (fixture-storage tables calls) [root] guard {})]
+          (is (= (graph-rows ordinary) (graph-rows cold) (graph-rows warm)))
+          (is (= #{:fns :slots :fn-slots :bindings :list-items} (set (keys warm))))
+          (is (= #{[root nil] [target nil]} (set @authorized)))
+          (is (every? (fn [[operation entity]] (and (= :read operation) (= :fn entity))) @calls))))
+      (reset! denied? true)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Source denied"
+            (source/collect-retained-closure (fixture-storage tables calls) [root] guard nil)))
+      (reset! denied? false)
+      (swap! retained assoc :identity-target-ids #{target})
+      (is (= :invalid-closure-targets
+             (try (source/collect-retained-closure (fixture-storage tables calls) [root] guard nil)
+                  (catch clojure.lang.ExceptionInfo e (:reason (ex-data e)))))))))

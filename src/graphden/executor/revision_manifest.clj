@@ -193,7 +193,7 @@
   ([source-storage roots authorize! run validate!]
    (capture source-storage :manifest roots authorize! run validate!))
   ([source-storage kind roots authorize! run validate!]
-   (when-not (contains? #{:manifest :client :server :nodes} kind)
+   (when-not (contains? #{:manifest :client :server :nodes :closure} kind)
      (throw (ex-info "Unknown source collector kind" {:kind kind})))
    (let [scope *snapshot*]
      (when (and scope (not @(:active? scope)))

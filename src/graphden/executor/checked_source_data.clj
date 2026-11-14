@@ -11,7 +11,9 @@
       Modifier)
     (java.math
       BigDecimal
-      BigInteger)))
+      BigInteger)
+    (java.util
+      IdentityHashMap)))
 
 
 (def ^:private containers
@@ -63,42 +65,79 @@
 
 
 (defn charge
-  "Return a deliberately conservative retained-data estimate, or nil. Walks
-   every occurrence (including shared references), every known metadata witness,
-   and all container members. No identity shortcut can hide mutable leaves.
-   Approved callbacks are static code references, never captured user closures."
+  "Conservative immutable admission and retained-data estimate. Summarize only
+   fully validated known containers within this call; every occurrence still
+   charges its full bytes, nodes and relative depth, including metadata.
+   Scratch summaries are identity-keyed and bounded to 1024 containers."
   [value {:keys [max-bytes max-nodes callbacks]}]
-  (let [charged-bytes (volatile! 0) nodes (volatile! 0)]
+  (let [charged-bytes (volatile! 0) nodes (volatile! 0)
+        summaries (IdentityHashMap.)]
     (letfn [(add!
               [n]
-              (and (<= (vswap! nodes inc) max-nodes)
+              (and (<= (vswap! nodes +' 1) max-nodes)
                    (<= (vswap! charged-bytes +' n) max-bytes)))
+            (members
+              [values depth]
+              (loop [remaining (seq values) height 0]
+                (if remaining
+                  (when-some [child (walk (first remaining) (inc depth))]
+                    (recur (next remaining) (max height (inc child))))
+                  height)))
+            (pairs
+              [entries depth]
+              (loop [remaining (seq entries) height 0]
+                (if remaining
+                  (let [[k v] (first remaining)]
+                    (when-some [key-height (walk k (inc depth))]
+                      (when-some [value-height (walk v (inc depth))]
+                        (recur (next remaining) (max height (inc key-height) (inc value-height))))))
+                  height)))
             (walk
               [v depth]
-              (when (and (<= depth 64) (add! (if (contains? containers (class v)) 256 96))
-                         ;; Unknown IMeta implementations can execute code.
-                         ;; Refuse their class before asking for metadata.
-                         (or (contains? containers (class v))
-                             (contains? scalar-classes (class v))
-                             (approved-callback? callbacks v)))
-                (and
-                  (if (meta v)
-                    (when-let [retained (provenance/retained-checker-metadata v)]
-                      (walk retained (inc depth)))
-                    true)
-                  (if-let [kind (get containers (class v))]
-                    (case kind
-                      :map (every? (fn [[k x]] (and (walk k (inc depth)) (walk x (inc depth)))) v)
-                      ;; List tails retain their own metadata. Subvectors are
-                      ;; refused entirely: their hidden backing vector can hold
-                      ;; mutable/unbounded values outside the visible slice.
-                      :list (and (walk (first v) (inc depth)) (walk (rest v) (inc depth)))
-                      (every? #(walk % (inc depth)) v))
-                    (cond
-                      (contains? scalar-classes (class v)) (add! (scalar-charge v))
-                      (approved-callback? callbacks v) (add! 256)
-                      :else false)))))]
-      (when (walk value 0) @charged-bytes))))
+              (let [kind (get containers (class v))
+                    cached (when kind (IdentityHashMap/.get summaries v))]
+                (if cached
+                  (let [^objects summary cached]
+                    (when (and (<= (+ depth (aget summary 2)) 64)
+                               (<= (vswap! nodes +' (aget summary 1)) max-nodes)
+                               (<= (vswap! charged-bytes +' (aget summary 0)) max-bytes))
+                      (aget summary 2)))
+                  (let [before-bytes @charged-bytes before-nodes @nodes]
+                    (when (and (<= depth 64) (add! (if kind 256 96))
+                               (or kind (contains? scalar-classes (class v))
+                                   (approved-callback? callbacks v)))
+                      (when-some [metadata-height
+                                  (if-let [metadata (meta v)]
+                                    ;; Only plain immutable metadata can support summary
+                                    ;; reuse. Inspect no user map methods before its class.
+                                    (when (and (= :map (get containers (class metadata)))
+                                               (nil? (meta metadata))
+                                               (<= (count metadata) 16)
+                                               (every? #(contains? #{clojure.lang.Keyword Object} (class %))
+                                                       (keys metadata)))
+                                      (when-let [retained (provenance/retained-checker-metadata v)]
+                                        (when-some [child (walk retained (inc depth))] (inc child))))
+                                    0)]
+                        (when-some [member-height
+                                    (if kind
+                                      (case kind
+                                        :map (pairs v depth)
+                                        :list (when-some [head (walk (first v) (inc depth))]
+                                                (when-some [tail (walk (rest v) (inc depth))]
+                                                  (max (inc head) (inc tail))))
+                                        (members v depth))
+                                      (when (cond
+                                              (contains? scalar-classes (class v)) (add! (scalar-charge v))
+                                              (approved-callback? callbacks v) (add! 256)
+                                              :else false)
+                                        0))]
+                          (let [height (max metadata-height member-height)
+                                node-count (-' @nodes before-nodes)]
+                            (when (and kind (>= node-count 8) (< (IdentityHashMap/.size summaries) 1024))
+                              (IdentityHashMap/.put summaries v
+                                                    (object-array [(-' @charged-bytes before-bytes) node-count height])))
+                            height))))))))]
+      (when-some [_ (walk value 0)] @charged-bytes))))
 
 
 (defn- plain-map?
@@ -185,17 +224,18 @@
   [left right]
   (and (= (class left) (class right))
        (identical? (meta left) (meta right))
-       (if-let [kind (get containers (class left))]
-         (and (= (count left) (count right))
-              (case kind
-                :map (every? true? (map (fn [[ak av] [bk bv]]
-                                          (and (same-input? ak bk) (same-input? av bv))) left right))
-                :list (and (same-input? (first left) (first right))
-                           (same-input? (rest left) (rest right)))
-                (every? true? (map same-input? left right))))
-         (cond
-           (fn? left) (identical? left right)
-           (instance? Ratio left) (and (= (.-numerator ^Ratio left) (.-numerator ^Ratio right))
-                                       (= (.-denominator ^Ratio left) (.-denominator ^Ratio right)))
-           (nil? left) true
-           :else (Object/.equals left right)))))
+       (or (identical? left right)
+           (if-let [kind (get containers (class left))]
+             (and (= (count left) (count right))
+                  (case kind
+                    :map (every? true? (map (fn [[ak av] [bk bv]]
+                                              (and (same-input? ak bk) (same-input? av bv))) left right))
+                    :list (and (same-input? (first left) (first right))
+                               (same-input? (rest left) (rest right)))
+                    (every? true? (map same-input? left right))))
+             (cond
+               (fn? left) (identical? left right)
+               (instance? Ratio left) (and (= (.-numerator ^Ratio left) (.-numerator ^Ratio right))
+                                           (= (.-denominator ^Ratio left) (.-denominator ^Ratio right)))
+               (nil? left) true
+               :else (Object/.equals left right))))))

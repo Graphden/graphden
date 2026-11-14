@@ -14,6 +14,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as router-epoch]
     [graphden.tenancy.context :as tenancy]
+    [graphden.util.json-size :as json-size]
     [graphden.versioning.storage.core :as versioned]))
 
 
@@ -61,8 +62,8 @@
 
 
 (defn- export-in-snapshot
-  [ctx component storage authorize! policy epoch]
-  (let [resolved (resolution/capture storage authorize! policy)
+  [ctx component {:keys [storage authorize! policy epoch resolved]}]
+  (let [resolved (or resolved (resolution/capture storage authorize! policy))
         id (:id resolved)
         row (sp/read-entity storage :fn id)]
     (when-not row (reject! :source-missing))
@@ -140,18 +141,80 @@
      :server-stale? (= {:type :browser-plan/unsupported :reason :server-epoch-changed} data)}))
 
 
+(defn- requested-components
+  [input]
+  (when-not (map? input) (reject! :invalid-request))
+  (let [batch? (= #{:components} (set (keys input)))
+        names (if batch? (:components input) [(:component input)])]
+    (when-not (and (or batch? (= #{:component} (set (keys input))))
+                   (vector? names) (<= 1 (count names) 8)
+                   (= (count names) (count (set names)))
+                   (every? #(contains? component-keys %) names))
+      (reject! :invalid-request))
+    {:batch? batch? :names names}))
+
+
+(defn- batch-item
+  [ctx component snapshot]
+  (when source/*snapshot-check* (source/*snapshot-check*))
+  (try
+    {:component component :result (export-in-snapshot ctx (get component-keys component) snapshot)}
+    (catch clojure.lang.ExceptionInfo error
+      ;; Missing optional roles are independent. A failed authorization, SQL
+      ;; statement, source check or policy epoch aborts the entire batch.
+      (if (= {:type :browser-plan/unsupported :reason :component-missing} (ex-data error))
+        {:component component :result (failure-facts error)}
+        (throw error)))))
+
+
+(defn- export-batch
+  [ctx names {:keys [storage authorize! policy epoch] :as snapshot}]
+  (let [resolved (resolution/capture storage authorize! policy)
+        snapshot (assoc snapshot :resolved resolved)
+        items (:items
+                (reduce (fn [{:keys [items remaining]} component]
+                          (let [item (batch-item ctx component snapshot)
+                                size (json-size/json-bytes-up-to item remaining)]
+                            (when-not size (reject! :batch-result-limit))
+                            {:items (conj items item) :remaining (- remaining size)}))
+                        {:items [] :remaining (- (* 4 1024 1024) (inc (count names)))} names))]
+    (when source/*snapshot-check* (source/*snapshot-check*))
+    (assert-current-policy! storage)
+    (when-not (= epoch (context/invalidation-epoch ctx))
+      (reject! :policy-refresh-required))
+    ;; The graph maps each finite item through the ordinary response policy.
+    ;; Partial batches do not publish staged replay recipes as a full success.
+    {:ok (every? #(true? (get-in % [:result :ok])) items)
+     :batch-complete? true :items items}))
+
+
+(defn- call-with-batch-deadline
+  [f]
+  (let [deadline (+ (System/nanoTime) (* 30 1000000000))
+        previous source/*snapshot-check*]
+    (binding [source/*snapshot-check* (fn []
+                                        (when previous (previous))
+                                        (when (or (Thread/.isInterrupted (Thread/currentThread))
+                                                  (>= (System/nanoTime) deadline))
+                                          (reject! :batch-deadline)))
+              source/*statement-timeout-ms* (min 30000 (or source/*statement-timeout-ms* 30000))]
+      (f))))
+
+
 (defn- export-resolved-value
   "Export default or personal components through the ordinary authorized resolver."
   [ctx input]
   (try
-    (when-not (and (map? input) (= #{:component} (set (keys input))))
-      (reject! :invalid-request))
-    (let [component (get component-keys (:component input))]
-      (when-not component (reject! :invalid-request))
-      (let [epoch (context/invalidation-epoch ctx)
-            policy (snapshot/capture-context-policy ctx)]
-        (source/with-snapshot (request/require-storage ctx)
-                              #(export-in-snapshot ctx component %1 %2 policy epoch))))
+    (let [{:keys [batch? names]} (requested-components input)
+          epoch (context/invalidation-epoch ctx)
+          policy (snapshot/capture-context-policy ctx)
+          run #(source/with-snapshot (request/require-storage ctx)
+                                     (fn [storage authorize!]
+                                       (let [captured {:storage storage :authorize! authorize! :policy policy :epoch epoch}]
+                                         (if batch?
+                                           (export-batch ctx names captured)
+                                           (export-in-snapshot ctx (get component-keys (first names)) captured)))))]
+      (if batch? (call-with-batch-deadline run) (run)))
     (catch Exception error
       (failure-facts error))))
 

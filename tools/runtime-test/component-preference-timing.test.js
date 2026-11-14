@@ -23,18 +23,21 @@ function fixture(initial = null) {
       if (route === '/prefs') return Promise.resolve({ok: true, headers: {get: () => 'owner-a'}, json: async () => ({components: server})});
       if (route === '/prepare') return Promise.resolve({ok: true, json: async () => ({ok: true})});
       plans.push(server);
-      return Promise.resolve({ok: !!server, json: async () => server
-        ? {ok: true, 'selection-id': server['fn-id'],
-          'configuration-branch-id': server['branch-id'],
-          'configuration-defaults-id': first['fn-id'],
-          'configuration-revision': 'a'.repeat(64),
-          'configuration-preference': {present: true, value: server},
-          roots: {}, plan} : {ok: false}});
+      const body = server ? {ok: true, 'selection-id': server['fn-id'],
+        'configuration-branch-id': server['branch-id'],
+        'configuration-defaults-id': first['fn-id'],
+        'configuration-revision': 'a'.repeat(64),
+        'configuration-preference': {present: true, value: server}, roots: {}, plan} : {ok: false};
+      const components = JSON.parse(options.body).components;
+      return Promise.resolve({ok: true, json: async () => components
+        ? {ok: true, items: components.map(component => ({component,
+          result: {status: server ? 200 : 422, headers: {}, body: JSON.stringify(body)}}))}
+        : body});
     },
   };
   const context = vm.createContext({window, graphdenCurrentOrg: 'org-a', document: {addEventListener() {}},
     localStorage: {getItem: () => mirror, setItem: (_, value) => { mirror = value; }},
-    setTimeout, clearTimeout, performance, Event, DOMException});
+    setTimeout, clearTimeout, performance, Event, DOMException, AbortController, Response});
   vm.runInContext(prefsSource, context);
   window.gdPrefsReady = true;
   window.gdPrefOwner = 'owner-a';
@@ -59,7 +62,7 @@ function fixture(initial = null) {
     f.complete(0);
     assert.equal(await writing, true);
     await Promise.all(f.loaded);
-    assert.equal(f.plans.length, 2);
+    assert.equal(f.plans.length, 1, 'committed components share one snapshot request');
     for (const component of ['account-menu', 'fn-picker']) assert.equal(f.window.gdUIComponentRuntimeIdentity(component), first['fn-id']);
   }
   for (const transportError of [false, true]) {
@@ -81,7 +84,7 @@ function fixture(initial = null) {
     f.complete(0);
     assert.equal(await older, false, 'a late superseded response cannot publish the old identity');
     assert.equal(f.window.gdPrefRead('components')['fn-id'], second['fn-id']);
-    assert.equal(f.plans.length, 2);
+    assert.equal(f.plans.length, 1, 'committed components share one snapshot request');
   }
   {
     const f = fixture();

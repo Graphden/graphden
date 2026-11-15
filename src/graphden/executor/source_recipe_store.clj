@@ -124,10 +124,10 @@
                       (<= max-charge (get-in store [:options :max-bytes]))
                       (< (count (:pending state)) (get-in store [:options :max-pending]))
                       (not-any? #(same-location? family physical %) (vals (:pending state))))
-               (let [state (make-room store state max-charge)]
-                 (if (room? store state max-charge)
+               (let [planned (make-room store state max-charge)]
+                 (if (room? store planned max-charge)
                    (let [ticket (Object.)]
-                     [(assoc-in state [:pending ticket]
+                     [(assoc-in planned [:pending ticket]
                                 {:family family :physical physical :reserved max-charge
                                  :generation (get-in state [:families family :generation])}) ticket])
                    [state nil]))

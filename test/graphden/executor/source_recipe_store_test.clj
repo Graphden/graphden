@@ -174,6 +174,26 @@
       (is (zero? (:charged-bytes (recipes/stats store)))))))
 
 
+(deftest denied-reservation-preserves-idle-recipes-when-eviction-cannot-make-room
+  (let [{:keys [store]} (fixture)
+        family (family! store) held (Object.) idle (Object.)]
+    (put! store family held :held 30)
+    (put! store family idle :idle 20)
+    (let [lease (recipes/acquire! store family held)
+          pending (recipes/reserve! store family (Object.) 40)]
+      (try
+        (is (some? pending))
+        (is (nil? (recipes/reserve! store family (Object.) 40)))
+        (is (= {:entries 2 :pending 1 :charged-bytes 90}
+               (select-keys (recipes/stats store) [:entries :pending :charged-bytes])))
+        (let [idle-lease (recipes/acquire! store family idle)]
+          (try (is (= :idle (recipes/lease-value store idle-lease)))
+               (finally (when idle-lease (recipes/release! store idle-lease)))))
+        (finally
+          (recipes/abort! store pending)
+          (recipes/release! store lease))))))
+
+
 (deftest least-recently-used-unleased-entry-makes-room
   (let [{:keys [store]} (fixture {:max-entries 2})
         family (family! store) a (Object.) b (Object.) c (Object.)]

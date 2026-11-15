@@ -47,7 +47,7 @@
     (reset! block? true)
     (let [workers (mapv (fn [_] (future (memo/call-with-artifact m ops))) (range 4))]
       (try
-        (is (= true (deref all-entered 5000 :timeout)))
+        (is (true? (deref all-entered 5000 :timeout)))
         (is (= 1 @built))
         (is (= {:pending 4 :pending-bytes 4000 :entries 1}
                (select-keys (memo/stats m) [:pending :pending-bytes :entries])))
@@ -103,13 +103,13 @@
 
 
 (deftest bounded-restore-counts-nonmirrored-registries-and-handles-hash-collisions
-  (let [keys (reduce (fn [prefixes _]
-                       (vec (for [prefix prefixes suffix ["Aa" "BB"]]
-                              (str prefix suffix)))) [""] (range 11))
-        by-id (zipmap keys (repeat {:return :text}))
+  (let [colliding-keys (reduce (fn [prefixes _]
+                                 (vec (for [prefix prefixes suffix ["Aa" "BB"]]
+                                        (str prefix suffix)))) [""] (range 11))
+        by-id (zipmap colliding-keys (repeat {:return :text}))
         registry {:rich {:by-id by-id} :per-org {:acme {:by-id by-id}}}
         artifact (data/compact-registry-state registry)]
-    (is (= 1 (count (set (map hash keys)))))
+    (is (= 1 (count (set (map hash colliding-keys)))))
     (is (data/bounded-registry-restore? artifact))
     (is (= registry (data/expand-registry-state artifact)))
     (is (not (data/bounded-registry-restore?

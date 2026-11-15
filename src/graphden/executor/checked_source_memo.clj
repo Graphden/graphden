@@ -73,7 +73,7 @@
             limit (get-in memo [:store :options :max-entries])]
         ;; Alternate branch/org registries keep their physical identity without
         ;; retaining the registries themselves. Overflow only loses reuse.
-        (reset! environment (into [] (take-last limit (concat others [token]))))
+        (reset! environment (vec (take-last limit (concat others [token]))))
         token))))
 
 

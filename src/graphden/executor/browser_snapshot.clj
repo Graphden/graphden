@@ -339,6 +339,19 @@
     (prepare-memo-base inputs)))
 
 
+(defn checker-hit-contract
+  "Frozen snapshot adapter for the runtime-owned checker cache. Call only
+   after built-ins load; retiring the cache is mandatory before code reload."
+  []
+  ;; Borrowed source is request-owned. <=2048 signature-projection + <=2048
+  ;; restored by-id entries:32MiB at8KiB/entry, including old/new collision
+  ;; arrays and trie paths. Ordering has8MiB; depth64/1024-summary admission
+  ;; and comparison8MiB; small state/registry maps fit the remaining16MiB.
+  ;; This bounds NEW live hit state, not allocation or the whole request heap.
+  {:bytes (* 64 1024 1024) :prepare prepare-bounded-memo-base
+   :restore restore-checker-state! :eligible? checker-data/bounded-registry-restore?})
+
+
 (defn- prepare-memo-input
   [base {:keys [original-rich recovery prepared]}]
   ;; prepare-build runs only after the complete base passed immutable admission.

@@ -29,17 +29,8 @@
 (defn- hit-contract
   []
   (when-let [snapshot (find-ns 'graphden.executor.browser-snapshot)]
-    (let [prepare (ns-resolve snapshot 'prepare-bounded-memo-base)
-          restore (ns-resolve snapshot 'restore-checker-state!)]
-      (when (and prepare restore)
-        ;; Frozen built-in adapters only. Borrowed source is request-owned.
-        ;; <=2048 signature-projection + <=2048 restored by-id entries:32MiB
-        ;; at8KiB/entry, including old/new collision arrays and trie paths.
-        ;; Ordering has8MiB; depth64/1024-summary admission+comparison8MiB;
-        ;; small state/registry maps fit the remaining16MiB. This bounds NEW
-        ;; live hit state, not total allocation or the whole request heap.
-        {:bytes (* 64 1024 1024) :prepare @prepare :restore @restore
-         :eligible? data/bounded-registry-restore?}))))
+    (when-let [factory (ns-resolve snapshot 'checker-hit-contract)]
+      (factory))))
 
 
 (defn create-cache

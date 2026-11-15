@@ -117,6 +117,15 @@
       {:plan (export f) :scopes @scopes :calls @calls :signatures @signatures})))
 
 
+(deftest runtime-installs-the-reviewed-snapshot-hit-adapter
+  (let [cache (checker-runtime/create-cache)
+        contract (snapshot/checker-hit-contract)]
+    (try
+      (is (= (* 64 1024 1024) (get-in cache [:hit-contract :bytes])))
+      (is (identical? (:restore contract) (get-in cache [:hit-contract :restore])))
+      (finally (checker-memo/retire! cache)))))
+
+
 (deftest bounded-hit-refuses-large-closure-before-ordering-or-projection
   (let [ordered? (atom false)
         inputs {:prepared {:reachable (set (range 2049))

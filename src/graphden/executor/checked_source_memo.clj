@@ -19,20 +19,26 @@
    this constructor checks capture shape, not callback purity. Unknown values
    miss. A frozen build is required; diagnostic reload must drain in-flight
    checks, retire! this instance, and construct a new one with the new ABI."
-  [{:keys [entry-bytes max-nodes ttl-ms clock-ms checker-abi callbacks] :as options}]
+  [{:keys [entry-bytes max-nodes ttl-ms clock-ms checker-abi callbacks hit-contract] :as options}]
   (when-not (and (every? #(and (integer? %) (pos? %)) [entry-bytes max-nodes ttl-ms])
                  (<= entry-bytes (:max-bytes options))
                  (<= ttl-ms (:max-ttl-ms options))
                  (string? checker-abi) (<= 1 (count checker-abi) 256)
                  (vector? callbacks) (<= (count callbacks) 128)
-                 (every? data/static-callback? callbacks))
+                 (every? data/static-callback? callbacks)
+                 (or (nil? hit-contract)
+                     (and (integer? (:bytes hit-contract)) (pos? (:bytes hit-contract))
+                          (<= (:bytes hit-contract) entry-bytes)
+                          (every? data/static-callback?
+                                  (map hit-contract [:prepare :eligible? :restore])))))
     (throw (ex-info "Checker memo requires explicit limits and a reviewed callback ABI" {})))
   (let [active? (atom true)]
     {:store (store/create-store (assoc options :closed? #(or (not @active?)
                                                              (nil? (WeakReference/.get %)))))
      :active? active? :environment (atom [])
      :admission {:max-bytes entry-bytes :max-nodes max-nodes :callbacks callbacks}
-     :entry-bytes entry-bytes :ttl-ms ttl-ms :clock-ms clock-ms :checker-abi checker-abi}))
+     :entry-bytes entry-bytes :ttl-ms ttl-ms :clock-ms clock-ms :checker-abi checker-abi
+     :hit-contract hit-contract}))
 
 
 (defn admitted?
@@ -103,6 +109,34 @@
     (fallback)))
 
 
+(defn- call-with-build-reservation
+  [memo family token lease {:keys [prepare restore consume fallback] :as operations}]
+  (if-let [ticket (store/reserve! (:store memo) family token (:entry-bytes memo))]
+    (try
+      (if-let [input (prepare)]
+        (if (admitted? memo input)
+          (let [cached (when lease (store/lease-value (:store memo) lease))]
+            (if (and cached (data/same-input? input (:input cached)))
+              (do (restore (:artifact cached)) (consume))
+              (build-and-consume memo ticket input operations)))
+          (fallback))
+        (fallback))
+      (finally (store/abort! (:store memo) ticket)))
+    (fallback)))
+
+
+(defn- call-with-read-reservation
+  [memo lease cached {:keys [restore consume hit-input]}]
+  (let [contract (:hit-contract memo)]
+    (if-let [ticket (store/reserve-read! (:store memo) lease (:bytes contract))]
+      (try
+        (when-let [input ((:prepare contract) hit-input)]
+          (when (and (admitted? memo input) (data/same-input? input (:input cached)))
+            {:hit? true :result (do (restore (:artifact cached)) (consume))}))
+        (finally (store/abort! (:store memo) ticket)))
+      {:denied? true})))
+
+
 (defn call-with-artifact
   "Called synchronously on the checking worker. prepare returns a fresh complete
    immutable comparison key, or nil for the original ordered path. Optional
@@ -111,25 +145,29 @@
    already be present in the comparison key. Its nil/non-admitted output uses
    the ordinary path. build returns derived registry data;
    restore installs only that data into isolated atoms. consume ALWAYS runs fresh.
+   Optional runtime-owned hit-contract is reviewed at construction: bytes bounds all NEW
+   live preparation/admission/comparison/restore memory, with borrowed immutable
+   inputs owned by the request. eligible? checks the retained artifact BEFORE
+   bounded prepare/restore. The request supplies only hit-input, never its own
+   scratch limit or adapter; restore must match the runtime's exact identity.
+   Generic callers retain full builder accounting.
    Cancellation and release happen after actual worker unwind, not caller timeout."
-  [memo {:keys [family original-rich prepare restore consume fallback] :as operations}]
+  [memo {:keys [family original-rich restore fallback] :as operations}]
   (if-let [family (register-family! memo family)]
     (let [token (environment-token memo original-rich)
           lease (store/acquire! (:store memo) family token)]
       (try
-        (if-let [ticket (store/reserve! (:store memo) family token (:entry-bytes memo))]
-          (try
-            ;; Reserve BEFORE preparation allocates the retained key/definitions.
-            ;; A hit also reserves its transient comparison input conservatively.
-            (if-let [input (prepare)]
-              (if (admitted? memo input)
-                (let [cached (when lease (store/lease-value (:store memo) lease))]
-                  (if (and cached (data/same-input? input (:input cached)))
-                    (do (restore (:artifact cached)) (consume))
-                    (build-and-consume memo ticket input operations)))
-                (fallback))
-              (fallback))
-            (finally (store/abort! (:store memo) ticket)))
-          (fallback))
+        (let [cached (when lease (store/lease-value (:store memo) lease))
+              contract (:hit-contract memo)
+              read-result (when (and cached contract (contains? operations :hit-input)
+                                     (identical? restore (:restore contract))
+                                     ((:eligible? contract) (:artifact cached)))
+                            (call-with-read-reservation memo lease cached operations))]
+          (cond
+            (:hit? read-result) (:result read-result)
+            (:denied? read-result) (fallback)
+            ;; A mismatched read input leaves its scope/accounting first. The
+            ;; ordinary builder prepares again under its full reservation.
+            :else (call-with-build-reservation memo family token lease operations)))
         (finally (when lease (store/release! (:store memo) lease)))))
     (fallback)))

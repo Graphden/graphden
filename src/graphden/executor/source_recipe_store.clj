@@ -75,10 +75,15 @@
                  (:entries state))))
 
 
+(defn- bytes-fit?
+  [store state charge]
+  (<= (+' (occupied-bytes state) charge) (get-in store [:options :max-bytes])))
+
+
 (defn- room?
   [store state charge]
-  (and (<= (+' (occupied-bytes state) charge) (get-in store [:options :max-bytes]))
-       (< (+ (count (:entries state)) (count (:pending state)))
+  (and (bytes-fit? store state charge)
+       (< (+ (count (:entries state)) (count (remove :read? (vals (:pending state)))))
           (get-in store [:options :max-entries]))))
 
 
@@ -134,6 +139,26 @@
                [state nil]))))
 
 
+(defn reserve-read!
+  "Reserve bounded reader scratch against an existing live lease. Readers may
+   share a physical entry; they never evict recipes or publish a replacement.
+   The caller must bound preparation AND restored state before using this API.
+   Keep the reservation until that state's consumer has actually unwound."
+  [store lease max-charge]
+  (change! store
+           (fn [state _]
+             (let [entry (get-in state [:entries (get-in state [:leases lease])])]
+               (if (and entry (not (:retired? entry))
+                        (integer? max-charge) (pos? max-charge)
+                        (< (count (:pending state)) (get-in store [:options :max-pending]))
+                        (bytes-fit? store state max-charge))
+                 (let [ticket (Object.)]
+                   [(assoc-in state [:pending ticket]
+                              (assoc (select-keys entry [:family :physical :generation])
+                                     :reserved max-charge :read? true)) ticket])
+                 [state nil])))))
+
+
 (defn abort!
   "Release a capture reservation after its builder has unwound. Idempotent."
   [store ticket]
@@ -161,9 +186,9 @@
   [store ticket payload actual-charge]
   (change! store
            (fn [state _]
-             (let [{:keys [family physical generation reserved revoked?] :as reservation}
+             (let [{:keys [family physical generation reserved revoked? read?] :as reservation}
                    (get-in state [:pending ticket])]
-               (if (and reservation (not revoked?)
+               (if (and reservation (not revoked?) (not read?)
                         (integer? actual-charge) (pos? actual-charge) (<= actual-charge reserved))
                  (let [state (update state :pending dissoc ticket)
                        old-id (first (matching-entry state family physical))

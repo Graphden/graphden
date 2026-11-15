@@ -117,6 +117,15 @@
       {:plan (export f) :scopes @scopes :calls @calls :signatures @signatures})))
 
 
+(deftest bounded-hit-refuses-large-closure-before-ordering-or-projection
+  (let [ordered? (atom false)
+        inputs {:prepared {:reachable (set (range 2049))
+                           :ordering (delay (reset! ordered? true)
+                                            (throw (ex-info "Ordering must stay delayed" {})))}}]
+    (is (nil? (#'snapshot/prepare-bounded-memo-base inputs)))
+    (is (false? @ordered?))))
+
+
 (deftest source-check-memo-is-private-to-one-snapshot-pass
   (let [make-fixture (fn [value]
                        (fixture [{:name :inner :parent :const :args {:value {:value value}}}]

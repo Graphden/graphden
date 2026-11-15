@@ -22,6 +22,104 @@
    :checker-abi "test-1" :callbacks []})
 
 
+(defn- hit-eligible?
+  [_]
+  true)
+
+
+(defn- read-options
+  []
+  (assoc (options (atom 0)) :hit-contract
+         {:bytes 1000 :prepare identity :restore identity :eligible? hit-eligible?}))
+
+
+(deftest concurrent-read-hits-share-an-artifact-and-keep-scratch-charged
+  (let [m (memo/create-memo (read-options)) built (atom 0) entered (atom 0)
+        block? (atom false) all-entered (promise) finish (promise)
+        ops {:family [:org :root] :original-rich {} :prepare (constantly {:source 1})
+             :hit-input {:source 1} :build (fn [input] (swap! built inc) input)
+             :restore identity :consume #(do (when @block?
+                                               (when (= 4 (swap! entered inc)) (deliver all-entered true))
+                                               @finish)
+                                             :checked)
+             :fallback (constantly :fallback) :check-cancel (constantly nil)}]
+    (is (= :checked (memo/call-with-artifact m ops)))
+    (reset! block? true)
+    (let [workers (mapv (fn [_] (future (memo/call-with-artifact m ops))) (range 4))]
+      (try
+        (is (= true (deref all-entered 5000 :timeout)))
+        (is (= 1 @built))
+        (is (= {:pending 4 :pending-bytes 4000 :entries 1}
+               (select-keys (memo/stats m) [:pending :pending-bytes :entries])))
+        (is (= :fallback (memo/call-with-artifact m ops)))
+        (finally (deliver finish true)))
+      (is (= [:checked :checked :checked :checked] (mapv #(deref % 5000 :timeout) workers))))
+    (is (= {:pending 0 :leases 0 :entries 1}
+           (select-keys (memo/stats m) [:pending :leases :entries])))
+    (memo/retire! m)))
+
+
+(deftest bounded-read-mismatch-and-nested-consume-release-their-own-tickets
+  (let [m (memo/create-memo (read-options)) built (atom 0)
+        ops {:family [:org :root] :original-rich {} :prepare (constantly {:source 1})
+             :hit-input {:source 1} :build (fn [input] (swap! built inc) input)
+             :restore identity :consume (constantly :checked)
+             :fallback (constantly :fallback) :check-cancel (constantly nil)}]
+    (memo/call-with-artifact m ops)
+    (is (= :checked (memo/call-with-artifact m (assoc ops :consume #(memo/call-with-artifact m ops)))))
+    (is (= 1 @built))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"consumer stopped"
+          (memo/call-with-artifact m (assoc ops :consume #(throw (ex-info "consumer stopped" {}))))))
+    (is (= {:pending 0 :leases 0}
+           (select-keys (memo/stats m) [:pending :leases])))
+    (is (= :checked
+           (memo/call-with-artifact m
+                                    (assoc ops :hit-input {:source 2} :prepare (constantly {:source 2})
+                                           :consume #(do (is (= 100000 (:pending-bytes (memo/stats m)))) :checked)))))
+    (is (= 2 @built))
+    (is (= {:pending 0 :leases 0}
+           (select-keys (memo/stats m) [:pending :leases])))
+    (memo/retire! m)))
+
+
+(deftest bounded-hit-adapters-cannot-be-replaced-by-request-callbacks
+  (let [m (memo/create-memo (read-options))
+        ops {:family [:org :root] :original-rich {} :prepare (constantly {:source 1})
+             :hit-input {:source 1} :build identity :restore identity
+             :consume (constantly :checked) :fallback (constantly :fallback)
+             :check-cancel (constantly nil)}]
+    (memo/call-with-artifact m ops)
+    (is (= :checked
+           (memo/call-with-artifact m
+                                    (assoc ops :restore (fn [_])
+                                           :consume #(do (is (= 100000 (:pending-bytes (memo/stats m)))) :checked)))))
+    (is (= :fallback
+           (memo/call-with-artifact m
+                                    (assoc ops :hit-input (java.util.Date. 0) :prepare #(java.util.Date. 0)
+                                           :consume #(throw (ex-info "Must not consume an unadmitted input" {}))))))
+    (is (zero? (:pending (memo/stats m))))
+    (is (zero? (:leases (memo/stats m))))
+    (memo/retire! m)))
+
+
+(deftest bounded-restore-counts-nonmirrored-registries-and-handles-hash-collisions
+  (let [keys (reduce (fn [prefixes _]
+                       (vec (for [prefix prefixes suffix ["Aa" "BB"]]
+                              (str prefix suffix)))) [""] (range 11))
+        by-id (zipmap keys (repeat {:return :text}))
+        registry {:rich {:by-id by-id} :per-org {:acme {:by-id by-id}}}
+        artifact (data/compact-registry-state registry)]
+    (is (= 1 (count (set (map hash keys)))))
+    (is (data/bounded-registry-restore? artifact))
+    (is (= registry (data/expand-registry-state artifact)))
+    (is (not (data/bounded-registry-restore?
+               {:registry {:rich {:by-id {}}
+                           :per-org {:acme {:by-id (assoc by-id :extra {})}}}
+                :mirrors {}})))
+    (is (not (data/bounded-registry-restore?
+               {:registry {:rich {:by-id {}} :per-org (java.util.HashMap.)} :mirrors {}})))))
+
+
 (deftest alternating-environments-reuse-only-their-own-checked-artifacts
   (let [m (memo/create-memo (options (atom 0)))
         a {:environment :same} b (with-meta a {:distinct-instance true})

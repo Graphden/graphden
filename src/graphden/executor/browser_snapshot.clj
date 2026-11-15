@@ -330,6 +330,15 @@
          :owned-ids (:owned-ids prepared)))
 
 
+(defn- prepare-bounded-memo-base
+  [{:keys [prepared] :as inputs}]
+  ;; The borrowed graph/normalized rows/seeds already belong to this request.
+  ;; Only a <=2048-entry signature projection and bounded ordering are new.
+  ;; Check BEFORE forcing dependency-order or building that projection.
+  (when (<= (count (:reachable prepared)) 2048)
+    (prepare-memo-base inputs)))
+
+
 (defn- prepare-memo-input
   [base {:keys [original-rich recovery prepared]}]
   ;; prepare-build runs only after the complete base passed immutable admission.
@@ -366,6 +375,7 @@
                            (check-definition! id definition)))
                        (checker-data/compact-registry-state (checker-state)))
               :restore restore-checker-state! :consume consume :fallback fallback
+              :hit-input (assoc inputs :prepared prepared-input)
               :check-cancel runtime/check-cancel!})
       (fallback))))
 

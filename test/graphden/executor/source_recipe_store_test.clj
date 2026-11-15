@@ -194,6 +194,63 @@
           (recipes/release! store lease))))))
 
 
+(deftest read-reservations-share-leases-but-not-publication-or-unbounded-capacity
+  (let [{:keys [store]} (fixture {:max-pending 4})
+        family (family! store) physical (Object.)]
+    (put! store family physical :checked 30)
+    (let [lease (recipes/acquire! store family physical)
+          tickets (mapv (fn [_] (recipes/reserve-read! store lease 20)) (range 3))]
+      (try
+        (is (every? some? tickets))
+        (is (= 3 (count (set tickets))))
+        (is (nil? (recipes/reserve-read! store lease 20)))
+        (is (= 90 (:charged-bytes (recipes/stats store))))
+        (doseq [ticket tickets]
+          (is (false? (recipes/publish! store ticket :replacement 1))))
+        (is (= :checked (recipes/lease-value store lease)))
+        (recipes/evict-family! store family)
+        (is (nil? (recipes/reserve-read! store lease 1)))
+        (is (= 90 (:charged-bytes (recipes/stats store))))
+        (finally
+          (doseq [ticket tickets] (recipes/abort! store ticket))
+          (recipes/release! store lease)))
+      (is (zero? (:charged-bytes (recipes/stats store)))))))
+
+
+(deftest read-scratch-does-not-need-a-free-artifact-slot
+  (let [{:keys [store]} (fixture {:max-entries 1})
+        family (family! store) physical (Object.)]
+    (put! store family physical :checked 30)
+    (let [lease (recipes/acquire! store family physical)
+          ticket (recipes/reserve-read! store lease 20)]
+      (try
+        (is (some? ticket))
+        (is (nil? (recipes/reserve! store family (Object.) 1)))
+        (is (= 50 (:charged-bytes (recipes/stats store))))
+        (is (= :checked (recipes/lease-value store lease)))
+        (finally
+          (recipes/abort! store ticket)
+          (recipes/release! store lease))))))
+
+
+(deftest denied-read-reservation-never-evicts-other-recipes
+  (let [{:keys [store clock]} (fixture)
+        family (family! store) a (Object.) b (Object.)]
+    (put! store family a :a 30)
+    (put! store family b :b 20)
+    (let [lease (recipes/acquire! store family a)]
+      (try
+        (is (nil? (recipes/reserve-read! store lease 60)))
+        (is (nil? (recipes/reserve-read! store (Object.) 1)))
+        (is (nil? (recipes/reserve-read! store lease 0)))
+        (is (= {:entries 2 :pending 0 :charged-bytes 50}
+               (select-keys (recipes/stats store) [:entries :pending :charged-bytes])))
+        (reset! clock 100)
+        (is (nil? (recipes/reserve-read! store lease 1)))
+        (is (= :a (recipes/lease-value store lease)))
+        (finally (recipes/release! store lease))))))
+
+
 (deftest least-recently-used-unleased-entry-makes-room
   (let [{:keys [store]} (fixture {:max-entries 2})
         family (family! store) a (Object.) b (Object.) c (Object.)]

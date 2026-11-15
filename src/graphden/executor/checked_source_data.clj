@@ -188,6 +188,29 @@
   (throw (ex-info "Invalid compact checker registry" {:type ::invalid-registry-artifact})))
 
 
+(defn bounded-registry-restore?
+  "Read-hit adapter guard, BEFORE allocating restored maps. Exact admitted
+   container classes/counts first; at most four registries are inspected.
+   Count all tenant by-id maps, including those with no mirrored signatures."
+  [artifact]
+  (when (and (plain-map? artifact) (= 2 (count artifact)))
+    (let [{:keys [registry mirrors]} artifact
+          rich (when (plain-map? registry) (:rich registry))
+          per-org (when (plain-map? registry) (:per-org registry))
+          global (when (plain-map? rich) (:by-id rich))]
+      (and (plain-map? registry) (<= (count registry) 16)
+           (plain-map? rich) (<= (count rich) 16)
+           (plain-map? global) (<= (count global) 2048)
+           (plain-map? per-org) (<= (count per-org) 4)
+           (plain-map? mirrors) (<= (count mirrors) 4)
+           (every? (fn [[_ ids]] (= clojure.lang.PersistentHashSet (class ids))) mirrors)
+           (<= (reduce + 0 (map (comp count val) mirrors)) 2048)
+           (every? (fn [[_ org-registry]]
+                     (and (plain-map? org-registry) (<= (count org-registry) 16)
+                          (plain-map? (:by-id org-registry)))) per-org)
+           (<= (reduce + 0 (map #(count (:by-id (val %))) per-org)) 2048)))))
+
+
 (defn expand-registry-state
   "Restore a privately produced compact artifact. References use THIS artifact's
    immutable rich registry, never the live global registry. Replacing existing

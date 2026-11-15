@@ -26,6 +26,22 @@
    'graphden.packages.web.html.impls '[encode-view-return-rule]})
 
 
+(defn- hit-contract
+  []
+  (when-let [snapshot (find-ns 'graphden.executor.browser-snapshot)]
+    (let [prepare (ns-resolve snapshot 'prepare-bounded-memo-base)
+          restore (ns-resolve snapshot 'restore-checker-state!)]
+      (when (and prepare restore)
+        ;; Frozen built-in adapters only. Borrowed source is request-owned.
+        ;; <=2048 signature-projection + <=2048 restored by-id entries:32MiB
+        ;; at8KiB/entry, including old/new collision arrays and trie paths.
+        ;; Ordering has8MiB; depth64/1024-summary admission+comparison8MiB;
+        ;; small state/registry maps fit the remaining16MiB. This bounds NEW
+        ;; live hit state, not total allocation or the whole request heap.
+        {:bytes (* 64 1024 1024) :prepare @prepare :restore @restore
+         :eligible? data/bounded-registry-restore?}))))
+
+
 (defn create-cache
   "Create after built-ins load. No eager reservation or global instance.
    Fixed limits cover retained artifacts AND concurrent checker reservations;
@@ -35,6 +51,7 @@
     {:max-bytes (* 512 1024 1024) :entry-bytes (* 256 1024 1024)
      :max-entries 16 :max-pending 4 :max-families 32 :max-leases 32
      :max-ttl-ms 600000 :ttl-ms 600000 :max-nodes 4000000
+     :hit-contract (hit-contract)
      :clock-ms #(quot (System/nanoTime) 1000000)
      ;; No persistence or sharing across runtime instances/builds. Changes to
      ;; checker semantics require a new runtime, not an in-place code reload.

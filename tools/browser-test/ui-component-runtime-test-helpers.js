@@ -16,7 +16,7 @@ async function observeUIPlanLoads(page) {
       const request = bySequence.get(key);
       if (!request) throw Error('Plan response has no observed request');
       Object.assign(request, {status: receipt.status, abortError: receipt.abortError === true,
-        signalAborted: receipt.signalAborted === true});
+        signalAborted: receipt.signalAborted === true, transportSignalAborted: receipt.transportSignalAborted === true});
       if (receipt.kind === 'plan') replies.push(receipt);
     }
   });
@@ -71,7 +71,7 @@ async function observeUIPlanLoads(page) {
       }, async error => {
         // Capture consumer and transport facts at rejection, before later aborts.
         await Promise.all(receipts.map(({receipt, signal}) => publish({...receipt, kind: 'failed', status: 'failed',
-          abortError: error?.name === 'AbortError', signalAborted: signal?.aborted === true})));
+          abortError: error?.name === 'AbortError', signalAborted: signal?.aborted === true, transportSignalAborted: options.signal?.aborted === true})));
       }));
       return response;
     };
@@ -117,7 +117,8 @@ async function drainUIPlanReplies(requests, replies, pending, requireLoadIdentit
     const superseded = new Map();
     let replacementPending = false;
     for (const request of requests.filter(request => request.status === 'failed')) {
-      if (!acceptSuperseded || request.abortError !== true || request.signalAborted !== true
+      if (!acceptSuperseded || request.abortError !== true
+        || !(request.signalAborted === true || request.transportSignalAborted === true)
         || typeof request.documentId !== 'string' || !request.documentId
         || !Number.isSafeInteger(request.loadId) || request.loadId <= 0)
         throw Error('UI plan request failed before receipt drain');

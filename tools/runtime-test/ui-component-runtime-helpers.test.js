@@ -287,3 +287,30 @@ test('shared transport failures retain each original consumer cancellation fact'
   assert.deepEqual(observed.requests.map(row => [row.abortError, row.signalAborted]), [[true, true], [true, false]]);
   await assert.rejects(drainUIPlanReplies(observed.requests, observed.replies, [], true, async () => {}), /request failed/);
 });
+
+
+test('a retired transport records cancellation even while its consumer signal stays active', async () => {
+  let reject;
+  const {page, context} = observerPage(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const observed = await observeUIPlanLoads(page);
+  const consumer = new AbortController(), transport = new AbortController();
+  context.window.gdLoadUIComponentRuntime = () => {};
+  context.window.gdLoadUIComponentRuntime('canvas-bindings', null, {}, consumer.signal);
+  const response = context.window.fetch('/api/ui/configuration/plan', {method: 'POST', signal: transport.signal,
+    body: JSON.stringify({component: 'canvas-bindings'})});
+  transport.abort();
+  reject(Object.assign(new Error('Selection changed'), {name: 'AbortError'}));
+  await assert.rejects(response, error => error.name === 'AbortError');
+  await observed.flush();
+  assert.equal(consumer.signal.aborted, false);
+  assert.equal(observed.requests[0].abortError, true);
+  assert.equal(observed.requests[0].signalAborted, false);
+  assert.equal(observed.requests[0].transportSignalAborted, true);
+  // A captured transport abort still requires a newer successful load before
+  // the receipt can be treated as superseded.
+  await assert.rejects(drainUIPlanReplies(observed.requests, observed.replies, [], true, async () => {}), /request failed/);
+  const replacement = {...observed.requests[0], sequence: 2, loadId: 2, status: 200};
+  const terminal = await drainUIPlanReplies([...observed.requests, replacement],
+    [{...replacement, kind: 'plan', ok: true}], [], true, async () => {});
+  assert.equal(terminal.superseded.length, 1);
+});

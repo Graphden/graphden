@@ -72,12 +72,6 @@
                              :separator {:value ""}}}}}
 
   ;; --- GET /api/prefs — the current user's map ------------------------
-  {:name :_prefs-retention-configured?
-   :description "Trusted runtime source-retention configuration, used only to recommend component request grouping. It grants no source access."
-   :args {} :return-type :bool}
-  {:name :_prefs-plan-batch-max
-   :parent :if
-   :args {:test :_prefs-retention-configured? :then "3" :else "1"}}
   {:name :_prefs-get-handler
    :lambda-params []
    :description "Ring handler for GET /api/prefs — the current user's `{key value}` preferences as JSON."
@@ -85,10 +79,8 @@
    :args {:status 200
           :body {:parent :to-json-string :args {:data :ui-prefs-read}}
           :headers {:parent :zipmap
-                    :args {:keys ["Content-Type" "Cache-Control" "X-Graphden-Preference-Owner"
-                                  "X-Graphden-UI-Plan-Batch-Max"]
-                           :vals ["application/json; charset=utf-8" "no-store" :current-user-id
-                                  :_prefs-plan-batch-max]}}}}
+                    :args {:keys ["Content-Type" "Cache-Control" "X-Graphden-Preference-Owner"]
+                           :vals ["application/json; charset=utf-8" "no-store" :current-user-id]}}}}
 
   {:name :api-prefs-get
    :description "GET /api/prefs — the current user's editor preferences (`{\"theme\" …, \"keymap\" …}`). Auth-required; per-principal."

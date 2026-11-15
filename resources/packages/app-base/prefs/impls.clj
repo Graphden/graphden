@@ -33,14 +33,6 @@
                      {:owner-id (tc/current-user-id)}))
 
 
-(defbase prefs-retention-configured?
-  "Whether this trusted runtime opted into source retention. A transport hint,
-   never source authority or a promise that a particular snapshot is admitted.
-   Reads only the supplied immutable runtime configuration, like other boot facts."
-  []
-  (some? (:source-manifest ctx)))
-
-
 (defbase ui-pref-write!
   "Upsert the current user's preference `pref-key` → `pref-value` (any
    JSON value; nil clears the stored document but keeps the row). Returns
@@ -74,7 +66,6 @@
 
 (def impls
   {:current-user-id current-user-id
-   :_prefs-retention-configured? prefs-retention-configured?
    :_ui-pref-rows ui-pref-rows
    ;; taint-propagate: returns the caller's own document back
    :ui-pref-write! {:impl ui-pref-write! :taint-propagate? true}

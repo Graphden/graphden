@@ -30,7 +30,7 @@
   (let [active? (atom true)]
     {:store (store/create-store (assoc options :closed? #(or (not @active?)
                                                              (nil? (WeakReference/.get %)))))
-     :active? active? :environment (atom nil)
+     :active? active? :environment (atom [])
      :admission {:max-bytes entry-bytes :max-nodes max-nodes :callbacks callbacks}
      :entry-bytes entry-bytes :ttl-ms ttl-ms :clock-ms clock-ms :checker-abi checker-abi}))
 
@@ -52,7 +52,7 @@
    before changing code: this is not live-hot-reload synchronization."
   [memo]
   (reset! (:active? memo) false)
-  (reset! (:environment memo) nil)
+  (reset! (:environment memo) [])
   (stats memo))
 
 
@@ -60,12 +60,15 @@
   [memo original-rich]
   (let [environment (:environment memo)]
     (locking environment
-      (let [previous @environment]
-        (if (and previous (identical? original-rich (WeakReference/.get previous)))
-          previous
-          (let [token (WeakReference. original-rich)]
-            (reset! environment token)
-            token))))))
+      (let [live (filterv #(some? (WeakReference/.get %)) @environment)
+            existing (some #(when (identical? original-rich (WeakReference/.get %)) %) live)
+            token (or existing (WeakReference. original-rich))
+            others (remove #(identical? token %) live)
+            limit (get-in memo [:store :options :max-entries])]
+        ;; Alternate branch/org registries keep their physical identity without
+        ;; retaining the registries themselves. Overflow only loses reuse.
+        (reset! environment (into [] (take-last limit (concat others [token]))))
+        token))))
 
 
 (defn- register-family!

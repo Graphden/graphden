@@ -22,6 +22,41 @@
    :checker-abi "test-1" :callbacks []})
 
 
+(deftest alternating-environments-reuse-only-their-own-checked-artifacts
+  (let [m (memo/create-memo (options (atom 0)))
+        a {:environment :same} b (with-meta a {:distinct-instance true})
+        built (atom 0) restored (atom 0)
+        ops {:family [:org :root] :prepare (constantly {:source 1})
+             :build (fn [input] (swap! built inc) input)
+             :restore (fn [_] (swap! restored inc)) :consume (constantly :checked)
+             :fallback (constantly :fallback) :check-cancel (constantly nil)}]
+    (is (= a b))
+    (is (not (identical? a b)))
+    (doseq [rich [a a b a b]]
+      (is (= :checked (memo/call-with-artifact m (assoc ops :original-rich rich)))))
+    (is (= 2 @built))
+    (is (= 3 @restored))
+    (is (= 2 (:entries (memo/stats m))))
+    (memo/retire! m)))
+
+
+(deftest environment-identities-are-weak-and-bounded
+  (let [m (memo/create-memo (assoc (options (atom 0)) :max-entries 2))
+        rich (mapv #(hash-map :environment %) (range 3))
+        ops {:family [:org :root] :prepare (constantly {:source 1})
+             :build identity :restore (fn [_]) :consume (constantly :checked)
+             :fallback (constantly :fallback) :check-cancel (constantly nil)}]
+    (doseq [original rich]
+      (is (= :checked (memo/call-with-artifact m (assoc ops :original-rich original)))))
+    (is (= 2 (count @(:environment m))))
+    ;; Deterministic weak-reference clearing avoids a GC-dependent test.
+    (doseq [token @(:environment m)] (java.lang.ref.WeakReference/.clear token))
+    (is (= :checked (memo/call-with-artifact m (assoc ops :original-rich (first rich)))))
+    (is (= 1 (count @(:environment m))))
+    (memo/retire! m)
+    (is (empty? @(:environment m)))))
+
+
 (deftest immutable-admission-covers-hidden-retained-values
   (let [m (memo/create-memo (options (atom 0)))
         mutable (java.util.Date. 0)

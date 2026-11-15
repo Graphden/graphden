@@ -687,6 +687,36 @@
           (is (zero? (:leases (checker-memo/stats m)))))))))
 
 
+(deftest artifact-hit-skips-derived-source-preparation
+  (let [f (fixture [] {}) m (artifact-memo)]
+    (binding [checker-memo/*memo* m tenancy/*current-org* (random-uuid)]
+      (let [expected (export f)]
+        (is (= 1 (:entries (checker-memo/stats m))))
+        (with-redefs [source-contract/fingerprints
+                      (fn [_] (throw (AssertionError. "A hit recomputed source fingerprints")))
+                      type-check/reconstruct-fn-def
+                      (fn [& _] (throw (AssertionError. "A hit reconstructed a definition")))]
+          (is (= expected (export f)))))
+      (is (zero? (:pending (checker-memo/stats m))))
+      (is (zero? (:leases (checker-memo/stats m)))))))
+
+
+(deftest artifact-key-includes-fresh-package-ownership
+  (let [f (fixture [] {}) m (artifact-memo)
+        owned? owned/owned-fn-id? check! check/check-fn-def! calls (atom 0)]
+    (binding [checker-memo/*memo* m tenancy/*current-org* (random-uuid)]
+      (with-redefs [check/check-fn-def! (fn [definition] (swap! calls inc) (check! definition))]
+        (let [expected (export f) checked @calls]
+          (is (pos? checked))
+          (is (= expected (export f)))
+          (is (= checked @calls))
+          (with-redefs [owned/owned-fn-id? (fn [id] (or (= id (:id f)) (owned? id)))]
+            (is (= expected (export f)))
+            (is (= (* 2 checked) @calls) "A changed process-owned witness invalidates the proof")
+            (is (= expected (export f)))
+            (is (= (* 2 checked) @calls))))))))
+
+
 (deftest mutable-source-and-unknown-rule-never-eagerly-prepare
   (let [literal (java.util.Date. 0)
         f (fixture [{:name :inner :parent :const :args {}}]

@@ -66,6 +66,44 @@
           (memo/create-memo (assoc (options clock) :callbacks [closure]))))))
 
 
+(deftest derived-input-is-prepared-only-on-a-miss-and-keeps-reservations-bounded
+  (let [m (memo/create-memo (options (atom 0)))
+        source (atom {:source 1}) prepare-mode (atom :valid)
+        prepared (atom 0) built (atom 0) consumed (atom 0) restored (atom 0)
+        ops {:family [:org :root] :original-rich {} :prepare #(deref source)
+             :prepare-build (fn [input]
+                              (swap! prepared inc)
+                              (case @prepare-mode
+                                :valid (assoc input :definitions [1 2])
+                                :mutable (assoc input :definitions (java.util.Date. 0))
+                                :cancel (throw (InterruptedException. "preparation cancelled"))
+                                nil))
+             :build (fn [input] (swap! built inc) {:checked (:definitions input)})
+             :restore (fn [_] (swap! restored inc))
+             :consume #(do (swap! consumed inc) :result)
+             :fallback (constantly :ordinary) :check-cancel (constantly nil)}]
+    (is (= :result (memo/call-with-artifact m ops)))
+    (is (= :result (memo/call-with-artifact m ops)))
+    (is (= [1 1 2 1] [@prepared @built @consumed @restored]))
+    (reset! source {:source 2})
+    (doseq [mode [:missing :mutable]]
+      (reset! prepare-mode mode)
+      (is (= :ordinary (memo/call-with-artifact m ops)))
+      (is (= 1 @built))
+      (is (= 1 (:entries (memo/stats m))))
+      (is (zero? (:pending (memo/stats m))))
+      (is (zero? (:leases (memo/stats m)))))
+    (reset! prepare-mode :cancel)
+    (is (thrown? InterruptedException (memo/call-with-artifact m ops)))
+    (is (zero? (:pending (memo/stats m))))
+    (is (zero? (:leases (memo/stats m))))
+    (let [before @prepared]
+      (reset! source {:source (java.util.Date. 0)})
+      (is (= :ordinary (memo/call-with-artifact m ops)))
+      (is (= before @prepared) "Unadmitted base never reaches derived preparation"))
+    (is (zero? (:pending (memo/stats m))))))
+
+
 (deftest worker-ownership-and-pure-publication-boundary
   (let [clock (atom 0) m (memo/create-memo (options clock))
         original {} input (atom {:source 1}) built (atom 0) restored (atom [])

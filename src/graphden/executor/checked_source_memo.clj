@@ -78,28 +78,35 @@
 
 
 (defn- build-and-consume
-  [memo ticket input {:keys [build consume check-cancel]}]
-  (let [artifact (build input)
-        payload {:input input :artifact artifact}
-        ;; Include the store entry, weak identity token and fixed-size family
-        ;; reference, in addition to all reachable payload data.
-        charge (some-> (data/charge payload (:admission memo)) (+ 1024))
-        result (consume)]
-    (check-cancel)
-    (when (Thread/.isInterrupted (Thread/currentThread))
-      (throw (InterruptedException. "Checker artifact builder interrupted")))
-    (when (and charge (<= charge (:entry-bytes memo)))
-      ;; Pure checker artifacts publish after checked-source including consume.
-      ;; Raw source recipes instead require full invocation AND postcheck success.
-      ;; A later execution failure does not invalidate this deterministic proof.
-      (store/publish! (:store memo) ticket payload charge))
-    result))
+  [memo ticket input {:keys [prepare-build build consume fallback check-cancel]}]
+  (if-let [build-input (if prepare-build (prepare-build input) input)]
+    (if (and prepare-build (not (admitted? memo build-input)))
+      (fallback)
+      (let [artifact (build build-input)
+            payload {:input input :artifact artifact}
+            ;; Include the store entry, weak identity token and fixed-size family
+            ;; reference, in addition to all reachable payload data.
+            charge (some-> (data/charge payload (:admission memo)) (+ 1024))
+            result (consume)]
+        (check-cancel)
+        (when (Thread/.isInterrupted (Thread/currentThread))
+          (throw (InterruptedException. "Checker artifact builder interrupted")))
+        (when (and charge (<= charge (:entry-bytes memo)))
+          ;; Pure checker artifacts publish after checked-source including consume.
+          ;; Raw source recipes instead require full invocation AND postcheck success.
+          ;; A later execution failure does not invalidate this deterministic proof.
+          (store/publish! (:store memo) ticket payload charge))
+        result))
+    (fallback)))
 
 
 (defn call-with-artifact
-  "Called synchronously on the checking worker. prepare must perform all fresh
-   reconstruction/provenance checks and return complete immutable checker input,
-   or nil to use the original ordered path. build returns derived registry data;
+  "Called synchronously on the checking worker. prepare returns a fresh complete
+   immutable comparison key, or nil for the original ordered path. Optional
+   prepare-build performs reconstruction/provenance preparation only on a miss;
+   all its immutable inputs, including the reconstruction environment, must
+   already be present in the comparison key. Its nil/non-admitted output uses
+   the ordinary path. build returns derived registry data;
    restore installs only that data into isolated atoms. consume ALWAYS runs fresh.
    Cancellation and release happen after actual worker unwind, not caller timeout."
   [memo {:keys [family original-rich prepare restore consume fallback] :as operations}]

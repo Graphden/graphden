@@ -216,12 +216,14 @@
 
 
 (defn- snapshot-storage
-  [{:keys [graph namespaces]}]
   ;; Source fingerprints are computed from the original immutable rows. Only
   ;; the checker's read adapter receives the canonical typed reconstruction.
-  (remote/from-bundle {:fn (reconstruction-fns graph) :slot (:slots graph)
-                       :fn-slot (:fn-slots graph) :binding (:bindings graph)
-                       :binding-list-item (:list-items graph) :ns namespaces}))
+  ([snapshot]
+   (snapshot-storage snapshot (reconstruction-fns (:graph snapshot))))
+  ([{:keys [graph namespaces]} fns]
+   (remote/from-bundle {:fn fns :slot (:slots graph)
+                        :fn-slot (:fn-slots graph) :binding (:bindings graph)
+                        :binding-list-item (:list-items graph) :ns namespaces})))
 
 
 (defn- seed-primitives!
@@ -233,15 +235,25 @@
     (registry/record-rich-types-raw! id (:name signature) signature)))
 
 
-(defn- prepare-check-closure
+(defn- prepare-check-input
   [snapshot entries]
   (let [graph (:graph snapshot)
         {:keys [forward-deps reverse-deps]} (deps/build-deps-state graph)
         reachable (set/difference (deps/forward-closure forward-deps (vals entries))
                                   (:identity-target-ids graph #{}))
-        storage (snapshot-storage snapshot)
+        fns (reconstruction-fns graph)]
+    {:storage (snapshot-storage snapshot fns)
+     ;; These fresh witnesses cover process-owned package/contract changes
+     ;; which raw source equality alone cannot detect.
+     :reconstructed-fns fns :owned-ids (set (filter owned/owned-fn-id? reachable))
+     :reachable reachable :ordering (delay (deps/dependency-order reverse-deps reachable))}))
+
+
+(defn- prepare-check-closure
+  [snapshot {:keys [storage reachable ordering]}]
+  (let [graph (:graph snapshot)
         source-fingerprints (source-contract/fingerprints graph)
-        {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
+        {:keys [ordered cyclic]} @ordering]
     (when (> (count reachable) 2048) (reject! :type-closure-limit {}))
     (when (seq cyclic) (reject! :type-cycle {:fn-id (first cyclic)}))
     {:storage storage :fingerprints source-fingerprints :ordered ordered}))
@@ -298,43 +310,56 @@
     (reset! registry/*per-org-rich-override* per-org)))
 
 
+(defn- checker-input
+  [{:keys [snapshot entries original-rich recovery structural? ordered]}]
+  {:source (select-keys snapshot [:graph :namespaces])
+   :entries entries :structural? structural? :recovery recovery
+   :org tenancy/*current-org* :seed (checker-state)
+   :aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)
+   :per-org-aliases @runtime/*per-org-aliases-override*
+   :caller-narrowings check/*caller-narrowings*
+   :ref-return-overrides check/*ref-return-overrides*
+   :type-compare-depth types/*type-compare-depth*
+   :original-signatures (select-keys (:by-id original-rich) ordered)})
+
+
+(defn- prepare-memo-base
+  [{:keys [prepared] :as inputs}]
+  (assoc (checker-input (assoc inputs :ordered (:ordered @(:ordering prepared))))
+         :reconstructed-fns (:reconstructed-fns prepared)
+         :owned-ids (:owned-ids prepared)))
+
+
 (defn- prepare-memo-input
-  [memo {:keys [snapshot entries original-rich recovery structural? prepared]}]
-  (let [input {:source (select-keys snapshot [:graph :namespaces])
-               :entries entries :structural? structural? :recovery recovery
-               :org tenancy/*current-org* :seed (checker-state)
-               :aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)
-               :per-org-aliases @runtime/*per-org-aliases-override*
-               :caller-narrowings check/*caller-narrowings*
-               :ref-return-overrides check/*ref-return-overrides*
-               :type-compare-depth types/*type-compare-depth*
-               :original-signatures (select-keys (:by-id original-rich) (:ordered prepared))}]
-    ;; Only proven immutable input and explicitly approved rules permit eager
-    ;; preparation. The ordinary path keeps its original per-fn interleaving.
-    (when (checker-memo/admitted? memo input)
-      (try
-        (assoc input :definitions
-               (mapv (fn [id]
-                       [id (prepare-checked-definition prepared original-rich recovery id)])
-                     (:ordered prepared)))
-        (catch InterruptedException error (throw error))
-        (catch Exception _
-          ;; Preserve original error precedence: an earlier type error may
-          ;; precede this later provenance/reconstruction error.
-          nil)))))
+  [base {:keys [original-rich recovery prepared]}]
+  ;; prepare-build runs only after the complete base passed immutable admission.
+  ;; Dropping comparison-only witnesses preserves that proof; do not rewalk the
+  ;; same base on a cold miss. The derived definitions are admitted separately.
+  (try
+    (assoc (dissoc base :reconstructed-fns :owned-ids) :definitions
+           (mapv (fn [id]
+                   [id (prepare-checked-definition prepared original-rich recovery id)])
+                 (:ordered prepared)))
+    (catch InterruptedException error (throw error))
+    (catch Exception _
+      ;; Preserve original error precedence: an earlier type error may
+      ;; precede this later provenance/reconstruction error.
+      nil)))
 
 
 (defn- with-checked-closure
   [snapshot entries original-rich recovery structural? consume]
-  (let [prepared (prepare-check-closure snapshot entries)
-        fallback (fn [] (check-ordered! prepared original-rich recovery) (consume))]
+  (let [prepared-input (prepare-check-input snapshot entries)
+        prepared (delay (prepare-check-closure snapshot prepared-input))
+        inputs {:snapshot snapshot :entries entries :original-rich original-rich
+                :recovery recovery :structural? structural?}
+        fallback (fn [] (check-ordered! @prepared original-rich recovery) (consume))]
     (if-let [memo checker-memo/*memo*]
       (checker-memo/call-with-artifact
         memo {:family [tenancy/*current-org* entries structural?]
               :original-rich original-rich
-              :prepare #(prepare-memo-input memo {:snapshot snapshot :entries entries
-                                                  :original-rich original-rich :recovery recovery
-                                                  :structural? structural? :prepared prepared})
+              :prepare #(prepare-memo-base (assoc inputs :prepared prepared-input))
+              :prepare-build (fn [base] (prepare-memo-input base (assoc inputs :prepared @prepared)))
               :build (fn [{:keys [definitions]}]
                        (binding [check/*ref-return-memo* (atom {})]
                          (doseq [[id definition] definitions :when definition]

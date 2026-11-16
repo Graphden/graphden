@@ -344,3 +344,73 @@
       (is (true? (recipes/abort! store ticket)))
       (is (= 30 (:charged-bytes (recipes/stats store))))
       (is (false? (recipes/revoke! store ticket))))))
+
+
+(deftest empty-family-metadata-cannot-disable-later-consumers
+  (let [{:keys [store]} (fixture)]
+    (doseq [family [:a :b :c]] (recipes/create-family! store family 100))
+    (is (= 3 (:families (recipes/stats store))))
+    (is (= :next (recipes/create-family! store :next 200)))
+    (let [ticket (recipes/reserve! store :next (Object.) 30)]
+      (is (some? ticket))
+      (is (true? (recipes/publish! store ticket :fresh 30))))
+    (is (= {:families 3 :entries 1 :pending 0 :leases 0 :charged-bytes 30}
+           (select-keys (recipes/stats store) [:families :entries :pending :leases :charged-bytes])))))
+
+
+(deftest family-reclamation-preserves-leases-and-pending-publication
+  (let [{:keys [store]} (fixture)
+        live (recipes/create-family! store :live 100)
+        physical (Object.)
+        _ (put! store live physical :owned 20)
+        lease (recipes/acquire! store live physical)
+        pending (recipes/create-family! store :pending 200)
+        pending-physical (Object.)
+        ticket (recipes/reserve! store pending pending-physical 30)]
+    (try
+      (recipes/create-family! store :empty 300)
+      (is (= :next (recipes/create-family! store :next 400)))
+      (is (nil? (recipes/reserve! store :empty (Object.) 10)))
+      (is (= :owned (recipes/lease-value store lease)))
+      (is (= 50 (:charged-bytes (recipes/stats store))))
+      (is (true? (recipes/publish! store ticket :published 30)))
+      (let [next-lease (recipes/acquire! store pending pending-physical)]
+        (try (is (= :published (recipes/lease-value store next-lease)))
+             (finally (recipes/release! store next-lease))))
+      (finally
+        (recipes/release! store lease)
+        (recipes/abort! store ticket)))))
+
+
+(deftest full-owned-families-refuse-without-changing-ownership
+  (let [{:keys [store]} (fixture {:max-families 2})
+        live (recipes/create-family! store :live 100)
+        physical (Object.)
+        _ (put! store live physical :owned 20)
+        pending (recipes/create-family! store :pending 200)
+        ticket (recipes/reserve! store pending (Object.) 30)
+        before (recipes/stats store)]
+    (try
+      (is (nil? (recipes/create-family! store :next 300)))
+      (is (= before (recipes/stats store)))
+      (is (true? (recipes/publish! store ticket :published 30)))
+      (finally (recipes/abort! store ticket)))))
+
+
+(deftest consumer-churn-reuses-fixed-family-and-entry-budgets
+  (let [{:keys [store]} (fixture {:max-entries 2})
+        results (mapv (fn [index]
+                        (let [family (recipes/create-family! store index 500)
+                              physical (Object.)
+                              ticket (recipes/reserve! store family physical 30)
+                              published? (recipes/publish! store ticket index 30)
+                              lease (recipes/acquire! store family physical)]
+                          (try
+                            {:value (when published? (recipes/lease-value store lease))
+                             :families (:families (recipes/stats store))}
+                            (finally (recipes/release! store lease)))))
+                      (range 40))]
+    (is (= (vec (range 40)) (mapv :value results)))
+    (is (every? #(<= (:families %) 3) results))
+    (is (= {:entries 2 :pending 0 :leases 0 :charged-bytes 60}
+           (select-keys (recipes/stats store) [:entries :pending :leases :charged-bytes])))))

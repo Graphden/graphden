@@ -7,6 +7,7 @@
     [graphden.executor.checked-source-runtime :as checker-runtime]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.interface :as exec]
+    [graphden.executor.source-recipe-store :as recipes]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.sync :as sync]
     [graphden.storage.postgres.core :as pg]
@@ -97,6 +98,11 @@
           checked (atom 0) checker check/check-fn-def!]
       (try
         (epoch/seed-watermark! (:storage ctx))
+        ;; Previous visitors leave family registrations after payload eviction.
+        ;; A new editor must still retain its working set before their TTL ends.
+        (doseq [index (range (get-in cache [:store :options :max-families]))]
+          (recipes/create-family! (:store cache) (str "previous-editor-" index)
+                                  (+ ((:clock-ms cache)) (:ttl-ms cache))))
         ;; Cold concurrent reservations may decline a builder. A second pass
         ;; completes admission; the following whole-editor load must stay warm.
         (dotimes [_ 2] (is (every? true? (export-editor-startup ctx))))

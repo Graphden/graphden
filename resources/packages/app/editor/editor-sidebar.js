@@ -472,7 +472,7 @@ function renderEntityList(data) {
                     fns: (searchFilter ? _searchResults : gdViewMembers()) || [] })
     : buildNsTree(data);
 
-  mountOpsSections(searchMode);
+  mountOpsSections();
 
   // Search: pin EXACT name matches above the tree. Substring matching
   // alone buried `core.arithmetic.add` under dozens of `app.editor`

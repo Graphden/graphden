@@ -51,7 +51,7 @@
 
 ;; Drain even when a worker throws a JVM Error; never turn that error into
 ;; success. Rethrow it after every other worker has actually unwound.
-^{:splint/disable [lint/catch-throwable]}
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/catch-throwable]}
 (defn- drain-workers
   [workers]
   (let [outcomes (mapv (fn [worker]

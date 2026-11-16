@@ -18,7 +18,8 @@
     [graphden.lint.core :as lint]
     [graphden.lint.graph :as lg]
     [graphden.packages.owned :as owned]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.golden-app :as ga]))
 
 
 (def ^:dynamic *graph* nil)
@@ -26,10 +27,11 @@
 
 (use-fixtures :once
   (setup/create-container-fixture)
+  ;; CRUD recompilation needs the production-shaped computed registry, not
+  ;; the unswept seed from a plain golden clone. Keep epoch healing and close.
+  (ga/fixture "graphden.crud.lint-graph-test")
   (fn [f]
-    (let [graph (setup/bootstrap-crud-graph-from-golden!*
-                  "graphden.crud.lint-graph-test"
-                  ["core" "web" "app"])]
+    (let [graph ga/*bootstrap*]
       (binding [*graph* graph]
         (try (f) (finally (setup/close-graph! graph)))))))
 

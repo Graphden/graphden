@@ -98,20 +98,38 @@
         (recur (update state :entries dissoc (ffirst victims)) (rest victims))))))
 
 
+(defn- reclaim-unused-family
+  [state]
+  ;; Metadata can outlive its payload after ordinary entry eviction. Protect
+  ;; every retained/leased entry and pending ticket, including retired ones.
+  ;; Removing only an empty registration cannot invalidate an owned artifact.
+  (let [owned (into #{} (map :family)
+                    (concat (vals (:entries state)) (vals (:pending state))))
+        unused (remove #(contains? owned (key %)) (:families state))
+        victim (first (sort-by (comp :expires-at val) unused))]
+    (if victim (update state :families dissoc (key victim)) state)))
+
+
 (defn create-family!
   "Register a consumer-owned opaque family ID. Sharing policy is the caller's
-   responsibility. A live registration never extends its fixed expiry. Reusing
-   an expired/evicted ID creates a new generation; old tickets cannot publish."
+   responsibility. A live registration never extends its fixed expiry. At the
+   metadata limit, reclaim one registration with no entry or pending ticket.
+   Reusing an expired/evicted ID creates a new generation; old tickets cannot
+   publish. A register/reserve race may miss and use ordinary execution."
   [store family expires-at]
   (change! store
            (fn [state now]
              (cond
                (contains? (:families state) family) [state family]
                (and (some? family) (integer? expires-at) (< now expires-at)
-                    (<= expires-at (+' now (get-in store [:options :max-ttl-ms])))
-                    (< (count (:families state)) (get-in store [:options :max-families])))
-               [(assoc-in state [:families family]
-                          {:expires-at expires-at :generation (Object.)}) family]
+                    (<= expires-at (+' now (get-in store [:options :max-ttl-ms]))))
+               (let [limit (get-in store [:options :max-families])
+                     planned (if (< (count (:families state)) limit)
+                               state (reclaim-unused-family state))]
+                 (if (< (count (:families planned)) limit)
+                   [(assoc-in planned [:families family]
+                              {:expires-at expires-at :generation (Object.)}) family]
+                   [state nil]))
                :else [state nil]))))
 
 

@@ -39,7 +39,11 @@
    overflow always performs the ordinary fresh check. Halt before code reload."
   []
   (memo/create-memo
-    {:max-bytes (* 512 1024 1024) :entry-bytes (* 256 1024 1024)
+    ;; The shipped root + eight component roles retain ~530MiB of conservative
+    ;; charge. Leave room for four 64MiB readers or a 256MiB builder as well;
+    ;; otherwise ordinary reloads evict their own working set on every pass.
+    ;; This is charged ownership, not an eager allocation or a heap-size claim.
+    {:max-bytes (* 1024 1024 1024) :entry-bytes (* 256 1024 1024)
      :max-entries 16 :max-pending 4 :max-families 32 :max-leases 32
      :max-ttl-ms 600000 :ttl-ms 600000 :max-nodes 4000000
      :hit-contract (hit-contract)

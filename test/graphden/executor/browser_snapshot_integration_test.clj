@@ -13,6 +13,8 @@
     [graphden.executor.browser-preview :as preview]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.checked-source-memo :as checker-memo]
+    [graphden.executor.checked-source-runtime :as checker-runtime]
     [graphden.executor.context :as context]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
@@ -70,6 +72,43 @@
   ;; Direct fixture exports omit the real request router's epoch admission.
   (epoch/seed-watermark! (:storage ctx))
   (ui-api/export-current ctx))
+
+
+(defn- export-editor-startup
+  [ctx]
+  (let [inputs [nil
+                {:components ["inspector" "explorer" "canvas"]}
+                {:components ["canvas-values" "canvas-inheritance" "canvas-metadata"]}
+                {:components ["canvas-type-structure" "canvas-bindings"]}]
+        workers (mapv (fn [input]
+                        (future
+                          (recheck/call-with-ctx-slices
+                            ctx
+                            #(true? (:ok (if input
+                                           (ui-api/export-resolved ctx input)
+                                           (ui-api/export-current ctx))))))) inputs)]
+    ;; Drain every request before a checker override or fixture can unwind.
+    (mapv deref workers)))
+
+
+(deftest warm-editor-startup-retains-root-and-every-component-family
+  (binding [br/*active-router-override* (atom nil)]
+    (let [cache (checker-runtime/create-cache)
+          ctx (assoc (:ctx ga/*bootstrap*) :checker-cache cache)
+          checked (atom 0) checker check/check-fn-def!]
+      (try
+        (epoch/seed-watermark! (:storage ctx))
+        ;; Cold concurrent reservations may decline a builder. A second pass
+        ;; completes admission; the following whole-editor load must stay warm.
+        (dotimes [_ 2] (is (every? true? (export-editor-startup ctx))))
+        (let [result (with-redefs [check/check-fn-def!
+                                   (fn [& args] (swap! checked inc) (apply checker args))]
+                       (export-editor-startup ctx))]
+          (is (every? true? result))
+          (is (zero? @checked) "Different UI roles must not evict the root on every reload")
+          (is (= {:pending 0 :leases 0}
+                 (select-keys (checker-memo/stats cache) [:pending :leases]))))
+        (finally (checker-memo/retire! cache))))))
 
 
 (deftest editor-root-is-selected-from-handler-binding

@@ -187,6 +187,23 @@
           (finally (reset! staged []) (locking cache (swap! cache update :pending dec))))))))
 
 
+(def ^:dynamic ^:private *retained-source* nil)
+
+
+(defn current-retained-source?
+  "Internal validator witness for this exact thawed graph, storage and policy.
+   Valid only during the physical manifest's hit callback in its active owned
+   snapshot. This proves persisted source, never current caller authority."
+  [source-storage authorize! graph]
+  (let [witness *retained-source*
+        scope *snapshot*]
+    (boolean (and witness scope @(:active? scope)
+                  (identical? scope (:snapshot witness))
+                  (identical? source-storage (:storage scope))
+                  (identical? authorize! (:authorize! scope))
+                  (identical? graph (:graph witness))))))
+
+
 (defn capture
   "Retain a bounded private collector graph, partitioned by collector semantics.
    Reuse always performs fresh authorization and source-contract validation."
@@ -215,7 +232,10 @@
                  (when (<= (+ @charged (:charge entry)) (:max-capture-bytes limits))
                    (swap! charged + (:charge entry)) true))
              (let [graph (copy/thaw (:graph entry) connection)]
-               (check!) (validate! graph) (check!) graph)
+               (check!)
+               (binding [*retained-source* {:snapshot scope :graph graph}]
+                 (validate! graph))
+               (check!) graph)
              (run))
            (let [graph (run)]
              (check!)

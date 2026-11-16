@@ -56,7 +56,7 @@
                                                      (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
                                                      {:value result}))
                      certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-         (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots}))))))
+         (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots :source source :authorize! authorize!}))))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -159,3 +159,22 @@
       (collect identity)
       (is (= 5 @reads) "Oversized witness paths fall back without retention")
       (is (= 1 (:entries (manifest/stats controller)))))))
+
+
+(deftest persisted-source-witness-is-exact-and-cannot-escape-the-hit
+  (exercise
+    (fn [{:keys [collect source authorize! kind]}]
+      (doseq [collector [:manifest :client :server :nodes :closure]]
+        (reset! kind collector)
+        (collect identity)
+        (let [escaped (atom nil)
+              observations (atom nil)]
+          (collect (fn [graph]
+                     (reset! observations
+                             [(manifest/current-retained-source? source authorize! graph)
+                              (manifest/current-retained-source? (Object.) authorize! graph)
+                              (manifest/current-retained-source? source (fn [_] true) graph)
+                              (manifest/current-retained-source? source authorize! (into (sorted-map) graph))])
+                     (reset! escaped (bound-fn [] (manifest/current-retained-source? source authorize! graph)))))
+          (is (= [true false false false] @observations) (name collector))
+          (is (false? (@escaped)) "A conveyed binding cannot outlive its owned snapshot"))))))

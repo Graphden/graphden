@@ -462,18 +462,23 @@
 
 
 (defn- fresh-retained-source
-  [storage graph]
-  (let [fresh (binding [*identity-hints* nil *prefetched* nil]
-                (vec (read-rows storage :fn (mapv :id (:fns graph)))))
-        _ (when-not (= (into {} (map (juxt :id identity)) (:fns graph))
-                       (into {} (map (juxt :id identity)) fresh))
-            (reject! :source-missing))]
-    (assoc graph :fns fresh)))
+  [storage authorize! graph]
+  ;; The physical manifest owns this witness only while validating its exact
+  ;; thawed graph in the fresh RR/catalog/RLS scope. Unknown validators retain
+  ;; the ordinary metadata read. ACL and native/type checks still follow.
+  (if (manifest/current-retained-source? storage authorize! graph)
+    graph
+    (let [fresh (binding [*identity-hints* nil *prefetched* nil]
+                  (vec (read-rows storage :fn (mapv :id (:fns graph)))))
+          _ (when-not (= (into {} (map (juxt :id identity)) (:fns graph))
+                         (into {} (map (juxt :id identity)) fresh))
+              (reject! :source-missing))]
+      (assoc graph :fns fresh))))
 
 
 (defn- validate-retained-source!
   [storage authorize! graph kind]
-  (let [graph (fresh-retained-source storage graph)
+  (let [graph (fresh-retained-source storage authorize! graph)
         terminal (:identity-target-ids graph)
         server-targets (when (= :client kind)
                          (into #{} (keep :ref-fn-id) (client-server-bindings graph)))
@@ -532,7 +537,7 @@
                 (collect-source storage [target] (constantly nil) false false))
               :identity-target-ids #{})
       (fn [graph]
-        (let [graph (fresh-retained-source storage graph)
+        (let [graph (fresh-retained-source storage authorize! graph)
               row (some #(when (= target (:id %)) %) (:fns graph))]
           (when-not row (reject! :source-missing))
           (check-snapshot!)

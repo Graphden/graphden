@@ -24,6 +24,7 @@
         && !window.isAuthenticated?.());
   }
   function status(component, message) {
+    if (message) window.gdUILoading?.error(component, 'could not be loaded. Built-in controls are available.');
     if (statuses.get(component) === message) return;
     statuses.set(component, message);
     window.dispatchEvent(new Event('gd-ui-components-status'));
@@ -185,6 +186,7 @@
   };
   let refreshTimer = null;
   function refresh(root = true) {
+    window.gdUILoading?.clear(true);
     if (root) void window.gdEditorRoot?.reload();
     generation++;
     for (const entry of [...planQueue, ...[...planBatches].flat()]) entry.abort();

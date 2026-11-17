@@ -592,6 +592,7 @@
   function create() {
     if (controller) return;
     host = document.getElementById('kind-filters');
+    window.gdUILoading?.bind('explorer', host);
     if (!host) return;
     owner = context();
     mounted = window.GraphdenRenderer.mount(host, {idPrefix: 'gd-explorer', nodeLimit: 96});
@@ -615,6 +616,7 @@
     const started = context();
     pending?.abort();
     const loading = new AbortController(); pending = loading;
+    const progress = window.gdUILoading?.begin('explorer', reload);
     try {
       const runtime = await window.gdLoadUIComponentRuntime('explorer', window.GraphdenBuiltinPlans.plans.explorer, {}, loading.signal);
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context()) return;
@@ -631,7 +633,10 @@
       resetFilterBodies(builtinRuntime);
       resetViewBodies(builtinRuntime);
       compare.resetDiffBodies(builtinRuntime);
-    } finally { if (pending === loading) pending = null; }
+    } finally {
+      progress?.finish();
+      if (pending === loading) pending = null;
+    }
   }
   function disposeToolbar() {
     generation++;
@@ -639,6 +644,7 @@
     host?.removeEventListener('click', click);
     controller?.dispose(); controller = null;
     mounted?.dispose(); mounted = null;
+    window.gdUILoading?.unbind(host);
     host = null; owner = null;
   }
   function resetContext() {

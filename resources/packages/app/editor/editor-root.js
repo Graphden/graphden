@@ -8,6 +8,7 @@
   let diagnostic = null;
   let installed = null;
   let loading = null;
+  let activity = null;
   const facades = new WeakMap();
   const stamp = () => JSON.stringify([window.gdPrefOwner,
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : 'public',
@@ -20,6 +21,8 @@
         && result.code === 'policy-refresh-required' && result.retryable === true);
   }
   function dispose() {
+    activity?.cancel();
+    activity = null;
     installed = null;
     diagnostic?.remove();
     diagnostic = null;
@@ -76,6 +79,8 @@
     pending = new AbortController();
     const {signal} = pending;
     dispose();
+    const progress = window.gdUILoading?.begin('editor', reload);
+    activity = progress;
     let scope;
     const current = () => {
       if (own !== generation || signal.aborted) return false;
@@ -124,11 +129,19 @@
       } catch (error) {
         if (!current() || error.name === 'AbortError') return;
         dispose();
-        diagnostic = document.createElement('div');
-        diagnostic.setAttribute('role', 'status');
-        diagnostic.textContent = 'Editor configuration could not be loaded.';
-        document.getElementById('app')?.before(diagnostic);
+        if (window.gdUILoading) {
+          // dispose retires the previous activity together with the old root.
+          activity = window.gdUILoading.begin('editor', reload);
+          window.gdUILoading.error('editor', 'could not be loaded.');
+        } else diagnostic = document.createElement('div');
+        if (diagnostic) {
+          diagnostic.setAttribute('role', 'status');
+          diagnostic.textContent = 'Editor configuration could not be loaded.';
+          document.getElementById('app')?.before(diagnostic);
+        }
         window.dispatchEvent(new CustomEvent('gd-editor-root-error', {detail: {message: error.message}}));
+      } finally {
+        progress?.finish();
       }
     })();
     return loading;

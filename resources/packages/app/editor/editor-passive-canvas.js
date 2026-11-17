@@ -234,6 +234,7 @@ window.gdCreatePassiveCanvas = config => {
   function mountCanvasBody(owner, host, surface, facts, options = {}) {
     reconcileScopes();
     const input = config.projection(surface, facts);
+    window.gdUILoading?.bind(config.identity, host);
     const renderer = window.GraphdenRenderer.mount(host, {idPrefix: config.prefix, nodeLimit: 1024});
     let disposed = false;
     const body = {input, renderer, options, context: context(),
@@ -266,6 +267,7 @@ window.gdCreatePassiveCanvas = config => {
       dispose() {
         if (disposed) return;
         disposed = true;
+        window.gdUILoading?.unbind(host);
         renderer.dispose();
         body.scope(null);
         const siblings = owners.get(owner);
@@ -304,6 +306,7 @@ window.gdCreatePassiveCanvas = config => {
     const started = context();
     const controller = new AbortController();
     pending = controller;
+    const progress = window.gdUILoading?.begin(config.identity, reload);
     try {
       const runtime = await window.gdLoadUIComponentRuntime(config.identity,
         config.plan(), {operationLimit: config.operationLimit || 150000}, controller.signal);
@@ -313,7 +316,11 @@ window.gdCreatePassiveCanvas = config => {
       changed();
     } catch (error) {
       if (own === generation && error.name !== 'AbortError') fail();
-    } finally { if (pending === controller) pending = null; }
+      else progress?.cancel();
+    } finally {
+      progress?.finish();
+      if (pending === controller) pending = null;
+    }
   }
   document.addEventListener('DOMContentLoaded', () => { void reload(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => invalidate(true));

@@ -141,6 +141,10 @@ test('real root lifetime keeps loading through held authorization and clears on 
   assert.equal(f.status('editor').dataset.phase, 'error');
   assert.equal(f.document.querySelectorAll('#gd-ui-loading-editor').length, 1, 'retiring the loading receipt leaves one error status');
   assert.equal(f.status('editor').getAttribute('aria-busy'), 'false');
+  const terminal = f.status('editor').querySelector('[role="status"]');
+  assert.equal(terminal.textContent, 'Editor configuration could not be loaded.');
+  assert.equal(terminal.getAttribute('aria-live'), 'off', 'the shared announcer remains the only speech owner');
+  assert.equal(f.announcements.at(-1), 'Editor controls — could not be loaded.');
   f.status('editor').querySelector('button').click(); await flush();
   assert.equal(f.status('editor').dataset.phase, 'loading');
   assert.equal(f.document.querySelectorAll('#gd-ui-loading-editor').length, 1, 'retry replaces rather than duplicates the root status');

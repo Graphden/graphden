@@ -89,13 +89,21 @@
       row.dataset.phase = state.phase;
       row.setAttribute('aria-busy', String(state.phase === 'loading'));
       row.hidden = component !== 'editor' && !visibleComponents.has(component);
-      const message = labels[component] + (state.phase === 'loading' ? ' — loading…' : ' — ' + state.message);
+      const message = state.phase === 'loading' ? labels[component] + ' — loading…'
+        : component === 'editor' ? state.message : labels[component] + ' — ' + state.message;
+      if (state.phase === 'error') {
+        // Keep terminal errors discoverable as statuses. Announcements remain
+        // owned by gdAnnounce outside busy hosts, so they are spoken once.
+        text.setAttribute('role', 'status');
+        text.setAttribute('aria-live', 'off');
+      } else { text.removeAttribute('role'); text.removeAttribute('aria-live'); }
       if (text.textContent !== message) text.textContent = message;
       retry.hidden = !(state.retry && (state.phase === 'error' || state.retrying));
       retry.disabled = state.phase === 'loading';
       retry.textContent = state.phase === 'loading' ? 'Retrying…' : 'Retry';
       visible ||= !row.hidden;
-      if (!row.hidden) announcements.push(message);
+      if (!row.hidden) announcements.push(component === 'editor' && state.phase === 'error'
+        ? 'Editor controls — could not be loaded.' : message);
       if (row.parentNode !== region) region.appendChild(row);
     }
     region.hidden = !visible;

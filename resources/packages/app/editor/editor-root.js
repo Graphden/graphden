@@ -132,7 +132,7 @@
         if (window.gdUILoading) {
           // dispose retires the previous activity together with the old root.
           activity = window.gdUILoading.begin('editor', reload);
-          window.gdUILoading.error('editor', 'could not be loaded.');
+          window.gdUILoading.error('editor', 'Editor configuration could not be loaded.');
         } else diagnostic = document.createElement('div');
         if (diagnostic) {
           diagnostic.setAttribute('role', 'status');

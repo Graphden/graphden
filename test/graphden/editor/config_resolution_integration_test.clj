@@ -868,9 +868,16 @@
                    :command {:component "fn-picker" :expected-preference {:present false :value nil}
                              :expected-configuration-revision (:revision before)}}
             nonce (random-uuid)
+            legacy-reads (atom 0)
+            count-read (fn [execute]
+                         (fn [connection query opts]
+                           (swap! legacy-reads inc)
+                           (execute connection query opts)))
             legacy (with-redefs [activation/call-with-preview-snapshot activation/call-with-current-configuration
                                  random-uuid (constantly nonce)]
-                     (activation/preview! ctx input))
+                     (binding [pg/*jdbc-override* {:execute! (count-read jdbc/execute!)
+                                                   :execute-one! (count-read jdbc/execute-one!)}]
+                       (activation/preview! (assoc ctx :graph-cache (atom nil)) input)))
             read-only? (atom [])
             observe (fn [execute]
                       (fn [connection query opts]
@@ -884,7 +891,10 @@
                       (binding [pg/*jdbc-override* {:execute! (observe jdbc/execute!)
                                                     :execute-one! (observe jdbc/execute-one!)}]
                         (activation/preview! ctx input)))]
-        (is (= legacy preview) "The original receipt and complete proposal seal remain unchanged")
+        (is (seq (:fns (context/cached-graph ctx))) "The reader exercises an existing advisory graph")
+        (is (= legacy preview) "Fresh hinted source preserves the complete unhinted writer proposal")
+        (is (< (count @read-only?) (* 0.75 @legacy-reads))
+            "Batching the root dependency IDs removes at least one quarter of the original SQL reads")
         (is (seq @read-only?) "The proof observes actual PostgreSQL reads")
         (is (every? true? @read-only?) "Every observed storage read uses the decorated read-only transaction")
         (is (empty? (sp/query-entities storage :fn {:namespace-id (:id home)})))

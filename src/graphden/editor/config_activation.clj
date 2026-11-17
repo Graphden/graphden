@@ -205,75 +205,78 @@
 
 
 (defn- configuration-plan
-  [storage input policy nonce read-only?]
-  (let [authorize! (tenancy/browser-source-policy storage)
-        current (resolution/capture storage authorize! policy)
-        _ (assert-preference! storage (:expected-preference input))
-        _ (when-not (= (:revision current) (:expected-configuration-revision input))
-            (refuse! :stale-configuration))
-        selected-id (:selection-id input)
-        existing-component? (when-let [component (:component input)]
-                              (resolution/owned-writable-view? storage current component))]
-    (if (or (= (:id current) selected-id) existing-component?)
-      {:scope (:scope current)
-       :receipt {:id (:id current) :created false :functions [] :namespaces [] :configuration-revision (:revision current)
-                 :entry-id (when (:component input) (get-in current [:configuration (:component input) :view]))}}
-      (let [home (:home current)
-            _ (when-not home (refuse! :personal-home-unavailable))
-            existing-home (metadata/namespace-row storage (:namespace-path home) (tenancy/current-org))
-            _ (when (and read-only? (nil? existing-home)) (refuse! :personal-home-unavailable))
-            namespace-row (or existing-home (personal-home/ensure-current! storage))
-            prior? (not= resolution/defaults-id (:id current))
-            prior-row (when prior? (sp/read-entity storage :fn (:id current)))
-            _ (when prior? (writer/assert-write-authorized! storage :fn prior-row (:id prior-row)))
-            selected (selection-for-write storage input current prior-row authorize! policy)
-            root-choice (resolution/root-choice storage authorize! policy)
-            root-row (when-not (= resolution/default-root-id (:id root-choice))
-                       (sp/read-entity storage :fn (:id root-choice)))
-            _ (when (and (not= resolution/default-root-id (:id root-choice)) (nil? root-row))
-                (refuse! :source-missing))
-            migrated-root? (root-plan/migration-owned? root-row (:id namespace-row))
-            default-root? (and (= resolution/default-root-id (:id root-choice))
-                               (= resolution/default-root-id (:root (root-binding/capture! storage))))
-            update-root? (or migrated-root? default-root?)
-            prepared (preparation/prepared-records
-                       storage namespace-row selected authorize! policy nonce
-                       {:derive-policy? update-root?})
-            private-name (str "_editor-prior-" nonce)
-            projected (cond-> (:snapshot prepared)
-                        prior-row (renamed-snapshot (:id prior-row) private-name))
-            root-plan (when update-root?
-                        (root-plan/proposal
-                          storage (:derived-policy prepared) nonce
-                          {:selection {:id (:id prepared) :home home
-                                       :configuration (config/configuration
-                                                        (:graph projected) (:id prepared))
-                                       :snapshot projected}
-                           :staged-source projected
-                           :staged-function-ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
-                           :renames (when prior-row {(:id prior-row) private-name})}))
-            ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
-            prior-snapshot (when prior?
-                             (renamed-snapshot (:snapshot current) (:id prior-row) private-name))
-            revisions (expected-revisions prepared prior-row private-name (:scope current) authorize!)]
-        {:prepared prepared :root-plan root-plan
-         :prior-row prior-row :private-name private-name :scope (:scope current)
-         :authorize! authorize!
-         :receipt (merge revisions
-                         (cond-> {:id (:id prepared) :created true :functions ids
-                                  :restore-revision (:revision current)
-                                  :restore-id (:id current)
-                                  :entry-id (when-let [component (:component input)]
-                                              (get-in (config/configuration (get-in prepared [:snapshot :graph]) (:id prepared))
-                                                      [component :view]))
-                                  :namespaces (if existing-home [] [(:id namespace-row)])
-                                  :function-receipts (mapv #(select-keys % [:id :name :namespace-id])
-                                                           (filter #(= :fn (:kind %)) (:records prepared)))
-                                  :changed-functions (if prior? [(:id prior-row)] [])
-                                  :previous (when prior?
-                                              {:id (:id prior-row) :name private-name :namespace-id (:id namespace-row)
-                                               :revision (resolution/source-revision (:id prior-row) prior-snapshot (:scope current))})}
-                           root-plan (assoc :root (:receipt root-plan))))}))))
+  ([storage input policy nonce read-only?]
+   (configuration-plan storage input policy nonce read-only? nil))
+  ([storage input policy nonce read-only? graph-hint]
+   (let [authorize! (tenancy/browser-source-policy storage)
+         current (resolution/capture storage authorize! policy)
+         _ (assert-preference! storage (:expected-preference input))
+         _ (when-not (= (:revision current) (:expected-configuration-revision input))
+             (refuse! :stale-configuration))
+         selected-id (:selection-id input)
+         existing-component? (when-let [component (:component input)]
+                               (resolution/owned-writable-view? storage current component))]
+     (if (or (= (:id current) selected-id) existing-component?)
+       {:scope (:scope current)
+        :receipt {:id (:id current) :created false :functions [] :namespaces [] :configuration-revision (:revision current)
+                  :entry-id (when (:component input) (get-in current [:configuration (:component input) :view]))}}
+       (let [home (:home current)
+             _ (when-not home (refuse! :personal-home-unavailable))
+             existing-home (metadata/namespace-row storage (:namespace-path home) (tenancy/current-org))
+             _ (when (and read-only? (nil? existing-home)) (refuse! :personal-home-unavailable))
+             namespace-row (or existing-home (personal-home/ensure-current! storage))
+             prior? (not= resolution/defaults-id (:id current))
+             prior-row (when prior? (sp/read-entity storage :fn (:id current)))
+             _ (when prior? (writer/assert-write-authorized! storage :fn prior-row (:id prior-row)))
+             selected (selection-for-write storage input current prior-row authorize! policy)
+             root-choice (resolution/root-choice storage authorize! policy)
+             root-row (when-not (= resolution/default-root-id (:id root-choice))
+                        (sp/read-entity storage :fn (:id root-choice)))
+             _ (when (and (not= resolution/default-root-id (:id root-choice)) (nil? root-row))
+                 (refuse! :source-missing))
+             migrated-root? (root-plan/migration-owned? root-row (:id namespace-row))
+             default-root? (and (= resolution/default-root-id (:id root-choice))
+                                (= resolution/default-root-id (:root (root-binding/capture! storage))))
+             update-root? (or migrated-root? default-root?)
+             prepared (preparation/prepared-records
+                        storage namespace-row selected authorize! policy nonce
+                        {:derive-policy? update-root?})
+             private-name (str "_editor-prior-" nonce)
+             projected (cond-> (:snapshot prepared)
+                         prior-row (renamed-snapshot (:id prior-row) private-name))
+             root-plan (when update-root?
+                         (root-plan/proposal
+                           storage (:derived-policy prepared) nonce
+                           {:graph-hint graph-hint
+                            :selection {:id (:id prepared) :home home
+                                        :configuration (config/configuration
+                                                         (:graph projected) (:id prepared))
+                                        :snapshot projected}
+                            :staged-source projected
+                            :staged-function-ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
+                            :renames (when prior-row {(:id prior-row) private-name})}))
+             ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
+             prior-snapshot (when prior?
+                              (renamed-snapshot (:snapshot current) (:id prior-row) private-name))
+             revisions (expected-revisions prepared prior-row private-name (:scope current) authorize!)]
+         {:prepared prepared :root-plan root-plan
+          :prior-row prior-row :private-name private-name :scope (:scope current)
+          :authorize! authorize!
+          :receipt (merge revisions
+                          (cond-> {:id (:id prepared) :created true :functions ids
+                                   :restore-revision (:revision current)
+                                   :restore-id (:id current)
+                                   :entry-id (when-let [component (:component input)]
+                                               (get-in (config/configuration (get-in prepared [:snapshot :graph]) (:id prepared))
+                                                       [component :view]))
+                                   :namespaces (if existing-home [] [(:id namespace-row)])
+                                   :function-receipts (mapv #(select-keys % [:id :name :namespace-id])
+                                                            (filter #(= :fn (:kind %)) (:records prepared)))
+                                   :changed-functions (if prior? [(:id prior-row)] [])
+                                   :previous (when prior?
+                                               {:id (:id prior-row) :name private-name :namespace-id (:id namespace-row)
+                                                :revision (resolution/source-revision (:id prior-row) prior-snapshot (:scope current))})}
+                            root-plan (assoc :root (:receipt root-plan))))})))))
 
 
 (defn- commit-plan!
@@ -377,7 +380,7 @@
     (call-with-preview-snapshot
       ctx
       (fn [storage policy]
-        (let [plan (configuration-plan storage command policy nonce true)]
+        (let [plan (configuration-plan storage command policy nonce true (context/cached-graph ctx))]
           {:request (wire-value {:operation operation :command command :nonce nonce
                                  :scope (request-scope (:scope plan))
                                  :expected-proposal (proposal-seal plan operation command nonce policy)})

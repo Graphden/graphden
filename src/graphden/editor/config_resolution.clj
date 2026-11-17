@@ -192,12 +192,17 @@
 
 
 (defn root-source-revision
-  "Capture an authorized root source witness for a later exact restore."
-  [storage authorize! policy id scope]
-  (let [graph (source/collect-client-closure storage [id] authorize!)
-        selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
-    (snapshot/validate-source! selected id policy)
-    (source-revision id selected scope)))
+  "Capture an authorized root source witness for a later exact restore.
+   Optional hints select dependency IDs only; source and permissions stay fresh."
+  ([storage authorize! policy id scope]
+   (root-source-revision storage authorize! policy id scope nil))
+  ([storage authorize! policy id scope graph-hint]
+   (let [graph (if graph-hint
+                 (source/collect-client-closure storage [id] authorize! graph-hint)
+                 (source/collect-client-closure storage [id] authorize!))
+         selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+     (snapshot/validate-source! selected id policy)
+     (source-revision id selected scope))))
 
 
 (defn cohort-revision

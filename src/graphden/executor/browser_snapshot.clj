@@ -8,6 +8,7 @@
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.checked-source-data :as checker-data]
     [graphden.executor.checked-source-memo :as checker-memo]
+    [graphden.executor.checker-tenant-index :as tenant-index]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry]
@@ -305,22 +306,24 @@
 
 (defn- restore-checker-state!
   [artifact]
-  (let [{:keys [rich per-org]} (checker-data/expand-registry-state artifact)]
+  (let [{:keys [rich per-org]} (checker-data/expand-registry-state
+                                 (tenant-index/restore-artifact artifact tenancy/*current-org*))]
     (reset! registry/*rich-types-override* rich)
     (reset! registry/*per-org-rich-override* per-org)))
 
 
 (defn- checker-input
   [{:keys [snapshot entries original-rich recovery structural? ordered]}]
-  {:source (select-keys snapshot [:graph :namespaces])
-   :entries entries :structural? structural? :recovery recovery
-   :org tenancy/*current-org* :seed (checker-state)
-   :aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)
-   :per-org-aliases @runtime/*per-org-aliases-override*
-   :caller-narrowings check/*caller-narrowings*
-   :ref-return-overrides check/*ref-return-overrides*
-   :type-compare-depth types/*type-compare-depth*
-   :original-signatures (select-keys (:by-id original-rich) ordered)})
+  (tenant-index/prepare-input
+    {:source (select-keys snapshot [:graph :namespaces])
+     :entries entries :structural? structural? :recovery recovery
+     :org tenancy/*current-org* :seed (checker-state)
+     :aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)
+     :per-org-aliases @runtime/*per-org-aliases-override*
+     :caller-narrowings check/*caller-narrowings*
+     :ref-return-overrides check/*ref-return-overrides*
+     :type-compare-depth types/*type-compare-depth*
+     :original-signatures (select-keys (:by-id original-rich) ordered)}))
 
 
 (defn- prepare-memo-base
@@ -378,15 +381,18 @@
         fallback (fn [] (check-ordered! @prepared original-rich recovery) (consume))]
     (if-let [memo checker-memo/*memo*]
       (checker-memo/call-with-artifact
-        memo {:family [tenancy/*current-org* entries structural?]
+        memo {:family [(tenant-index/comparison-org tenancy/*current-org* snapshot (checker-state))
+                       entries structural?]
               :original-rich original-rich
               :prepare #(prepare-memo-base (assoc inputs :prepared prepared-input))
               :prepare-build (fn [base] (prepare-memo-input base (assoc inputs :prepared @prepared)))
-              :build (fn [{:keys [definitions]}]
+              :build (fn [{:keys [definitions org]}]
                        (binding [check/*ref-return-memo* (atom {})]
                          (doseq [[id definition] definitions :when definition]
                            (check-definition! id definition)))
-                       (checker-data/compact-registry-state (checker-state)))
+                       (tenant-index/prepare-artifact
+                         org tenancy/*current-org*
+                         (checker-data/compact-registry-state (checker-state))))
               :restore restore-checker-state! :consume consume :fallback fallback
               :hit-input (assoc inputs :prepared prepared-input)
               :check-cancel runtime/check-cancel!})

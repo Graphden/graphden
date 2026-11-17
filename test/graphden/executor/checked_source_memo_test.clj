@@ -331,3 +331,19 @@
       (is (not (memo/admitted? m (with-meta 'argument metadata)))))
     (is (not (data/same-input? input (with-meta 'argument (into {} positions))))
         "Reader metadata admission does not weaken metadata identity")))
+
+
+(deftest nonretained-artifacts-still-consume-without-poisoning-a-family
+  (let [m (memo/create-memo (options (atom 0))) built (atom 0) consumed (atom 0)
+        ops {:family [:tenant :root] :original-rich {} :prepare (constantly {:source 1})
+             :build (fn [_] (swap! built inc) nil)
+             :restore (fn [_] (throw (ex-info "Unretained artifact restored" {})))
+             :consume #(swap! consumed inc) :fallback (constantly :fallback)
+             :check-cancel (constantly nil)}]
+    (try
+      (is (= 1 (memo/call-with-artifact m ops)))
+      (is (= 2 (memo/call-with-artifact m ops)))
+      (is (= 2 @built))
+      (is (= {:entries 0 :pending 0 :leases 0}
+             (select-keys (memo/stats m) [:entries :pending :leases])))
+      (finally (memo/retire! m)))))

@@ -95,7 +95,8 @@
             payload {:input input :artifact artifact}
             ;; Include the store entry, weak identity token and fixed-size family
             ;; reference, in addition to all reachable payload data.
-            charge (some-> (data/charge payload (:admission memo)) (+ 1024))
+            charge (when (some? artifact)
+                     (some-> (data/charge payload (:admission memo)) (+ 1024)))
             result (consume)]
         (check-cancel)
         (when (Thread/.isInterrupted (Thread/currentThread))
@@ -143,7 +144,8 @@
    prepare-build performs reconstruction/provenance preparation only on a miss;
    all its immutable inputs, including the reconstruction environment, must
    already be present in the comparison key. Its nil/non-admitted output uses
-   the ordinary path. build returns derived registry data;
+   the ordinary path. build returns derived registry data; nil declines
+   retention while consume still runs freshly;
    restore installs only that data into isolated atoms. consume ALWAYS runs fresh.
    Optional runtime-owned hit-contract is reviewed at construction: bytes bounds all NEW
    live preparation/admission/comparison/restore memory, with borrowed immutable

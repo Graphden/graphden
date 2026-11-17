@@ -63,7 +63,7 @@
 
 (defn- export-in-snapshot
   [ctx component {:keys [storage authorize! policy epoch resolved]}]
-  (let [resolved (or resolved (resolution/capture storage authorize! policy))
+  (let [resolved (or resolved (resolution/capture-for-context ctx storage authorize! policy))
         id (:id resolved)
         row (sp/read-entity storage :fn id)]
     (when-not row (reject! :source-missing))
@@ -169,7 +169,7 @@
 
 (defn- export-batch
   [ctx names {:keys [storage authorize! policy epoch] :as snapshot}]
-  (let [resolved (resolution/capture storage authorize! policy)
+  (let [resolved (resolution/capture-for-context ctx storage authorize! policy)
         snapshot (assoc snapshot :resolved resolved)
         items (:items
                 (reduce (fn [{:keys [items remaining]} component]

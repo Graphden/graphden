@@ -578,10 +578,15 @@
    retain the normal bounded ACL-before-values collection. Multiple roots
    share the SAME function/row budget. Fresh declaration frontiers batch owned
    reads across inheritance; binding references still wait for classification."
-  [storage roots authorize!]
-  (manifest/capture storage roots authorize!
-                    #(collect-source storage roots authorize! true false nil true)
-                    #(validate-retained-source! storage authorize! % :manifest)))
+  ([storage roots authorize!]
+   (collect-manifests storage roots authorize! nil))
+  ([storage roots authorize! graph-hint]
+   (let [run #(collect-source storage roots authorize! true false nil true)]
+     (manifest/capture storage roots authorize!
+                       #(if graph-hint
+                          (call-with-identity-hints storage roots graph-hint :manifest run)
+                          (run))
+                       #(validate-retained-source! storage authorize! % :manifest)))))
 
 
 (defn collect-manifest
@@ -589,8 +594,7 @@
   ([storage root authorize!]
    (collect-manifests storage [root] authorize!))
   ([storage root authorize! graph-hint]
-   (call-with-identity-hints storage [root] graph-hint :manifest
-                             #(collect-manifests storage [root] authorize!))))
+   (collect-manifests storage [root] authorize! graph-hint)))
 
 
 (defn- ordinary-snapshot

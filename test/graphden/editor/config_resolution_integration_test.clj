@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.type-check :as type-check]
+    [graphden.crud.types-api :as types-api]
     [graphden.editor.component-config :as config]
     [graphden.editor.config-activation :as activation]
     [graphden.editor.config-preparation :as preparation]
@@ -22,6 +23,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.crud :as pg-crud]
+    [graphden.storage.postgres.util :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.tenancy.context :as tenancy]
@@ -31,7 +33,8 @@
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
-    [graphden.versioning.storage.core :as versioned]))
+    [graphden.versioning.storage.core :as versioned]
+    [next.jdbc :as jdbc]))
 
 
 (def ^:private default-component-roles
@@ -803,3 +806,49 @@
           (is (= (str (:id prepared)) (get-in personal [:body :selection-id])))
           (is (= (get-in default [:body :plan]) (get-in personal [:body :plan])))
           (is (string? (get-in personal [:body :configuration-revision]))))))))
+
+
+(deftest stale-context-hint-cannot-select-an-obsolete-personal-configuration
+  (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
+        path (str "hint-profile-" (random-uuid))
+        home (sp/create-entity storage :ns {:name path})
+        old (sp/create-entity storage :fn {:id (random-uuid) :namespace-id (:id home)
+                                           :name "editor" :parent-ids [resolution/defaults-id]})
+        hint (types-api/load-graph-entities-uncached storage)]
+    (sp/update-entity storage :fn (:id old) {:name "obsolete-editor"})
+    (let [current (sp/create-entity storage :fn {:id (random-uuid) :namespace-id (:id home)
+                                                 :name "editor" :parent-ids [resolution/defaults-id]})]
+      (check/check-fn-def! (type-check/reconstruct-fn-def storage (:id current)))
+      (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+        (tenancy/install-personal-namespace-fn!
+          (constantly {:namespace-path path :source :fixture :isolated? false}))
+        (let [policy (snapshot/capture-context-policy ctx)
+              capture (fn [context guard]
+                        (source/with-snapshot storage
+                                              (fn [fixed authorize!]
+                                                (resolution/capture-for-context context fixed (or guard authorize!) policy))))
+              ordinary (capture (assoc ctx :graph-cache (atom nil)) nil)
+              queries (atom [])
+              observe (fn [execute]
+                        (fn [connection query opts]
+                          (swap! queries conj query)
+                          (execute connection query opts)))
+              hinted (binding [pg/*jdbc-override* {:execute! (observe jdbc/execute!)
+                                                   :execute-one! (observe jdbc/execute-one!)}]
+                       (capture (assoc ctx :graph-cache (atom hint)) nil))
+              obsolete-payload? (fn [query]
+                                  (and (re-find #"(?:FROM|JOIN) (?:public\.)?\"(?:binding|fn_slot)(?:_version)?\"" (first query))
+                                       (some #{(:id old)} (rest query))))]
+          (is (= (:id current) (:id ordinary) (:id hinted)))
+          (is (= (select-keys ordinary [:id :configuration :revision])
+                 (select-keys hinted [:id :configuration :revision])))
+          (is (not-any? obsolete-payload? @queries)
+              "Old hint-owned bindings and slots are not loaded")
+          (is (= :authz/forbidden
+                 (try
+                   (capture (assoc ctx :graph-cache (atom hint))
+                            (fn [row & _]
+                              (when (= (:id current) (:id row))
+                                (throw (ex-info "Selected configuration denied" {:type :authz/forbidden})))))
+                   nil
+                   (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))))

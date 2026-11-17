@@ -795,3 +795,17 @@
       (is (= :invalid-closure-targets
              (try (source/collect-retained-closure (fixture-storage tables calls) [root] guard nil)
                   (catch clojure.lang.ExceptionInfo e (:reason (ex-data e)))))))))
+
+
+(deftest retained-manifests-do-not-prepare-advisory-metadata-before-a-hit
+  (let [root (random-uuid) calls (atom [])
+        storage (fixture-storage {:fn {root {:id root :parent-ids []}}} calls)
+        graph (source/collect-manifest storage root (constantly nil))]
+    (reset! calls [])
+    (with-redefs [manifest/capture (fn [_ _ _ _ validate!]
+                                     (is (empty? @calls) "The loader's hint preparation belongs to misses only")
+                                     (validate! graph)
+                                     graph)]
+      (is (= graph (source/collect-manifest storage root (constantly nil) graph)))
+      (is (= [[:read :fn root]] @calls)
+          "An ordinary validator still performs its own fresh metadata check"))))

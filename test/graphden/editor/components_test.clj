@@ -145,13 +145,15 @@
         policy {:original :policy}
         calls (atom [])
         authorize! (constantly nil)
-        ctx {:storage storage :rich-types-atom (atom {})}]
+        hint {:untrusted-selection "unselected-hint-identity"}
+        ctx {:storage storage :rich-types-atom (atom {}) :graph-cache (atom hint)}]
     (with-redefs [snapshot/capture-policy (constantly policy)
                   source/with-snapshot (fn [actual f]
                                          (is (= storage actual))
                                          (f actual authorize!))
-                  resolution/capture (fn [actual guard frozen]
+                  resolution/capture (fn [actual guard frozen graph-hint]
                                        (swap! calls conj :resolve)
+                                       (is (identical? hint graph-hint))
                                        (is (= [storage authorize! (assoc policy :type-recheck nil :checker-cache nil)]
                                               [actual guard frozen]))
                                        {:id selected :revision "authoritative-revision"

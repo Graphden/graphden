@@ -858,7 +858,10 @@
 (deftest read-only-preview-matches-the-writer-proposal-and-apply-rejects-a-later-root
   (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
         path (str "snapshot-preview-" (random-uuid))
-        home (sp/create-entity storage :ns {:name path})]
+        home (sp/create-entity storage :ns {:name path})
+        ;; Other cases invalidate the shared context cache. Give this count
+        ;; scenario its own complete advisory graph, independent of test order.
+        ctx (assoc ctx :graph-cache (atom (types-api/load-graph-entities-uncached storage)))]
     (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
       (tenancy/install-personal-namespace-fn!
         (constantly {:namespace-path path :source :fixture :isolated? false}))

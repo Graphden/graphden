@@ -166,3 +166,15 @@ test('a late root reply cannot erase loading for its replacement account', async
   await second; await flush();
   assert.equal(f.status('editor'), null);
 });
+
+
+test('one card has one marker per loading concern while every body retains its description', async () => {
+  const f = fixture();
+  const card = f.document.createElement('div'); card.className = 'node-overlay';
+  f.main.appendChild(card);
+  const bodies = Array.from({length: 4}, () => { const host = f.document.createElement('span'); card.appendChild(host); return host; });
+  for (const body of bodies) f.activity.bind('canvas-metadata', body);
+  f.activity.begin('canvas-metadata', () => {}); await flush();
+  assert.equal(bodies.filter(body => body.getAttribute('data-ui-loading-indicator') !== null).length, 1);
+  assert.equal(bodies.filter(body => body.getAttribute('aria-describedby') === 'gd-ui-loading-canvas-metadata').length, 4);
+});

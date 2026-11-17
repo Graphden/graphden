@@ -8,6 +8,7 @@
   let region = null;
   let queued = false;
   let announced = '';
+  let observer = null;
   const identity = component => 'gd-ui-loading-' + component;
   function hosts(component) {
     return document.querySelectorAll('[data-ui-loading-component="' + component + '"]');
@@ -37,7 +38,30 @@
       region.setAttribute('aria-label', 'Interface status');
       app.insertBefore(region, document.getElementById('main-container'));
     }
-    for (const component of Object.keys(labels)) for (const host of hosts(component)) updateHost(host, component);
+    // Hosts can be assembled off-document. Observe only connections while
+    // something is pending; unrelated graph text updates need no status pass.
+    if (states.size && !observer && typeof MutationObserver === 'function') {
+      observer = new MutationObserver(records => {
+        if (records.some(record => [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1
+          && (node.matches('[data-ui-loading-component]') || node.querySelector('[data-ui-loading-component]'))))) publish();
+      });
+      observer.observe(app, {childList: true, subtree: true});
+    } else if (!states.size && observer) { observer.disconnect(); observer = null; }
+    const visibleComponents = new Set();
+    const bindings = Object.keys(labels).map(component => ({component,
+      hosts: [...hosts(component)].map(host => ({host, visible: host.getClientRects().length > 0,
+        group: host.closest('.node-overlay') || host.closest('.arg-overlay-row') || host.closest('.arg-value-edit-popover') || host})),
+    }));
+    for (const {component, hosts} of bindings) {
+      const marked = new Set();
+      for (const {host, visible, group} of hosts) {
+        updateHost(host, component);
+        const indicator = visible && !marked.has(group);
+        host.toggleAttribute('data-ui-loading-indicator', indicator);
+        if (indicator) marked.add(group);
+        if (visible) visibleComponents.add(component);
+      }
+    }
     for (const row of [...region.children]) if (states.get(row.dataset.component)?.row !== row) row.remove();
     let visible = false;
     const announcements = [];
@@ -59,7 +83,7 @@
       const [text, retry] = row.children;
       row.dataset.phase = state.phase;
       row.setAttribute('aria-busy', String(state.phase === 'loading'));
-      row.hidden = component !== 'editor' && ![...hosts(component)].some(host => host.getClientRects().length);
+      row.hidden = component !== 'editor' && !visibleComponents.has(component);
       const message = labels[component] + (state.phase === 'loading' ? ' — loading…' : ' — ' + state.message);
       if (text.textContent !== message) text.textContent = message;
       retry.hidden = !(state.retry && (state.phase === 'error' || state.retrying));
@@ -121,6 +145,7 @@
     // Remove only the attributes this host owns, keeping other descriptions.
     delete host.dataset.uiLoadingComponent;
     host.removeAttribute('data-ui-loading');
+    host.removeAttribute('data-ui-loading-indicator');
     host.removeAttribute('data-ui-load-error');
     const descriptions = (host.getAttribute('aria-describedby') || '').split(' ').filter(id => id && id !== identity(component));
     if (descriptions.length) host.setAttribute('aria-describedby', descriptions.join(' '));

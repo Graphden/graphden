@@ -4,6 +4,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, BASE, waitForServerHealthy} = require('./edit-test-helpers');
 const {waitForEditorReady} = require('./editor-readiness');
 const path = require('node:path');
+const fs = require('node:fs');
 const gate = () => { let release; return {promise: new Promise(resolve => { release = resolve; }), release: () => release()}; };
 (async () => {
   await waitForServerHealthy();
@@ -12,6 +13,21 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
   let denyValues = true, denyRoot = false;
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.loadingAnnouncementProof = [];
+    let announce;
+    Object.defineProperty(window, 'gdAnnounce', {configurable: true, get: () => announce, set(fn) {
+      announce = function(message, ...args) {
+        const result = fn.call(this, message, ...args);
+        if (typeof message === 'string' && message.includes(' — loading…')) {
+          const node = document.getElementById('gd-a11y-announcer');
+          loadingAnnouncementProof.push(!!node && !node.closest('[aria-busy="true"]')
+            && node.getAttribute('aria-live') === 'polite' && node.getAttribute('role') === 'status');
+        }
+        return result;
+      };
+    }});
+  });
   await page.route('**/api/ui/root/plan', async route => {
     await root.promise;
     if (denyRoot) await route.fulfill({status: 403, contentType: 'application/json', body: '{"ok":false}'});
@@ -24,18 +40,41 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
       await route.fulfill({status: 403, contentType: 'application/json', body: '{"ok":false}'});
     else await route.continue();
   });
+  async function audit(name) {
+    if (!process.env.GRAPHDEN_A11Y_SOURCE) return;
+    await page.addScriptTag({path: process.env.GRAPHDEN_A11Y_SOURCE});
+    const result = await page.evaluate(async () => {
+      const context = {include: [['.gd-ui-loading'], ['[data-ui-loading-component]']]};
+      const runOnly = {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']};
+      const full = await window.axe.run(context, {runOnly});
+      // Existing canvas text colors are reported intact. The loading region
+      // must pass contrast too; all annotated hosts must pass structural ARIA.
+      const status = await window.axe.run('.gd-ui-loading', {runOnly});
+      const aria = await window.axe.run(context, {runOnly, rules: {'color-contrast': {enabled: false}}});
+      return {full, statusViolations: status.violations, ariaViolations: aria.violations};
+    });
+    if (process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR) {
+      fs.writeFileSync(path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, name + '-a11y.json'), JSON.stringify(result, null, 2));
+      fs.writeFileSync(path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, name + '-aria.yml'),
+        await page.locator('.gd-ui-loading').ariaSnapshot());
+    }
+    assert(result.statusViolations.length === 0 && result.ariaViolations.length === 0,
+      name + ' status passes WCAG contrast and local hosts pass ARIA checks');
+  }
   try {
     await page.goto(BASE + '/#web-server');
     await waitForEditorReady(page);
-    await page.waitForFunction(() => document.querySelector('[data-ui-loading-component="canvas-values"][data-ui-loading]'));
+    await page.waitForFunction(() => document.querySelector('[data-ui-loading-component="canvas-values"][data-ui-loading][data-ui-loading-indicator]'));
     const rootStatus = page.locator('#gd-ui-loading-editor');
+    assert(await page.locator('#gd-ui-loading-canvas-bindings').isHidden(), 'an unopened binding popover adds no visible loading row');
     assert(await rootStatus.getAttribute('aria-busy') === 'true', 'held root has an individual loading status');
-    const values = page.locator('[data-ui-loading-component="canvas-values"][data-ui-loading]').first();
+    const values = page.locator('[data-ui-loading-component="canvas-values"][data-ui-loading][data-ui-loading-indicator]').first();
+    assert(await page.locator('#gd-ui-loading-canvas-values').isVisible(), 'late-mounted values appear in the visible summary');
     assert(await values.isVisible(), 'pending value presentation is marked on its actual visible host');
-    assert(await page.evaluate(() => document.querySelector('#gd-a11y-announcer')?.textContent.includes('loading')),
+    assert(await page.evaluate(() => loadingAnnouncementProof.length > 0 && loadingAnnouncementProof.every(Boolean)),
       'loading is announced outside all aria-busy nodes');
     assert(await page.evaluate(() => {
-      const host = document.querySelector('[data-ui-loading-component="canvas-values"][data-ui-loading]');
+      const host = document.querySelector('[data-ui-loading-component="canvas-values"][data-ui-loading][data-ui-loading-indicator]');
       const spinner = getComputedStyle(host, '::after');
       return spinner.content !== 'none' && spinner.animationName === 'editor-busy-spin';
     }), 'the local loading marker has a real CSS progress indicator');
@@ -47,6 +86,7 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
     });
     if (process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR)
       await page.screenshot({path: path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, 'loading.png')});
+    await audit('loading');
     root.release();
     await rootStatus.waitFor({state: 'detached', timeout: 60000});
     assert(await values.getAttribute('data-ui-loading') !== null, 'root completion does not clear the independently pending values');
@@ -62,6 +102,7 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
       && (!loadingNativeProof.action || loadingNativeProof.action.isConnected)), 'failure preserves the original native controls');
     if (process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR)
       await page.screenshot({path: path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, 'error.png')});
+    await audit('error');
     denyValues = false;
     await valuesStatus.getByRole('button', {name: 'Retry values and types'}).click();
     await valuesStatus.waitFor({state: 'detached', timeout: 60000});
@@ -74,6 +115,8 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
     await rootStatus.getByRole('button', {name: 'Retry editor controls'}).click();
     await rootStatus.waitFor({state: 'detached', timeout: 60000});
     await page.waitForFunction(() => document.querySelector('.gd-ui-loading')?.hidden === true);
+    if (process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR)
+      await page.screenshot({path: path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, 'ready.png')});
     assert(errors.length === 0, 'loading, denial and retry produce no page errors');
     console.log('PASS nonblocking component loading, local markers, truthful errors and retry');
   } finally {

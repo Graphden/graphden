@@ -6091,7 +6091,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .gd-ui-loading-item button:hover { background: var(--hover-bg); }
 .gd-ui-loading-item button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-[data-ui-loading]::after, .gd-ui-loading-item[data-phase="loading"]::before {
+[data-ui-loading][data-ui-loading-indicator]::after, .gd-ui-loading-item[data-phase="loading"]::before {
   content: "";
   display: inline-block;
   flex-shrink: 0;
@@ -8488,7 +8488,7 @@ button.lambda-params-chip {
   }
 
   /* Progress indicators are exempt — but slow the rotation down. */
-  .editor-busy-banner::before, [data-ui-loading]::after, .gd-ui-loading-item[data-phase="loading"]::before {
+  .editor-busy-banner::before, [data-ui-loading][data-ui-loading-indicator]::after, .gd-ui-loading-item[data-phase="loading"]::before {
     animation-duration: 1.6s !important;
     animation-iteration-count: infinite !important;
   }

@@ -886,7 +886,7 @@
                         (activation/preview! ctx input)))]
         (is (= legacy preview) "The original receipt and complete proposal seal remain unchanged")
         (is (seq @read-only?) "The proof observes actual PostgreSQL reads")
-        (is (every? true? @read-only?) "Every read uses the decorated read-only transaction")
+        (is (every? true? @read-only?) "Every observed storage read uses the decorated read-only transaction")
         (is (empty? (sp/query-entities storage :fn {:namespace-id (:id home)})))
         ;; Another request creates the ordinary personal root after preview.
         (preparation/prepare! ctx {:create true})

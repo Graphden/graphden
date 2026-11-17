@@ -38,7 +38,7 @@
       app.insertBefore(region, document.getElementById('main-container'));
     }
     for (const component of Object.keys(labels)) for (const host of hosts(component)) updateHost(host, component);
-    for (const row of [...region.children]) if (!states.has(row.dataset.component)) row.remove();
+    for (const row of [...region.children]) if (states.get(row.dataset.component)?.row !== row) row.remove();
     let visible = false;
     const announcements = [];
     for (const [component, state] of states) {

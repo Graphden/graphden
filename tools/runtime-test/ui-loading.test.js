@@ -139,9 +139,11 @@ test('real root lifetime keeps loading through held authorization and clears on 
   f.requests[1].resolve({ok: false, status: 403, json: async () => ({ok: false})});
   await failed; await flush();
   assert.equal(f.status('editor').dataset.phase, 'error');
+  assert.equal(f.document.querySelectorAll('#gd-ui-loading-editor').length, 1, 'retiring the loading receipt leaves one error status');
   assert.equal(f.status('editor').getAttribute('aria-busy'), 'false');
   f.status('editor').querySelector('button').click(); await flush();
   assert.equal(f.status('editor').dataset.phase, 'loading');
+  assert.equal(f.document.querySelectorAll('#gd-ui-loading-editor').length, 1, 'retry replaces rather than duplicates the root status');
   const pending = f.requests[2];
   f.context.gdEditorRoot.dispose(); await flush();
   assert.equal(pending.options.signal.aborted, true);

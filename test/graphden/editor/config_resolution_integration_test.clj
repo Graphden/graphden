@@ -884,7 +884,7 @@
             read-only? (atom [])
             observe (fn [execute]
                       (fn [connection query opts]
-                        (swap! read-only? conj (.isReadOnly ^java.sql.Connection connection))
+                        (swap! read-only? conj (java.sql.Connection/.isReadOnly connection))
                         (execute connection query opts)))
             preview (with-redefs [random-uuid (constantly nonce)
                                   writer/call-with-write

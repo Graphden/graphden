@@ -6104,7 +6104,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   animation: editor-busy-spin 0.8s linear infinite;
   pointer-events: none;
 }
-[data-ui-load-error]::after { content: " !"; color: var(--error-fg); }
+[data-ui-load-error][data-ui-loading-indicator]::after { content: " !"; color: var(--error-fg); }
 
 /* ---- CONTEXT BAR ---- */
 #gd-ctxbar {

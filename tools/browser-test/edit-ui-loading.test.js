@@ -61,6 +61,26 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
     assert(result.statusViolations.length === 0 && result.ariaViolations.length === 0,
       name + ' status passes WCAG contrast and local hosts pass ARIA checks');
   }
+  const layoutProof = {};
+  async function assertLayout(phase) {
+    const geometry = await page.evaluate(() => {
+      const main = document.getElementById('main-container'), explorer = document.getElementById('side-menu');
+      const saved = explorer.scrollTop;
+      explorer.scrollTop = 80;
+      const scrollInside = explorer.scrollTop > 0;
+      explorer.scrollTop = saved;
+      return {viewport: innerHeight, mainBottom: main.getBoundingClientRect().bottom,
+        explorerBottom: explorer.getBoundingClientRect().bottom, scrollHeight: explorer.scrollHeight,
+        clientHeight: explorer.clientHeight, overflow: getComputedStyle(explorer).overflowY, scrollInside,
+        namespaces: document.querySelectorAll('#entity-list .ns-header').length};
+    });
+    layoutProof[phase] = geometry;
+    if (process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR)
+      fs.writeFileSync(path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, 'layout.json'), JSON.stringify(layoutProof, null, 2));
+    assert(geometry.mainBottom <= geometry.viewport + 1 && geometry.explorerBottom <= geometry.viewport + 1
+      && geometry.scrollHeight > geometry.clientHeight && geometry.scrollInside
+      && ['auto', 'scroll'].includes(geometry.overflow), phase + ' full catalogue stays inside the viewport and scrolls within Explorer');
+  }
   try {
     await page.goto(BASE + '/#web-server');
     await waitForEditorReady(page);
@@ -78,6 +98,7 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
       const spinner = getComputedStyle(host, '::after');
       return spinner.content !== 'none' && spinner.animationName === 'editor-busy-spin';
     }), 'the local loading marker has a real CSS progress indicator');
+    await assertLayout('loading');
     await page.locator('#search-input').fill('web-server');
     assert(await page.locator('#search-input').inputValue() === 'web-server', 'native search works while personal views wait');
     await page.evaluate(() => {
@@ -115,6 +136,10 @@ const gate = () => { let release; return {promise: new Promise(resolve => { rele
     await rootStatus.getByRole('button', {name: 'Retry editor controls'}).click();
     await rootStatus.waitFor({state: 'detached', timeout: 60000});
     await page.waitForFunction(() => document.querySelector('.gd-ui-loading')?.hidden === true);
+    await page.locator('#search-input').fill('');
+    await page.waitForFunction(() => !document.querySelector('#entity-list .search-exact-section')
+      && !document.getElementById('entity-list').textContent.includes('Searching…'));
+    await assertLayout('ready');
     if (process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR)
       await page.screenshot({path: path.join(process.env.GRAPHDEN_LOADING_SCREENSHOT_DIR, 'ready.png')});
     assert(errors.length === 0, 'loading, denial and retry produce no page errors');

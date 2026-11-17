@@ -178,3 +178,38 @@ test('one card has one marker per loading concern while every body retains its d
   assert.equal(bodies.filter(body => body.getAttribute('data-ui-loading-indicator') !== null).length, 1);
   assert.equal(bodies.filter(body => body.getAttribute('aria-describedby') === 'gd-ui-loading-canvas-metadata').length, 4);
 });
+
+test('a body connected after its first off-document render gains a visible status, then observation stops', async () => {
+  const f = fixture();
+  const observers = [];
+  f.context.MutationObserver = class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() { this.active = true; }
+    disconnect() { this.active = false; }
+  };
+  const progress = f.activity.begin('canvas-values', () => {});
+  await flush();
+  const body = f.document.createElement('span'); body.nodeType = 1;
+  body.matches = selector => body.closest(selector) === body;
+  f.activity.bind('canvas-values', body); await flush();
+  assert.equal(f.status('canvas-values').hidden, true);
+  f.main.appendChild(body);
+  observers[0].callback([{addedNodes: [body], removedNodes: []}]);
+  await flush();
+  assert.equal(f.status('canvas-values').hidden, false);
+  assert.equal(body.getAttribute('data-ui-loading-indicator'), '');
+  progress.finish(); await flush();
+  assert.equal(observers[0].active, false);
+});
+
+
+test('display contents bodies are visible through their rendered child boxes', async () => {
+  const f = fixture();
+  const body = f.document.createElement('span');
+  body.getClientRects = () => [];
+  body.appendChild(f.document.createElement('span')); f.main.appendChild(body);
+  f.activity.bind('canvas-values', body);
+  f.activity.begin('canvas-values', () => {}); await flush();
+  assert.equal(f.status('canvas-values').hidden, false);
+  assert.equal(body.getAttribute('data-ui-loading-indicator'), '');
+});

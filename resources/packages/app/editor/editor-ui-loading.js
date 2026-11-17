@@ -13,6 +13,10 @@
   function hosts(component) {
     return document.querySelectorAll('[data-ui-loading-component="' + component + '"]');
   }
+  function visibleContent(host) {
+    // Passive spans use display:contents and have no box of their own.
+    return host.getClientRects().length > 0 || [...host.children].some(visibleContent);
+  }
   function updateHost(host, component) {
     const state = states.get(component);
     host.toggleAttribute('data-ui-loading', state?.phase === 'loading');
@@ -49,7 +53,7 @@
     } else if (!states.size && observer) { observer.disconnect(); observer = null; }
     const visibleComponents = new Set();
     const bindings = Object.keys(labels).map(component => ({component,
-      hosts: [...hosts(component)].map(host => ({host, visible: host.getClientRects().length > 0,
+      hosts: [...hosts(component)].map(host => ({host, visible: visibleContent(host),
         group: host.closest('.node-overlay') || host.closest('.arg-overlay-row') || host.closest('.arg-value-edit-popover') || host})),
     }));
     for (const {component, hosts} of bindings) {

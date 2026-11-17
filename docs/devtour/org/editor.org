@@ -325,7 +325,7 @@ Gives a graph component its own empty DOM host. ~render~ validates live Hiccup a
 :CUSTOM_ID: editor/mountCanvasBody
 :FILE: resources/packages/app/editor/editor-passive-canvas.js
 :LINE: 234
-:MINS: 3.5
+:MINS: 3.6
 :END:
 
 Mounts passive canvas bodies through one shared lifetime and stylesheet mechanism. The app.ui-canvas binding keeps its original display ABI; app.ui-canvas-values separately presents value labels, type chips and inherited type history over finite display facts. Native overlays retain Run, actions, service controls, edit guards, focus and geometry. All bodies share a checked scoped stylesheet; overlay removal disposes their renderers. Scope reconciliation retires old owner facts before refresh, while first preference hydration keeps bodies only within the same authenticated location. Personal markup cannot claim native controls or identities; a malformed surface selects the builtin component. Existing sanitized representation previews stay native siblings. Values styles stay in flow; one measured grid pass reserves card widths, edge labels and type-history row envelopes.

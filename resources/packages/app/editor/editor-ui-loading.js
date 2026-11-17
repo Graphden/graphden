@@ -74,7 +74,7 @@
     if (summary !== announced) {
       announced = summary;
       // Use the existing polite announcer outside all busy descendants.
-      if (summary) window.announce?.(summary);
+      if (summary) window.gdAnnounce?.(summary);
     }
   }
   function publish() {

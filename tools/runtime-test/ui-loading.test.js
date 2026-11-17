@@ -28,7 +28,7 @@ function fixture(root = false) {
   const listeners = new Map(), requests = [], announcements = [];
   const context = vm.createContext({document, Map, Set, WeakMap, Object, queueMicrotask, AbortController,
     performance, DOMException, Event, CustomEvent: class {},
-    announce: text => announcements.push(text),
+    gdAnnounce: text => announcements.push(text),
     gdPrefOwner: 'owner', gdPrefRead: () => null,
     API: {api_ui_root_plan: '/api/ui/root/plan'},
     GraphdenBrowser: {keyword: key => key, isCallable: value => typeof value === 'function',

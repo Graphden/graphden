@@ -15,7 +15,8 @@
   }
   function visibleContent(host) {
     // Passive spans use display:contents and have no box of their own.
-    return host.getClientRects().length > 0 || [...host.children].some(visibleContent);
+    return [...host.getClientRects()].some(rect => rect.width > 0 && rect.height > 0)
+      || [...host.children].some(visibleContent);
   }
   function updateHost(host, component) {
     const state = states.get(component);

@@ -6079,7 +6079,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .gd-ui-loading[hidden], .gd-ui-loading-item[hidden] { display: none; }
 .gd-ui-loading-item { display: inline-flex; align-items: center; gap: 6px; }
-.gd-ui-loading-item[data-phase="error"] { color: var(--error-fg); }
+.gd-ui-loading-item[data-phase="error"] { color: var(--error-fg-strong); }
 .gd-ui-loading-item button {
   padding: 2px 6px;
   border: 1px solid var(--light-border);
@@ -6104,7 +6104,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   animation: editor-busy-spin 0.8s linear infinite;
   pointer-events: none;
 }
-[data-ui-load-error][data-ui-loading-indicator]::after { content: " !"; color: var(--error-fg); }
+[data-ui-load-error][data-ui-loading-indicator]::after { content: " !"; color: var(--error-fg-strong); }
 
 /* ---- CONTEXT BAR ---- */
 #gd-ctxbar {

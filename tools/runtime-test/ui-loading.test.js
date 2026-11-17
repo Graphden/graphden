@@ -17,7 +17,7 @@ function fixture(root = false) {
     el.append = (...children) => children.forEach(child => el.appendChild(child));
     el.getClientRects = () => {
       for (let node = el; node; node = node.parentNode) if (node.hidden) return [];
-      return el.isConnected ? [{}] : [];
+      return el.isConnected ? [{width: 20, height: 10}] : [];
     };
     return el;
   };
@@ -212,4 +212,15 @@ test('display contents bodies are visible through their rendered child boxes', a
   f.activity.begin('canvas-values', () => {}); await flush();
   assert.equal(f.status('canvas-values').hidden, false);
   assert.equal(body.getAttribute('data-ui-loading-indicator'), '');
+});
+
+
+test('an empty presentation box does not claim a visible loading indicator', async () => {
+  const f = fixture();
+  const body = f.document.createElement('span');
+  body.getClientRects = () => [{width: 0, height: 10}]; f.main.appendChild(body);
+  f.activity.bind('canvas-bindings', body);
+  f.activity.begin('canvas-bindings', () => {}); await flush();
+  assert.equal(f.status('canvas-bindings').hidden, true);
+  assert.equal(body.getAttribute('data-ui-loading-indicator'), null);
 });

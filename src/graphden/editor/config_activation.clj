@@ -297,6 +297,15 @@
                                     (get-in root-plan [:receipt :changed-functions]))))))))
 
 
+(defn- run-with-current-policy
+  [ctx storage policy context-epoch operation]
+  (components/assert-current-policy! storage)
+  (let [result (operation storage policy)]
+    (when-not (= context-epoch (context/invalidation-epoch ctx))
+      (refuse! :policy-refresh-required))
+    result))
+
+
 (defn call-with-current-configuration
   "Freeze source policy and epoch, then run an editor configuration operation
    under the graph writer and current owner's preference lock."
@@ -310,12 +319,21 @@
                          storage "components"
                          (fn [storage]
                            (branch-resolution/call-with-fresh-memos
-                             #(do
-                                (components/assert-current-policy! storage)
-                                (let [result (operation storage policy)]
-                                  (when-not (= context-epoch (context/invalidation-epoch ctx))
-                                    (refuse! :policy-refresh-required))
-                                  result))))))))
+                             #(run-with-current-policy ctx storage policy context-epoch operation)))))))
+
+
+(defn call-with-preview-snapshot
+  "Read a proposal in one decorated, owned read-only snapshot. Preview takes
+   no write locks; apply still rebuilds and verifies the proposal under them."
+  [ctx operation]
+  (let [storage (request/require-storage ctx)
+        context-epoch (context/invalidation-epoch ctx)
+        policy (snapshot/capture-context-policy ctx)]
+    (tx/assert-owns-commit! storage)
+    (source/with-snapshot
+      storage
+      (fn [fixed _authorize!]
+        (run-with-current-policy ctx fixed policy context-epoch operation)))))
 
 
 (defn wire-value
@@ -356,7 +374,7 @@
   [ctx input]
   (let [{:keys [operation command]} (parse-preview-command input)
         nonce (random-uuid)]
-    (call-with-current-configuration
+    (call-with-preview-snapshot
       ctx
       (fn [storage policy]
         (let [plan (configuration-plan storage command policy nonce true)]

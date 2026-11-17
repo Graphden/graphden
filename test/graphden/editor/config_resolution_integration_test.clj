@@ -13,6 +13,7 @@
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.config-templates :as templates]
     [graphden.editor.config-undo :as undo]
+    [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.composition.core :as composition]
@@ -852,3 +853,45 @@
                                 (throw (ex-info "Selected configuration denied" {:type :authz/forbidden})))))
                    nil
                    (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))))
+
+
+(deftest read-only-preview-matches-the-writer-proposal-and-apply-rejects-a-later-root
+  (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
+        path (str "snapshot-preview-" (random-uuid))
+        home (sp/create-entity storage :ns {:name path})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path path :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [before (current-configuration storage)
+            input {:operation "personalize"
+                   :command {:component "fn-picker" :expected-preference {:present false :value nil}
+                             :expected-configuration-revision (:revision before)}}
+            nonce (random-uuid)
+            legacy (with-redefs [activation/call-with-preview-snapshot activation/call-with-current-configuration
+                                 random-uuid (constantly nonce)]
+                     (activation/preview! ctx input))
+            read-only? (atom [])
+            observe (fn [execute]
+                      (fn [connection query opts]
+                        (swap! read-only? conj (.isReadOnly ^java.sql.Connection connection))
+                        (execute connection query opts)))
+            preview (with-redefs [random-uuid (constantly nonce)
+                                  writer/call-with-write
+                                  (fn [& _] (throw (IllegalStateException. "Preview acquired a graph writer")))
+                                  preferences/call-with-lock
+                                  (fn [& _] (throw (IllegalStateException. "Preview acquired a preference lock")))]
+                      (binding [pg/*jdbc-override* {:execute! (observe jdbc/execute!)
+                                                    :execute-one! (observe jdbc/execute-one!)}]
+                        (activation/preview! ctx input)))]
+        (is (= legacy preview) "The original receipt and complete proposal seal remain unchanged")
+        (is (seq @read-only?) "The proof observes actual PostgreSQL reads")
+        (is (every? true? @read-only?) "Every read uses the decorated read-only transaction")
+        (is (empty? (sp/query-entities storage :fn {:namespace-id (:id home)})))
+        ;; Another request creates the ordinary personal root after preview.
+        (preparation/prepare! ctx {:create true})
+        (epoch/seed-watermark! storage)
+        (let [refusal (try (activation/apply-proposal! ctx (:request preview)) nil
+                           (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))]
+          (is (= :stale-configuration refusal)))
+        (is (= 1 (count (sp/query-entities storage :fn {:namespace-id (:id home)}))))))))

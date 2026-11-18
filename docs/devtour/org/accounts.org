@@ -11,26 +11,26 @@ Sign-in, account linking, tokens, and second-factor validation.
 :PROPERTIES:
 :CUSTOM_ID: accounts/resolve-social-identity!
 :FILE: src/graphden/accounts/core.clj
-:LINE: 168
+:LINE: 169
 :MINS: 3.2
 :END:
 
 Resolves a social sign-in to an existing identity, links it to an account with the same verified email when allowed, or creates an account. The resulting stable account ID is used for [[file:glossary.org::#term/auth][authorization]] independently of the sign-in method.
 
-- source :: [[file:../../../src/graphden/accounts/core.clj::(defn resolve-social-identity!][src/graphden/accounts/core.clj:168]]
+- source :: [[file:../../../src/graphden/accounts/core.clj::(defn resolve-social-identity!][src/graphden/accounts/core.clj:169]]
 - same file :: [[file:accounts.org::#accounts/mint-session!][mint-session!]]
 
 * 2. mint-session!
 :PROPERTIES:
 :CUSTOM_ID: accounts/mint-session!
 :FILE: src/graphden/accounts/core.clj
-:LINE: 228
+:LINE: 229
 :MINS: 1.9
 :END:
 
 Creates a stored session whose raw token is returned once; storage keeps its SHA-256 hash. Session kinds also distinguish verification links and pending second-factor steps, which must not authenticate as ordinary API sessions.
 
-- source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:228]]
+- source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:229]]
 - same file :: [[file:accounts.org::#accounts/resolve-social-identity!][resolve-social-identity!]]
 
 * 3. accounts-provider

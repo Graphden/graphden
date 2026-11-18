@@ -14,6 +14,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.accounts.crypto :as crypto]
+    [graphden.accounts.session-read :as session-read]
     [graphden.accounts.totp :as totp]
     [graphden.storage.protocol.core :as sp])
   (:import
@@ -291,10 +292,16 @@
    per-token ceiling without re-reading the session row."
   [storage token]
   (when-not (str/blank? token)
-    (when-let [s (first (sp/query-entities storage :session
-                                           {:token-hash (crypto/sha256-hex token)}))]
+    (let [token-hash (crypto/sha256-hex token)
+          paired (if (satisfies? session-read/SessionAccountRead storage)
+                   (session-read/session-and-account storage token-hash)
+                   ::session-read/unsupported)
+          rows (if (= ::session-read/unsupported paired)
+                 {:session (first (sp/query-entities storage :session {:token-hash token-hash}))}
+                 paired)
+          s (:session rows)]
       (when (authenticating-session? s)
-        (when-let [acct (account-of storage (:account-id s))]
+        (let [acct (if (contains? rows :account) (:account rows) (account-of storage (:account-id s)))]
           (when (= "active" (:status acct))
             (touch-session! storage s)
             (assoc acct

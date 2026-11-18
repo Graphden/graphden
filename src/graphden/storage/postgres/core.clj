@@ -11,8 +11,10 @@
    - migration.clj - Schema migration logic
    - crud.clj - CRUD operations"
   (:require
+    [graphden.accounts.session-read :as session-read]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.grouped-read :as grouped]
+    [graphden.storage.postgres.account-session :as account-session]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.graph :as graph]
@@ -151,6 +153,14 @@
 
 (defrecord PostgresStorage
   [pool metadata-cache lock slot-row-cache]
+
+  session-read/SessionAccountRead
+
+  (session-and-account
+    [_ token-hash]
+    (account-session/lookup pool (get-entity-fields pool metadata-cache lock :account)
+                            (get-entity-fields pool metadata-cache lock :session) token-hash))
+
 
   sp/StorageExpectedSource
 

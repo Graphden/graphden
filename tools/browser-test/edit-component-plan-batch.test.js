@@ -29,6 +29,12 @@ const {newContext, waitForEditorReady, BASE} = require('./edit-test-helpers');
     for (const size of [1, 3]) {
       batchMax = String(size);
       await page.evaluate(() => gdPrefsRefresh());
+      // Refresh schedules eight owner reloads after its preferences response.
+      // An already-reached networkidle state can return before they send, so
+      // await their fresh generation identities before counting our six reads.
+      await page.waitForFunction(() => ['canvas', 'canvas-values', 'canvas-inheritance',
+        'canvas-metadata', 'canvas-type-structure', 'canvas-bindings', 'explorer', 'inspector']
+        .every(name => typeof gdUIComponentRuntimeIdentity(name) === 'string'), null, {timeout: 45000});
       await page.waitForLoadState('networkidle');
       assert.equal(await page.evaluate(() => gdUIPlanBatchMax), size);
       transports.length = 0;

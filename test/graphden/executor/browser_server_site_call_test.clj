@@ -11,6 +11,7 @@
     [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as runtime]
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.storage.binding-read :as binding-read]
     [graphden.storage.remote.core :as remote]
     [graphden.system.branch-router.recheck :as recheck]
@@ -159,3 +160,21 @@
                                                 (if (= owner (:fn-id row)) (assoc row :fn-id parent) row)) %))
                      (update :bindings #(mapv (fn [row]
                                                 (if (= site-slot (:slot-id row)) (assoc row :fn-id parent) row)) %)))))))))
+
+
+(deftest retained-target-row-never-authorizes-private-source
+  (let [target (random-uuid)
+        identity-row {:id target :name "query"}
+        attempts (atom [])]
+    (with-redefs [manifest/capture (fn [_ kind ids _ _ validate!]
+                                     (is (= :server-target kind))
+                                     (is (= [target] ids))
+                                     (validate! {:fns [identity-row]}))
+                  source/collect-server-closure (fn [& _] (swap! attempts conj :private-source))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Revoked"
+            (server-source/capture {} nil
+                                   (fn [row permission]
+                                     (swap! attempts conj [row permission])
+                                     (throw (ex-info "Revoked" {:type :authz/forbidden})))
+                                   {} target)))
+      (is (= [[identity-row {:execute? true :server-target? true}]] @attempts)))))

@@ -261,7 +261,7 @@
   ([source-storage roots authorize! run validate!]
    (capture source-storage :manifest roots authorize! run validate!))
   ([source-storage kind roots authorize! run validate!]
-   (when-not (contains? #{:manifest :client :server :nodes :closure} kind)
+   (when-not (contains? #{:manifest :client :server :server-target :nodes :closure} kind)
      (throw (ex-info "Unknown source collector kind" {:kind kind})))
    (let [scope *snapshot*]
      (when (and scope (not @(:active? scope)))
@@ -269,7 +269,7 @@
      (if-not (and scope (identical? source-storage (:storage scope))
                   (identical? authorize! (:authorize! scope))
                   (identical? (:registration scope) (tenancy/source-replay-policy-info authorize!))
-                  (<= 1 (count roots) (if (= :nodes kind) 128 8)) (every? uuid? roots))
+                  (<= 1 (count roots) (case kind :nodes 128 :server-target 1 8)) (every? uuid? roots))
        (run)
        (let [{:keys [controller connection check! charged client-source]} scope
              {:keys [cache limits]} controller

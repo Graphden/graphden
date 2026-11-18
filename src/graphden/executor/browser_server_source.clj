@@ -10,6 +10,7 @@
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
@@ -54,16 +55,28 @@
       (when (some? (:value binding)) (wire/encode-value (:value binding))))))
 
 
+(defn- authorize-target!
+  "A physical manifest may supply only this target's versioned identity row.
+   Recheck its execute grant before inspecting any private closure rows."
+  [storage authorize! target]
+  (let [check-row! (fn [row]
+                     (when-not (and row (= target (:id row))) (reject! :server-target-missing))
+                     (authorize! row {:execute? true :server-target? true}))]
+    (manifest/capture
+      storage :server-target [target] authorize!
+      (fn []
+        (let [row (sp/read-entity storage :fn target)]
+          (check-row! row)
+          {:fns [row] :fn-slots [] :slots [] :bindings [] :list-items [] :identity-target-ids #{}}))
+      (fn [{[row] :fns}] (check-row! row)))))
+
+
 (defn capture
   "Read/check the complete server closure inside the caller's snapshot.
    Returns server-only evidence and a frozen input/output contract."
   [ctx storage authorize! policy target]
-  (let [row (sp/read-entity storage :fn target)
-        _ (when-not row (reject! :server-target-missing))
-        ;; Only the target execute grant authorizes this private inspection.
-        ;; Dependency rows never enter the browser source/export graph.
-        _ (authorize! row {:execute? true :server-target? true})
-        graph (source/collect-server-closure storage target authorize! (some-> (:graph-cache ctx) deref))
+  (authorize-target! storage authorize! target)
+  (let [graph (source/collect-server-closure storage target authorize! (some-> (:graph-cache ctx) deref))
         signature (get-in policy [:rich :by-id target])
         captured {:graph graph :namespaces (source/collect-namespaces storage graph)}
         natives (filter #(and (empty? (:parent-ids %)) (:return-type-fn-id %)) (:fns graph))]

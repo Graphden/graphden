@@ -25,6 +25,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.context :as context]
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.executor.source-recipe-replay :as replay]
     [graphden.storage.binding-read :as binding-read]
     [graphden.system.branch-router.recheck :as recheck]
@@ -255,7 +256,7 @@
 
 
 (defn- export-captured-plan
-  [ctx request policy entries anchor {:keys [snapshot calls targets evidence anchor-evidence]}]
+  [ctx storage authorize! request policy entries anchor {:keys [snapshot calls targets evidence anchor-evidence]}]
   (let [epoch (context/invalidation-epoch ctx)
         site-proofs (server-site/prepare-all (:graph snapshot) entries calls targets anchor-evidence)
         descriptors (into {}
@@ -267,6 +268,11 @@
                                                 :contract (select-keys (get targets target)
                                                                        [:input-type :output-type])})]))
                           calls)]
+    ;; A single witness group caps speculative work per export. Other plans
+    ;; populate their selected paths on demand.
+    (when-let [ids (:ids (first (vals site-proofs)))]
+      (when (every? #(= ids (:ids %)) (vals site-proofs))
+        (manifest/stage-client-witness! storage authorize! (get-in snapshot [:graph :fns]) ids)))
     (snapshot/export-snapshot
       (assoc snapshot :server-plan-options {:server-descriptors descriptors})
       (:base-fns ctx) entries policy)))
@@ -276,7 +282,7 @@
   "Export the selected root. Network targets stop at checked opaque terminals;
    their implementations and configured captures remain exclusively server-side."
   [ctx storage authorize! policy entries request anchor]
-  (export-captured-plan ctx request policy entries anchor
+  (export-captured-plan ctx storage authorize! request policy entries anchor
                         (capture-client ctx storage authorize! policy entries anchor)))
 
 
@@ -290,7 +296,7 @@
         entries {:root root}]
     (consume root
              #(export-captured-plan
-                ctx request policy entries anchor
+                ctx storage authorize! request policy entries anchor
                 (capture-client-source ctx storage authorize! policy entries evidence)))))
 
 

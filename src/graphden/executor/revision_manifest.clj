@@ -3,6 +3,7 @@
    Controller lifetime belongs to one trusted pool/schema generation. No ACL
    result, authorizer, connection or caller graph enters retained state."
   (:require
+    [graphden.executor.browser-server-site :as site]
     [graphden.executor.manifest-graph-copy :as copy]
     [graphden.executor.source-recipe-storage :as storage]
     [graphden.storage.grouped-read :as grouped]
@@ -175,12 +176,13 @@
                               scope {:controller controller :storage fixed :connection connection :active? active?
                                      :revision token :policy-context policy-context
                                      :branch (:branch-id description) :registration registration
-                                     :authorize! authorize! :check! check! :staged staged :charged (atom 0)}]
+                                     :authorize! authorize! :check! check! :staged staged :charged (atom 0)
+                                     :client-source (volatile! nil)}]
                           (binding [*snapshot* scope]
                             (try
                               (storage/call-with-fresh-memos
                                 #(grouped/call-with-snapshot-cache connection (fn [] (consume fixed authorize!))))
-                              (finally (reset! active? false)))))))))]
+                              (finally (vreset! (:client-source scope) nil) (reset! active? false)))))))))]
             (check!)
             (publish! controller @staged)
             result)
@@ -204,6 +206,55 @@
                   (identical? graph (:graph witness))))))
 
 
+(defn- entry-key
+  [scope kind roots]
+  [kind (:branch scope) (:generation (:registration scope)) (:revision scope) (:policy-context scope) (set roots)])
+
+
+(defn- stage-copy!
+  [{:keys [controller charged staged]} key graph]
+  (let [{:keys [cache limits]} controller]
+    (when-not (:closed? @cache)
+      (try
+        (locking charged
+          (let [remaining (- (:max-capture-bytes limits) @charged (* 128 (count (peek key))))]
+            (when (pos? remaining)
+              (let [frozen (copy/freeze graph remaining (:max-rows limits))]
+                (swap! charged + (retained-charge key frozen))
+                (swap! staged conj [key frozen])
+                true))))
+        (catch clojure.lang.ExceptionInfo error
+          (when-not (contains? #{::copy/ineligible :graphden.executor.source-recipe-values/ineligible}
+                               (:type (ex-data error)))
+            (throw error)))))))
+
+
+(defn stage-client-witness!
+  "Stage one selected path from this snapshot's admitted client collector.
+   Only node identities cross this boundary. Reconstruct complete owned rows
+   here, excluding identity-only terminals. Publication follows RR commit;
+   the next caller still runs the ordinary :nodes validator on a fresh hit."
+  [source-storage authorize! client-fns ids]
+  (when-let [{:keys [controller active? client-source staged check!] :as scope} *snapshot*]
+    (let [graph @client-source
+          ids (set ids)]
+      (when (and @active? graph (identical? client-fns (:fns graph))
+                 (identical? source-storage (:storage scope)) (identical? authorize! (:authorize! scope))
+                 (identical? (:registration scope) (tenancy/source-replay-policy-info authorize!))
+                 (<= 1 (count ids) 128) (every? uuid? ids)
+                 (not-any? (:identity-target-ids graph) ids))
+        (vreset! client-source nil)
+        (check!)
+        (let [key (entry-key scope :nodes ids)
+              cache (:cache controller)
+              entry (get-in @cache [:entries key])]
+          (when-not (or (:closed? @cache) (and entry (> (:expires entry) (now-ms)))
+                        (some #(= key (first %)) @staged))
+            (let [witness (site/project graph ids)]
+              (when (= ids (set (map :id (:fns witness))))
+                (stage-copy! scope key (assoc witness :identity-target-ids #{}))))))))))
+
+
 (defn capture
   "Retain a bounded private collector graph, partitioned by collector semantics.
    Reuse always performs fresh authorization and source-contract validation."
@@ -220,9 +271,9 @@
                   (identical? (:registration scope) (tenancy/source-replay-policy-info authorize!))
                   (<= 1 (count roots) (if (= :nodes kind) 128 8)) (every? uuid? roots))
        (run)
-       (let [{:keys [controller connection check! staged charged]} scope
+       (let [{:keys [controller connection check! charged client-source]} scope
              {:keys [cache limits]} controller
-             key [kind (:branch scope) (:generation (:registration scope)) (:revision scope) (:policy-context scope) (set roots)]
+             key (entry-key scope kind roots)
              _ (check!)
              entry (locking cache
                      (swap! cache prune (now-ms))
@@ -235,20 +286,12 @@
                (check!)
                (binding [*retained-source* {:snapshot scope :graph graph}]
                  (validate! graph))
-               (check!) graph)
+               (check!)
+               (when (= :client kind) (vreset! client-source graph))
+               graph)
              (run))
            (let [graph (run)]
              (check!)
-             (when-not (:closed? @cache)
-               (try
-                 (locking charged
-                   (let [key-charge (* 128 (count roots))
-                         frozen (copy/freeze graph (max 1 (- (:max-capture-bytes limits) @charged key-charge)) (:max-rows limits))]
-                     (swap! charged + (retained-charge key frozen))
-                     (swap! staged conj [key frozen])))
-                 (catch clojure.lang.ExceptionInfo error
-                   (when-not (contains? #{::copy/ineligible
-                                          :graphden.executor.source-recipe-values/ineligible}
-                                        (:type (ex-data error)))
-                     (throw error)))))
+             (when (and (stage-copy! scope key graph) (= :client kind))
+               (vreset! client-source graph))
              graph)))))))

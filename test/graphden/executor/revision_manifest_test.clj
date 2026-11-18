@@ -33,6 +33,7 @@
            checks (atom 0)
            root (random-uuid)
            roots (atom [root])
+           after-capture (atom identity)
            collect (fn [validate!]
                      (manifest/call-with-controller
                        controller
@@ -42,8 +43,9 @@
                             (reset! escaped (bound-fn [] (manifest/capture fixed @kind @roots policy
                                                                            (fn [] (swap! reads inc) graph) validate!)))
                             (last (mapv (fn [_]
-                                          (manifest/capture fixed @kind @roots policy
-                                                            (fn [] (swap! reads inc) graph) validate!))
+                                          (@after-capture
+                                           (manifest/capture fixed @kind @roots policy
+                                                             (fn [] (swap! reads inc) graph) validate!)))
                                         (range @repetitions))))
                           (fn [_] (throw (ex-info "Unexpected fallback" {}))))))]
        (with-redefs [tenancy/source-replay-registration (constantly registration)
@@ -56,7 +58,7 @@
                                                      (when @fail-commit? (throw (ex-info "Aborted snapshot" {})))
                                                      {:value result}))
                      certificate/verify-policy-context! (fn [& _] {"app.org" @context})]
-         (f {:collect collect :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots :source source :authorize! authorize!}))))))
+         (f {:collect collect :after-capture after-capture :controller controller :reads reads :revision revision :context context :graph graph :fail-commit? fail-commit? :repetitions repetitions :escaped escaped :kind kind :roots roots :source source :authorize! authorize!}))))))
 
 
 (deftest fresh-validation-on-every-hit-and-revision-and-context-misses
@@ -178,3 +180,46 @@
                      (reset! escaped (bound-fn [] (manifest/current-retained-source? source authorize! graph)))))
           (is (= [true false false false] @observations) (name collector))
           (is (false? (@escaped)) "A conveyed binding cannot outlive its owned snapshot"))))))
+
+
+(deftest selected-client-witness-reuses-owned-rows-only-after-commit
+  (exercise
+    (fn [{:keys [collect after-capture kind roots graph reads controller source authorize! fail-commit? revision]}]
+      (let [id (:id (first (:fns graph)))
+            observe! (fn [g]
+                       (manifest/stage-client-witness! source authorize! (:fns g) [id])
+                       g)]
+        (reset! kind :client)
+        (reset! after-capture observe!)
+        (reset! fail-commit? true)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Aborted snapshot" (collect identity)))
+        (is (zero? (:entries (manifest/stats controller))))
+        (reset! fail-commit? false)
+        (collect identity)
+        (is (= 2 (:entries (manifest/stats controller))))
+        (reset! kind :nodes)
+        (reset! roots [id])
+        (reset! after-capture identity)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Denied"
+              (collect (fn [_] (throw (ex-info "Denied" {}))))))
+        (is (= graph (collect identity)))
+        (is (= 2 @reads))
+        (swap! revision inc)
+        (collect identity)
+        (is (= 3 @reads))))))
+
+
+(deftest foreign-client-rows-and-unknown-witnesses-do-not-seed-a-projection
+  (exercise
+    (fn [{:keys [collect after-capture kind controller source authorize! graph]}]
+      (reset! kind :client)
+      (let [id (:id (first (:fns graph)))]
+        (reset! after-capture
+                (fn [g]
+                  (manifest/stage-client-witness! source (fn [_] true) (:fns g) [id])
+                  (manifest/stage-client-witness! (Object.) authorize! (:fns g) [id])
+                  (manifest/stage-client-witness! source authorize! (mapv identity (:fns g)) [id])
+                  (manifest/stage-client-witness! source authorize! (:fns g) [(random-uuid)])
+                  g))
+        (collect identity)
+        (is (= 1 (:entries (manifest/stats controller))))))))

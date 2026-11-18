@@ -99,7 +99,7 @@
         bindings (filterv #(contains? ids (:fn-id %)) (:bindings graph))
         slot-ids (set (map :slot-id fn-slots))
         binding-ids (set (map :id bindings))]
-    (into {}
+    (into (hash-map)
           (map (fn [[kind rows]] [kind (canonical-rows rows)]))
           {:fns (filterv #(contains? ids (:id %)) (:fns graph))
            :fn-slots fn-slots

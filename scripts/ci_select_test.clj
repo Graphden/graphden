@@ -200,6 +200,7 @@
 (deftest source-codec-instrumentation-runs-before-broad-suites
   (let [paths ["src/graphden/executor/source_recipe_jdbc_rows.clj"
                "src/graphden/executor/source_recipe_values.clj"
+               "src/graphden/executor/browser_server_site.clj"
                "src/graphden/executor/manifest_graph_copy.clj"
                "src/graphden/executor/revision_manifest.clj"
                "test/graphden/executor/source_recipe_jdbc_rows_test.clj"

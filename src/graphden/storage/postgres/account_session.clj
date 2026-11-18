@@ -15,15 +15,18 @@
    :auth_created_at :created-at :auth_scopes :scopes})
 
 
-(def ^:private lookup-sql
-  "SELECT a.*, s.id AS auth_session_id, s.account_id AS auth_account_id,
-          s.kind AS auth_kind, s.expires_at AS auth_expires_at,
-          s.last_used_at AS auth_last_used_at, s.created_at AS auth_created_at,
-          s.scopes AS auth_scopes
-     FROM session s LEFT JOIN account a ON a.id = CASE
-       WHEN s.account_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-       THEN s.account_id::uuid END
-    WHERE s.token_hash = ?")
+(def ^:private uuid-pattern
+  "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+(def ^:private lookup-plan
+  {:select [:a.* [:s.id :auth_session_id] [:s.account_id :auth_account_id]
+            [:s.kind :auth_kind] [:s.expires_at :auth_expires_at]
+            [:s.last_used_at :auth_last_used_at] [:s.created_at :auth_created_at]
+            [:s.scopes :auth_scopes]]
+   :from [[:session :s]]
+   :left-join [[:account :a] [:= :a.id [:case [:not= [:regexp_match :s.account_id uuid-pattern "i"] nil]
+                                        [:cast :s.account_id :uuid]]]]})
 
 
 (defn lookup
@@ -36,7 +39,7 @@
            (not-any? #(contains? session-fields (keyword (pg/kw->snake-case %))) (keys account-schema))
            (not (junction/has-ref-many? account-schema))
            (not (junction/has-ref-many? session-schema)))
-    (when-let [row (pg/exec-one! pool [lookup-sql token-hash])]
+    (when-let [row (pg/exec-read-one! pool (assoc lookup-plan :where [:= :s.token_hash token-hash]) {:quoted true})]
       (let [session (reduce-kv (fn [result column field] (assoc result field (get row column)))
                                {} session-fields)
             id (:account-id session)

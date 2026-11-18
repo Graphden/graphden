@@ -252,7 +252,7 @@
                         (some #(= key (first %)) @staged))
             (let [witness (site/project graph ids)]
               (when (= ids (set (map :id (:fns witness))))
-                (stage-copy! scope key (assoc witness :identity-target-ids #{}))))))))))
+                (stage-copy! scope key (assoc witness :identity-target-ids (hash-set)))))))))))
 
 
 (defn capture

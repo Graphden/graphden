@@ -55,10 +55,15 @@
     :else value))
 
 
+(defn- canonical-edn
+  [value]
+  (stable-edn (canonical value)))
+
+
 (defn same-edn?
-  "Compare data independently of map/set order while retaining collection kind."
+  "Compare canonical EDN while retaining collection kind and numeric representation."
   [left right]
-  (= (canonical left) (canonical right)))
+  (= (canonical-edn left) (canonical-edn right)))
 
 
 (defn fingerprint
@@ -73,7 +78,7 @@
                                                          %)) records))]))
                    snapshot)
         digest-bytes (MessageDigest/.digest (MessageDigest/getInstance "SHA-256")
-                                            (String/.getBytes (stable-edn (canonical rows)) StandardCharsets/UTF_8))]
+                                            (String/.getBytes (canonical-edn rows) StandardCharsets/UTF_8))]
     (str/join (map #(format "%02x" (bit-and 255 %)) digest-bytes))))
 
 

@@ -1,5 +1,6 @@
 (ns ^:serial graphden.input.source-test
   (:require
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is testing]]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
@@ -345,6 +346,32 @@
         (is (= #{:legacy-v2-meaning-mismatch} (codes checked)))
         (is (= :blocked (:status checked)))
         (is (not (contains? checked :proposed)))))))
+
+
+(deftest source-verification-retains-edn-number-representations
+  (doseq [[original replacement] [["1" "1N"] ["0.0" "-0.0"] ["1M" "1.00M"]]]
+    (let [child {:name :child :namespace "demo" :parent :sink
+                 :args {:x {:value [(edn/read-string original)]}}}
+          definitions [base child]
+          context (prepared definitions)
+          planned (source/plan-module definitions context)
+          edited (assoc-in planned [:definitions 1 :proposed :bind :x 1 0] (edn/read-string replacement))
+          unchanged (result (source/verify-module planned context) :child)
+          changed (result (source/verify-module edited context) :child)]
+      (is (= :authored-source-equivalent (:verification unchanged)))
+      (is (= #{:legacy-v2-meaning-mismatch} (codes changed))))))
+
+
+(deftest source-verification-ignores-map-and-set-order
+  (let [value (array-map :first (sorted-set 1 2 3) :second false)
+        child {:name :child :namespace "demo" :parent :sink :args {:x {:value value}}}
+        definitions [base child]
+        context (prepared definitions)
+        planned (source/plan-module definitions context)
+        reordered (array-map :second false :first (sorted-set-by #(compare %2 %1) 1 2 3))
+        edited (assoc-in planned [:definitions 1 :proposed :bind :x 1] reordered)
+        checked (result (source/verify-module edited context) :child)]
+    (is (= :authored-source-equivalent (:verification checked)))))
 
 
 (deftest verified-reference-survives-edn-wire-qualification

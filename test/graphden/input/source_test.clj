@@ -560,3 +560,76 @@
     (doseq [[s child] (map vector sources inlines)]
       (is (= (keyword (:namespace s) "producer") (get-in child [:source :parent])))
       (is (= {:parent :producer} (:inline-body child))))))
+
+
+(deftest inline-one-field-preserves-body-spelling-and-binding-origins
+  (let [cases [[:literal false false]
+               [:wrapped {:value false} [:value false]]
+               [:nil nil nil]
+               [:wrapped-nil {:value nil} [:value nil]]
+               [:decimal {:value 1.00M} [:value 1.00M]]
+               [:enum :unknown :unknown]
+               [:known :demo/producer [:ref :demo/producer]]
+               [:literal-name {:value :producer} [:value :producer]]
+               [:dictionary {:value {:parent :producer :value [:ref :producer]}}
+                [:value {:parent :producer :value [:ref :producer]}]]]]
+    (doseq [[label raw expected] cases]
+      (let [body {:parent :demo/sink :args {:x raw}}
+            source {:namespace "demo" :name :host :parent :sink :args {:x body}}
+            context (prepared [base producer source])
+            authored (source/plan-module [source] context)
+            report (source/verify-module authored context)
+            entry (first (:definitions report))
+            inline (first (vals (get-in entry [:v2 :inline-definitions])))
+            [old-host] (filter #(= :host (:name %)) (:fn-defs context))
+            [old-child] (filter #(= (get-in old-host [:args :x]) (:name %)) (:fn-defs context))
+            [old-row] (filter #(= :binding (:kind %)) (parse/parse-prepared-module (assoc context :fn-defs [old-child])))
+            [new-row] (:bindings inline)]
+        (is (= :authored-source-equivalent (:verification entry)) label)
+        (is (= [:ref {:parent :demo/sink :bind {:x expected}}] (get-in entry [:proposed :bind :x])) label)
+        (is (= (:fn-id old-child) (:fn-id inline) (get-in entry [:v2 :bindings 0 :ref-fn-id])) label)
+        (is (= (:id old-row) (:id new-row)) label)
+        (is (= (:slot-id old-row) (first (:target-path new-row))) label)
+        (if (= label :known)
+          (is (= (ids/fn-id "demo" :producer) (:ref-fn-id old-row) (:ref-fn-id new-row)))
+          (is (migration/same-edn? (:value old-row) (:value new-row)) label))))))
+
+
+(deftest changing-inline-origin-or-child-binding-refuses-migration
+  (let [host {:name :host :namespace "demo" :parent :sink
+              :args {:x {:parent :sink :args {:x {:value false}}}}}
+        ctx (prepared [base producer host])
+        plan (source/plan-module [host] ctx)]
+    (doseq [replacement [false [:value nil] [:ref :producer] :producer [:value {:ref :producer}]]]
+      (let [changed (assoc-in plan [:definitions 0 :proposed :bind :x 1 :bind :x] replacement)]
+        (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))
+    (let [wrapper (assoc-in host [:args :x :args :x] {:ref :producer})
+          report (source/plan-module [wrapper] (prepared [base producer wrapper]))]
+      (is (= [{:code :inline-binding-origin-required :definition ["demo" :host]
+               :source-path [:args :x :args :x]}] (:blockers report))))))
+
+
+(deftest inline-children-preserve-inherited-occupancy-blockers
+  (let [preset {:name :preset :namespace "demo" :parent :sink :args {:x nil}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x {:parent :preset :args {:x false}}}}
+        [blocker] (:blockers (source/plan-module [host] (prepared [base preset host])))]
+    (is (= :inherited-occupancy-required (:code blocker)))
+    (is (= [:args :x :args :x] (:source-path blocker)))))
+
+
+(deftest inline-and-host-hazards-retain-both-source-paths
+  (let [preset {:name :preset :namespace "demo" :parent :sink :args {:x nil}}
+        host {:name :host :namespace "demo" :parent :preset :args {:x {:parent :preset :args {:x false}}}}
+        blockers (:blockers (source/plan-module [host] (prepared [base preset host])))]
+    (is (= #{[[:args :x] :inherited-occupancy-required]
+             [[:args :x :args :x] :inherited-occupancy-required]}
+           (set (map (juxt :source-path :code) blockers))))))
+
+
+(deftest changing-inline-numeric-representation-changes-the-legacy-origin
+  (let [host {:name :host :namespace "demo" :parent :sink :args {:x {:parent :sink :args {:x 1}}}}
+        ctx (prepared [base host])
+        planned (source/plan-module [host] ctx)
+        changed (assoc-in planned [:definitions 0 :proposed :bind :x 1 :bind :x] 1N)]
+    (is (= :supported (get-in (source/verify-module planned ctx) [:definitions 0 :status])))
+    (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))

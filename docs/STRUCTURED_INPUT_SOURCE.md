@@ -52,8 +52,14 @@ A direct anonymous binding whose entire body is `{:parent P}` becomes
 field and normalized parent spelling to reproduce the legacy child UUID.
 The exported source retains the authored parent spelling. Verification
 compares the child's declaration rows and the owner's reference to that child.
-Empty explicit `:args {}`, nonempty bodies, annotated inline refs and inline
-list items require additional identity mapping or lowering. List builders,
+A direct child may also bind one field. Its bare scalars stay bare,
+a bare graph reference `P` becomes `[:ref P]`, and a literal wrapper
+`{:value x}` becomes `[:value x]`. These spellings let a fresh reader
+recover the original anonymous-body hash and independently parse the child
+binding. The child retains its own binding UUID and target field UUID.
+An explicit legacy `{:ref P}` needs additional provenance to distinguish
+it from a bare reference. Empty explicit `:args {}`, multi-field bodies,
+annotated inline refs and inline list items also remain blocked. List builders,
 rename projections, referenced input scopes, assertions that require inline
 type rows and unknown binding policies have explicit blockers.
 Secret-path resolution must never become an ordinary literal value.

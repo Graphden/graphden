@@ -244,3 +244,24 @@
     (is (= :export-origin-drift
            (error-code #(module/emit-module-v2
                           (assoc-in parsed [:definitions 0 :inline-definitions path :origin-ledger] {}) options))))))
+
+
+(deftest fresh-inline-single-binding-needs-no-legacy-child-definition
+  (let [options {:context-for context-for
+                 :normalize-inline-parent (fn [_ ref] (get {:fixture/base :base :leaf :leaf} ref))}
+        read-form (fn [value]
+                    (let [body {:parent :fixture/base :bind {:value value}}
+                          source (source-module {:bind {:hof [:ref body]}})
+                          parsed (module/parse-module-v2 source options)]
+                      (is (= source (module/emit-module-v2 parsed options)))
+                      (first (vals (get-in parsed [:definitions 0 :inline-definitions])))))
+        bare (read-form false)
+        wrapped (read-form [:value false])
+        reference (read-form [:ref :leaf])
+        data (read-form [:value :leaf])]
+    (is (apply distinct? (map :fn-id [bare wrapped reference data])))
+    (is (= false (get-in bare [:bindings 0 :value]) (get-in wrapped [:bindings 0 :value])))
+    (is (= (ids/fn-id "fixture" :leaf) (get-in reference [:bindings 0 :ref-fn-id])))
+    (is (= :leaf (get-in data [:bindings 0 :value])))
+    (doseq [[value code] [[:leaf :inline-binding-origin-mismatch] [[:ref :missing] :unresolved-inline-reference]]]
+      (is (= code (error-code #(read-form value)))))))

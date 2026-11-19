@@ -145,7 +145,7 @@
                      {:name :secret :namespace "demo" :parent :sink
                       :args {:x {:resolver :producer :value "private-payload"}}}
                      {:name :anonymous :namespace "demo" :parent :sink
-                      :args {:x {:parent :producer}}}]
+                      :args {:x {:parent :producer :args {}}}}]
         report (plan definitions)]
     (is (= {:supported 2 :blocked 4} (:counts report)))
     (is (contains? (codes (result report :append)) :list-builder-required))
@@ -499,3 +499,64 @@
         report (verified [first second])]
     (is (= {:supported 0 :blocked 2} (:counts report)))
     (is (= #{:cyclic-parent-input} (set (map :code (:blockers report)))))))
+
+
+(deftest direct-inline-ref-verifies-use-site-and-child-declaration
+  (let [host (assoc base :args {:x :any :y :any})
+        source {:name :child :namespace "demo" :parent :sink
+                :args {:x {:parent :demo/producer} :y {:parent :producer}}}
+        other (assoc source :name :sibling)
+        context (prepared [host producer source other])
+        planned (source/plan-module [source other] context)
+        report (source/verify-module planned context)
+        legacy (into {} (map (juxt :name identity)) (:fn-defs context))
+        child-ids (fn [entry]
+                    (mapv :ref-fn-id (get-in entry [:v2 :bindings])))]
+    (is (= {:supported 2 :blocked 0} (:counts report)))
+    (is (= 4 (count (set (mapcat child-ids (:definitions report))))))
+    (doseq [entry (:definitions report)
+            {:keys [target-path ref-fn-id]} (get-in entry [:v2 :bindings])]
+      (let [owner (get-in entry [:source :name])
+            field (if (= (first target-path) (ids/slot-id (ids/fn-id "demo" :sink) :x)) :x :y)
+            generated (get-in legacy [owner :args field])
+            inline (get-in entry [:v2 :inline-definitions target-path])]
+        (is (= (:fn-id (legacy generated)) ref-fn-id (:fn-id inline)))
+        (is (= (:parent (get-in entry [:source :args field])) (get-in inline [:inline-body :parent])))
+        (is (= [(ids/fn-id "demo" :producer)]
+               (:parent-ids (first (filter #(= ref-fn-id (:id %)) (:declaration-records inline))))))))
+    (doseq [edited [[:ref :producer]
+                    [:ref (get-in legacy [:child :args :x])]
+                    [:ref {:parent :sink}]
+                    [:ref {:parent :producer :args {}}]]]
+      (let [failed (source/verify-module (assoc-in planned [:definitions 0 :proposed :bind :x] edited) context)]
+        (is (= :blocked (:status (result failed :child))))
+        (is (= :supported (:status (result failed :sibling))))))
+    (let [id (first (child-ids (result report :child)))
+          corrupted (update context :fn-defs (fn [defs]
+                                               (mapv #(if (= id (:fn-id %)) (assoc % :description "drift") %) defs)))]
+      (is (contains? (codes (result (source/verify-module planned corrupted) :child))
+                     :inline-declaration-mismatch)))))
+
+
+(deftest unsupported-inline-shapes-stay-at-their-source-field
+  (doseq [body [{:parent :producer :args {}} {:parents [:producer]} {:parent :producer :type :any}
+                [{:parent :producer}] {:append [{:parent :producer}]}]]
+    (let [d {:name :child :namespace "demo" :parent :sink :args {:items body}}
+          entry (result (plan [base producer d]) :child)]
+      (is (= [{:code :inline-identity-or-source-mapping-required :definition ["demo" :child]
+               :source-path [:args :items]}] (:blockers entry)))
+      (is (nil? (:proposed entry))))))
+
+
+(deftest inline-parent-normalization-honors-namespace-ambiguity
+  (let [local {:name :child :namespace "demo" :parent :demo/sink :args {:x {:parent :producer}}}
+        remote (assoc local :namespace "other")
+        sources [local remote]
+        context (prepared (into [base producer (assoc producer :namespace "other")] sources))
+        verified (source/verify-module (source/plan-module sources context) context)
+        inlines (mapv #(first (vals (get-in % [:v2 :inline-definitions]))) (:definitions verified))]
+    (is (= {:supported 2 :blocked 0} (:counts verified)))
+    (is (apply distinct? (map :fn-id inlines)))
+    (doseq [[s child] (map vector sources inlines)]
+      (is (= (keyword (:namespace s) "producer") (get-in child [:source :parent])))
+      (is (= {:parent :producer} (:inline-body child))))))

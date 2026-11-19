@@ -7,7 +7,8 @@
     [graphden.input.format :as format]
     [graphden.input.rows :as rows]
     [graphden.input.syntax :as syntax]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]))
 
 
 (def ^:private type-keys
@@ -155,21 +156,51 @@
         configuration))
 
 
+(declare ^:private parse-definition)
+
+
+(defn- inline-definitions
+  [source namespace {:keys [contract scope]} {:keys [normalize-inline-parent] :as options}]
+  (into (sorted-map)
+        (keep (fn [[field expression]]
+                (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
+                  (let [body (second expression)]
+                    (when-not (and (= 2 (count expression)) (format/inline-leaf? body)
+                                   (or (:parent source) (:parents source)))
+                      (reject! :unsupported-inline-declaration))
+                    (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
+                    (let [parent (normalize-inline-parent namespace (:parent body))
+                          _ (when-not (keyword? parent) (reject! :unresolved-inline-parent))
+                          child (parse/inline-declaration {:parent parent} [(:name source) field] namespace)
+                          path (:path (input/resolve-address contract scope [field]))]
+                      [path (assoc (parse-definition child namespace options) :inline-body body)])))))
+        (when (map? (:bind source)) (:bind source))))
+
+
 (defn- parse-definition
-  [source namespace context-for]
+  [source namespace {:keys [context-for] :as options}]
   (let [definition (assoc source :namespace namespace)
         ctx (context definition context-for)
         common {:source source :namespace namespace :fn-id (:fn-id ctx)
                 :declaration-records (:declaration-records ctx) :origin-ledger (:origin-ledger ctx)}]
     (if (type-only? definition)
       common
-      (let [expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {}) ctx)
+      (let [inlines (inline-definitions source namespace ctx options)
+            expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {})
+                                                (assoc ctx :inline-at inlines))
             state (input/bind-input (:contract ctx) {} (:scope ctx) expression)
             configs (resolve-configurations ctx state (:configure source))
             by-path (into {} (map (juxt :target-path identity)) (vals configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
-               :expression expression :binding-state state :bindings bindings :configurations configs)))))
+               :expression expression :binding-state state :bindings bindings :configurations configs
+               :inline-definitions inlines)))))
+
+
+(defn- definition-records
+  [parsed]
+  (concat (:declaration-records parsed) (:bindings parsed)
+          (mapcat definition-records (vals (:inline-definitions parsed)))))
 
 
 (defn parse-module-v2
@@ -177,17 +208,22 @@
    contexts. Each callback receives the original definition with module
    namespace attached. Contexts supply source-derived :fn-id, :scope [id []],
    :input-type-id, :contract, resolved :name->id, :binding-id, declaration rows
-   and an opaque :origin-ledger. Type-only contexts need no callable input.
+   and an opaque :origin-ledger. For direct inline refs, :normalize-inline-parent
+   resolves [module-namespace parent-name] to its canonical legacy spelling,
+   and context-for also receives the derived child declaration. Type-only
+   contexts need no callable input.
 
    Returns authored declaration/input-binding rows only. Origin ledgers and
    rich :input declarations are retained; no refs execute and no records are
    written. This does not establish type compatibility or residual interfaces.
    All definitions and rows validate before a result can be returned."
-  [module {:keys [context-for]}]
+  [module {:keys [context-for] :as options}]
   (validate-source! module)
   (when-not (ifn? context-for) (reject! :context-provider-required))
-  (let [definitions (mapv #(parse-definition % (:namespace module) context-for) (:fns module))
-        records (unique-records (mapcat #(concat (:declaration-records %) (:bindings %)) definitions))]
+  (let [definitions (mapv #(parse-definition % (:namespace module) options) (:fns module))
+        records (unique-records (mapcat definition-records definitions))
+        owners (mapcat (fn [d] (cons (:fn-id d) (map :fn-id (vals (:inline-definitions d))))) definitions)]
+    (when-not (= (count owners) (count (set owners))) (reject! :duplicate-definition))
     (rows/state (filter #(= :input-binding (:kind %)) records))
     {:input-format 2 :module (dissoc module :fns) :definitions definitions :records records}))
 
@@ -209,7 +245,8 @@
       (reject! :export-context-drift))
     (if (contains? source :bind)
       (assoc source :bind (syntax/emit-expression (:contract ctx) (:expression parsed)
-                                                  {:id->name (id->name (:name->id ctx))}))
+                                                  {:id->name (id->name (:name->id ctx))
+                                                   :inline-at (:inline-definitions parsed)}))
       source)))
 
 
@@ -224,6 +261,7 @@
   (let [module (assoc (:module parsed) :fns (mapv #(emit-definition % context-for) (:definitions parsed)))
         reparsed (parse-module-v2 module options)]
     (when-not (and (= (:records parsed) (:records reparsed))
-                   (= (mapv :configurations (:definitions parsed)) (mapv :configurations (:definitions reparsed))))
+                   (= (mapv #(select-keys % [:configurations :inline-definitions]) (:definitions parsed))
+                      (mapv #(select-keys % [:configurations :inline-definitions]) (:definitions reparsed))))
       (reject! :export-origin-drift))
     module))

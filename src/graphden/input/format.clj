@@ -2,6 +2,12 @@
   "Version boundary shared by the offline reader and the legacy loader.")
 
 
+(defn inline-leaf?
+  "A single-parent computation with no authored fields, bindings or annotations."
+  [form]
+  (and (map? form) (= #{:parent} (set (keys form))) (keyword? (:parent form))))
+
+
 (defn configuration-type?
   "Named types and collection shapes whose leaves resolve to named types.
    Forms that require new inline type rows are outside this source format slice."

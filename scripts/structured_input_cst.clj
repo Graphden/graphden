@@ -107,6 +107,11 @@
   [source starts leaf op path]
   (case op
     :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
+    :wrap-inline-ref
+    (let [body (z/sexpr leaf)]
+      (when-not (and (map? body) (= #{:parent} (set (keys body))) (keyword? (:parent body)))
+        (refuse :unsupported-inline-declaration {:path path}))
+      (node-edit source starts leaf #(str "[:ref " % "]")))
     :wrap-ref
     (do
       (when-not (keyword? (z/sexpr leaf))
@@ -224,7 +229,7 @@
           (refuse :not-composed-definition {:definition definition}))
         (rename-edit source starts loc definition path :bind))
 
-      (:wrap-value :wrap-ref :map-expression-to-vector)
+      (:wrap-value :wrap-ref :wrap-inline-ref :map-expression-to-vector)
       (leaf-edit source starts (argument-loc loc path) op path)
 
       :partition-composed-args
@@ -241,6 +246,8 @@
   [source {:keys [source-path kind expression policy]}]
   (let [[operator payload] expression
         raw (get-in source source-path)
+        inline? (and (= :ref operator) (map? raw) (= #{:parent} (set (keys raw)))
+                     (keyword? (:parent raw)) (= payload raw))
         wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))
         typed? (and wrapper? (= #{operator :type} (set (keys raw)))
                     (or (keyword? (:type raw)) (vector? (:type raw)))
@@ -249,15 +256,16 @@
                    (vector? source-path) (= 2 (count source-path)) (= :args (first source-path))
                    (contains? (:args source) (second source-path))
                    (vector? expression) (= 2 (count expression)) (#{:value :ref} operator)
-                   (or (= :value operator) (qualified-keyword? payload)))
+                   (or (= :value operator) (qualified-keyword? payload) inline?))
       (refuse :unsupported-source-argument {:path source-path}))
     (when-not (if wrapper?
                 (and (or typed? (= 1 (count raw))) (contains? raw operator)
                      (if (= :value operator) (= payload (get raw operator))
                          (keyword? (get raw operator))))
-                (if (= :value operator) (= payload raw) (keyword? raw)))
+                (if (= :value operator) (= payload raw) (or (keyword? raw) inline?)))
       (refuse :planner-ledger-mismatch {:path source-path}))
-    {:op (cond typed? :typed-expression
+    {:op (cond inline? :wrap-inline-ref
+               typed? :typed-expression
                wrapper? :map-expression-to-vector
                (= :value operator) :wrap-value
                :else :wrap-ref)

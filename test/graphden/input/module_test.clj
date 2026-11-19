@@ -217,3 +217,30 @@
                           (update (source-module {:bind {:value 1}}) :fns conj
                                   {:name :other :bind {:value 1}})
                           options))))))
+
+
+(deftest fresh-inline-source-keeps-own-identity-through-export
+  (let [source (source-module {:bind {:value [:ref {:parent :other/leaf}]}})
+        options {:context-for context-for
+                 :normalize-inline-parent (fn [ns-id parent]
+                                            (when (= ["fixture" :other/leaf] [ns-id parent]) :leaf))}
+        parsed (module/parse-module-v2 source options)
+        path [(field-id :value)]
+        child (get-in parsed [:definitions 0 :inline-definitions path])
+        child-id (:fn-id child)
+        parent (first (:definitions parsed))]
+    (is (uuid? child-id))
+    (is (= child-id (:ref-fn-id (first (:bindings parent)))))
+    (is (some #(= child-id (:id %)) (:records parsed)))
+    (is (= source (module/emit-module-v2 parsed options)))
+    (is (= :inline-parent-resolver-required (error-code #(parse source))))
+    (is (= :unresolved-inline-parent
+           (error-code #(module/parse-module-v2 (assoc-in source [:fns 0 :bind :value 1 :parent] :unknown)
+                                                options))))
+    (is (= :unsupported-inline-declaration
+           (error-code #(module/parse-module-v2 (assoc-in source [:fns 0 :bind :value 1 :bind] {}) options))))
+    (is (= :duplicate-definition
+           (error-code #(module/parse-module-v2 (update source :fns conj (:source child)) options))))
+    (is (= :export-origin-drift
+           (error-code #(module/emit-module-v2
+                          (assoc-in parsed [:definitions 0 :inline-definitions path :origin-ledger] {}) options))))))

@@ -105,13 +105,13 @@ Reads a module's [[file:glossary.org::#term/edn][EDN]] definitions while retaini
 :PROPERTIES:
 :CUSTOM_ID: packages/prepare-module
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 1165
+:LINE: 1162
 :MINS: 3.2
 :END:
 
 Prepares the module shared by production composition and its type sweep. References resolve within their namespace before dependency sorting, and inline functions expand before checker identities are attached. The public ~parse-module~ entry uses these same indexes to resolve inherited [[file:glossary.org::#term/slot][slot]] ownership before emitting stored rows.
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1165]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1162]]
 - same file :: [[file:packages.org::#packages/parse-composed][parse-composed]]
 
 * 9. parse-composed

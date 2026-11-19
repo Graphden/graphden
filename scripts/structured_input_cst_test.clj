@@ -285,6 +285,18 @@
     (is (str/includes? target ":bind {:pin ; bound text\r\n [:value \"one\r\ntwo\"] ; pin tail\r\n :flag [:value false] ; flag tail\r\n"))))
 
 
+(deftest inline-source-location-keeps-comments-qualification-and-literal-bytes
+  (let [body "{ ; вложенная функция\r\n :parent ; qualified\r\n :demo.main/producer}"
+        literal "{:parent :producer :text \"one\r\ntwo\"}"
+        text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :y :any} :return-type :any}\r\n"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x " body " :y {:value " literal "}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target (str ":x [:ref " body "]")))
+    (is (str/includes? target (str ":y [:value " literal "]")))
+    (is (not (str/includes? target "_anon-")))))
+
+
 (deftest typed-reference-and-literal-annotations-use-their-original-source-spans
   (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:x :any :y :any} :return-type :any}\r\n"
                   "{:name :producer :return-type :any} {:name :child :parent :base :args {"

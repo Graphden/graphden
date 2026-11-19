@@ -45,9 +45,17 @@ type declarations, independently owned composed fields, and provable whole-value
 or reference bindings. A bound top-level field can retain a named type
 assertion or a list, map, tuple or union assertion with named leaves.
 The verifier compares the rich form as well as its storage ID, since
-different collection types can share that ID. List builders, anonymous
-identity mapping, rename projections, referenced input scopes, assertions
-that require inline type rows and unknown binding policies have explicit blockers.
+different collection types can share that ID.
+
+A direct anonymous binding whose entire body is `{:parent P}` becomes
+`[:ref {:parent P}]`. The reader uses the original namespace, host name,
+field and normalized parent spelling to reproduce the legacy child UUID.
+The exported source retains the authored parent spelling. Verification
+compares the child's declaration rows and the owner's reference to that child.
+Empty explicit `:args {}`, nonempty bodies, annotated inline refs and inline
+list items require additional identity mapping or lowering. List builders,
+rename projections, referenced input scopes, assertions that require inline
+type rows and unknown binding policies have explicit blockers.
 Secret-path resolution must never become an ordinary literal value.
 
 `graphden.input.source/verify-module` checks each supported plan entry against

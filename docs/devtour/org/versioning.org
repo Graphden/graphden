@@ -7,7 +7,7 @@ Branch-specific reads, conflict detection, and cache refresh.
 
 after: storage
 
-[[file:index.org][index]] · ~106 min
+[[file:index.org][index]] · ~105 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
@@ -207,13 +207,13 @@ Repairs references after moving a packaged function between namespaces, which ch
 :PROPERTIES:
 :CUSTOM_ID: versioning/diff-branches
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 499
+:LINE: 505
 :MINS: 4.4
 :END:
 
 Compares the resolved contents of two branches, considering entities visible from either side. This read-only comparison reports their differences without deciding how a merge should resolve conflicts.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:499]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:505]]
 - same file :: [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 17. diff-branches-view-facts
@@ -232,26 +232,26 @@ Reads branch differences, resolves [[file:glossary.org::#term/slot][slot]] names
 :PROPERTIES:
 :CUSTOM_ID: versioning/detect-conflicts
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 297
-:MINS: 2.8
+:LINE: 310
+:MINS: 2.3
 :END:
 
 Finds entities changed to different content on both branches after their fork point, excluding [[file:glossary.org::#term/branch-local][branch-local functions]]. Effective timestamps include changes that arrived through earlier merges, not only rows originally written on that branch. These conflicts need resolution before merging.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:297]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:310]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 19. merge-branch!
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-branch!
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 756
-:MINS: 8.8
+:LINE: 774
+:MINS: 7.8
 :END:
 
 Validates conflicts and approval requirements, then writes a ~branch-merge~ record and any conflict-resolution overrides in one transaction. Resolution makes source versions visible through this record without copying all source rows. The result also reports rows excluded as [[file:glossary.org::#term/branch-local][branch-local]].
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:756]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:774]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]]
 
 * 20. merge-transitively!

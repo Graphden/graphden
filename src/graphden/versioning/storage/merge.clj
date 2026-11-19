@@ -17,6 +17,7 @@
   (:require
     [clojure.set :as set]
     [graphden.storage.graph-writer :as writer]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
@@ -64,7 +65,7 @@
    Rows that reached an endpoint through a MERGE after this point count as
    that endpoint's changes (`detect-conflicts` judges each side by when its
    winning row arrived, not by who wrote it)."
-  [base-storage source-branch-id target-branch-id]
+  [base-storage source-branch-id target-branch-id endpoints]
   (let [source-chain (res/collect-branch-chain base-storage source-branch-id)
         target-chain (res/collect-branch-chain base-storage target-branch-id)
         target-set   (set target-chain)
@@ -73,9 +74,10 @@
         ;; branch that forked off the common line. nil when this side is an
         ;; ancestor of the other (its whole chain is shared) → it never
         ;; diverged.
+        created-at (fn [id] (:created-at (or (get endpoints id) (sp/read-entity base-storage :branch id))))
         divergence-created (fn [chain other-set]
                              (when-let [b (first (remove other-set chain))]
-                               (:created-at (sp/read-entity base-storage :branch b))))
+                               (created-at b)))
         src-div (divergence-created source-chain target-set)
         tgt-div (divergence-created target-chain source-set)
         branch-created (cond
@@ -85,8 +87,7 @@
                          tgt-div tgt-div
                          ;; Degenerate: source == target (self-merge, no
                          ;; conflicts anyway). Keep the ts non-nil.
-                         :else (:created-at (sp/read-entity base-storage :branch
-                                                            source-branch-id)))
+                         :else (created-at source-branch-id))
         ;; Previous merges between these branches in EITHER direction.
         ;; One SQL roundtrip via `WHERE source IN (a, b) AND target IN
         ;; (a, b)` covers the 4 (source,target) combos; in-memory we
@@ -294,6 +295,18 @@
           slot-id (assoc :slot-name (:name (get slots-by-id slot-id))))))))
 
 
+(defn- merge-conflicts
+  [base-storage source-branch-id target-branch-id endpoints]
+  (res/call-with-merges-memo
+    (fn []
+      (let [fp (fork-point base-storage source-branch-id target-branch-id endpoints)
+            candidates (candidate-ids base-storage source-branch-id fp)
+            divergent (divergent-ids base-storage candidates
+                                     source-branch-id target-branch-id fp)]
+        {:conflicts (conflict-rows base-storage divergent source-branch-id target-branch-id)
+         :fork-point fp}))))
+
+
 (defn detect-conflicts
   "Finds entities modified on BOTH branches after the fork point, to
    different content.
@@ -322,14 +335,7 @@
                  :fields [{:field \"value\" :source \"1\" :target \"2\"} …]}]
     :fork-point <Instant>}"
   [base-storage source-branch-id target-branch-id]
-  (res/call-with-merges-memo
-    (fn []
-      (let [fp (fork-point base-storage source-branch-id target-branch-id)
-            candidates (candidate-ids base-storage source-branch-id fp)
-            divergent (divergent-ids base-storage candidates
-                                     source-branch-id target-branch-id fp)]
-        {:conflicts (conflict-rows base-storage divergent source-branch-id target-branch-id)
-         :fork-point fp}))))
+  (merge-conflicts base-storage source-branch-id target-branch-id nil))
 
 
 (defn- assert-resolutions-cover-conflicts!
@@ -753,6 +759,18 @@
   (uniq/xact-lock! (tx/datasource storage) (map branch-lock-key (remove nil? branch-ids))))
 
 
+(defn- read-merge-endpoints!
+  "Read through the transaction-bound decorator after locking both branches.
+   The fork calculation uses the creation times from these locked rows."
+  [storage source-id target-id]
+  (let [endpoints (grouped/scalar-operation storage {:op :read-ids :entity :branch :ids [source-id target-id]})]
+    (when-not (get endpoints source-id)
+      (throw (ex-info "Merge source branch not found" {:type :not-found :branch-id source-id})))
+    (when-not (get endpoints target-id)
+      (throw (ex-info "Merge target branch not found" {:type :not-found :branch-id target-id})))
+    endpoints))
+
+
 (defn merge-branch!
   "Merges source branch into the current (target) branch.
 
@@ -813,27 +831,12 @@
            ;; deadlock-free) makes the read-then-write below one
            ;; serialized critical section per branch pair.
            (lock-branches! storage source-branch-id target-branch-id)
-           ;; Under the lock, re-confirm both endpoints still exist — a
-           ;; delete of source/target that committed just before we won
-           ;; the lock must abort this merge rather than plant a
-           ;; branch-merge dangling at a removed branch.
-           (when-not (sp/read-entity storage :branch source-branch-id)
-             (throw (ex-info "Merge source branch not found"
-                             {:type :not-found :branch-id source-branch-id})))
-           (when-not (sp/read-entity storage :branch target-branch-id)
-             (throw (ex-info "Merge target branch not found"
-                             {:type :not-found :branch-id target-branch-id})))
-           ;; The policy layer checked before entering this write. Check it
-           ;; again on the transaction-bound storage after the writer and
-           ;; branch locks, so a changed approval or proposal cannot ride an
-           ;; earlier decision into this merge. This callback is supplied by
-           ;; trusted host code only; user graph code never runs here.
-           (when trusted-precommit-check!
-             (trusted-precommit-check! storage))
-           ;; Conflict detection now reads a lock-stable view (inside the
-           ;; tx, after the lock) instead of the pre-tx snapshot.
-           (let [{:keys [conflicts]} (detect-conflicts storage source-branch-id
-                                                       target-branch-id)]
+           (let [endpoints (read-merge-endpoints! storage source-branch-id target-branch-id)
+                 ;; Recheck policy on the locked transaction-bound storage,
+                 ;; independently of the endpoint read and pre-transaction checks.
+                 ;; Only trusted host code supplies this callback.
+                 _ (when trusted-precommit-check! (trusted-precommit-check! storage))
+                 {:keys [conflicts]} (merge-conflicts storage source-branch-id target-branch-id endpoints)]
              (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)
              ;; A by-reference merge carries only the source's OWN rows, so
              ;; content the source shows by inheritance from a branch the target

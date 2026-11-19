@@ -36,13 +36,18 @@
 
 
 (defn- parse-leaf
-  [path form {:keys [name->id binding-id scope]}]
+  [path form {:keys [name->id binding-id scope inline-at]}]
   (when-not (and (vector? form) (= 2 (count form)))
     (reject! :explicit-expression-required path))
   (let [[operator payload] form
         expression (case operator
                      :value {:kind :value :value payload}
-                     :ref (if-let [id (and (keyword? payload) (get name->id payload))]
+                     :ref (if-let [id (if (map? payload)
+                                        (let [child (get inline-at path)]
+                                          (when-not (= payload (:inline-body child))
+                                            (reject! :unsupported-inline-declaration path))
+                                          (:fn-id child))
+                                        (and (keyword? payload) (get name->id payload)))]
                             {:kind :ref :fn-id id}
                             (reject! :unresolved-ref path))
                      (reject! :unknown-operator path))
@@ -97,11 +102,13 @@
     :value (if (contains? expression :value)
              [:value (:value expression)]
              (reject! :missing-value path))
-    :ref (if-let [ref-name (get id->name (:fn-id expression))]
-           (if (keyword? ref-name)
-             [:ref ref-name]
-             (reject! :unresolved-ref path))
-           (reject! :unresolved-ref path))
+    :ref (if-let [child (get (:inline-at context) path)]
+           (if (= (:fn-id child) (:fn-id expression))
+             [:ref (:inline-body child)]
+             (reject! :inline-reference-mismatch path))
+           (if-let [ref-name (get id->name (:fn-id expression))]
+             (if (keyword? ref-name) [:ref ref-name] (reject! :unresolved-ref path))
+             (reject! :unresolved-ref path)))
     (reject! :unsupported-expression path)))
 
 

@@ -959,6 +959,14 @@
     (keyword (str "_anon-" (subs (ids/shape-hash shape-with-host) 0 16)))))
 
 
+(defn inline-declaration
+  "Internal declaration of a normalized anonymous body at its legacy use-site.
+   The body excludes binding-side annotations. The name stays out of source."
+  [body host ns-id]
+  (assoc body :name (anon-fn-name body host ns-id) :namespace ns-id
+         :description (or (:description body) "Synthetic — extracted from an inline anon fn-def.")))
+
+
 (declare expand-anons-in-fn-def)
 
 
@@ -984,14 +992,8 @@
           ;; synthetic name based on per-call-site overrides.
           binding-type (:type v)
           v* (dissoc v :type)
-          synthetic-name (anon-fn-name v* host ns-id)
-          ;; Anon inherits the outer fn-def's namespace so its fn-id
-          ;; lands in the same module's namespace tree.
-          named (-> v*
-                    (assoc :name synthetic-name
-                           :namespace ns-id
-                           :description (or (:description v*)
-                                            "Synthetic — extracted from an inline anon fn-def.")))
+          named (inline-declaration v* host ns-id)
+          synthetic-name (:name named)
           [expanded extras] (expand-anons-in-fn-def named)
           new-arg-value (if binding-type
                           {:ref synthetic-name :type binding-type}
@@ -1044,13 +1046,8 @@
    (originals with refs in place + the new synthetics) for the
    regular parser to consume.
 
-   Dedup: identical inline anon shapes within a module collapse to
-   one synthetic name via `ids/shape-hash`. Multiple identical
-   inline anons (in one fn-def OR across fn-defs in the module)
-   produce the SAME synthetic name → keep only one copy. Without
-   dedup, sync would fail `validate-no-duplicate-ids!` on the
-   resulting storage batch. Cross-module identical shapes still
-   produce separate fn-ids (different `:namespace`)."
+   Synthetic names include namespace, host, argument and any sequence indices.
+   Repeated occurrences of the same synthetic name produce a single row."
   [module-fn-defs]
   (let [results (mapv expand-anons-in-fn-def module-fn-defs)
         expanded-defs (map first results)

@@ -50,16 +50,25 @@
   "Preparation adds an empty args map and fn-id, and may extract anonymous
    computations. Only that extraction is a recognized semantic difference."
   [source prepared normalized]
-  (let [expected (assoc normalized :args (or (:args normalized) {}))
-        actual (dissoc prepared :fn-id)
-        identity (ids/fn-id (:namespace source) (:name source))]
-    (cond-> []
-      (not= identity (:fn-id prepared))
+  (let [args (or (:args normalized) {})
+        prepared-args (:args prepared)
+        fields (distinct (concat (keys args) (keys prepared-args)))
+        composed? (= :composed (definition-kind source))
+        blockers (keep (fn [field]
+                         (let [body (get args field)
+                               expected (if (and composed? (format/inline-leaf? body))
+                                          (:name (parse/inline-declaration body [(:name source) field]
+                                                                           (:namespace source)))
+                                          body)]
+                           (when-not (and (contains? args field) (contains? prepared-args field)
+                                          (= expected (get prepared-args field)))
+                             (blocker source :inline-identity-or-source-mapping-required [:args field]))))
+                       fields)]
+    (cond-> (vec blockers)
+      (not= (ids/fn-id (:namespace source) (:name source)) (:fn-id prepared))
       (conj (blocker source :prepared-identity-mismatch []))
-      (not= (dissoc expected :args) (dissoc actual :args))
-      (conj (blocker source :prepared-source-mismatch []))
-      (not= (:args expected) (:args actual))
-      (conj (blocker source :inline-identity-or-source-mapping-required [:args])))))
+      (not= (dissoc normalized :args) (dissoc prepared :args :fn-id))
+      (conj (blocker source :prepared-source-mismatch [])))))
 
 
 (defn- parse-one
@@ -104,7 +113,7 @@
 (defn- argument-ledger
   "Resolve through the legacy slot walker, including rename and ref scopes.
    Keep the resulting address even when lowering that address is unsupported."
-  [context definition rows]
+  [context source definition rows]
   (let [{:keys [name->id defs-by-name]} context
         own-ref (slots/own-ref definition defs-by-name)
         by-slot (into {} (map (juxt :slot-id identity))
@@ -120,7 +129,10 @@
               (let [[owner field] (slots/resolve-slot-owner own-ref arg defs-by-name value)
                     owner-id (get name->id owner)
                     slot-id (ids/slot-id owner-id field)
-                    binding (get by-slot slot-id)]
+                    binding (get by-slot slot-id)
+                    body (get-in source [:args arg])
+                    inline-id (when (and (format/inline-leaf? body) (keyword? value))
+                                (ids/fn-id (:namespace source) value))]
                 {:source-path [:args arg]
                  :kind :binding
                  :origin {:fn-id (:fn-id definition)
@@ -128,7 +140,9 @@
                  :target {:owner owner :field field
                           :type (or (slots/slot-type-of owner field defs-by-name)
                                     (slots/rename-source-type owner field defs-by-name))}
-                 :expression (binding-expression binding names)
+                 :expression (if (and inline-id (= inline-id (:ref-fn-id binding)))
+                               [:ref body]
+                               (binding-expression binding names))
                  :policy (binding-policy binding)})))
           (:args definition))))
 
@@ -173,6 +187,9 @@
     ;; The owner identity is checked separately from the binding's own fn-id:
     ;; binding rows can address free inputs in an arbitrary referenced graph.
     (cond-> []
+      (and (format/inline-leaf? (get-in source source-path))
+           (not= [:ref (get-in source source-path)] expression))
+      (conj (problem :inline-reference-mismatch))
       (:source-slot-id entry)
       (conj (problem :field-projection-required))
       (and (= :binding (:kind entry)) (nil? (:binding-id origin)))
@@ -220,7 +237,7 @@
 
 (defn- composed-plan
   [source definition context rows]
-  (let [arguments (argument-ledger context definition rows)
+  (let [arguments (argument-ledger context source definition rows)
         defs (:defs-by-name context)
         chain (set (slots/chain-of (slots/own-ref definition defs) defs))
         blockers (vec (distinct
@@ -342,6 +359,33 @@
                    (migration/stable-edn (wire/encode-unreadable-kws form))))
 
 
+(defn- legacy-inline-meaning
+  [environment source prepared {:keys [source-path origin]}]
+  (let [body (get-in source source-path)]
+    (when (format/inline-leaf? body)
+      (let [id (ids/fn-id (:namespace source) (get-in prepared source-path))
+            child (get-in environment [:definition-by-id id])]
+        (when-not child
+          (throw (ex-info "Missing legacy inline declaration"
+                          {:code :missing-inline-declaration :path source-path})))
+        (let [records ((:records-of environment) child)
+              bindings (filterv #(= :binding (:kind %)) records)
+              ctx (source-context/declaration-context environment child records bindings)]
+          [[(:slot-id origin)] [body (authored-meaning child ctx bindings)]])))))
+
+
+(defn- verify-inline-children!
+  [environment {:keys [source legacy]} prepared v2]
+  (let [expected (into {} (keep #(legacy-inline-meaning environment source prepared %)) (:arguments legacy))
+        actual (into {} (map (fn [[path child]]
+                               (let [bindings (mapv migration/legacy-binding (:bindings child))]
+                                 [path [(:inline-body child) (authored-meaning (:source child) child bindings)]])))
+                     (:inline-definitions v2))]
+    (when-not (migration/same-edn? expected actual)
+      (throw (ex-info "Inline source identities or declarations changed"
+                      {:type :input/source-verification :code :inline-declaration-mismatch})))))
+
+
 (defn- verify-definition
   [environment definition]
   (let [{:keys [source proposed legacy identity]} definition
@@ -351,8 +395,14 @@
         legacy-context (source-context/declaration-context environment prepared records bindings)
         context-for (fn [v2]
                       (let [[lowered rows] (source-context/lower-declarations environment v2)]
-                        (source-context/declaration-context environment lowered rows bindings)))
-        options {:context-for context-for}
+                        (source-context/declaration-context environment lowered rows
+                                                            (if (= (:name lowered) (:name source)) bindings []))))
+        options {:context-for context-for
+                 :normalize-inline-parent
+                 (fn [ns-id parent]
+                   (let [names (get-in environment [:context :name->id])
+                         ref (parse/normalize-ref parent names ns-id)]
+                     (when (uuid? (get names ref)) ref)))}
         proposed-module {:input-format 2 :namespace (:namespace source) :fns [proposed]}
         parsed (module/parse-module-v2 proposed-module options)
         emitted (module/emit-module-v2 parsed options)
@@ -366,6 +416,7 @@
         v2-meaning (assoc (authored-meaning lowered v2 (mapv migration/legacy-binding (:bindings v2)))
                           :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
                                                 (:configurations v2)))]
+    (verify-inline-children! environment definition prepared v2)
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"
                       {:type :input/source-verification :code :v2-round-trip-mismatch})))

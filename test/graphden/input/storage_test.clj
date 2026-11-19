@@ -14,12 +14,14 @@
     [graphden.schema.traits.schema :as traits]
     [graphden.schema.versioned.schema :as versioned]
     [graphden.storage.postgres.core :as pg]
+    [graphden.storage.postgres.source-revision :as revision]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.identity-repair :as identity-repair]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.input :as input-storage]
-    [graphden.versioning.storage.resolution :as resolution]))
+    [graphden.versioning.storage.resolution :as resolution]
+    [next.jdbc :as jdbc]))
 
 
 (def ^:dynamic *container* nil)
@@ -37,9 +39,10 @@
 
 
 (defn- base-storage
-  []
-  (-> (pg/create-storage (th/get-container-config *container*))
-      (sp/initialize-with-cleanup! (storage-schema))))
+  ([] (base-storage {}))
+  ([options]
+   (-> (pg/create-storage (merge (th/get-container-config *container*) options))
+       (sp/initialize-with-cleanup! (storage-schema)))))
 
 
 (defmacro ^:private with-storage
@@ -91,6 +94,25 @@
       (binding [access/*offline?* false]
         (is (= :input/offline-only
                (attempt #(sp/create-entity v :input-binding (literal ids [user] {})))))))))
+
+
+(deftest offline-identity-and-version-writes-each-invalidate-source
+  (with-storage [base (base-storage {:source-revision? true})]
+    (let [v (vs/wrap-with-versioning base)
+          {:keys [user name] :as ids} (seed! v)
+          row (sp/create-entity v :input-binding (literal ids [user name] "before"))
+          pool (:pool base)]
+      ;; Isolate each physical table. A versioned edit could bump other tracked tables too.
+      (doseq [statement ["UPDATE input_binding SET description=? WHERE id=?"
+                         "UPDATE input_binding_version SET description=? WHERE input_binding_id=?"]]
+        (let [before (revision/current pool)
+              query [statement "after" (:id row)]]
+          (jdbc/with-transaction [tx pool {:rollback-only true}]
+                                 (is (= 1 (:next.jdbc/update-count (jdbc/execute-one! tx query))))
+                                 (is (= (update before :revision inc) (revision/current tx))))
+          (is (= before (revision/current pool)))
+          (is (= 1 (:next.jdbc/update-count (jdbc/execute-one! pool query))))
+          (is (= (update before :revision inc) (revision/current pool))))))))
 
 
 (deftest single-bulk-and-inherited-overlaps-test

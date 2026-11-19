@@ -2,7 +2,8 @@
 
 These tools prepare and inspect a migration. The production package loader
 still uses the existing format; no command below rewrites installed graphs.
-A supported source rewrite is not a proof of new-loader or runtime equivalence.
+Source verification covers authored declarations and bindings in the
+supported subset.
 
 ## Read-only corpus report
 
@@ -23,8 +24,9 @@ The report includes source identities, definition origins, counts and
 blockers. It excludes literal payloads and proposed function bodies. Exit 0
 means the analysis finished: inspect `:counts`, `:blockers` and
 `:coverage-complete?` before drawing any conclusion about migration readiness.
-The report explicitly leaves new-loader, runtime and history equivalence
-unverified. There is no file-writing `--apply` option.
+`:verification :authored-source-equivalence :verified-definitions` counts the
+definitions that passed the offline comparison. Full loader, runtime and
+history equivalence are still unverified. The report is read-only.
 
 Package analysis sees only declared transitive dependencies. References in a
 successful dependency context are qualified before contexts are combined, so
@@ -43,6 +45,20 @@ type declarations, and provable whole-value/reference bindings. Other forms
 are reported explicitly: list builders, anonymous identity mapping, rename
 projections, referenced input scopes, metadata and unknown binding policies.
 Secret-path resolution must never become an ordinary literal value.
+
+`graphden.input.source/verify-module` checks each supported plan entry against
+the same prepared package context. The offline adapter lowers the actual
+v2 `:input` declaration to rows, resolves inherited fields in parent order,
+and gives the v2 reader the original binding identities and reference scope.
+Field IDs and the derived input type and membership IDs use the storage
+migration's mapping. Missing ancestor declarations, inheritance cycles and
+distinct inherited fields with the same public name produce blockers.
+
+The verifier parses, emits and rereads v2 EDN, then compares declaration rows,
+rich field contracts and authored bindings with the legacy plan. Literals
+retain collection kind and the distinction between absent and present nil.
+The adapter uses the legacy declaration lowerer temporarily. The v2 parser
+handles binding expressions and its own row validation.
 
 A base argument's documenting `:value` annotation remains a free input;
 conversion does not create a new binding or runtime default. Existing
@@ -114,9 +130,10 @@ The result contains `:module` metadata, `:definitions` with original `:source`,
 declared `:contract`, parsed `:expression`, `:binding-state`, `:bindings` and
 origin ledger, plus combined `:records`. Rich `:input` declarations and top-level
 definition metadata are retained. The reader validates structural shapes,
-addresses, binding origins and occupancy before returning any result. It does
-not write records, register types, execute refs, or convert declarations into
-legacy `:args`.
+addresses, binding origins and occupancy before returning any result. The
+offline source verifier supplies a resolver for migrated declarations. The
+general reader also accepts frozen contexts for independently authored v2
+fixtures.
 
 Missing required fields are allowed in a partial definition. Documented default
 values remain annotations. This structural validation does **not** prove value

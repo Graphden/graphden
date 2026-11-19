@@ -13,6 +13,7 @@
    reverse."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.input.references :as input-refs]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.resolution :as res]))
@@ -45,7 +46,13 @@
    :slot    [[:fn-slot :slot-id] [:binding :slot-id]
              [:fn-slot-version :slot-id] [:binding-version :slot-id]
              [:slot :source-slot-id]]
-   :fn      [[:fn-slot :fn-id] [:binding :fn-id]
+   :fn      [[:input-binding :fn-id]
+             [:input-binding :ref-fn-id] [:input-binding :resolver-fn-id]
+             [:input-binding :type-override-fn-id]
+             [:input-binding-version :fn-id] [:input-binding-version :ref-fn-id]
+             [:input-binding-version :resolver-fn-id] [:input-binding-version :type-override-fn-id]
+             [:fn :input-type-fn-id] [:fn-version :input-type-fn-id]
+             [:fn-slot :fn-id] [:binding :fn-id]
              [:binding :ref-fn-id] [:binding :type-override-fn-id]
              [:binding :resolver-fn-id]
              [:binding-list-item :ref-fn-id]
@@ -102,7 +109,7 @@
                                           base-storage :fn :parent-ids id))))
                          candidates)
                    retained)]
-    (into [] (remove (or retained #{})) candidates)))
+    (into [] (remove (into (or retained #{}) (input-refs/retained-ids base-storage entity-name candidates))) candidates)))
 
 
 ;; =============================================================================
@@ -205,7 +212,7 @@
         dead (dead-on-every-branch base-storage entity-name candidates branch-ids)
         referenced (if (and (= :fn entity-name) (seq dead))
                      (set (keys (idrepair/inbound-refs-many base-storage dead)))
-                     #{})]
+                     (input-refs/retained-ids base-storage entity-name dead))]
     (filterv #(and (contains? dead %) (not (contains? referenced %))) candidates)))
 
 

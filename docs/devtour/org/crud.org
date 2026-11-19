@@ -25,13 +25,13 @@ Graph composition selects the entity type and ID from an HTTP mutation request. 
 :PROPERTIES:
 :CUSTOM_ID: crud/read-json-body
 :FILE: src/graphden/crud/request.clj
-:LINE: 128
+:LINE: 130
 :MINS: 2.2
 :END:
 
 Normalizes a [[file:glossary.org::#term/ring][Ring]] request body supplied as text, an input stream, or an already parsed value. JSON object keys become Clojure [[file:glossary.org::#term/edn][keywords]] for the write handlers.
 
-- source :: [[file:../../../src/graphden/crud/request.clj::(defn read-json-body][src/graphden/crud/request.clj:128]]
+- source :: [[file:../../../src/graphden/crud/request.clj::(defn read-json-body][src/graphden/crud/request.clj:130]]
 
 * 3. resolve-branch-ref
 :PROPERTIES:
@@ -50,13 +50,13 @@ Resolves the requested branch by UUID or name before writing. The resulting bran
 :PROPERTIES:
 :CUSTOM_ID: crud/create-entity
 :FILE: src/graphden/crud/entities.clj
-:LINE: 194
+:LINE: 201
 :MINS: 0.8
 :END:
 
 Creates one row through the generic write API. It checks the caller's [[file:glossary.org::#term/auth][capability]], validates the proposed change with ~write-rej~, writes through ~sp/create-entity~, then invalidates caches and sends notifications.
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:194]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:201]]
 - same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
@@ -103,13 +103,13 @@ On failure, traverses the creation journal backward and attempts to delete each 
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 917
+:LINE: 924
 :MINS: 1.5
 :END:
 
 Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Binding writes follow rename views only within the edited function's inheritance. A view belonging to a separately captured call retains its slot UUID and argument name; following it into that call would bind a different argument. See the [[file:../../../docs/adr/ADR-inherited-rename-surface.md][inherited rename design]]. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:917]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:924]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 

@@ -121,7 +121,7 @@
 
 (deftest versioned-entities-constant-test
   (testing "versioned-entities lists every versioned entity name"
-    (is (= #{:branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
+    (is (= #{:input-binding-version :branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
              :binding-version :binding-list-item-version}
            vds/versioned-entities))))
 
@@ -151,7 +151,7 @@
 (deftest version-data-fields-derived-test
   (testing "version-data-fields derive from the SAME source as the mirror
             entities — pinned snapshots guard the identity/versioned split"
-    (is (= #{:name :description :constraint :base-fn-id :element-fn-id
+    (is (= #{:input-type-fn-id :name :description :constraint :base-fn-id :element-fn-id
              :return-type-fn-id :anonymous-hash :expects-effects
              :lambda-params}
            (vds/version-data-fields :fn)))

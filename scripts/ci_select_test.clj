@@ -70,6 +70,15 @@
         "the tour's three reading paths are all baked from tour.edn")))
 
 
+(deftest commit-metadata-is-checked-once-in-the-first-wave
+  (doseq [changed [#{} #{"docs/example.md"} #{"src/graphden/input/core.clj"}]]
+    (let [selected (:run (ci-select/partition-checks real-registry {:changed changed}))
+          batches (ci-select/canonical-batches real-registry selected)
+          names-in (fn [waves] (map :name (mapcat identity (mapcat batches waves))))]
+      (is (= 1 (count (filter #{"commitlint"} (names-in [:affected])))))
+      (is (not-any? #{"commitlint"} (names-in [:pre :priority :test :post-test]))))))
+
+
 (deftest public-contract-guard-runs-before-the-full-suites
   (let [selected (run-names #{"resources/packages/registry/marketplace/fns.edn"})
         batches (ci-select/canonical-batches real-registry real-registry)

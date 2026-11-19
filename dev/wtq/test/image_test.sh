@@ -51,3 +51,41 @@ printf '  image build: RUN\n  e2e: SKIPPED — --no-e2e (manual override)\nverif
 bb "$SRC/report.clj" finish "$REPORT" abc123 42 "$T/gate.log" "$T/ci.edn" "$T/resources.csv" 0
 bb -e '(require (quote clojure.edn)) (let [r (clojure.edn/read-string (slurp (first *command-line-args*)))] (assert (true? (:complete r))) (assert (= 0 (:exit r))) (assert (= 12000 (:duration-ms r))) (assert (= :selected (get-in r [:scope :image-build]))) (assert (= :manual-skip (get-in r [:scope :e2e]))) (assert (= "sha256:test" (get-in r [:artifact :image :id]))))' -- "$REPORT"
 echo 'image_test: partial and finished train receipts verified'
+
+# A successful validation is reusable proof, never a landed verdict. The
+# independent selector receipt binds it to exactly the requested SHA and base.
+sha="$(git -C "$T/repo" rev-parse HEAD)"
+base="$(printf '%040d' 0)"
+expected="$T/expected.edn"
+printf '{:schema 1 :sha "%s" :scope {:since "%s"}}\n' "$sha" "$base" > "$expected"
+WTQ_GATE_MODE=validate bb "$SRC/report.clj" finish "$REPORT" "$sha" 42 "$T/gate.log" "$T/ci.edn" "$T/resources.csv" 0
+[ "$(bb "$SRC/report.clj" validated "$REPORT" "$expected" "$sha" "$base")" = "$sha" ]
+for mode in landed landed-image; do
+  if bb "$SRC/report.clj" "$mode" "$REPORT" >/dev/null 2>&1; then
+    echo "validation proof was reported as $mode" >&2; exit 1
+  fi
+done
+for changed in sha base; do
+  candidate="$sha"; target="$base"
+  if [ "$changed" = sha ]; then candidate="$base"; else target="$sha"; fi
+  if bb "$SRC/report.clj" validated "$REPORT" "$expected" "$candidate" "$target" >/dev/null 2>&1; then
+    echo "changed $changed reused a validation proof" >&2; exit 1
+  fi
+done
+# These are deliberately NOT eligible, even with an exact SHA/base and a
+# successful-looking retained ref: generic success, red, partial or missing proof.
+bb -e '(require (quote clojure.edn))
+  (let [[path dir] *command-line-args*
+        proof (clojure.edn/read-string (slurp path))]
+    (doseq [[label invalid] {"landed" (assoc proof :mode :land :outcome :landed)
+                            "legacy" (dissoc proof :mode :outcome)
+                            "red" (assoc proof :exit 1)
+                            "incomplete" (assoc proof :complete false)
+                            "failed-stage" (assoc proof :failed-stage :ci)}]
+      (spit (str dir "/invalid-" label ".edn") (pr-str invalid))))' -- "$REPORT" "$T"
+for invalid in "$T"/invalid-*.edn "$T/missing.edn"; do
+  if bb "$SRC/report.clj" validated "$invalid" "$expected" "$sha" "$base" >/dev/null 2>&1; then
+    echo "invalid receipt was reusable: $invalid" >&2; exit 1
+  fi
+done
+echo 'image_test: only exact completed validation supplies proof; it never implies landing'

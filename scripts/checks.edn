@@ -37,6 +37,19 @@
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
  {:name "native-inventory-selftest" :bb "native-inventory-test" :timeout 180000 :group :clj
   :relevant ["^scripts/native_inventory(?:_test)?\\.clj$" "^\\.clj-kondo/" "^deps\\.edn$" "^bb\\.edn$"]}
+ {:name "structured-input-inventory-selftest" :bb "structured-input-inventory-test" :timeout 30000 :group :infra :stage :affected
+  :relevant ["^scripts/structured_input_inventory(?:_test)?\\.clj$" "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ {:name "structured-input-cst-selftest" :bb "structured-input-cst-test" :timeout 30000 :group :infra :stage :affected
+  :relevant ["^scripts/structured_input_(?:cst(?:_test)?|inventory)\\.clj$"
+             "^src/graphden/(?:input/|packages/records|packages/rebase|types/)"
+             "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ {:name "structured-input-dry-run-selftest" :bb "structured-input-dry-run-test" :timeout 30000 :group :infra :stage :affected
+  :relevant ["^scripts/structured_input_(?:dry_run(?:_test)?|inventory)\\.clj$"
+             "^src/graphden/(?:input/|packages/records|packages/rebase|types/)"
+             "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ {:name "structured-input-module-selftest" :bb "structured-input-module-test" :timeout 30000 :group :infra :stage :affected
+  :relevant ["^src/graphden/input/" "^src/graphden/packages/records/ids\\.clj$"
+             "^test/graphden/input/module_test\\.clj$" "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  ;; `^bb\.edn$` in every check whose SCAN SET is defined by its `bb`
  ;; task body (a narrowed glob there would otherwise skip the very
  ;; check the edit changed); `^\.cljstyle$` because the extensionless
@@ -190,7 +203,8 @@
  ;; read as "the new JVM dep's license was vetted", which this task never does.
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec
   :relevant ["package(-lock)?\\.json$" "^bb\\.edn$"]}
- {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
+ ;; Commit metadata can fail in seconds; reject it before expensive lint waves.
+ {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit :stage :affected}
  ;; Full suites run related cases first, without a separate focused execution.
  {:name "tests-js-affected" :bb "staged-js-affected" :timeout 60000 :group :test :stage :affected
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"

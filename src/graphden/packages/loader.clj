@@ -49,6 +49,7 @@
     [clojure.tools.logging :as log]
     [clojure.tools.reader :as treader]
     [clojure.tools.reader.reader-types :as treader-types]
+    [graphden.input.format :as input-format]
     [graphden.packages.loaded :as loaded]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
@@ -223,10 +224,12 @@
   [package-name module-name]
   (let [path (str "packages/" package-name "/" module-name "/fns.edn")]
     (if-let [raw (read-resource-edn-with-meta path)]
-      {:ns-path (:namespace raw)
-       :ns-description (:description raw)
-       :fns (do (validate-fn-def-keys! (:fns raw) path)
-                (attach-source-meta (vec (:fns raw)) path))}
+      (do
+        (input-format/require-legacy! raw path)
+        {:ns-path (:namespace raw)
+         :ns-description (:description raw)
+         :fns (do (validate-fn-def-keys! (:fns raw) path)
+                  (attach-source-meta (vec (:fns raw)) path))})
       (throw (ex-info (str "Module fns not found: " package-name "/" module-name)
                       {:type :package-error/module-not-found
                        :package package-name
@@ -474,9 +477,9 @@
    Type-rows (`:type` / `:refine` / `:list` / `:union` / `:variant`)
    ride along in the `fn-defs` slot — `composition/sync-fns-to-storage!`
    routes them to slot / fn-slot / binding rows by role marker."
-  [package-name module-name]
+  [package-name module-name module-source]
   (let [{ns-path :ns-path ns-description :ns-description fns :fns}
-        (load-module-fns package-name module-name)
+        module-source
         impls (load-module-impls package-name module-name)
 
         ;; Separate base functions from fn-defs
@@ -525,6 +528,18 @@
 ;; Package Loading
 ;; =============================================================================
 
+(defn- snapshot-package-source
+  "Read and validate every module before any implementation is evaluated.
+   The snapshot is local to one load call and is also the source consumed by
+   processing, so a later resource change cannot bypass this format check."
+  [package-name pkg-meta]
+  {:package-name package-name
+   :meta pkg-meta
+   :modules (mapv (fn [module-name]
+                    [module-name (load-module-fns package-name module-name)])
+                  (:modules pkg-meta))})
+
+
 (defn- load-single-package
   "Loads a single package and returns its functions.
 
@@ -532,18 +547,16 @@
    inherits its description from `package.edn`'s `:description`. Module
    namespaces (`core.arithmetic`, …) get theirs from each module's
    `fns.edn` `:description`."
-  [package-name]
+  [{:keys [package-name modules] pkg-meta :meta}]
   (log/info "Loading package:" package-name)
-  (let [pkg-meta (load-package-meta package-name)
-        modules (:modules pkg-meta)
-        seed-ns-descriptions (cond-> {}
+  (let [seed-ns-descriptions (cond-> {}
                                (:description pkg-meta)
                                (assoc package-name (:description pkg-meta)))]
 
     (reduce
-      (fn [acc module-name]
+      (fn [acc [module-name module-source]]
         (let [{:keys [base-fn-defs fn-defs base-fn-pairs ns-descriptions]}
-              (process-module package-name module-name)]
+              (process-module package-name module-name module-source)]
           (-> acc
               (update :base-fn-defs merge base-fn-defs)
               (update :fn-defs into fn-defs)
@@ -607,6 +620,30 @@
                        :present present})))))
 
 
+(defn- resolve-package-set
+  "Resolve the closure and retain its metadata for this load call."
+  [package-names]
+  (let [metas (atom {})
+        load-meta! (fn [pkg]
+                     (or (@metas pkg)
+                         (let [m (load-package-meta pkg)]
+                           (swap! metas assoc pkg m)
+                           m)))
+        sorted (atom [])
+        visited (atom #{})
+        visit (fn visit
+                [pkg]
+                (when-not (@visited pkg)
+                  (swap! visited conj pkg)
+                  (doseq [dep (normalize-deps (get (load-meta! pkg) :dependencies []))]
+                    (visit (:name dep)))
+                  (swap! sorted conj pkg)))]
+    (doseq [pkg package-names]
+      (visit pkg))
+    (validate-dep-constraints! @metas)
+    {:ordered @sorted :metas @metas}))
+
+
 (defn resolve-dependencies
   "Returns packages in dependency order (topological sort).
 
@@ -629,25 +666,7 @@
    dep graph would loop here; package.edn dep graphs are tiny and
    reviewed)."
   [package-names]
-  (let [metas (atom {})
-        load-meta! (fn [pkg]
-                     (or (@metas pkg)
-                         (let [m (load-package-meta pkg)]
-                           (swap! metas assoc pkg m)
-                           m)))
-        sorted (atom [])
-        visited (atom #{})
-        visit (fn visit
-                [pkg]
-                (when-not (@visited pkg)
-                  (swap! visited conj pkg)
-                  (doseq [dep (normalize-deps (get (load-meta! pkg) :dependencies []))]
-                    (visit (:name dep)))
-                  (swap! sorted conj pkg)))]
-    (doseq [pkg package-names]
-      (visit pkg))
-    (validate-dep-constraints! @metas)
-    @sorted))
+  (:ordered (resolve-package-set package-names)))
 
 
 (defn load-packages
@@ -669,9 +688,12 @@
                        :cardinality :per-pod
                        :description \"…\"} …]}"
   [package-names]
-  (let [ordered (resolve-dependencies package-names)
+  (let [{:keys [ordered metas]} (resolve-package-set package-names)
         _ (log/info "Loading packages in order:" ordered)
-        results (mapv load-single-package ordered)
+        ;; Eager preflight of the complete resolved closure. In particular a
+        ;; late v2/unknown-format module cannot follow an earlier impl effect.
+        sources (mapv #(snapshot-package-source % (get metas %)) ordered)
+        results (mapv load-single-package sources)
         ;; Single pass over results to build all aggregations
         combined (reduce (fn [acc result]
                            (let [pkg-name (get-in result [:meta :name])

@@ -586,21 +586,21 @@
   ;; from. Pre-fix the NULL params typed as `text` → PG raised "column is
   ;; of type bigint but expression is of type text". The declared-type
   ;; fallback in `column-type-cast` supplies the right cast.
-  (testing "clearing an :int column to nil across a whole batch succeeds"
+  (testing "clearing a kebab-case :int column to nil across a whole batch succeeds"
     (let [storage (setup/create-test-storage)
           schema (th/make-schema
                    :fields {:name  {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}
-                            :score {:uuid #uuid "00000000-0000-0000-0000-000000000003" :type :int :nullable? true}})
+                            :highest-score {:uuid #uuid "00000000-0000-0000-0000-000000000003" :type :int :nullable? true}})
           _ (sp/initialize storage schema)
           id1 #uuid "aaaaaaaa-0000-0000-0000-000000000001"
           id2 #uuid "aaaaaaaa-0000-0000-0000-000000000002"
-          _ (sp/create-entity storage :user {:id id1 :name "A" :score 10})
-          _ (sp/create-entity storage :user {:id id2 :name "B" :score 20})]
+          _ (sp/create-entity storage :user {:id id1 :name "A" :highest-score 10})
+          _ (sp/create-entity storage :user {:id id2 :name "B" :highest-score 20})]
       (try
-        (sp/update-entities storage :user [{:id id1 :score nil}
-                                           {:id id2 :score nil}])
-        (is (nil? (:score (sp/read-entity storage :user id1))))
-        (is (nil? (:score (sp/read-entity storage :user id2))))
+        (sp/update-entities storage :user [{:id id1 :highest-score nil}
+                                           {:id id2 :highest-score nil}])
+        (is (nil? (:highest-score (sp/read-entity storage :user id1))))
+        (is (nil? (:highest-score (sp/read-entity storage :user id2))))
         (finally
           (sp/close storage))))))
 

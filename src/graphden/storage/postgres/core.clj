@@ -12,6 +12,7 @@
    - crud.clj - CRUD operations"
   (:require
     [graphden.accounts.session-read :as session-read]
+    [graphden.input.access :as input-access]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.account-session :as account-session]
@@ -292,6 +293,7 @@
 
   (delete-entity
     [this entity-name id]
+    (input-access/assert-write! entity-name {})
     (writer/with-write [this entity-name]
                        (let [pool (:pool this)]
                          (evict-slot-rows! slot-row-cache entity-name [id])
@@ -393,6 +395,7 @@
 
   (delete-entities
     [this entity-name ids]
+    (input-access/assert-write! entity-name {})
     (writer/with-write [this entity-name]
                        (let [pool (:pool this)
                              deleted (crud/delete-entities pool entity-name ids)]

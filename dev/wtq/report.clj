@@ -82,6 +82,8 @@
     (assoc base
            :complete true
            :exit exit
+           :outcome (when (zero? exit)
+                      (if (= :validate (:mode base)) :validated :landed))
            :failed-stage (when (= 1 exit)
                            (some->> (re-seq #"(?m)^WTQ_FAILED_STAGE=(ci|build|e2e|visual|integration|fleet)$" output)
                                     last second keyword))
@@ -97,9 +99,11 @@
 
 (defn- base
   [sha queue-ms]
-  (let [admission-ms (parse-long (or (System/getenv "WTQ_ADMISSION_MS") "0"))]
+  (let [admission-ms (parse-long (or (System/getenv "WTQ_ADMISSION_MS") "0"))
+        mode (if (= "validate" (System/getenv "WTQ_GATE_MODE")) :validate :land)]
     {:schema 1 :complete false :sha sha
-     :command ["bb" "wt" "merge"]
+     :mode mode
+     :command ["bb" "wt" (if (= :validate mode) "validate" "merge")]
      :wait {:reason :merge-train-queue
             :duration-ms (parse-long queue-ms)
             :admission (when (pos? admission-ms)
@@ -107,17 +111,40 @@
                           :duration-ms admission-ms})}}))
 
 
+(defn- validated-candidate!
+  "A successful validation can supply pass credit, never a landed verdict.
+   Stage roster, CI and image proofs must still be verified by the caller."
+  [path expected-path sha base-sha]
+  (let [receipt (edn/read-string (slurp path))
+        expected (edn/read-string (slurp expected-path))]
+    (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha)
+                   (= 1 (:schema receipt) (:schema expected))
+                   (true? (:complete receipt))
+                   (= 0 (:exit receipt))
+                   (= :validate (:mode receipt))
+                   (= :validated (:outcome receipt))
+                   (nil? (:failed-stage receipt))
+                   (= sha (:sha receipt) (:sha expected))
+                   (= base-sha (get-in expected [:scope :since])))
+      (throw (ex-info "No exact successful validation proof" {:path path})))
+    (println sha)))
+
+
 (defn -main
   [& args]
-  (let [[mode path sha queue-ms & remaining] args]
+  (let [[mode path & args] args]
     (case mode
-      "init" (write-atomic! path (base sha queue-ms))
-      "finish" (let [[gate-output ci-path resources exit] remaining]
+      "init" (let [[sha queue-ms] args]
+               (write-atomic! path (base sha queue-ms)))
+      "validated" (apply validated-candidate! path args)
+      "finish" (let [[sha queue-ms gate-output ci-path resources exit] args]
                  (write-atomic! path (report (base sha queue-ms) (slurp gate-output)
                                              ci-path resources (parse-long exit))))
       ("landed" "landed-image") (let [receipt (edn/read-string (slurp path))]
                                   (when-not (and (= 1 (:schema receipt))
                                                  (true? (:complete receipt))
+                                                 (not= :validate (:mode receipt))
+                                                 (not= :validated (:outcome receipt))
                                                  (zero? (or (:exit receipt) -1))
                                                  (string? (:sha receipt)))
                                     (throw (ex-info "Train did not complete successfully" {:path path})))

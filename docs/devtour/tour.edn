@@ -464,7 +464,25 @@
    :paths ["src/graphden/storage/" "src/graphden/schema/"]
    :after [:executor]
    :steps
-   [{:ns graphden.storage.protocol.core :defn Storage
+   [{:ns graphden.schema.input.schema :defn extend-builder
+     :say "Adds the inactive structured-input storage: stable UUID field paths and a separate
+           input-binding entity. Functions point to existing record-type descriptors through a
+           versioned input-type field. Production continues using v1; generic public access to
+           these entities remains denied. See the [offline storage contract](../../docs/STRUCTURED_INPUT_STORAGE.md)."}
+    {:ns graphden.input.offline :defn apply!
+     :say "Rehearses an additive migration on a stopped database copy. The artifact preserves raw
+           history, shared binding origins and exact timestamps. Apply verifies its plan and source
+           fingerprint under the graph writer lock, checks every branch, and commits atomically.
+           Unsupported semantic forms block the complete artifact; this does not enable a new
+           production writer. Restore refuses to erase changes made after the rehearsal."
+     :see [[:storage "validate-view!"]]}
+    {:ns graphden.versioning.storage.input :defn validate-view!
+     :say "Checks scoped field paths and occupied-prefix conflicts among supplied rows, including
+           inherited origins. The offline writer and merge transaction call this validator under
+           locks. It deliberately leaves recursive reference availability, type/HOF classification
+           and execution to later transition stages; it is not the effective remaining-input calculation."
+     :see [[:types "remaining-input"]]}
+    {:ns graphden.storage.protocol.core :defn Storage
      :say "Defines the storage lifecycle [protocol](#term/protocol): initialize a backend with a data
            schema, then close its resources when finished. Row operations and reachable-graph queries
            are separate [protocols](#term/protocol) shown next."}
@@ -709,10 +727,50 @@
    :title "Types — validation and inference"
    :status :toured
    :summary "Type expressions, compatibility, inference, and secret markings."
-   :paths ["src/graphden/types/"]
+   :paths ["src/graphden/types/" "src/graphden/input/"]
    :after [:executor]
    :steps
-   [{:ns graphden.types.core.shapes :defn primitives
+   [{:ns graphden.input.core :defn bind-input
+     :say "The structured-input transition begins with a pure binding algebra, not yet used by
+           production execution. A partial record binds declared child fields; a whole value or
+           reference occupies its subtree. Stable field paths reject overlapping bindings without
+           executing references. Expected types remain available for later value/HOF classification."
+     :see [[:types "remaining-input"]]}
+    {:ns graphden.input.core :defn remaining-input
+     :say "Describes locally missing fields and occupancy while retaining original rich types and
+           constraints. Optional fields remain bindable without preventing invocation; partially
+           filling an optional record activates its required children. Reference dependencies are
+           returned separately: no local missing fields does not prove the whole graph is ready."}
+    {:ns graphden.input.syntax :defn parse-expression
+     :say "Normalizes partial record maps and explicit value/ref expressions against a supplied
+           resolved descriptor. Literal payloads stay opaque and references remain unevaluated.
+           The caller supplies stable binding identities and namespace-resolved reference names;
+           this offline API is not yet connected to the production package loader."}
+    {:ns graphden.input.source :defn plan-module
+     :say "Compares original source forms with a prepared legacy module to plan supported rewrites.
+           It retains rich declarations and binding origins, while reporting unsupported list,
+           rename, ref-scope and policy forms as explicit blockers. A completed report does not
+           prove runtime equivalence or authorize dropping an unsupported definition."}
+    {:ns graphden.input.source :defn verify-module
+     :say "Derives declared input contexts for supported rewrites using the frozen package index
+           and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich
+           declarations and authored bindings with the legacy plan. The report records
+           verification per definition. Runtime and residual interface checks follow later."}
+    {:ns graphden.input.module :defn parse-module-v2
+     :say "Reads an explicitly versioned source module with caller-resolved declarations and
+           namespace contexts. It retains authored input metadata and origin ledgers, returning
+           validated input-binding rows without registry or storage writes. Partial required
+           fields are legal; structural validation does not prove types or graph readiness."}
+    {:ns graphden.input.module :defn emit-module-v2
+     :say "Exports offline definitions using the same declared descriptors and identity callbacks.
+           Re-parsing detects changed binding origins or declaration context. Rich declarations
+           remain intact; source formatting and comments belong to the separate CST writer."}
+    {:ns graphden.input.format :defn require-legacy!
+     :say "Keeps format 2 outside the production loader. Unsupported headers and mixed structured
+           definition keys fail during the entire package closure's preflight, before any impl
+           executes. Absent/version-1 headers still use legacy semantics; same-named argument
+           fields and literal map keys remain ordinary data."}
+    {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on
            this vocabulary."}

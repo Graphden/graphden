@@ -22,6 +22,7 @@
     [graphden.storage.tx :as tx]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.field-diff :as fd]
+    [graphden.versioning.storage.input :as input-storage]
     [graphden.versioning.storage.resolution :as res]
     [graphden.versioning.storage.stamp :as stamp]
     [graphden.versioning.storage.uniqueness :as uniq])
@@ -702,7 +703,8 @@
    for free."
   [storage source-branch-id target-branch-id]
   (doseq [[entity-name version-entity id-field check!]
-          [[:fn :fn-version :fn-id uniq/check-fn-name-collisions!]
+          [[:input-binding :input-binding-version :input-binding-id input-storage/check-collisions!]
+           [:fn :fn-version :fn-id uniq/check-fn-name-collisions!]
            [:binding-list-item :binding-list-item-version :item-id
             uniq/check-list-item-position-collisions!]
            [:resource-override :resource-override-version :override-id

@@ -68,6 +68,7 @@
       (let [report (dry/dry-run roots)]
         (is (= :prepared (:status (package-result report "client"))))
         (is (= {:supported 5 :blocked 0} (:counts report)))
+        (is (= 5 (get-in report [:verification :authored-source-equivalence :verified-definitions])))
         (is (empty? (:blockers report)))))))
 
 
@@ -121,6 +122,8 @@
                                                  {:out :string :err :string}))]
         (is (= serialized (inventory/report-text (dry/dry-run roots))))
         (is (= report (edn/read-string (:out cli))))
+        (is (= 2 (get-in report [:verification :authored-source-equivalence :verified-definitions])))
+        (is (false? (get-in report [:verification :new-loader-equivalence])))
         (is (not (str/includes? serialized "PRIVATE-PAYLOAD")))
         (is (not (str/includes? serialized (str root))))
         (is (= 64 (count (:report-sha256 report))))))))

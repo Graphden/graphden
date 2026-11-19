@@ -1,6 +1,7 @@
 (ns ^:serial graphden.input.source-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.input.migration :as migration]
     [graphden.input.source :as source]
     [graphden.input.syntax :as syntax]
     [graphden.packages.records.ids :as ids]
@@ -276,3 +277,115 @@
           (is (contains? (codes planned) expected))
           (is (not (contains? planned :proposed)))
           (is (contains? (get-in planned [:legacy :arguments 0 :policy]) column)))))))
+
+
+(defn- verified
+  [definitions]
+  (let [context (prepared definitions)]
+    (source/verify-module (source/plan-module definitions context) context)))
+
+
+(deftest verified-declarations-and-bindings-agree-with-storage-migration
+  (let [options {:type {:flag :bool} :required false :value {:flag false}
+                 :description "Default in the implementation"}
+        parent (assoc base :args {:x :any :options options :items [:list 'a]})
+        child {:name :child :namespace "demo" :parent :sink :args {:x {:value nil}}}
+        report (verified [parent child])
+        parent-plan (result report :sink)
+        child-plan (result report :child)
+        owner (:identity child-plan)
+        input-id (migration/derived-id :input-type owner)
+        x-id (ids/slot-id (:identity parent-plan) :x)
+        binding-id (ids/binding-id owner x-id)
+        v2 (:v2 child-plan)
+        db-mapping (->> (:definitions report)
+                        (mapcat #(get-in % [:legacy :records]))
+                        (group-by :kind)
+                        migration/plan
+                        :mapping)
+        mapping (get-in v2 [:origin-ledger :mapping])
+        contract (:contract v2)
+        option-field (second (:fields contract))]
+    (is (= {:supported 2 :blocked 0} (:counts report)))
+    (is (= :authored-source-equivalent (:verification child-plan)))
+    (is (= input-id (:input-type-id v2)))
+    (is (= {:input-types (select-keys (:input-types db-mapping) [input-id])
+            :memberships (select-keys (:memberships db-mapping) (keys (:memberships mapping)))
+            :binding-origins (:binding-origins db-mapping)}
+           mapping))
+    (is (= [x-id (ids/slot-id (:identity parent-plan) :options)
+            (ids/slot-id (:identity parent-plan) :items)]
+           (mapv :id (:fields contract))))
+    (is (= options (:declaration option-field)))
+    (is (= false (:required option-field)))
+    (is (= [{:name :flag :type :bool :required true}]
+           (mapv #(select-keys % [:name :type :required]) (:fields option-field))))
+    (is (= [[:list 'a]] (mapv :type (drop 2 (:fields contract)))))
+    (is (= [{:kind :input-binding :id binding-id :fn-id owner
+             :scope-path [] :target-path [x-id] :expression-kind "value"
+             :value-present true :value nil}] (:bindings v2)))
+    (is (empty? (get-in parent-plan [:v2 :bindings])))))
+
+
+(deftest verification-rejects-drift-in-rewrites
+  (let [parent (assoc base :args {:x {:type :any :required false :value false}})
+        child {:name :child :namespace "demo" :parent :sink :args {:x {:value [1]}}}
+        definitions [parent producer child]
+        context (prepared definitions)
+        planned (source/plan-module definitions context)]
+    (doseq [[entry name edit]
+            [[0 :sink #(assoc-in % [:input :x :value] nil)]
+             [0 :sink #(assoc-in % [:input :x :required] true)]
+             [0 :sink #(assoc % :effects #{:io})]
+             [2 :child #(dissoc % :bind)]
+             [2 :child #(assoc-in % [:bind :x] [:value '(1)])]]]
+      (let [changed (update-in planned [:definitions entry :proposed] edit)
+            checked (result (source/verify-module changed context) name)]
+        (is (= #{:legacy-v2-meaning-mismatch} (codes checked)))
+        (is (= :blocked (:status checked)))
+        (is (not (contains? checked :proposed)))))))
+
+
+(deftest verified-reference-survives-edn-wire-qualification
+  (let [root-producer (assoc producer :namespace nil)
+        child {:name :child :namespace "demo" :parent :sink
+               :args {:x {:ref (keyword "" "producer")}}}
+        report (verified [base producer root-producer child])
+        planned (result report :child)]
+    (is (= {:supported 4 :blocked 0} (:counts report)))
+    (is (= (ids/fn-id nil :producer)
+           (get-in planned [:v2 :bindings 0 :ref-fn-id])))
+    (is (= [:ref (keyword "" "producer")] (get-in planned [:v2 :source :bind :x])))))
+
+
+(deftest verification-cannot-introduce-a-different-known-reference
+  (let [other (assoc producer :namespace "other")
+        child {:name :child :namespace "demo" :parent :sink
+               :args {:x {:ref :producer}}}
+        definitions [base producer other child]
+        context (prepared definitions)
+        planned (source/plan-module definitions context)
+        tampered (assoc-in planned [:definitions 3 :proposed :bind :x] [:ref :other/producer])
+        checked (result (source/verify-module tampered context) :child)]
+    (is (= #{:unresolved-ref} (codes checked)))
+    (is (= :blocked (:status checked)))))
+
+
+(deftest inherited-diamonds-deduplicate-fields-and-distinct-name-collisions-block
+  (let [left {:name :left :namespace "demo" :parent :sink}
+        right {:name :right :namespace "demo" :parent :sink}
+        diamond {:name :diamond :namespace "demo" :parents [:left :right] :args {:x false}}
+        different (assoc base :name :different :args {:x :bool})
+        conflict {:name :conflict :namespace "demo" :parents [:left :different]}
+        report (verified [base left right diamond different conflict])]
+    (is (= [:x :items] (mapv :name (get-in (result report :diamond) [:v2 :contract :fields]))))
+    (is (= false (get-in (result report :diamond) [:v2 :bindings 0 :value])))
+    (is (= #{:ambiguous-inherited-input} (codes (result report :conflict))))))
+
+
+(deftest indirect-parent-cycles-do-not-verify
+  (let [first {:name :first :namespace "demo" :parent :second}
+        second {:name :second :namespace "demo" :parent :first}
+        report (verified [first second])]
+    (is (= {:supported 0 :blocked 2} (:counts report)))
+    (is (= #{:cyclic-parent-input} (set (map :code (:blockers report)))))))

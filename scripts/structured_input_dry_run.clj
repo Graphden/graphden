@@ -127,7 +127,7 @@
 (defn- summarize-definition
   [package definition]
   (let [original (:source definition)]
-    (-> (select-keys definition [:identity :kind :status :origins])
+    (-> (select-keys definition [:identity :kind :status :origins :verification])
         (assoc :definition [(:namespace original) (:name original)]
                :file (:source-file original)
                :blockers (mapv #(assoc % :repository (:repository package) :package (:name package))
@@ -163,7 +163,7 @@
         (if (duplicate-definition? (concat dependencies original))
           (blocked-state package [(problem package :duplicate-visible-definition)])
           (let [context (parse/prepare-module original names definitions)
-                planned (source/plan-module original context)
+                planned (source/verify-module (source/plan-module original context) context)
                 summaries (mapv #(summarize-definition package %) (:definitions planned))]
             {:status :prepared
              :exports (vec (distinct (concat dependencies (qualify-definitions context))))
@@ -235,9 +235,12 @@
                                    (:definitions module)))
         counts (reduce #(merge-with + %1 (:counts %2)) {:supported 0 :blocked orphan-count} summaries)
         complete? (= (get-in manifest [:totals :definitions]) (+ (:supported counts) (:blocked counts)))
+        verified (count (filter #(= :authored-source-equivalent (:verification %))
+                                (mapcat :definitions summaries)))
         report {:schema-version 1
                 :mode :read-only-source-plan
-                :verification {:new-loader-equivalence false :runtime-equivalence false :history false}
+                :verification {:authored-source-equivalence {:verified-definitions verified}
+                               :new-loader-equivalence false :runtime-equivalence false :history false}
                 :source-identities (mapv #(select-keys % [:label :source-identity]) (:repositories manifest))
                 :inventory-totals (:totals manifest)
                 :counts counts :coverage-complete? complete?

@@ -3,11 +3,16 @@
    Source forms and raw ledgers are private artifacts, not log messages. A
    supported rewrite is not proof of runtime or whole-corpus equivalence."
   (:require
+    [clojure.edn :as edn]
+    [graphden.input.migration :as migration]
+    [graphden.input.module :as module]
+    [graphden.input.source-context :as source-context]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slots]
-    [graphden.packages.records.types :as types]))
+    [graphden.packages.records.types :as types]
+    [graphden.packages.records.wire :as wire]))
 
 
 (def ^:private type-keys
@@ -287,3 +292,82 @@
      :definitions definitions
      :blockers (vec (mapcat :blockers definitions))
      :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions)))}))
+
+
+(defn- binding-meaning
+  [record]
+  (cond-> (select-keys record [:id :fn-id :slot-id :value-present])
+    (:value-present record) (assoc :value (:value record))
+    (:ref-fn-id record) (assoc :ref-fn-id (:ref-fn-id record))))
+
+
+(defn- authored-meaning
+  [declaration context bindings]
+  {:declaration (dissoc declaration :args :fn-id :namespace)
+   :base-args (when (= :base (definition-kind declaration)) (or (:args declaration) {}))
+   :context (select-keys context [:fn-id :contract :declaration-records :origin-ledger])
+   :bindings (mapv binding-meaning (sort-by :id bindings))})
+
+
+(defn- read-emitted
+  [form]
+  (edn/read-string {:readers wire/wire-readers}
+                   (migration/stable-edn (wire/encode-unreadable-kws form))))
+
+
+(defn- verify-definition
+  [environment definition]
+  (let [{:keys [source proposed legacy identity]} definition
+        prepared (get-in environment [:definition-by-id identity])
+        records (:records legacy)
+        bindings (filterv #(= :binding (:kind %)) records)
+        legacy-context (source-context/declaration-context environment prepared records bindings)
+        context-for (fn [v2]
+                      (let [[lowered rows] (source-context/lower-declarations environment v2)]
+                        (source-context/declaration-context environment lowered rows bindings)))
+        options {:context-for context-for}
+        proposed-module {:input-format 2 :namespace (:namespace source) :fns [proposed]}
+        parsed (module/parse-module-v2 proposed-module options)
+        emitted (module/emit-module-v2 parsed options)
+        reread (module/parse-module-v2 (read-emitted emitted) options)
+        v2 (first (:definitions reread))
+        [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
+        legacy-meaning (authored-meaning prepared legacy-context bindings)
+        v2-meaning (authored-meaning lowered v2 (mapv migration/legacy-binding (:bindings v2)))]
+    (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
+      (throw (ex-info "Structured source records changed on round trip"
+                      {:type :input/source-verification :code :v2-round-trip-mismatch})))
+    (when-not (migration/same-edn? legacy-meaning v2-meaning)
+      (throw (ex-info "Structured source changed authored meaning"
+                      {:type :input/source-verification :code :legacy-v2-meaning-mismatch})))
+    (assoc definition :verification :authored-source-equivalent :v2 v2)))
+
+
+(defn verify-module
+  "Verify each supported plan entry with a source-derived v2 resolver.
+   Compares declared field contracts, row identities, authored metadata and
+   whole-value/ref binding meaning after v2 parse, emit, EDN read and reparse.
+   Ancestor declarations come from the frozen prepared context. Ref execution,
+   residual interfaces, whole-corpus and database proofs are separate stages.
+
+   Keep the returned v2 rows and contracts private like the source plan.
+   Use :counts, :blockers and per-definition :verification for reports."
+  [plan context]
+  (let [environment (source-context/environment context)
+        definitions
+        (mapv (fn [{:keys [source status] :as definition}]
+                (if (= :supported status)
+                  (try
+                    (verify-definition environment definition)
+                    (catch Exception failure
+                      (let [{:keys [type code path]} (ex-data failure)]
+                        (-> definition
+                            (dissoc :proposed :verification :v2)
+                            (assoc :status :blocked
+                                   :blockers [(assoc (blocker source (or code :v2-verification-failed) (or path []))
+                                                     :cause-type type)])))))
+                  definition))
+              (:definitions plan))]
+    (assoc plan :definitions definitions
+           :blockers (vec (mapcat :blockers definitions))
+           :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions))))))

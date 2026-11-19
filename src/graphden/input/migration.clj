@@ -55,6 +55,12 @@
     :else value))
 
 
+(defn same-edn?
+  "Compare data independently of map/set order while retaining collection kind."
+  [left right]
+  (= (canonical left) (canonical right)))
+
+
 (defn fingerprint
   "Ignore SQL's absent-column nils, but preserve nils INSIDE literal values."
   [snapshot]
@@ -141,10 +147,21 @@
             (issue :owner-mismatch :binding (:id b))))))))
 
 
-(defn- descriptor-row
+(defn input-type-record
+  "Storage row for the declared input of an existing callable identity."
   [owner]
   {:id (derived-id :input-type (:id owner)) :name nil
    :parent-ids [] :org-id (:org-id owner)})
+
+
+(defn input-membership-record
+  "Copy a legacy membership onto the callable's input type. The field ID
+   stays the original slot ID, including when inherited by several owners."
+  [owner membership]
+  (assoc membership
+         :id (derived-id :membership (:id owner) (:id membership))
+         :fn-id (derived-id :input-type (:id owner))
+         :org-id (:org-id owner)))
 
 
 (def ^:private version-stamps
@@ -161,10 +178,7 @@
 (defn- membership-copies
   [fns memberships]
   (mapcat (fn [[owner ms]]
-            (map (fn [m]
-                   (assoc m :id (derived-id :membership owner (:id m))
-                          :fn-id (derived-id :input-type owner)
-                          :org-id (:org-id (get fns owner)))) ms))
+            (map #(input-membership-record (get fns owner) %) ms))
           memberships))
 
 
@@ -194,6 +208,18 @@
     version? (-> (assoc :input-binding-id (:binding-id row)) (dissoc :binding-id))))
 
 
+(defn identity-mapping
+  "Shared identity mapping for legacy memberships and authored bindings."
+  [memberships bindings]
+  {:binding-origins (into {} (map (fn [b] [[[(:fn-id b) []] [(:slot-id b)]] (:id b)])) bindings)
+   :input-types (into {} (map (fn [id] [(derived-id :input-type id) id])) (keys memberships))
+   :memberships (into {} (mapcat (fn [[owner ms]]
+                                   (map (fn [m]
+                                          [(derived-id :membership owner (:id m))
+                                           (select-keys m [:id :fn-id])]) ms)))
+                      memberships)})
+
+
 (defn plan
   "Prepare an additive artifact from RAW identity and version rows. Inherited
    memberships retain each original branch/revision; no latest-only rewrite.
@@ -205,7 +231,7 @@
         by-owner (group-by :fn-id (:fn-slot snapshot))
         memberships (into (sorted-map) (map (fn [id] [id (vec (mapcat by-owner (sort-by str (closure fns id))))])) executable-ids)
         problems (vec (sort-by stable-edn (exceptions snapshot fns executable-ids memberships)))
-        descriptors (mapv #(descriptor-row (get fns %)) (sort-by str executable-ids))
+        descriptors (mapv #(input-type-record (get fns %)) (sort-by str executable-ids))
         descriptor-versions (mapv descriptor-version (filter #(contains? executable-ids (:fn-id %)) (:fn-version snapshot)))
         copied-members (vec (membership-copies fns memberships))
         copied-versions (vec (membership-versions memberships (:fn-slot-version snapshot)))
@@ -220,14 +246,7 @@
     {:format :graphden/structured-input-storage-v2
      :source-fingerprint (fingerprint snapshot)
      :exceptions problems :changes changes :additions additions
-     :mapping {:binding-origins (into {} (map (fn [b] [[[(:fn-id b) []] [(:slot-id b)]] (:id b)]))
-                                      (:binding snapshot))
-               :input-types (into {} (map (fn [id] [(derived-id :input-type id) id])) executable-ids)
-               :memberships (into {} (mapcat (fn [[owner ms]]
-                                               (map (fn [m]
-                                                      [(derived-id :membership owner (:id m))
-                                                       {:id (:id m) :fn-id (:fn-id m)}]) ms)))
-                                  memberships)}}))
+     :mapping (identity-mapping memberships (:binding snapshot))}))
 
 
 (defn binding-origin

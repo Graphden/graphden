@@ -254,6 +254,45 @@
       (is (= (parse-expression expected) (parse-expression actual))))))
 
 
+(defn- migrate-child
+  [text]
+  (let [{:keys [namespace fns]} (edn/read-string text)
+        definitions (mapv #(assoc % :namespace namespace) fns)
+        ctx (parse/prepare-module definitions {} {})
+        planned (source/plan-module [(peek definitions)] ctx)
+        entry (first (:definitions planned))
+        patch (cst/plan text {:namespace namespace :operations (cst/entry-operations entry)})
+        target (:target-text patch)
+        authored (assoc (peek (:fns (edn/read-string target))) :namespace namespace)
+        verified (source/verify-module (assoc-in planned [:definitions 0 :proposed] authored) ctx)]
+    (is (= :authored-source-equivalent (get-in verified [:definitions 0 :verification])))
+    (is (= {:status :already-applied :text target} (cst/apply-text patch target)))
+    target))
+
+
+(deftest mixed-composed-input-preserves-entry-comments-and-literal-bytes
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:pin :text :flag :bool} :return-type :text}\r\n"
+                  "{:name :child :parent :base :args ; original map\r\n"
+                  "{:pin ; bound text\r\n \"one\r\ntwo\" ; pin tail\r\n"
+                  " ; free address\r\n :address {:type {:city :text} :required false} ; address tail\r\n"
+                  " :flag false ; flag tail\r\n ; free number\r\n :count {:type :int}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:pin [:value "one\r\ntwo"] :flag [:value false]} (:bind child)))
+    (is (= [:address :count] (vec (keys (:input child)))))
+    (is (str/includes? target ":input ; original map\r\n{ ; free address\r\n :address"))
+    (is (str/includes? target "; address tail\r\n ; free number\r\n :count"))
+    (is (str/includes? target ":bind {:pin ; bound text\r\n [:value \"one\r\ntwo\"] ; pin tail\r\n :flag [:value false] ; flag tail\r\n"))))
+
+
+(deftest own-field-positions-survive-a-large-mixed-map
+  (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
+        args (:args (peek (:fns (edn/read-string text))))
+        target (migrate-child text)]
+    (is (= (mapv key (filter (comp map? val) args))
+           (vec (keys (:input (peek (:fns (edn/read-string target))))))))))
+
+
 (deftest bridge-requires-supported-and-consistent-ledger-test
   (let [[entry _] (planner-entry {:value false})]
     (is (= :unsupported-source-entry

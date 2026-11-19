@@ -239,7 +239,8 @@
                      {:name :annotated :namespace "demo" :parent :sink
                       :args {:x {:value nil :description "annotation" :terminal false}}}]
         report (plan definitions)]
-    (is (contains? (codes (result report :new-field)) :own-field-declaration-required))
+    (is (= {:new {:type :text :required false}} (get-in (result report :new-field) [:proposed :input])))
+    (is (not (contains? (:proposed (result report :new-field)) :bind)))
     (is (contains? (codes (result report :annotated)) :binding-metadata-required))
     (is (not (contains? (result report :annotated) :proposed)))))
 
@@ -327,6 +328,40 @@
              :scope-path [] :target-path [x-id] :expression-kind "value"
              :value-present true :value nil}] (:bindings v2)))
     (is (empty? (get-in parent-plan [:v2 :bindings])))))
+
+
+(deftest composed-declarations-preserve-free-fields-beside-inherited-bindings
+  (let [field {:type {:city :text} :description "Delivery address" :required false}
+        child {:name :checkout :namespace "demo" :parent :sink
+               :args {:address field :x {:value nil} :count {:type :int}}}
+        context (prepared [base child])
+        planned (source/plan-module [child] context)
+        entry (first (:definitions (source/verify-module planned context)))
+        owner (:identity entry)
+        free-field (first (get-in entry [:v2 :contract :fields]))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:address field :count {:type :int}} (get-in entry [:proposed :input])))
+    (is (= {:x [:value nil]} (get-in entry [:proposed :bind])))
+    (is (= [(:address (:args child)) (ids/slot-id owner :address) false]
+           [(:declaration free-field) (:id free-field) (:required free-field)]))
+    (is (= [:address :count :x :items] (mapv :name (get-in entry [:v2 :contract :fields]))))
+    (is (= [[(ids/slot-id (ids/fn-id "demo" :sink) :x)]]
+           (mapv :target-path (get-in entry [:v2 :bindings]))))
+    (doseq [[edited code] [[{:type :int} :legacy-v2-meaning-mismatch]
+                           [{:value 12} :unsupported-input-declaration]]]
+      (is (= code (get-in (source/verify-module
+                            (assoc-in planned [:definitions 0 :proposed :input :address] edited) context)
+                          [:blockers 0 :code]))))))
+
+
+(deftest composed-fields-with-unhandled-policy-or-inherited-projection-remain-blocked
+  (let [report (verified [base
+                          {:name :unsupported :namespace "demo" :parent :sink
+                           :args {:new {:type :int :unknown-policy true}}}
+                          {:name :shadow :namespace "demo" :parent :sink :args {:x {:type :text}}}])]
+    (is (contains? (codes (result report :unsupported)) :own-field-declaration-required))
+    (is (contains? (codes (result report :shadow)) :field-projection-required))
+    (is (every? #(nil? (:proposed (result report %))) [:unsupported :shadow]))))
 
 
 (deftest verification-rejects-drift-in-rewrites

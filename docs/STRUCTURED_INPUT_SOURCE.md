@@ -41,8 +41,8 @@ forms, parsed records and binding origins in its private ledger. Log only the
 safe aggregate counts and blockers, not that ledger or the original sources.
 
 Supported rewrites currently include base argument declarations, unchanged
-type declarations, and provable whole-value/reference bindings. Other forms
-are reported explicitly: list builders, anonymous identity mapping, rename
+type declarations, independently owned composed fields, and provable whole-value
+or reference bindings. Other forms are reported explicitly: list builders, anonymous identity mapping, rename
 projections, referenced input scopes, metadata and unknown binding policies.
 Secret-path resolution must never become an ordinary literal value.
 
@@ -83,8 +83,13 @@ namespace context; a global bare-name index is insufficient.
 
 The Babashka `structured-input-cst` helper converts supported planner entries
 into exact source edits. It can rename argument keys, wrap literal/ref leaves
-and change an old single-operator map to a vector expression. Unsupported
-entry moves fail explicitly. Literal contents are never recursively rewritten.
+and change an old single-operator map to a vector expression. Independently owned
+composed fields move to `:input` while inherited bindings move to `:bind`.
+Same-line trailing comments follow their values, standalone comments precede
+the next field, and declaration ordering retains original slot positions.
+Fields forwarding an inherited or referenced slot require a projection and
+remain blocked. Other entry moves fail explicitly. Literal contents are
+kept verbatim.
 
 Tracked CST positions locate original text slices. Applying the slices
 preserves comments, CRLF, Unicode and multiline string payloads without

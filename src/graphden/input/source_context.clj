@@ -179,6 +179,13 @@
       common)))
 
 
+(defn own-field-declaration?
+  "The composed field declaration forms currently supported by the source migrator."
+  [spec]
+  (and (types/own-slot-declaration? spec)
+       (every? #{:type :required :description} (keys spec))))
+
+
 (defn lower-declarations
   "Temporary offline compatibility with the existing declaration lowerer.
    The new syntax reader handles :bind separately. Remove this legacy
@@ -187,7 +194,9 @@
   (let [source (dissoc definition :input :bind)
         source (if (contains? definition :input)
                  (let [declaration (:input definition)]
-                   (when-not (and (map? declaration) (not (or (:parent source) (:parents source))))
+                   (when-not (and (map? declaration)
+                                  (or (not (or (:parent source) (:parents source)))
+                                      (every? own-field-declaration? (vals declaration))))
                      (reject! :unsupported-input-declaration [:input]))
                    (assoc source :args declaration))
                  source)

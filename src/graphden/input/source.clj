@@ -108,10 +108,13 @@
         own-ref (slots/own-ref definition defs-by-name)
         by-slot (into {} (map (juxt :slot-id identity))
                       (filter #(= :binding (:kind %)) rows))
+        own-sources (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
+                                     [(:id %) (:source-slot-id %)])) rows)
         names (::ref-index context)]
     (mapv (fn [[arg value]]
             (if (types/own-slot-declaration? value)
-              {:source-path [:args arg] :kind :declaration :spec value}
+              (cond-> {:source-path [:args arg] :kind :declaration :spec value}
+                (get own-sources (ids/slot-id (:fn-id definition) arg)) (assoc :forwarded? true))
               (let [[owner field] (slots/resolve-slot-owner own-ref arg defs-by-name value)
                     owner-id (get name->id owner)
                     slot-id (ids/slot-id owner-id field)
@@ -138,7 +141,8 @@
                       (conj (blocker source :secret-path-binding-required [:args arg]))
                       (contains? value :as)
                       (conj (blocker source :rename-projection-required [:args arg]))
-                      (types/own-slot-declaration? value)
+                      (and (types/own-slot-declaration? value)
+                           (not (source-context/own-field-declaration? value)))
                       (conj (blocker source :own-field-declaration-required [:args arg]))
                       (and (some #(contains? value %) [:value :ref])
                            (seq (dissoc value :value :ref)))
@@ -160,6 +164,8 @@
     ;; The owner identity is checked separately from the binding's own fn-id:
     ;; binding rows can address free inputs in an arbitrary referenced graph.
     (cond-> []
+      (:forwarded? entry)
+      (conj (problem :field-projection-required))
       (and (= :binding (:kind entry)) (nil? (:binding-id origin)))
       (conj (problem :missing-binding-origin))
       (and (= :binding (:kind entry)) (not (contains? ancestor-ids (:owner target))))
@@ -209,14 +215,18 @@
                         (concat (source-argument-blockers source)
                                 (mapcat #(argument-blockers source % chain) arguments)
                                 (inherited-blockers source definition context arguments))))
+        declarations (into (array-map) (filter (comp types/own-slot-declaration? val)) (:args source))
+        binds (filter #(= :binding (:kind %)) arguments)
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
-                              [(second source-path) expression])) arguments)]
+                              [(second source-path) expression])) binds)]
     {:arguments arguments
      :blockers blockers
      :proposed (when (empty? blockers)
                  (cond-> (dissoc source :args)
-                   (contains? source :args) (assoc :bind bindings)))}))
+                   (seq declarations) (assoc :input declarations)
+                   (or (seq bindings) (and (contains? source :args) (empty? declarations)))
+                   (assoc :bind bindings)))}))
 
 
 (defn- classify

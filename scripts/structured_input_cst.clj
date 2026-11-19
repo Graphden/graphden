@@ -103,6 +103,81 @@
     (node-edit source starts key-node (constantly (str target)))))
 
 
+(defn- leaf-edit
+  [source starts leaf op path]
+  (case op
+    :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
+    :wrap-ref
+    (do
+      (when-not (keyword? (z/sexpr leaf))
+        (refuse :non-keyword-reference {:path path}))
+      (node-edit source starts leaf #(str "[:ref " % "]")))
+    :map-expression-to-vector
+    (let [nodes (when (= :map (z/tag leaf)) (children leaf))]
+      (when-not (and (= 2 (count nodes)) (#{:value :ref} (z/sexpr (first nodes)))
+                     (or (= :value (z/sexpr (first nodes)))
+                         (keyword? (z/sexpr (second nodes)))))
+        (refuse :unsupported-expression-map {:path path}))
+      (node-edit source starts leaf #(str "[" (subs % 1 (dec (count %))) "]")))
+    (refuse :unknown-operation {:op op})))
+
+
+(defn- field-spans
+  [source starts args operators]
+  (mapv (fn [[k v]]
+          (let [field (z/sexpr k)
+                key-span (node-edit source starts k identity)
+                value-span (if-let [op (get operators field)]
+                             (leaf-edit source starts v op [:args field])
+                             (node-edit source starts v identity))]
+            {:field field :start (:start key-span) :end (:end value-span)
+             :text (str (subs source (:start key-span) (:start value-span)) (:after value-span))}))
+        (partition 2 (children args))))
+
+
+(defn- field-chunks
+  "A same-line trailing comment follows its value. Subsequent comment lines
+   travel with the next field. Include every original byte of map trivia."
+  [source map-span spans]
+  (let [cuts (mapv (fn [[left right]]
+                     (let [gap (subs source (:end left) (:start right))
+                           tail (re-find #"^[\t ,]*;[^\r\n]*(?:\r\n|\r|\n)" gap)]
+                       (+ (:end left) (count tail))))
+                   (partition 2 1 spans))]
+    (mapv (fn [span from to]
+            [(:field span) (str (subs source from (:start span)) (:text span) (subs source (:end span) to))])
+          spans (cons (inc (:start map-span)) cuts) (conj cuts (dec (:end map-span))))))
+
+
+(defn- partition-composed-edit
+  [source starts loc {:keys [definition path declarations operators]}]
+  (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
+                 (not (or (key-loc loc :input) (key-loc loc :bind)))
+                 (vector? declarations) (seq declarations) (= (count declarations) (count (set declarations)))
+                 (map? operators) (not-any? (set declarations) (keys operators)))
+    (refuse :invalid-field-partition {:definition definition}))
+  (let [args (value-at loc path)
+        key-edit (rename-edit source starts loc definition path :input)
+        map-span (node-edit source starts args identity)
+        spans (field-spans source starts args operators)
+        chunks (field-chunks source map-span spans)
+        by-field (into {} chunks)
+        owns? (set declarations)
+        own-chunks (filter (comp owns? first) chunks)
+        ;; A large legacy args map may iterate in hash order. Preserve the
+        ;; original slot positions when the smaller :input becomes an array map.
+        ordered (if (= declarations (vec (keys (into {} own-chunks))))
+                  (map second own-chunks) (map by-field declarations))
+        binds (remove (comp owns? first) chunks)]
+    (when-not (and (= :map (z/tag args)) (= (set (keys by-field)) (into owns? (keys operators))))
+      (refuse :invalid-field-partition {:definition definition}))
+    {:start (:start key-edit) :end (:end map-span)
+     :before (subs source (:start key-edit) (:end map-span))
+     :after (str ":input" (subs source (:end key-edit) (:start map-span))
+                 "{" (apply str ordered) "}"
+                 (when (seq binds) (str " :bind {" (apply str (map second binds)) "}")))}))
+
+
 (defn- operation-edit
   [source starts definitions {:keys [op definition path] :as operation}]
   (when-not (and (keyword? definition) (vector? path) (seq path))
@@ -125,23 +200,11 @@
           (refuse :not-composed-definition {:definition definition}))
         (rename-edit source starts loc definition path :bind))
 
-      :wrap-value
-      (node-edit source starts (argument-loc loc path) #(str "[:value " % "]"))
+      (:wrap-value :wrap-ref :map-expression-to-vector)
+      (leaf-edit source starts (argument-loc loc path) op path)
 
-      :wrap-ref
-      (let [leaf (argument-loc loc path)]
-        (when-not (keyword? (z/sexpr leaf))
-          (refuse :non-keyword-reference {:path path}))
-        (node-edit source starts leaf #(str "[:ref " % "]")))
-
-      :map-expression-to-vector
-      (let [leaf (argument-loc loc path)
-            nodes (when (= :map (z/tag leaf)) (children leaf))]
-        (when-not (and (= 2 (count nodes)) (#{:value :ref} (z/sexpr (first nodes)))
-                       (or (= :value (z/sexpr (first nodes)))
-                           (keyword? (z/sexpr (second nodes)))))
-          (refuse :unsupported-expression-map {:path path}))
-        (node-edit source starts leaf #(str "[" (subs % 1 (dec (count %))) "]")))
+      :partition-composed-args
+      (partition-composed-edit source starts loc operation)
 
       :move-args-entry
       (refuse :unsupported-comment-safe-move
@@ -198,14 +261,24 @@
       :composed
       (let [arguments (:arguments legacy)
             paths (mapv :source-path arguments)
-            bindings (into {} (map (fn [{:keys [source-path expression]}]
-                                     [(second source-path) expression])) arguments)]
+            {fields :declaration binds :binding} (group-by :kind arguments)
+            declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
+            bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)]
         (when-not (and (or (not has-args?) (map? (:args source)))
                        (vector? arguments) (= (count paths) (count (set paths)))
+                       (= (count arguments) (+ (count fields) (count binds)))
                        (= (set paths) (set (map #(vector :args %) (keys (:args source)))))
-                       (= proposed (cond-> (dissoc source :args) has-args? (assoc :bind bindings))))
+                       (every? #(= (:spec %) (get-in source (:source-path %))) fields)
+                       (= proposed (cond-> (dissoc source :args)
+                                     (seq fields) (assoc :input declarations)
+                                     (or (seq binds) (and has-args? (empty? fields))) (assoc :bind bindings))))
           (refuse :planner-ledger-mismatch {}))
-        (into (rename :rename-bind) (map #(argument-operation source %)) arguments))
+        (let [operations (mapv #(argument-operation source %) binds)]
+          (if (seq fields)
+            [{:op :partition-composed-args :definition (:name source) :path [:args]
+              :declarations (vec (keys declarations))
+              :operators (into {} (map (juxt (comp second :path) :op)) operations)}]
+            (into (rename :rename-bind) operations))))
 
       (refuse :unsupported-source-entry {}))))
 
@@ -248,7 +321,8 @@
    :map-expression-to-vector (sole-key legacy :value/:ref maps only).
    Paths contain map keys and address the ORIGINAL definition. Rename requires
    [:args]; wrap requires an explicit path below :args. Overlaps refuse.
-   The caller owns semantic classification. Moving entries is unsupported."
+   A planner-owned field partition separates composed declarations and bindings.
+   Unclassified entry moves refuse."
   [source {:keys [namespace operations]}]
   (when-not (and (string? source) (vector? operations))
     (refuse :invalid-request {}))

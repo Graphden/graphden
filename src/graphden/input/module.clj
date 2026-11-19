@@ -26,6 +26,12 @@
        (some #(contains? definition %) type-keys)))
 
 
+(defn- field-configuration?
+  [[path spec]]
+  (and (vector? path) (= 1 (count path)) (simple-keyword? (first path))
+       (map? spec) (= #{:type} (set (keys spec))) (keyword? (:type spec))))
+
+
 (defn- validate-source!
   [module]
   (format/require-v2! module)
@@ -40,9 +46,12 @@
     (when (and (contains? definition :namespace)
                (not= (or (:namespace definition) "") (or (:namespace module) "")))
       (reject! :definition-namespace-mismatch))
-    (when (some #(contains? definition %) [:args :configure :input-format])
+    (when (some #(contains? definition %) [:args :input-format])
       (reject! :unsupported-definition-form))
-    (when (and (type-only? definition) (some #(contains? definition %) [:input :bind]))
+    (when (and (contains? definition :configure)
+               (not (and (map? (:configure definition)) (every? field-configuration? (:configure definition)))))
+      (reject! :unsupported-field-configuration))
+    (when (and (type-only? definition) (some #(contains? definition %) [:input :bind :configure]))
       (reject! :type-definition-input)))
   (when-not (= (count (:fns module)) (count (set (map :name (:fns module)))))
     (reject! :duplicate-definition)))
@@ -118,14 +127,31 @@
 
 
 (defn- binding-row
-  [[[[owner scope-path] path] {:keys [binding-id expression]}]]
+  [configuration [[[owner scope-path] path] {:keys [binding-id expression]}]]
   (rows/normalize
     (merge {:kind :input-binding :id binding-id :fn-id owner
             :scope-path scope-path :target-path path}
+           (select-keys (get configuration path) [:type-override-fn-id])
            (case (:kind expression)
              :value {:expression-kind "value" :value-present true :value (:value expression)}
              :ref {:expression-kind "ref" :value-present false :ref-fn-id (:fn-id expression)}
              (reject! :unsupported-binding-expression)))))
+
+
+(defn- resolve-configurations
+  [{:keys [contract scope resolve-config-type]} state configuration]
+  (into {}
+        (map (fn [[names {:keys [type]}]]
+               (let [path (:path (input/resolve-address contract scope names))]
+                 (when-not (contains? state [scope path])
+                   (reject! :configuration-requires-bound-field))
+                 (when-not (ifn? resolve-config-type)
+                   (reject! :configuration-type-resolver-required))
+                 (let [resolved (resolve-config-type type)]
+                   (when-not (and (keyword? (:type resolved)) (uuid? (:type-override-fn-id resolved)))
+                     (reject! :unresolved-configuration-type))
+                   [names (assoc (select-keys resolved [:type :type-override-fn-id]) :target-path path)]))))
+        configuration))
 
 
 (defn- parse-definition
@@ -138,9 +164,11 @@
       common
       (let [expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {}) ctx)
             state (input/bind-input (:contract ctx) {} (:scope ctx) expression)
-            bindings (mapv binding-row (sort-by (comp pr-str key) state))]
+            configs (resolve-configurations ctx state (:configure source))
+            by-path (into {} (map (juxt :target-path identity)) (vals configs))
+            bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
-               :expression expression :binding-state state :bindings bindings)))))
+               :expression expression :binding-state state :bindings bindings :configurations configs)))))
 
 
 (defn parse-module-v2
@@ -194,6 +222,7 @@
     (reject! :invalid-export))
   (let [module (assoc (:module parsed) :fns (mapv #(emit-definition % context-for) (:definitions parsed)))
         reparsed (parse-module-v2 module options)]
-    (when-not (= (:records parsed) (:records reparsed))
+    (when-not (and (= (:records parsed) (:records reparsed))
+                   (= (mapv :configurations (:definitions parsed)) (mapv :configurations (:definitions reparsed))))
       (reject! :export-origin-drift))
     module))

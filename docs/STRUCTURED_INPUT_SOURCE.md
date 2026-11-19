@@ -42,8 +42,10 @@ safe aggregate counts and blockers, not that ledger or the original sources.
 
 Supported rewrites currently include base argument declarations, unchanged
 type declarations, independently owned composed fields, and provable whole-value
-or reference bindings. Other forms are reported explicitly: list builders, anonymous identity mapping, rename
-projections, referenced input scopes, metadata and unknown binding policies.
+or reference bindings. A bound top-level field can retain an authored named
+type assertion. List builders, anonymous identity mapping, rename projections,
+referenced input scopes, structural binding annotations and unknown binding
+policies have explicit blockers.
 Secret-path resolution must never become an ordinary literal value.
 
 `graphden.input.source/verify-module` checks each supported plan entry against
@@ -91,6 +93,12 @@ Fields forwarding an inherited or referenced slot require a projection and
 remain blocked. Other entry moves fail explicitly. Literal contents are
 kept verbatim.
 
+For example, `{:x {:ref :query :type :text}}` becomes
+`:bind {:x [:ref :query]}` and `:configure {[:x] {:type :text}}`. The path
+identifies the field, while the expression and its type assertion share one
+binding identity. The CST edit carries the original type token and its
+comments to the configuration entry.
+
 Tracked CST positions locate original text slices. Applying the slices
 preserves comments, CRLF, Unicode and multiline string payloads without
 rendering the whole syntax tree again. `plan` checks source and target
@@ -124,6 +132,7 @@ attached. It must provide a frozen, verified context:
 | `:binding-id` | Pure `(fn [scope field-id-path] ...)` returning the preserved origin UUID |
 | `:declaration-records` | Validated declaration rows, including the owner `:fn` row |
 | `:origin-ledger` | Opaque provenance map retained with the parsed definition |
+| `:resolve-config-type` | For a configured field, resolve the named type to its canonical `:type` spelling and `:type-override-fn-id` UUID in the module's frozen namespace context |
 
 Type-only declarations require their source owner, declaration rows and origin
 ledger, with no callable contract. A shared input-type declaration already in

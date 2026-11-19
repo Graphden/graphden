@@ -171,6 +171,11 @@
             input-id (:input-type-id declared)]
         (-> (merge common declared)
             (assoc :name->id (resolved-names environment (:namespace definition) binding-origins))
+            (assoc :resolve-config-type
+                   (fn [type]
+                     (let [names (get-in environment [:context :name->id])
+                           resolved (parse/normalize-ref type names (:namespace definition))]
+                       {:type resolved :type-override-fn-id (types/resolve-type-ref resolved names)})))
             (update :declaration-records into
                     (map #(if (and (= :fn (:kind %)) (= id (:id %)))
                             (assoc % :input-type-fn-id input-id)
@@ -191,7 +196,7 @@
    The new syntax reader handles :bind separately. Remove this legacy
    lowering adapter when the v2 package loader replaces the v1 loader."
   [{:keys [context]} definition]
-  (let [source (dissoc definition :input :bind)
+  (let [source (dissoc definition :input :bind :configure)
         source (if (contains? definition :input)
                  (let [declaration (:input definition)]
                    (when-not (and (map? declaration)

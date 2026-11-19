@@ -109,12 +109,13 @@
         by-slot (into {} (map (juxt :slot-id identity))
                       (filter #(= :binding (:kind %)) rows))
         own-sources (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
-                                     [(:id %) (:source-slot-id %)])) rows)
+                                      [(:id %) (:source-slot-id %)])) rows)
         names (::ref-index context)]
     (mapv (fn [[arg value]]
             (if (types/own-slot-declaration? value)
-              (cond-> {:source-path [:args arg] :kind :declaration :spec value}
-                (get own-sources (ids/slot-id (:fn-id definition) arg)) (assoc :forwarded? true))
+              (let [source-slot-id (get own-sources (ids/slot-id (:fn-id definition) arg))]
+                (cond-> {:source-path [:args arg] :kind :declaration :spec value}
+                  source-slot-id (assoc :source-slot-id source-slot-id)))
               (let [[owner field] (slots/resolve-slot-owner own-ref arg defs-by-name value)
                     owner-id (get name->id owner)
                     slot-id (ids/slot-id owner-id field)
@@ -131,6 +132,12 @@
           (:args definition))))
 
 
+(defn- typed-binding?
+  [value]
+  (and (map? value) (keyword? (:type value))
+       (contains? #{#{:type :ref} #{:type :value}} (set (keys value)))))
+
+
 (defn- source-argument-blockers
   [source]
   (into []
@@ -144,7 +151,7 @@
                       (and (types/own-slot-declaration? value)
                            (not (source-context/own-field-declaration? value)))
                       (conj (blocker source :own-field-declaration-required [:args arg]))
-                      (and (some #(contains? value %) [:value :ref])
+                      (and (not (typed-binding? value)) (some #(contains? value %) [:value :ref])
                            (seq (dissoc value :value :ref)))
                       (conj (blocker source :binding-annotations-required [:args arg]))))))
         (:args source)))
@@ -160,11 +167,12 @@
   [source entry ancestor-ids]
   (let [{:keys [source-path origin expression policy target]} entry
         problem #(blocker source % source-path)
+        typed? (typed-binding? (get-in source source-path))
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
     ;; binding rows can address free inputs in an arbitrary referenced graph.
     (cond-> []
-      (:forwarded? entry)
+      (:source-slot-id entry)
       (conj (problem :field-projection-required))
       (and (= :binding (:kind entry)) (nil? (:binding-id origin)))
       (conj (problem :missing-binding-origin))
@@ -178,7 +186,10 @@
       (conj (problem :legacy-override-kind-required))
       (seq unknown-columns)
       (conj (assoc (problem :unsupported-binding-columns) :columns unknown-columns))
-      (some #(contains? policy %) [:type-override-fn-id :required :terminal :description])
+      (and typed? (not (uuid? (:type-override-fn-id policy))))
+      (conj (problem :unresolved-binding-type))
+      (or (and (contains? policy :type-override-fn-id) (not typed?))
+          (some #(contains? policy %) [:required :terminal :description]))
       (conj (problem :binding-metadata-required))
       (and (= :binding (:kind entry)) (nil? expression)
            (not (or (:list-append policy) (:list-closed policy))))
@@ -217,6 +228,9 @@
                                 (inherited-blockers source definition context arguments))))
         declarations (into (array-map) (filter (comp types/own-slot-declaration? val)) (:args source))
         binds (filter #(= :binding (:kind %)) arguments)
+        configuration (into {} (keep (fn [[field spec]]
+                                       (when (typed-binding? spec) [[field] (select-keys spec [:type])])))
+                            (:args source))
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
                               [(second source-path) expression])) binds)]
@@ -226,7 +240,8 @@
                  (cond-> (dissoc source :args)
                    (seq declarations) (assoc :input declarations)
                    (or (seq bindings) (and (contains? source :args) (empty? declarations)))
-                   (assoc :bind bindings)))}))
+                   (assoc :bind bindings)
+                   (seq configuration) (assoc :configure configuration)))}))
 
 
 (defn- classify
@@ -307,6 +322,7 @@
 (defn- binding-meaning
   [record]
   (cond-> (select-keys record [:id :fn-id :slot-id :value-present])
+    (:type-override-fn-id record) (assoc :type-override-fn-id (:type-override-fn-id record))
     (:value-present record) (assoc :value (:value record))
     (:ref-fn-id record) (assoc :ref-fn-id (:ref-fn-id record))))
 
@@ -342,8 +358,13 @@
         reread (module/parse-module-v2 (read-emitted emitted) options)
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
-        legacy-meaning (authored-meaning prepared legacy-context bindings)
-        v2-meaning (authored-meaning lowered v2 (mapv migration/legacy-binding (:bindings v2)))]
+        legacy-meaning (assoc (authored-meaning prepared legacy-context bindings)
+                              :asserted-types (into {} (keep (fn [[field spec]]
+                                                               (when (typed-binding? spec) [[field] (:type spec)])))
+                                                    (when (= :composed (:kind definition)) (:args prepared))))
+        v2-meaning (assoc (authored-meaning lowered v2 (mapv migration/legacy-binding (:bindings v2)))
+                          :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
+                                                (:configurations v2)))]
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"
                       {:type :input/source-verification :code :v2-round-trip-mismatch})))

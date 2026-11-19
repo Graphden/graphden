@@ -131,12 +131,27 @@
                     (assoc (source-module {}) :input-format 1)
                     (assoc (source-module {}) :input-format 3)
                     (source-module {:args {}})
-                    (source-module {:configure {}})
+                    (source-module {:configure {[:value] {:unsupported true}}})
                     (source-module {:namespace "wrong"})
                     {:input-format 2 :fns [{:name :x} {:name :x}]}
                     {:input-format 2 :fns [{:name :x :type {:a :int} :bind {}}]}]]
       (is (some? (error-code #(module/parse-module-v2 source options)))))
     (is (zero? @calls))))
+
+
+(deftest configuration-validates-the-owned-path-and-named-type-before-emitting-a-row
+  (let [configured (source-module {:bind {:value false} :configure {[:value] {:type :bool}}})
+        parse-with (fn [document resolver]
+                     (module/parse-module-v2 document {:context-for #(assoc (context-for %) :resolve-config-type resolver)}))
+        resolver (fn [type] {:type type :type-override-fn-id (ids/primitive-fn-id type)})]
+    (is (= (ids/primitive-fn-id :bool) (get-in (parse-with configured resolver) [:definitions 0 :bindings 0 :type-override-fn-id])))
+    (is (= :configuration-type-resolver-required (error-code #(parse configured))))
+    (is (= :unresolved-configuration-type (error-code #(parse-with configured (constantly {})))))
+    (is (= :configuration-requires-bound-field
+           (error-code #(parse-with (update-in configured [:fns 0] dissoc :bind) resolver))))
+    (is (= :unsupported-field-configuration
+           (error-code #(parse-with (assoc-in configured [:fns 0 :configure] {[:options :flag] {:type :bool}})
+                                    resolver))))))
 
 
 (deftest reject-drifted-and-incomplete-contexts

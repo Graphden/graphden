@@ -364,6 +364,38 @@
     (is (every? #(nil? (:proposed (result report %))) [:unsupported :shadow]))))
 
 
+(deftest named-type-assertions-follow-the-original-binding-identity
+  (let [child {:name :typed :namespace "demo" :parent :sink
+               :args {:x {:ref :producer :type :never} :items {:value nil :type :null}}}
+        defs [base producer child]
+        context (prepared defs)
+        planned (source/plan-module defs context)
+        entry (result (source/verify-module planned context) :typed)
+        configs (get-in entry [:v2 :configurations])
+        x (ids/slot-id (ids/fn-id "demo" :sink) :x)
+        expected-id (ids/binding-id (:identity entry) x)
+        binding (some #(when (= expected-id (:id %)) %) (get-in entry [:v2 :bindings]))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {[:x] {:type :never} [:items] {:type :null}} (get-in entry [:proposed :configure])))
+    (is (= {:target-path [x] :type :never :type-override-fn-id (ids/primitive-fn-id :any)}
+           (get configs [:x])))
+    (is (= (select-keys binding [:target-path :type-override-fn-id]) (dissoc (get configs [:x]) :type)))
+    (is (= (ids/fn-id "demo" :producer) (:ref-fn-id binding)))
+    (doseq [change [#(assoc-in % [:configure [:x] :type] :any) #(dissoc % :configure)]]
+      (let [altered (update-in planned [:definitions 2 :proposed] change)]
+        (is (contains? (codes (result (source/verify-module altered context) :typed)) :legacy-v2-meaning-mismatch))))))
+
+
+(deftest unresolved-and-structural-assertions-remain-explicit-blockers
+  (let [report (verified [base producer
+                          {:name :unknown :namespace "demo" :parent :sink
+                           :args {:x {:ref :producer :type :unknown-type}}}
+                          {:name :shape :namespace "demo" :parent :sink
+                           :args {:x {:ref :producer :type [:list :text]}}}])]
+    (is (contains? (codes (result report :unknown)) :unresolved-binding-type))
+    (is (contains? (codes (result report :shape)) :binding-annotations-required))))
+
+
 (deftest verification-rejects-drift-in-rewrites
   (let [parent (assoc base :args {:x {:type :any :required false :value false}})
         child {:name :child :namespace "demo" :parent :sink :args {:x {:value [1]}}}

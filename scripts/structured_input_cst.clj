@@ -123,14 +123,14 @@
 
 
 (defn- field-spans
-  [source starts args operators]
+  [source starts args edit-value]
   (mapv (fn [[k v]]
           (let [field (z/sexpr k)
                 key-span (node-edit source starts k identity)
-                value-span (if-let [op (get operators field)]
-                             (leaf-edit source starts v op [:args field])
-                             (node-edit source starts v identity))]
+                value-span (edit-value field v)]
             {:field field :start (:start key-span) :end (:end value-span)
+             :configuration (when-let [spec (:configuration value-span)]
+                              (str "[" (:before key-span) "] " spec))
              :text (str (subs source (:start key-span) (:start value-span)) (:after value-span))}))
         (partition 2 (children args))))
 
@@ -149,17 +149,37 @@
           spans (cons (inc (:start map-span)) cuts) (conj cuts (dec (:end map-span))))))
 
 
+(defn- typed-leaf
+  [source starts leaf]
+  (when-not (= :map (z/tag leaf)) (refuse :unsupported-expression-map {}))
+  (let [raw (node-edit source starts leaf identity)
+        spans (field-spans source starts leaf (fn [_ value] (node-edit source starts value identity)))
+        parts (into {} (field-chunks source raw spans))
+        operator (if (contains? parts :ref) :ref :value)]
+    (when-not (and (= #{:type operator} (set (keys parts)))
+                   (keyword? (z/sexpr (value-at leaf [:type])))
+                   (or (= :value operator) (keyword? (z/sexpr (value-at leaf [:ref])))))
+      (refuse :unsupported-expression-map {}))
+    (assoc raw :after (str "[" (get parts operator) "]")
+           :configuration (str "{" (:type parts) "}"))))
+
+
 (defn- partition-composed-edit
   [source starts loc {:keys [definition path declarations operators]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
-                 (not (or (key-loc loc :input) (key-loc loc :bind)))
-                 (vector? declarations) (seq declarations) (= (count declarations) (count (set declarations)))
+                 (not-any? #(key-loc loc %) [:input :bind :configure])
+                 (vector? declarations) (= (count declarations) (count (set declarations)))
                  (map? operators) (not-any? (set declarations) (keys operators)))
     (refuse :invalid-field-partition {:definition definition}))
   (let [args (value-at loc path)
-        key-edit (rename-edit source starts loc definition path :input)
+        key-edit (rename-edit source starts loc definition path (if (seq declarations) :input :bind))
         map-span (node-edit source starts args identity)
-        spans (field-spans source starts args operators)
+        spans (field-spans source starts args
+                           (fn [field value]
+                             (case (get operators field)
+                               nil (node-edit source starts value identity)
+                               :typed-expression (typed-leaf source starts value)
+                               (leaf-edit source starts value (get operators field) [:args field]))))
         chunks (field-chunks source map-span spans)
         by-field (into {} chunks)
         owns? (set declarations)
@@ -168,14 +188,17 @@
         ;; original slot positions when the smaller :input becomes an array map.
         ordered (if (= declarations (vec (keys (into {} own-chunks))))
                   (map second own-chunks) (map by-field declarations))
-        binds (remove (comp owns? first) chunks)]
+        binds (remove (comp owns? first) chunks)
+        configs (keep :configuration spans)]
     (when-not (and (= :map (z/tag args)) (= (set (keys by-field)) (into owns? (keys operators))))
       (refuse :invalid-field-partition {:definition definition}))
     {:start (:start key-edit) :end (:end map-span)
      :before (subs source (:start key-edit) (:end map-span))
-     :after (str ":input" (subs source (:end key-edit) (:start map-span))
-                 "{" (apply str ordered) "}"
-                 (when (seq binds) (str " :bind {" (apply str (map second binds)) "}")))}))
+     :after (str (:after key-edit) (subs source (:end key-edit) (:start map-span))
+                 (when (seq declarations) (str "{" (apply str ordered) "}"))
+                 (when (and (seq declarations) (seq binds)) " :bind ")
+                 (when (seq binds) (str "{" (apply str (map second binds)) "}"))
+                 (when (seq configs) (str " :configure {" (str/join " " configs) "}")))}))
 
 
 (defn- operation-edit
@@ -217,20 +240,23 @@
   [source {:keys [source-path kind expression policy]}]
   (let [[operator payload] expression
         raw (get-in source source-path)
-        wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))]
-    (when-not (and (= :binding kind) (empty? policy)
+        wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))
+        typed? (and wrapper? (= #{operator :type} (set (keys raw))) (keyword? (:type raw))
+                    (= #{:type-override-fn-id} (set (keys policy))) (uuid? (:type-override-fn-id policy)))]
+    (when-not (and (= :binding kind) (or typed? (empty? policy))
                    (vector? source-path) (= 2 (count source-path)) (= :args (first source-path))
                    (contains? (:args source) (second source-path))
                    (vector? expression) (= 2 (count expression)) (#{:value :ref} operator)
                    (or (= :value operator) (qualified-keyword? payload)))
       (refuse :unsupported-source-argument {:path source-path}))
     (when-not (if wrapper?
-                (and (= 1 (count raw)) (contains? raw operator)
+                (and (or typed? (= 1 (count raw))) (contains? raw operator)
                      (if (= :value operator) (= payload (get raw operator))
                          (keyword? (get raw operator))))
                 (if (= :value operator) (= payload raw) (keyword? raw)))
       (refuse :planner-ledger-mismatch {:path source-path}))
-    {:op (cond wrapper? :map-expression-to-vector
+    {:op (cond typed? :typed-expression
+               wrapper? :map-expression-to-vector
                (= :value operator) :wrap-value
                :else :wrap-ref)
      :definition (:name source) :path source-path}))
@@ -263,7 +289,12 @@
             paths (mapv :source-path arguments)
             {fields :declaration binds :binding} (group-by :kind arguments)
             declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
-            bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)]
+            bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
+            operations (mapv #(argument-operation source %) binds)
+            configuration (into {} (keep (fn [{:keys [op path]}]
+                                           (when (= :typed-expression op)
+                                             [[(second path)] (select-keys (get-in source path) [:type])])))
+                                operations)]
         (when-not (and (or (not has-args?) (map? (:args source)))
                        (vector? arguments) (= (count paths) (count (set paths)))
                        (= (count arguments) (+ (count fields) (count binds)))
@@ -271,14 +302,14 @@
                        (every? #(= (:spec %) (get-in source (:source-path %))) fields)
                        (= proposed (cond-> (dissoc source :args)
                                      (seq fields) (assoc :input declarations)
-                                     (or (seq binds) (and has-args? (empty? fields))) (assoc :bind bindings))))
+                                     (or (seq binds) (and has-args? (empty? fields))) (assoc :bind bindings)
+                                     (seq configuration) (assoc :configure configuration))))
           (refuse :planner-ledger-mismatch {}))
-        (let [operations (mapv #(argument-operation source %) binds)]
-          (if (seq fields)
-            [{:op :partition-composed-args :definition (:name source) :path [:args]
-              :declarations (vec (keys declarations))
-              :operators (into {} (map (juxt (comp second :path) :op)) operations)}]
-            (into (rename :rename-bind) operations))))
+        (if (or (seq fields) (seq configuration))
+          [{:op :partition-composed-args :definition (:name source) :path [:args]
+            :declarations (vec (keys declarations))
+            :operators (into {} (map (juxt (comp second :path) :op)) operations)}]
+          (into (rename :rename-bind) operations)))
 
       (refuse :unsupported-source-entry {}))))
 

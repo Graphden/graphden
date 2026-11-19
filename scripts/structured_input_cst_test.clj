@@ -285,6 +285,21 @@
     (is (str/includes? target ":bind {:pin ; bound text\r\n [:value \"one\r\ntwo\"] ; pin tail\r\n :flag [:value false] ; flag tail\r\n"))))
 
 
+(deftest typed-reference-and-literal-annotations-use-their-original-source-spans
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:x :any :y :any} :return-type :any}\r\n"
+                  "{:name :producer :return-type :any} {:name :child :parent :base :args {"
+                  ":x {:type ; named type\r\n :text ; type tail\r\n :ref ; producer\r\n :producer}"
+                  " :new {:type :text} :y {:value ; literal\r\n \"a\r\nb\" :type :text}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:x [:ref :producer] :y [:value "a\r\nb"]} (:bind child)))
+    (is (= {[:x] {:type :text} [:y] {:type :text}} (:configure child)))
+    (is (= {:new {:type :text}} (:input child)))
+    (is (str/includes? target ":ref ; producer\r\n :producer"))
+    (is (str/includes? target "[:x] {:type ; named type\r\n :text ; type tail\r\n}"))
+    (is (str/includes? target ":value ; literal\r\n \"a\r\nb\""))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))

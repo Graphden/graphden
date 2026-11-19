@@ -511,7 +511,7 @@ assert_events 'expect,verify,e2e,integration,fleet'
 cp "$RESUME_SOURCE.stages.edn" "$RESUME_SOURCE.interrupted.edn"
 WTQ_GATE_MODE=validate
 WTQ_REPORT_TS=resume-validation
-printf '%s\n' '{:schema 1 :kind "stages" :sha "0000000000000000000000000000000000000001" :roster ["ci" "build" "visual" "e2e" "integration" "fleet"] :status {"ci" :passed "build" :passed "visual" :passed "e2e" :passed "integration" :passed "fleet" :passed}}' > "$RESUME_SOURCE.stages.edn"
+printf '%s\n' '{:schema 1 :kind "stages" :sha "0000000000000000000000000000000000000001" :roster ["ci" "build" "visual" "e2e" "integration" "fleet"] :status {"ci" :passed "build" :passed "visual" :passed "e2e" :passed "integration" :passed "fleet" :passed} :sources {"ci" :local "build" :local "visual" :local "e2e" :local "integration" :local "fleet" :local}}' > "$RESUME_SOURCE.stages.edn"
 run_case
 assert_events 'expect,verify'
 # Completed validation is also reusable by the landing mode, which must still
@@ -536,7 +536,7 @@ if grep -Eq '^(ci|integration)$' "$TEST_LOG"; then exit 1; fi
 mv "$RESUME_SOURCE.saved-image.tsv" "$RESUME_SOURCE.image.tsv"
 # Even an all-passed successful validation cannot reuse a different stage roster.
 cp "$RESUME_SOURCE.stages.edn" "$RESUME_SOURCE.all-passed.edn"
-sed 's/ "fleet"//; s/ "fleet" :passed//' "$RESUME_SOURCE.stages.edn" > "$RESUME_SOURCE.changed.edn"
+sed 's/ "fleet"\]/]/; s/ "fleet" :passed//; s/ "fleet" :local//' "$RESUME_SOURCE.stages.edn" > "$RESUME_SOURCE.changed.edn"
 mv "$RESUME_SOURCE.changed.edn" "$RESUME_SOURCE.stages.edn"
 WTQ_REPORT_TS=validated-roster-changed
 run_case

@@ -4,6 +4,7 @@
    supported rewrite is not proof of runtime or whole-corpus equivalence."
   (:require
     [clojure.edn :as edn]
+    [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
     [graphden.input.source-context :as source-context]
@@ -134,7 +135,7 @@
 
 (defn- typed-binding?
   [value]
-  (and (map? value) (keyword? (:type value))
+  (and (map? value) (format/configuration-type? (:type value))
        (contains? #{#{:type :ref} #{:type :value}} (set (keys value)))))
 
 

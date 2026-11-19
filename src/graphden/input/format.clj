@@ -2,6 +2,20 @@
   "Version boundary shared by the offline reader and the legacy loader.")
 
 
+(defn configuration-type?
+  "Named types and collection shapes whose leaves resolve to named types.
+   Forms that require new inline type rows are outside this source format slice."
+  [type]
+  (or (keyword? type)
+      (and (vector? type)
+           (case (first type)
+             :list (= 2 (count type))
+             :map (= 3 (count type))
+             (:tuple :union) (< 1 (count type))
+             false)
+           (every? configuration-type? (rest type)))))
+
+
 (defn require-v2!
   [module]
   (when-not (and (map? module) (= 2 (:input-format module)))

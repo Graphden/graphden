@@ -157,7 +157,8 @@
         parts (into {} (field-chunks source raw spans))
         operator (if (contains? parts :ref) :ref :value)]
     (when-not (and (= #{:type operator} (set (keys parts)))
-                   (keyword? (z/sexpr (value-at leaf [:type])))
+                   (let [type (z/sexpr (value-at leaf [:type]))]
+                     (or (keyword? type) (vector? type)))
                    (or (= :value operator) (keyword? (z/sexpr (value-at leaf [:ref])))))
       (refuse :unsupported-expression-map {}))
     (assoc raw :after (str "[" (get parts operator) "]")
@@ -241,7 +242,8 @@
   (let [[operator payload] expression
         raw (get-in source source-path)
         wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))
-        typed? (and wrapper? (= #{operator :type} (set (keys raw))) (keyword? (:type raw))
+        typed? (and wrapper? (= #{operator :type} (set (keys raw)))
+                    (or (keyword? (:type raw)) (vector? (:type raw)))
                     (= #{:type-override-fn-id} (set (keys policy))) (uuid? (:type-override-fn-id policy)))]
     (when-not (and (= :binding kind) (or typed? (empty? policy))
                    (vector? source-path) (= 2 (count source-path)) (= :args (first source-path))

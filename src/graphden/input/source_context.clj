@@ -174,7 +174,10 @@
             (assoc :resolve-config-type
                    (fn [type]
                      (let [names (get-in environment [:context :name->id])
-                           resolved (parse/normalize-ref type names (:namespace definition))]
+                           resolved (rebase/rewrite-type-references
+                                      type #(parse/normalize-ref % names (:namespace definition)))]
+                       (when (seq (types/inline-fn-type-rows-from-form resolved))
+                         (reject! :configuration-requires-inline-type-rows [:configure]))
                        {:type resolved :type-override-fn-id (types/resolve-type-ref resolved names)})))
             (update :declaration-records into
                     (map #(if (and (= :fn (:kind %)) (= id (:id %)))

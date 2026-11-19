@@ -386,12 +386,27 @@
         (is (contains? (codes (result (source/verify-module altered context) :typed)) :legacy-v2-meaning-mismatch))))))
 
 
-(deftest unresolved-and-structural-assertions-remain-explicit-blockers
+(deftest collection-assertions-preserve-rich-types-even-when-storage-ids-match
+  (let [child {:name :shape :namespace "demo" :parent :sink
+               :args {:x {:ref :producer :type [:list :demo/producer]}}}
+        defs [base producer child]
+        context (prepared defs)
+        plan (source/plan-module defs context)
+        entry (result (source/verify-module plan context) :shape)
+        altered (assoc-in plan [:definitions 2 :proposed :configure [:x] :type] [:list :int])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:type [:list :producer] :type-override-fn-id (ids/primitive-fn-id :sequence)}
+           (select-keys (get-in entry [:v2 :configurations [:x]]) [:type :type-override-fn-id])))
+    (is (contains? (codes (result (source/verify-module altered context) :shape))
+                   :legacy-v2-meaning-mismatch))))
+
+
+(deftest unresolved-and-unsupported-assertions-remain-explicit-blockers
   (let [report (verified [base producer
                           {:name :unknown :namespace "demo" :parent :sink
                            :args {:x {:ref :producer :type :unknown-type}}}
                           {:name :shape :namespace "demo" :parent :sink
-                           :args {:x {:ref :producer :type [:list :text]}}}])]
+                           :args {:x {:ref :producer :type [:fn {} :text]}}}])]
     (is (contains? (codes (result report :unknown)) :unresolved-binding-type))
     (is (contains? (codes (result report :shape)) :binding-annotations-required))))
 

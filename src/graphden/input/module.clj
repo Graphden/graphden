@@ -29,7 +29,7 @@
 (defn- field-configuration?
   [[path spec]]
   (and (vector? path) (= 1 (count path)) (simple-keyword? (first path))
-       (map? spec) (= #{:type} (set (keys spec))) (keyword? (:type spec))))
+       (map? spec) (= #{:type} (set (keys spec))) (format/configuration-type? (:type spec))))
 
 
 (defn- validate-source!
@@ -148,7 +148,8 @@
                  (when-not (ifn? resolve-config-type)
                    (reject! :configuration-type-resolver-required))
                  (let [resolved (resolve-config-type type)]
-                   (when-not (and (keyword? (:type resolved)) (uuid? (:type-override-fn-id resolved)))
+                   (when-not (and (format/configuration-type? (:type resolved))
+                                  (uuid? (:type-override-fn-id resolved)))
                      (reject! :unresolved-configuration-type))
                    [names (assoc (select-keys resolved [:type :type-override-fn-id]) :target-path path)]))))
         configuration))

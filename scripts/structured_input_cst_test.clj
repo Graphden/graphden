@@ -288,15 +288,15 @@
 (deftest typed-reference-and-literal-annotations-use-their-original-source-spans
   (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:x :any :y :any} :return-type :any}\r\n"
                   "{:name :producer :return-type :any} {:name :child :parent :base :args {"
-                  ":x {:type ; named type\r\n :text ; type tail\r\n :ref ; producer\r\n :producer}"
+                  ":x {:type ; list type\r\n [:list :text] ; type tail\r\n :ref ; producer\r\n :producer}"
                   " :new {:type :text} :y {:value ; literal\r\n \"a\r\nb\" :type :text}}}]}")
         target (migrate-child text)
         child (peek (:fns (edn/read-string target)))]
     (is (= {:x [:ref :producer] :y [:value "a\r\nb"]} (:bind child)))
-    (is (= {[:x] {:type :text} [:y] {:type :text}} (:configure child)))
+    (is (= {[:x] {:type [:list :text]} [:y] {:type :text}} (:configure child)))
     (is (= {:new {:type :text}} (:input child)))
     (is (str/includes? target ":ref ; producer\r\n :producer"))
-    (is (str/includes? target "[:x] {:type ; named type\r\n :text ; type tail\r\n}"))
+    (is (str/includes? target "[:x] {:type ; list type\r\n [:list :text] ; type tail\r\n}"))
     (is (str/includes? target ":value ; literal\r\n \"a\r\nb\""))))
 
 

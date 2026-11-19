@@ -42,10 +42,12 @@ safe aggregate counts and blockers, not that ledger or the original sources.
 
 Supported rewrites currently include base argument declarations, unchanged
 type declarations, independently owned composed fields, and provable whole-value
-or reference bindings. A bound top-level field can retain an authored named
-type assertion. List builders, anonymous identity mapping, rename projections,
-referenced input scopes, structural binding annotations and unknown binding
-policies have explicit blockers.
+or reference bindings. A bound top-level field can retain a named type
+assertion or a list, map, tuple or union assertion with named leaves.
+The verifier compares the rich form as well as its storage ID, since
+different collection types can share that ID. List builders, anonymous
+identity mapping, rename projections, referenced input scopes, assertions
+that require inline type rows and unknown binding policies have explicit blockers.
 Secret-path resolution must never become an ordinary literal value.
 
 `graphden.input.source/verify-module` checks each supported plan entry against
@@ -132,7 +134,7 @@ attached. It must provide a frozen, verified context:
 | `:binding-id` | Pure `(fn [scope field-id-path] ...)` returning the preserved origin UUID |
 | `:declaration-records` | Validated declaration rows, including the owner `:fn` row |
 | `:origin-ledger` | Opaque provenance map retained with the parsed definition |
-| `:resolve-config-type` | For a configured field, resolve the named type to its canonical `:type` spelling and `:type-override-fn-id` UUID in the module's frozen namespace context |
+| `:resolve-config-type` | Resolve a configured field's type to its canonical `:type` form and `:type-override-fn-id` UUID in the module's frozen namespace context |
 
 Type-only declarations require their source owner, declaration rows and origin
 ledger, with no callable contract. A shared input-type declaration already in

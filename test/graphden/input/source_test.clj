@@ -286,7 +286,7 @@
 
 
 (deftest verified-declarations-and-bindings-agree-with-storage-migration
-  (let [options {:type {:flag :bool} :required false :value {:flag false}
+  (let [options {:type {:flag {:type :bool :required false}} :required false :value {:flag false}
                  :description "Default in the implementation"}
         parent (assoc base :args {:x :any :options options :items [:list 'a]})
         child {:name :child :namespace "demo" :parent :sink :args {:x {:value nil}}}
@@ -308,7 +308,8 @@
         option-field (second (:fields contract))]
     (is (= {:supported 2 :blocked 0} (:counts report)))
     (is (= :authored-source-equivalent (:verification child-plan)))
-    (is (= input-id (:input-type-id v2)))
+    (is (= input-id (:input-type-id v2) (:type-id contract)))
+    (is (= {:x :any :options {:flag :bool} :items [:list 'a]} (:type contract)))
     (is (= {:input-types (select-keys (:input-types db-mapping) [input-id])
             :memberships (select-keys (:memberships db-mapping) (keys (:memberships mapping)))
             :binding-origins (:binding-origins db-mapping)}
@@ -318,7 +319,7 @@
            (mapv :id (:fields contract))))
     (is (= options (:declaration option-field)))
     (is (= false (:required option-field)))
-    (is (= [{:name :flag :type :bool :required true}]
+    (is (= [{:name :flag :type :bool :required false}]
            (mapv #(select-keys % [:name :type :required]) (:fields option-field))))
     (is (= [[:list 'a]] (mapv :type (drop 2 (:fields contract)))))
     (is (= [{:kind :input-binding :id binding-id :fn-id owner

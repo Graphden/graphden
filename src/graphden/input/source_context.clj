@@ -86,6 +86,12 @@
        vec))
 
 
+(defn- record-node
+  [type-id fields]
+  {:type (into {} (map (juxt :name :type)) fields)
+   :type-id type-id :fields fields})
+
+
 (declare ^:private fields)
 
 
@@ -100,12 +106,12 @@
       (reject! :missing-field-declaration field-path))
     (when source-slot-id
       (reject! :field-projection-required field-path))
-    (cond-> {:id id :name key :type type :type-fn-id type-fn-id
-             :required required :description description :declaration spec}
-      ;; Named and wrapped shapes retain their rich type. This bridge can only
-      ;; address inline record children whose rows the declaration emitted.
-      (and (map? type) (seq type) (not (types/type-spec-map? type)))
-      (assoc :fields (fields records type-fn-id type field-path)))))
+    (merge {:id id :name key :required required :description description :declaration spec}
+           ;; Named and wrapped shapes retain their rich type. This bridge can
+           ;; address inline record children whose rows the declaration emitted.
+           (if (and (map? type) (seq type) (not (types/type-spec-map? type)))
+             (record-node type-fn-id (fields records type-fn-id type field-path))
+             {:type type :type-id type-fn-id}))))
 
 
 (defn- fields
@@ -144,7 +150,7 @@
               (not= (count fields) (count (set (map :name fields)))))
       (reject! :ambiguous-inherited-input [:input]))
     {:scope [id []] :input-type-id input-id
-     :contract {:type input-id :fields fields}
+     :contract (record-node input-id fields)
      :declaration-records (into [(assoc descriptor :kind :fn)]
                                 (map #(migration/input-membership-record owner %))
                                 members)

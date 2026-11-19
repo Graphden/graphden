@@ -20,14 +20,25 @@
 (defonce ^:private marker-key (Object.))
 
 
+(defn- sort-by-printed
+  [key-fn values]
+  ;; sort-by recomputes its key on each comparison. Print once per immutable
+  ;; item, retaining the same stable ordering and canonical digest bytes.
+  (if (next values)
+    (->> values
+         (map (fn [value] [(pr-str (key-fn value)) value]))
+         (sort-by first)
+         (mapv second))
+    (vec values)))
+
+
 (defn- canonical
   [value]
   (cond
     (map? value) [::map (->> value
                              (map (fn [[k v]] [(canonical k) (canonical v)]))
-                             (sort-by (comp pr-str first))
-                             vec)]
-    (set? value) [::set (vec (sort-by pr-str (map canonical value)))]
+                             (sort-by-printed first))]
+    (set? value) [::set (sort-by-printed identity (map canonical value))]
     (vector? value) [::vector (mapv canonical value)]
     (sequential? value) [::sequence (mapv canonical value)]
     :else value))
@@ -137,3 +148,36 @@
          (identical? witness-seal (.-seal ^StorageWitness witness))
          (= (::input metadata) (.-authored-input ^StorageWitness witness))
          (= source-fingerprint (.-source-fingerprint ^StorageWitness witness)))))
+
+
+^{:splint/disable [lint/prefer-method-values]}
+(defn retained-checker-metadata
+  "Expose all data retained by sealed provenance and reader source locations
+   for immutable admission and conservative memory accounting. Nil means
+   unknown metadata: refuse the optimization. This is neither a fresh source
+   check nor an authority grant."
+  [value]
+  (let [metadata (meta value)
+        position-keys #{:source :line :column :end-line :end-column}
+        positions (select-keys metadata position-keys)
+        marker (get metadata marker-key)
+        storage (::storage-input metadata)]
+    (when (and (every? (into #{::input ::storage-input marker-key} position-keys) (keys metadata))
+               (every? (fn [[k v]] (if (= k :source) (string? v) (integer? v))) positions)
+               (or (not (contains? metadata marker-key))
+                   (and (instance? MarkerWitness marker)
+                        (identical? witness-seal (.-seal ^MarkerWitness marker))))
+               (or (not (contains? metadata ::storage-input))
+                   (and (instance? StorageWitness storage)
+                        (identical? witness-seal (.-seal ^StorageWitness storage)))))
+      ;; Runtime construction avoids inheriting source metadata from tooling
+      ;; that instruments collection literals; admission walks this value too.
+      (cond-> (vector (::input metadata) positions)
+        marker (conj (vector (.-input ^MarkerWitness marker)
+                             (.-fn-id ^MarkerWitness marker)
+                             (.-signature ^MarkerWitness marker)
+                             (.-flags ^MarkerWitness marker)
+                             (.-args ^MarkerWitness marker)
+                             (.-return-value ^MarkerWitness marker)))
+        storage (conj (vector (.-authored-input ^StorageWitness storage)
+                              (.-source-fingerprint ^StorageWitness storage)))))))

@@ -426,22 +426,26 @@
 (deftest with-heartbeat-beats-while-the-body-runs-test
   (testing "the beat fires every period until the body returns; the body's value comes back"
     (let [beats (atom 0)
+          ready (promise)
           result ((impls/impl-of :with-heartbeat)
-                  {:body (fn [] (Thread/sleep 350) :done)
-                   :beat (fn [] (swap! beats inc))
+                  {:body (fn [] (when (= :ready (deref ready 10000 :timeout)) :done))
+                   :beat (fn [] (when (= 2 (swap! beats inc)) (deliver ready :ready)))
                    :every-ms (delay 100)}
                   nil)
           seen @beats]
       (is (= :done result))
-      (is (<= 2 seen 4) (str "≈3 beats over 350 ms at 100 ms, saw " seen))
+      (is (<= 2 seen) "The body waits for repeated callbacks rather than a scheduler window")
       (Thread/sleep 250)
       (is (= seen @beats) "no beat after the body returned")))
 
   (testing "a throwing beat is logged and skipped; a throwing body still stops the beat"
-    (let [beats (atom 0)]
+    (let [beats (atom 0)
+          ready (promise)]
       (is (= :ok ((impls/impl-of :with-heartbeat)
-                  {:body (fn [] (Thread/sleep 250) :ok)
-                   :beat (fn [] (swap! beats inc) (throw (ex-info "beat failed" {})))
+                  {:body (fn [] (when (= :ready (deref ready 10000 :timeout)) :ok))
+                   :beat (fn []
+                           (when (= 2 (swap! beats inc)) (deliver ready :ready))
+                           (throw (ex-info "beat failed" {})))
                    :every-ms (delay 60)}
                   nil)))
       (is (<= 2 @beats))

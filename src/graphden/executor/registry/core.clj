@@ -632,7 +632,7 @@
                             (reduce (fn [r k] (assoc-in r [:by-name k] fn-id))
                                     (assoc-in (remove-anonymous-name-keys reg fn-id fn-name) [:by-id fn-id]
                                               (cond-> (-> rich-type-map
-                                                          (update :effects #(or % #{}))
+                                                          (update :effects #(or % (hash-set)))
                                                           (assoc :fn-id fn-id :name fn-name))
                                                 carry-bl? (assoc :branch-local? true)))
                                     (index-keys-for fn-name (:namespace rich-type-map))))))]

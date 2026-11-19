@@ -6,6 +6,9 @@
     [graphden.crud.type-check :as type-check]
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
+    [graphden.executor.checked-source-data :as checker-data]
+    [graphden.executor.checked-source-memo :as checker-memo]
+    [graphden.executor.checker-tenant-index :as tenant-index]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry]
@@ -132,6 +135,7 @@
    Recovery may request a retry, never supply a source certificate or grant."
   [ctx]
   (assoc (capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
+         :checker-cache (:checker-cache ctx)
          :type-recheck (some-> (:type-recheck-state ctx) deref
                                (select-keys [:status :pending-ids]))))
 
@@ -213,12 +217,14 @@
 
 
 (defn- snapshot-storage
-  [{:keys [graph namespaces]}]
   ;; Source fingerprints are computed from the original immutable rows. Only
   ;; the checker's read adapter receives the canonical typed reconstruction.
-  (remote/from-bundle {:fn (reconstruction-fns graph) :slot (:slots graph)
-                       :fn-slot (:fn-slots graph) :binding (:bindings graph)
-                       :binding-list-item (:list-items graph) :ns namespaces}))
+  ([snapshot]
+   (snapshot-storage snapshot (reconstruction-fns (:graph snapshot))))
+  ([{:keys [graph namespaces]} fns]
+   (remote/from-bundle {:fn fns :slot (:slots graph)
+                        :fn-slot (:fn-slots graph) :binding (:bindings graph)
+                        :binding-list-item (:list-items graph) :ns namespaces})))
 
 
 (defn- seed-primitives!
@@ -230,47 +236,175 @@
     (registry/record-rich-types-raw! id (:name signature) signature)))
 
 
-(defn- check-closure!
-  [snapshot entries original-rich recovery]
+(defn- prepare-check-input
+  [snapshot entries]
   (let [graph (:graph snapshot)
         {:keys [forward-deps reverse-deps]} (deps/build-deps-state graph)
         reachable (set/difference (deps/forward-closure forward-deps (vals entries))
                                   (:identity-target-ids graph #{}))
-        storage (snapshot-storage snapshot)
+        fns (reconstruction-fns graph)]
+    {:storage (snapshot-storage snapshot fns)
+     ;; These fresh witnesses cover process-owned package/contract changes
+     ;; which raw source equality alone cannot detect.
+     :reconstructed-fns fns :owned-ids (set (filter owned/owned-fn-id? reachable))
+     :reachable reachable :ordering (delay (deps/dependency-order reverse-deps reachable))}))
+
+
+(defn- prepare-check-closure
+  [snapshot {:keys [storage reachable ordering]}]
+  (let [graph (:graph snapshot)
         source-fingerprints (source-contract/fingerprints graph)
-        {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
+        {:keys [ordered cyclic]} @ordering]
     (when (> (count reachable) 2048) (reject! :type-closure-limit {}))
     (when (seq cyclic) (reject! :type-cycle {:fn-id (first cyclic)}))
-    ;; Dependencies are final before consumers run in this isolated registry.
-    ;; Never reuse an ambient memo: another snapshot may use the same identities
-    ;; with different source, aliases, markers or primitive signatures.
-    (binding [check/*ref-return-memo* (atom {})]
-      (doseq [id ordered]
-        (when-let [definition (type-check/reconstruct-fn-def storage id)]
-          (when-not (let [signature (get-in original-rich [:by-id id])]
-                      (or (provenance/matches? signature (check/checker-view definition))
-                          (provenance/matches-storage-input? signature (get source-fingerprints id))))
-            (let [{:keys [status pending-ids]} recovery]
-              (if (and (contains? #{:pending :running} status)
-                       (not (owned/owned-fn-id? id))
-                       (or (nil? pending-ids) (contains? pending-ids id)))
-                (reject! :policy-refresh-required {:fn-id id})
-                (reject! :type-source-mismatch {:fn-id id}))))
-          (try
-            (check/check-fn-def! definition)
-            (catch Exception _
-              ;; Checker diagnostics may contain literal data. Export errors do
-              ;; not carry their message, cause, or original ex-data.
-              (reject! :type-check-failed {:fn-id id})))
-          (when-not (registry/rich-type-of-id id)
-            (reject! :type-unresolved {:fn-id id})))))))
+    {:storage storage :fingerprints source-fingerprints :ordered ordered}))
+
+
+(defn- prepare-checked-definition
+  [{:keys [storage fingerprints]} original-rich recovery id]
+  (when-let [definition (type-check/reconstruct-fn-def storage id)]
+    (when-not (let [signature (get-in original-rich [:by-id id])]
+                (or (provenance/matches? signature (check/checker-view definition))
+                    (provenance/matches-storage-input? signature (get fingerprints id))))
+      (let [{:keys [status pending-ids]} recovery]
+        (if (and (contains? #{:pending :running} status)
+                 (not (owned/owned-fn-id? id))
+                 (or (nil? pending-ids) (contains? pending-ids id)))
+          (reject! :policy-refresh-required {:fn-id id})
+          (reject! :type-source-mismatch {:fn-id id}))))
+    definition))
+
+
+(defn- check-definition!
+  [id definition]
+  (try
+    (check/check-fn-def! definition)
+    (catch Exception _
+      ;; Checker diagnostics may contain literal data. Export errors do
+      ;; not carry their message, cause, or original ex-data.
+      (reject! :type-check-failed {:fn-id id})))
+  (when-not (registry/rich-type-of-id id)
+    (reject! :type-unresolved {:fn-id id})))
+
+
+(defn- check-ordered!
+  [{:keys [ordered] :as prepared} original-rich recovery]
+  ;; Keep the default path's prepare/check interleaving: a preceding custom
+  ;; rule could mutate a later literal, which its fresh provenance must see.
+  ;; The memo is always pass-local; no ambient registry evidence is reused.
+  (binding [check/*ref-return-memo* (atom {})]
+    (doseq [id ordered]
+      (when-let [definition (prepare-checked-definition prepared original-rich recovery id)]
+        (check-definition! id definition)))))
+
+
+(defn- checker-state
+  []
+  {:rich @registry/*rich-types-override*
+   :per-org @registry/*per-org-rich-override*})
+
+
+(defn- restore-checker-state!
+  [artifact]
+  (let [{:keys [rich per-org]} (checker-data/expand-registry-state
+                                 (tenant-index/restore-artifact artifact tenancy/*current-org*))]
+    (reset! registry/*rich-types-override* rich)
+    (reset! registry/*per-org-rich-override* per-org)))
+
+
+(defn- checker-input
+  [{:keys [snapshot entries original-rich recovery structural? ordered]}]
+  (tenant-index/prepare-input
+    {:source (select-keys snapshot [:graph :namespaces])
+     :entries entries :structural? structural? :recovery recovery
+     :org tenancy/*current-org* :seed (checker-state)
+     :aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)
+     :per-org-aliases @runtime/*per-org-aliases-override*
+     :caller-narrowings check/*caller-narrowings*
+     :ref-return-overrides check/*ref-return-overrides*
+     :type-compare-depth types/*type-compare-depth*
+     :original-signatures (select-keys (:by-id original-rich) ordered)}))
+
+
+(defn- prepare-memo-base
+  [{:keys [prepared] :as inputs}]
+  (assoc (checker-input (assoc inputs :ordered (:ordered @(:ordering prepared))))
+         :reconstructed-fns (:reconstructed-fns prepared)
+         :owned-ids (:owned-ids prepared)))
+
+
+(defn- prepare-bounded-memo-base
+  [{:keys [prepared] :as inputs}]
+  ;; The borrowed graph/normalized rows/seeds already belong to this request.
+  ;; Only a <=2048-entry signature projection and bounded ordering are new.
+  ;; Check BEFORE forcing dependency-order or building that projection.
+  (when (<= (count (:reachable prepared)) 2048)
+    (prepare-memo-base inputs)))
+
+
+(defn checker-hit-contract
+  "Frozen snapshot adapter for the runtime-owned checker cache. Call only
+   after built-ins load; retiring the cache is mandatory before code reload."
+  []
+  ;; Borrowed source is request-owned. <=2048 signature-projection + <=2048
+  ;; restored by-id entries:32MiB at8KiB/entry, including old/new collision
+  ;; arrays and trie paths. Ordering has8MiB; depth64/1024-summary admission
+  ;; and comparison8MiB; small state/registry maps fit the remaining16MiB.
+  ;; This bounds NEW live hit state, not allocation or the whole request heap.
+  {:bytes (* 64 1024 1024) :prepare prepare-bounded-memo-base
+   :restore restore-checker-state! :eligible? checker-data/bounded-registry-restore?})
+
+
+(defn- prepare-memo-input
+  [base {:keys [original-rich recovery prepared]}]
+  ;; prepare-build runs only after the complete base passed immutable admission.
+  ;; Dropping comparison-only witnesses preserves that proof; do not rewalk the
+  ;; same base on a cold miss. The derived definitions are admitted separately.
+  (try
+    (assoc (dissoc base :reconstructed-fns :owned-ids) :definitions
+           (mapv (fn [id]
+                   [id (prepare-checked-definition prepared original-rich recovery id)])
+                 (:ordered prepared)))
+    (catch InterruptedException error (throw error))
+    (catch Exception _
+      ;; Preserve original error precedence: an earlier type error may
+      ;; precede this later provenance/reconstruction error.
+      nil)))
+
+
+(defn- with-checked-closure
+  [snapshot entries original-rich recovery structural? consume]
+  (let [prepared-input (prepare-check-input snapshot entries)
+        prepared (delay (prepare-check-closure snapshot prepared-input))
+        inputs {:snapshot snapshot :entries entries :original-rich original-rich
+                :recovery recovery :structural? structural?}
+        fallback (fn [] (check-ordered! @prepared original-rich recovery) (consume))]
+    (if-let [memo checker-memo/*memo*]
+      (checker-memo/call-with-artifact
+        memo {:family [(tenant-index/comparison-org tenancy/*current-org* snapshot (checker-state))
+                       entries structural?]
+              :original-rich original-rich
+              :prepare #(prepare-memo-base (assoc inputs :prepared prepared-input))
+              :prepare-build (fn [base] (prepare-memo-input base (assoc inputs :prepared @prepared)))
+              :build (fn [{:keys [definitions org]}]
+                       (binding [check/*ref-return-memo* (atom {})]
+                         (doseq [[id definition] definitions :when definition]
+                           (check-definition! id definition)))
+                       (tenant-index/prepare-artifact
+                         org tenancy/*current-org*
+                         (checker-data/compact-registry-state (checker-state))))
+              :restore restore-checker-state! :consume consume :fallback fallback
+              :hit-input (assoc inputs :prepared prepared-input)
+              :check-cancel runtime/check-cancel!})
+      (fallback))))
 
 
 (defn- checked-source
   "Derive a fresh policy and plan from the SAME immutable rows. No writes to
    the executor's rich types, aliases, markers, diagnostics, or storage."
-  [snapshot entries {:keys [rich classes type-recheck]} structural? consume]
-  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+  [snapshot entries {:keys [rich classes type-recheck checker-cache]} structural? consume]
+  (binding [checker-memo/*memo* (or checker-cache checker-memo/*memo*)
+            registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             registry/*per-org-rich-override* (atom {})
             types/*type-aliases-override* (atom {})
             types/*alias-view* nil
@@ -291,26 +425,28 @@
                                      (cond-> (conj (plan/supported-primitive-ids)
                                                    (ids/fn-id "app.ui-components" :ui-components))
                                        structural? (into (structural-contracts/operation-ids)))))
-      (check-closure! snapshot entries rich type-recheck)
-      ;; A snapshot checks only source identities it actually exports. The
-      ;; original policy was frozen in full before the storage read; this
-      ;; second classification is a fresh veto, not another authority grant.
-      (let [current-flags (shapes/markers-snapshot)
-            snapshot-class (memoize
-                             (fn [id]
-                               (get-in (capture-policy-for rich
-                                                           (select-keys (:by-id rich) [id])
-                                                           current-flags)
-                                       [:classes id])))]
-        (consume
-          {:allow-fn?
-           (fn [id]
-             (and (= :plain (registry/trace-capture-class id nil))
-                  ;; Storage intentionally erases inline marker
-                  ;; annotations. A fresh check is only a veto:
-                  ;; it must never relax the original policy.
-                  (= :plain (get classes id))
-                  (= :plain (snapshot-class id))))}))
+      (with-checked-closure snapshot entries rich type-recheck structural?
+        (fn []
+          ;; A snapshot checks only source identities it actually exports. The
+          ;; original policy was frozen in full before the storage read; this
+          ;; second classification is a fresh veto, not another authority grant.
+          (let [current-flags (shapes/markers-snapshot)
+                snapshot-class (memoize
+                                 (fn [id]
+                                   (get-in (capture-policy-for rich
+                                                               (select-keys (:by-id rich) [id])
+                                                               current-flags)
+                                           [:classes id])))]
+            (consume
+              {:allow-fn?
+               (fn [id]
+                 (and (= :plain (registry/trace-capture-class id nil))
+                      ;; Storage intentionally erases inline marker
+                      ;; annotations. A fresh check is only a veto:
+                      ;; it must never relax the original policy.
+                      (= :plain (get classes id))
+                      (= :plain (snapshot-class id))))}))))
+      (catch InterruptedException error (throw error))
       (catch Exception error
         (if (= :browser-plan/unsupported (:type (ex-data error)))
           (throw error)

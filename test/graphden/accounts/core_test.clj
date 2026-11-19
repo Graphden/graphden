@@ -298,3 +298,21 @@
           (accounts/mint-preview-token! (storage) (str (:id account)) "acme" fn-id branch-id :unknown)))
     (accounts/revoke-token! (storage) token)
     (is (nil? (accounts/preview-grant-by-token (storage) token)))))
+
+
+(deftest ^:integration paired-session-read-preserves-account-and-legacy-ids
+  (let [st (storage)
+        account (sp/create-entity st :account {:id #uuid "00000001-0001-0001-0001-000000000001"
+                                               :display-name "Paired account" :status "active"
+                                               :totp-enabled? true :created-at 1})
+        id (:id account)
+        authenticate (fn [account-id]
+                       (let [token (accounts/mint-session! st account-id {:kind "api" :scopes "read execute"})]
+                         (accounts/authenticate-token st token)))
+        expected (assoc (sp/read-entity st :account id) :token-kind "api" :token-scopes #{:read :execute})]
+    (is (= expected (authenticate (str id))))
+    (is (= expected (authenticate "1-1-1-1-1")))
+    (is (nil? (authenticate "not-a-uuid")))
+    (is (nil? (authenticate (str (random-uuid)))))
+    (sp/update-entity st :account id {:status "suspended"})
+    (is (nil? (authenticate (str id))))))

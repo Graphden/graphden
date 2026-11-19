@@ -165,6 +165,7 @@
     pending?.abort();
     const loading = new AbortController();
     pending = loading;
+    const progress = window.gdUILoading?.begin('inspector', reload);
     try {
       const candidate = await window.gdLoadUIComponentRuntime('inspector', window.GraphdenBuiltinPlans.plans.inspector, {operationLimit: 150000}, loading.signal);
       if (loading.signal.aborted || own !== generation || active !== controller || owner !== (window.gdPrefOwner || null)) return;
@@ -176,7 +177,10 @@
       const fallback = builtin();
       active.replaceRuntime(fallback);
       publishRuntime(fallback);
-    } finally { if (pending === loading) pending = null; }
+    } finally {
+      progress?.finish();
+      if (pending === loading) pending = null;
+    }
   }
   function click(event) {
     const target = event.target.closest?.('button');
@@ -196,6 +200,7 @@
     host?.removeEventListener('keydown', keydown);
     mounted?.dispose(); mounted = null;
     controller?.dispose(); controller = null;
+    window.gdUILoading?.unbind(host);
     host = null; handlers = null; output = null;
     sharedRuntime = null;
   }
@@ -212,7 +217,9 @@
         mounted?.dispose();
         host?.removeEventListener('click', click);
         host?.removeEventListener('keydown', keydown);
+        window.gdUILoading?.unbind(host);
         host = nextHost;
+        window.gdUILoading?.bind('inspector', host);
         mounted = window.GraphdenRenderer.mount(host, {idPrefix: 'gd-insp', nodeLimit: 128});
         host.addEventListener('click', click);
         host.addEventListener('keydown', keydown);

@@ -44,6 +44,17 @@ const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     assert(!insp.hasEmpty, 'inspector left the empty state once a fn is selected');
     assert(insp.effects > 0, 'inspector lists this fn’s effects (got ' + insp.effects + ')');
 
+    const earlyAdminRequests = await page.evaluate(() => {
+      const paths = new Set(['/partials/grants-admin', '/partials/users-admin',
+        '/partials/roles-admin', '/partials/executor-admin', '/partials/packages-governance',
+        '/partials/stats', '/partials/queues-panel', '/partials/assets-panel',
+        '/partials/orgs-admin', '/partials/platform-access', '/partials/moderation-queue']);
+      return performance.getEntriesByType('resource')
+        .map(entry => new URL(entry.name).pathname).filter(path => paths.has(path));
+    });
+    assert(earlyAdminRequests.length === 0,
+      'Build does not fetch hidden management panels: ' + earlyAdminRequests.join(', '));
+
     // --- 2. Menu: Organization reveals the ops panels; brand → Build ---
     // Surface ENTRY is the account chip's menu now (rail retired); the way
     // back is the brand button. Packages split by intent (spec §1/§4):

@@ -251,9 +251,29 @@
   {:name :_editor-configuration-plan-facts
    :description "Export one component selected by the protected ordinary authenticated editor resolver. Default and personal source use the same authorization and snapshot."
    :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_component-plan-batch-item
+   :parent :assoc
+   :args {:map {:as :item :type {:component :text :result :keyword-map}}
+          :key {:value :result}
+          :value {:parent :json-envelope-response
+                  :args {:envelope {:parent :component-export-result
+                                    :args {:result {:parent :get
+                                                    :args {:coll {:as :item :type {:component :text :result :keyword-map}}
+                                                           :key {:value :result} :default {:value {}}}}}}}}}}
   {:name :_editor-configuration-plan
-   :parent :component-export-result
-   :args {:result :_editor-configuration-plan-facts}
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll :_editor-configuration-plan-facts
+                        :key {:value :batch-complete?} :default false}}
+          :then {:parent :zipmap
+                 :args {:keys {:value [:ok :items]}
+                        :vals [true {:parent :map
+                                     :args {:func {:parent :_component-plan-batch-item :lambda-params [:item]}
+                                            :coll {:parent :get
+                                                   :args {:coll :_editor-configuration-plan-facts
+                                                          :key {:value :items} :default {:value []}}}}}]}}
+          :else {:parent :component-export-result
+                 :args {:result :_editor-configuration-plan-facts}}}
    :return-type :keyword-map}
 
   {:name :_editor-configuration-plan-handler :parent :json-envelope-response

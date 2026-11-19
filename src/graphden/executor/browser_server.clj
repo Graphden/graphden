@@ -3,6 +3,7 @@
    the original source binding under fresh principal/session/branch policy."
   (:require
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.provider :as accounts]
@@ -13,6 +14,7 @@
     [graphden.editor.root-binding :as root-binding]
     [graphden.executor.browser-plan :as wire]
     [graphden.executor.browser-server-execution :as server-execution]
+    [graphden.executor.browser-server-site :as server-site]
     [graphden.executor.browser-server-source :as server-source]
     [graphden.executor.browser-server-values :as values]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -23,6 +25,8 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.context :as context]
+    [graphden.executor.revision-manifest :as manifest]
+    [graphden.executor.source-recipe-replay :as replay]
     [graphden.storage.binding-read :as binding-read]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.tenancy.context :as tenancy]
@@ -33,6 +37,77 @@
 (def ^:private lifetime-ms 120000)
 (def ^:private max-issuances 2048)
 (defonce ^:private issuances (atom {}))
+
+
+(def ^:dynamic ^:private *client-fingerprint-memo* nil)
+
+
+(def ^:private fingerprint-container-kinds
+  {clojure.lang.PersistentArrayMap :map clojure.lang.PersistentHashMap :map
+   clojure.lang.PersistentVector :vector clojure.lang.APersistentVector$SubVector :vector
+   clojure.lang.PersistentHashSet :set
+   clojure.lang.PersistentList :sequence clojure.lang.PersistentList$EmptyList :sequence})
+
+
+(def ^:private fingerprint-leaf-classes
+  #{nil String Boolean Character java.util.UUID clojure.lang.Keyword clojure.lang.Symbol
+    Long Integer Short Byte Double Float java.math.BigDecimal java.math.BigInteger
+    clojure.lang.BigInt clojure.lang.Ratio})
+
+
+(defn- fingerprint-map-key?
+  [value]
+  ;; canonical sorts map keys by their printed form. Distinct keywords can
+  ;; print alike when a component contains '/'; stable-sort ties then expose
+  ;; map iteration order. Admit only injectively printed keyword components.
+  (or (string? value) (uuid? value)
+      (and (keyword? value)
+           (not (str/includes? (name value) "/"))
+           (let [keyword-ns (namespace value)]
+             (or (nil? keyword-ns) (not (str/includes? keyword-ns "/")))))))
+
+
+(defn- same-fingerprint-input?
+  "Conservative digest equivalence, not Clojure equality: vector/list and
+   printed numeric representations differ. Unknown/mutable values always miss,
+   even when identical. Call only under fingerprint-data's print bindings."
+  [left right]
+  (let [kind (get fingerprint-container-kinds (class left))]
+    (and (= kind (get fingerprint-container-kinds (class right)))
+         (case kind
+           :map (and (= (count left) (count right))
+                     (every? (fn [[k v]]
+                               (when (fingerprint-map-key? k)
+                                 (when-let [entry (find right k)]
+                                   (and (fingerprint-map-key? (key entry))
+                                        (same-fingerprint-input? k (key entry))
+                                        (same-fingerprint-input? v (val entry)))))) left))
+           :set (and (= (count left) (count right))
+                     (every? (fn [item]
+                               (and (contains? right item)
+                                    (same-fingerprint-input? item (get right item)))) left))
+           (:vector :sequence) (and (= (count left) (count right))
+                                    (every? true? (map same-fingerprint-input? left right)))
+           (and (contains? fingerprint-leaf-classes (class left))
+                (contains? fingerprint-leaf-classes (class right))
+                (or (identical? left right) (= (pr-str left) (pr-str right))))))))
+
+
+(defn- client-fingerprint
+  [input]
+  (let [memo *client-fingerprint-memo*
+        previous (when memo @memo)]
+    (if (and (map? previous)
+             (binding [*print-length* nil *print-level* nil *print-meta* false
+                       *print-readably* true *print-dup* false *print-namespace-maps* false]
+               (same-fingerprint-input? (:input previous) input)))
+      (:digest previous)
+      (let [digest (provenance/fingerprint-data input)]
+        ;; A timed-out worker may still unwind. It cannot reopen the request's
+        ;; closed memo or retain another captured graph after invoke returns.
+        (when (and memo (not= ::closed previous))
+          (compare-and-set! memo previous {:input input :digest digest}))
+        digest))))
 
 
 (defn- reject!
@@ -98,9 +173,11 @@
 
 
 (defn- capture-root-anchor
-  [storage authorize! policy]
+  [ctx storage authorize! policy]
   (let [{handler-root :root :keys [root-row selector-row]} (root-binding/capture! storage)
-        choice (resolution/root-choice storage authorize! policy)
+        choice (if-let [hint (some-> (:graph-cache ctx) deref)]
+                 (resolution/root-choice storage authorize! policy hint)
+                 (resolution/root-choice storage authorize! policy))
         selected-root (root-binding/selected-root handler-root choice)]
     {:anchor {:handler-root handler-root :selected-root selected-root}
      :evidence {:root-binding root-row :selector-binding selector-row
@@ -108,9 +185,9 @@
 
 
 (defn- anchor!
-  [storage authorize! policy {:keys [fn-id slot-id ref-fn-id handler-root selected-root] :as anchor}]
+  [ctx storage authorize! policy {:keys [fn-id slot-id ref-fn-id handler-root selected-root] :as anchor}]
   (if (contains? anchor :selected-root)
-    (let [captured (capture-root-anchor storage authorize! policy)]
+    (let [captured (capture-root-anchor ctx storage authorize! policy)]
       (when-not (= {:handler-root handler-root :selected-root selected-root} (:anchor captured))
         (reject! :server-binding-changed))
       (:evidence captured))
@@ -123,9 +200,11 @@
       row)))
 
 
-(defn- capture-client-source
+(defn- capture-client-source-value
   [ctx storage authorize! policy entries anchor-row]
-  (let [graph (source/collect-client-closure storage (vals entries) authorize!)
+  (let [graph (if-let [hint (some-> (:graph-cache ctx) deref)]
+                (source/collect-client-closure storage (vals entries) authorize! hint)
+                (source/collect-client-closure storage (vals entries) authorize!))
         _ (doseq [id (vals entries)]
             (let [row (some #(when (= id (:id %)) %) (:fns graph))]
               (when-not row (reject! :server-root-missing))
@@ -144,16 +223,23 @@
         signatures (into {} (map (fn [[id evidence]] [id (:signature evidence)])) targets)
         captured {:graph graph :namespaces (source/collect-namespaces storage graph)
                   :server-signatures signatures}
-        evidence (provenance/fingerprint-data
+        evidence (client-fingerprint
                    {:graph (normalized-graph graph) :anchor anchor-row
                     :targets (into {} (map (fn [[id proof]] [id (:fingerprint proof)])) targets)})]
-    {:snapshot captured :targets targets :calls calls :evidence evidence}))
+    {:snapshot captured :targets targets :calls calls :evidence evidence :anchor-evidence anchor-row}))
+
+
+(defn- capture-client-source
+  [ctx storage authorize! policy entries anchor-row]
+  (replay/capture storage authorize! entries
+                  (fn [fresh-storage fresh-authorize!]
+                    (capture-client-source-value ctx fresh-storage fresh-authorize! policy entries anchor-row))))
 
 
 (defn- capture-client
   [ctx storage authorize! policy entries anchor]
   (capture-client-source ctx storage authorize! policy entries
-                         (anchor! storage authorize! policy anchor)))
+                         (anchor! ctx storage authorize! policy anchor)))
 
 
 (defn- issue!
@@ -170,16 +256,23 @@
 
 
 (defn- export-captured-plan
-  [ctx request policy entries anchor {:keys [snapshot calls targets evidence]}]
+  [ctx storage authorize! request policy entries anchor {:keys [snapshot calls targets evidence anchor-evidence]}]
   (let [epoch (context/invalidation-epoch ctx)
+        site-proofs (server-site/prepare-all (:graph snapshot) entries calls targets anchor-evidence)
         descriptors (into {}
                           (map (fn [[site target]]
                                  [site (issue! {:scope (scope ctx request) :anchor anchor
                                                 :entries entries :site site :target target
+                                                :site-proof (get site-proofs site)
                                                 :evidence evidence :epoch epoch
                                                 :contract (select-keys (get targets target)
                                                                        [:input-type :output-type])})]))
                           calls)]
+    ;; A single witness group caps speculative work per export. Other plans
+    ;; populate their selected paths on demand.
+    (when-let [ids (:ids (first (vals site-proofs)))]
+      (when (every? #(= ids (:ids %)) (vals site-proofs))
+        (manifest/stage-client-witness! storage authorize! (get-in snapshot [:graph :fns]) ids)))
     (snapshot/export-snapshot
       (assoc snapshot :server-plan-options {:server-descriptors descriptors})
       (:base-fns ctx) entries policy)))
@@ -189,7 +282,7 @@
   "Export the selected root. Network targets stop at checked opaque terminals;
    their implementations and configured captures remain exclusively server-side."
   [ctx storage authorize! policy entries request anchor]
-  (export-captured-plan ctx request policy entries anchor
+  (export-captured-plan ctx storage authorize! request policy entries anchor
                         (capture-client ctx storage authorize! policy entries anchor)))
 
 
@@ -198,12 +291,12 @@
    The callback receives its identity and a zero-argument exporter; no caller
    can supply prevalidated anchor evidence. Invocations still recapture it."
   [ctx storage authorize! policy request consume]
-  (let [{:keys [anchor evidence]} (capture-root-anchor storage authorize! policy)
+  (let [{:keys [anchor evidence]} (capture-root-anchor ctx storage authorize! policy)
         root (:selected-root anchor)
         entries {:root root}]
     (consume root
              #(export-captured-plan
-                ctx request policy entries anchor
+                ctx storage authorize! request policy entries anchor
                 (capture-client-source ctx storage authorize! policy entries evidence)))))
 
 
@@ -223,10 +316,43 @@
     (when-let [guard (:execute-guard ctx)] (guard ctx target))))
 
 
+(defn- capture-site
+  "Refresh only the selected issued path and target in this new snapshot.
+   Witnesses establish provenance, never permissions: every path owner and
+   selected target is freshly authorized before its owned source is read."
+  [ctx storage authorize! policy issued]
+  (let [{:keys [ids evidence target-fingerprint]} (:site-proof issued)
+        anchor-evidence (anchor! ctx storage authorize! policy (:anchor issued))
+        graph (source/capture-nodes storage ids authorize!)
+        expected (server-site/fingerprint graph ids anchor-evidence target-fingerprint)]
+    (when-not (= evidence expected) (reject! :server-binding-changed))
+    (doseq [id (vals (:entries issued))]
+      (let [row (some #(when (= id (:id %)) %) (:fns graph))]
+        (when-not row (reject! :server-root-missing))
+        (authorize! row {:execute? true})))
+    (let [[owner slot] (:site issued)
+          index (lookups/build-lookups graph)
+          binding (filterv #(= slot (:slot-id %)) (bindings/collect-bindings owner index))
+          target (:target issued)]
+      (when-not (and (= 1 (count binding)) (= :ref (:kind (first binding)))
+                     (= target (:ref-id (first binding))))
+        (reject! :server-binding-changed))
+      (let [target-source (server-source/capture ctx storage authorize! policy target)]
+        (when-not (and (= target-fingerprint (:fingerprint target-source))
+                       (= (:contract issued) (select-keys target-source [:input-type :output-type])))
+          (reject! :server-binding-changed))
+        {:snapshot {:graph (update graph :fns conj
+                                   (some #(when (= target (:id %)) %) (:fns (:graph target-source))))}
+         :targets {target target-source} :calls {(:site issued) target} :evidence evidence}))))
+
+
 (defn- current-call!
   [ctx storage authorize! policy issued]
-  (let [captured (capture-client ctx storage authorize! policy (:entries issued) (:anchor issued))]
-    (when-not (and (= (:evidence issued) (:evidence captured))
+  (let [captured (if (:site-proof issued)
+                   (capture-site ctx storage authorize! policy issued)
+                   (capture-client ctx storage authorize! policy (:entries issued) (:anchor issued)))
+        evidence (or (get-in issued [:site-proof :evidence]) (:evidence issued))]
+    (when-not (and (= evidence (:evidence captured))
                    (= (:target issued) (get-in captured [:calls (:site issued)])))
       (reject! :server-binding-changed))
     (let [row (some #(when (= (:target issued) (:id %)) %) (get-in captured [:snapshot :graph :fns]))]
@@ -306,7 +432,22 @@
     result))
 
 
-(defn invoke-current
+(defn- refusal-log-reason
+  "Return only fixed, non-sensitive categories; never log arbitrary exception data."
+  [error]
+  (let [{:keys [type reason]} (ex-data error)]
+    (case type
+      :authz/forbidden :forbidden
+      :browser-plan/unsupported
+      (case reason
+        :server-timeout :server-timeout
+        :server-capacity :server-capacity
+        :server-epoch-changed :server-epoch-changed
+        :unavailable)
+      :unavailable)))
+
+
+(defn- invoke-current-value
   "Request accepts only opaque descriptor plus tagged data. No client target,
    capture, binding, principal or branch can be supplied as authority."
   [ctx request input]
@@ -318,9 +459,20 @@
     (let [issued (get @issuances (get-in input [:descriptor :token]))]
       (when-not (and issued (> (:expires issued) (System/currentTimeMillis)))
         (reject! :server-descriptor-expired))
-      (recheck/call-with-ctx-slices ctx #(execute-current ctx request issued (:input input))))
+      (let [memo (atom nil)]
+        (binding [*client-fingerprint-memo* memo]
+          (try
+            (recheck/call-with-ctx-slices ctx #(execute-current ctx request issued (:input input)))
+            (finally (reset! memo ::closed))))))
     (catch Exception error
       (log/warn "Read-only server call refused"
                 {:type :browser-server/refused
-                 :reason (if (= :authz/forbidden (:type (ex-data error))) :forbidden :unavailable)})
+                 :reason (refusal-log-reason error)})
       (components/failure-facts error))))
+
+
+(defn invoke-current
+  "Invoke an opaque current descriptor. Optional source recipes publish only
+   after execution AND the fresh caller-side postcheck have succeeded."
+  [ctx request input]
+  (replay/call-with-operation ctx #(invoke-current-value ctx request input)))

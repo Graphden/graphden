@@ -8,6 +8,7 @@
   :username #or [#env DB_USERNAME "graphden"]
   :password #or [#env DB_PASSWORD "graphden"]
   :pool-size #long #or [#env DB_POOL_SIZE "10"]
+  :source-revision? #or [#env GRAPHDEN_SOURCE_REVISION "false"]
   :schema #ig/ref :db/schema}
 
  ;; Tenancy storage seam (docs/TENANCY_SEAM.md § Storage & schema
@@ -91,7 +92,11 @@
  {:token #or [#env AUTH_TOKEN ""]}
 
  :exec/context
- {:storage #ig/ref :db/versioned
+ {;; Pure checker artifacts only; raw source replay remains disabled.
+  ;; Restart after changing this flag. Development hot reload leaves it off.
+  :checker-cache? #or [#env GRAPHDEN_CHECKER_CACHE "true"]
+  :source-manifest? #or [#env GRAPHDEN_SOURCE_MANIFEST "false"]
+  :storage #ig/ref :db/versioned
   :vault-client #ig/ref :vault/client
   ;; NOTIFY listener — event-driven SSE (`:sse-stream`'s
   ;; :wake-on-writes) registers per-stream callbacks on it.

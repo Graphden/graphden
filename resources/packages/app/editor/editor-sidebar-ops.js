@@ -170,8 +170,12 @@ function buildPackagesGovernanceSection() {
 // middle of building the namespace tree — two surfaces, one function.
 // The four hosts are static page-shell nodes (app/editor/fns.edn), so they
 // are always present once the editor has booted.
-function mountOpsSections(searchMode) {
-  if (searchMode) return;
+function mountOpsSections() {
+  // HTMX load triggers fire even inside hidden surfaces. Keep their shells
+  // unmounted until a management surface is actually opened.
+  const operate = document.getElementById('gd-operate');
+  const platform = document.getElementById('gd-platform');
+  if ((!operate || operate.hidden) && (!platform || platform.hidden)) return;
   const opsHost = document.getElementById('gd-operate-panels');
   const opsNavHost = document.getElementById('gd-operate-nav');
   const platHost = document.getElementById('gd-platform-panels');

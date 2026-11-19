@@ -10,6 +10,34 @@
 (def statuses #{:pending :running :passed :failed})
 
 
+(defn valid-external-proof?
+  "Validate the shape and candidate identity of a reverified hosted receipt.
+   This is not a substitute for the release controller's live verification."
+  [proof sha]
+  (and (= 1 (:schema proof)) (= sha (:sha proof))
+       (= :green (:status proof)) (= :hosted-integration (:source proof))
+       (= {:suite :integration :scope :full} (:coverage proof))
+       (= (str "refs/heads/release-proof/" sha) (:ref proof))
+       (pos-int? (:run-id proof))
+       (re-matches #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                   (or (:request-id proof) ""))
+       (zero? (get proof :exit -1))
+       (number? (:duration-ms proof)) (<= 0 (:duration-ms proof))))
+
+
+(defn stage-proof-source
+  "Missing or contradictory provenance cannot silently become a local pass."
+  [receipt id]
+  (let [source (get-in receipt [:sources id])
+        proof (get-in receipt [:proof id])]
+    (cond
+      (and (= :passed (get-in receipt [:status id]))
+           (= :hosted-integration source)
+           (valid-external-proof? proof (:sha receipt))) :hosted-integration
+      (and (= :passed (get-in receipt [:status id])) (= :local source) (nil? proof)) :local
+      :else :unknown)))
+
+
 (defn valid-receipt?
   [receipt kind]
   (let [{:keys [schema roster status sha]} receipt]
@@ -42,7 +70,12 @@
 (defn credited
   [prior sha roster]
   (if (exact-credit? prior sha roster)
-    (set (for [id roster :when (= :passed (get-in prior [:status id]))] id))
+    (set (for [id roster
+               :when (and (= :passed (get-in prior [:status id]))
+                          (or (not= "stages" (:kind prior))
+                              (not (#{"priority" "integration"} id))
+                              (not= :unknown (stage-proof-source prior id))))]
+           id))
     #{}))
 
 
@@ -144,6 +177,7 @@
                       candidates)))
          state (atom {:schema 1 :kind kind :sha sha :roster ordered
                       :status (zipmap ordered (map #(if (contains? passed %) :passed :pending) ordered))
+                      :sources (select-keys (:sources prior) passed)
                       :proof (select-keys (:proof prior) passed)})]
      (when-not (valid-receipt? @state kind)
        (throw (ex-info "Invalid current progress receipt" {:kind kind})))
@@ -156,8 +190,26 @@
   (locking state
     (when-not (and (contains? (:status @state) id) (statuses status))
       (throw (ex-info "Unknown progress check/status" {:id id :status status})))
-    (swap! state assoc-in [:status id] status)
+    (swap! state (fn [receipt]
+                   (cond-> (-> receipt (assoc-in [:status id] status) (update :proof dissoc id))
+                     (= :passed status) (assoc-in [:sources id] :local)
+                     (not= :passed status) (update :sources dissoc id))))
     (report/write-atomic! path @state)))
+
+
+(defn mark-hosted-passed!
+  "Publish stage success and its exact hosted proof in one atomic write."
+  [{:keys [path state]} id proof]
+  (locking state
+    (when-not (and (= "stages" (:kind @state)) (#{"priority" "integration"} id)
+                   (contains? (:status @state) id)
+                   (valid-external-proof? proof (:sha @state)))
+      (throw (ex-info "Cannot credit stage without exact hosted proof" {:id id})))
+    (let [receipt (-> @state (assoc-in [:status id] :passed)
+                      (assoc-in [:sources id] :hosted-integration)
+                      (assoc-in [:proof id] proof))]
+      (report/write-atomic! path receipt)
+      (reset! state receipt))))
 
 
 (defn mark-proof!
@@ -203,6 +255,12 @@
                          (or (seq output-prefix)
                              (zero? (:exit (p/shell {:out :string :err :string :continue true}
                                                     "git" "merge-base" "--is-ancestor" (:sha prior) sha)))))
-                prior)]
-    (begin! path kind sha roster prior
-            (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT")))))
+                prior)
+        ;; Several browser phases share this gate-owned full-roster journal.
+        ;; Carry only final passes; inherited hints and provisional files are
+        ;; not current work, and standalone retries retain their old policy.
+        current (when (and (= kind "browser") (seq output-prefix))
+                  (read-hint path kind))
+        current (when (exact-credit? current sha roster) current)]
+    (begin! path kind sha roster (or current prior)
+            (or (some? current) (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT"))))))

@@ -87,17 +87,24 @@
     :else (= expected actual)))
 
 
+(defn matches-owner?
+  "Validate the normative owner fields before following its declared type edges.
+   Slot declarations and absence of own bindings require matches? separately."
+  [{expected :fn} row]
+  (let [fields [:id :name :parent-ids :base-fn-id :element-fn-id
+                :return-type-fn-id :anonymous-hash :constraint]]
+    (same-shape? (select-keys expected fields) (select-keys row fields))))
+
+
 (defn matches?
   "Compare only structural source, never mutable descriptions or version
    timestamps. No own binding/literal or predicate implementation is allowed.
    Type variables tolerate the storage codec's symbol spelling conversion."
-  [{expected :fn expected-slots :slots expected-junctions :fn-slots} row slots junctions bindings]
-  (let [fields [:id :name :parent-ids :base-fn-id :element-fn-id
-                :return-type-fn-id :anonymous-hash :constraint]
-        slot-fields [:id :name :type-fn-id :required]
+  [{expected-slots :slots expected-junctions :fn-slots :as type-contract} row slots junctions bindings]
+  (let [slot-fields [:id :name :type-fn-id :required]
         junction-fields [:id :fn-id :slot-id :position]]
     (and (empty? bindings)
-         (same-shape? (select-keys expected fields) (select-keys row fields))
+         (matches-owner? type-contract row)
          (= (set (map #(select-keys % slot-fields) expected-slots))
             (set (map #(select-keys % slot-fields) slots)))
          (= (set (map #(select-keys % junction-fields) expected-junctions))

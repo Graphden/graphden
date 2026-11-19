@@ -36,10 +36,12 @@
     [graphden.http-host.lease :as http-lease]
     [graphden.input.access :as input-access]
     [graphden.storage.graph-writer :as writer]
+    [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
+    [graphden.storage.source-projection :as projection]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy-context]
     [graphden.types.diagnostics :as diag]
@@ -48,6 +50,7 @@
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.purge :as purge]
     [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.source-projection :as source-projection]
     [graphden.versioning.storage.stamp :as stamp]
     [graphden.versioning.storage.uniqueness :as uniq])
   (:import
@@ -957,6 +960,15 @@
     (sp/query-latest-per-group base-storage entity-name where group-cols))
 
 
+  sp/StorageSourceProjection
+
+  (read-source-projection
+    [this {:keys [op scope]}]
+    (if (= op :source-edges)
+      (source-projection/collect-edges this base-storage branch-id scope)
+      (projection/unavailable!)))
+
+
   sp/StorageBoundedQuery
 
   (query-identity-candidates
@@ -971,6 +983,16 @@
   (query-bounded-entities
     [_ entity-name where max-candidates]
     (res/resolve-bounded-entities base-storage entity-name branch-id where max-candidates))
+
+
+  sp/StorageGroupedRead
+
+  (read-operations
+    [this requests]
+    (if (every? res/grouped-query? requests)
+      (res/resolve-query-group base-storage branch-id requests)
+      ;; Unsupported shapes keep this wrapper's semantics and call order.
+      (mapv #(grouped/scalar-operation this %) requests)))
 
 
   sp/StorageBatchCRUD

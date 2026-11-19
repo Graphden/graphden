@@ -3,8 +3,8 @@
    primitive boot-data. Leaf namespace — depends on nothing else under
    `graphden.packages.records`."
   (:require
-    [clojure.string :as str]
-    [graphden.tenancy.context :as tc])
+    [graphden.tenancy.context :as tc]
+    [graphden.util.hex :as hex])
   (:import
     (java.nio.charset
       StandardCharsets)
@@ -129,7 +129,7 @@
   (let [digest (MessageDigest/getInstance algo)
         utf-bytes (String/.getBytes ^String s StandardCharsets/UTF_8)
         hash-bytes (MessageDigest/.digest digest utf-bytes)]
-    (str/join (map #(format "%02x" (bit-and ^byte % 0xff)) hash-bytes))))
+    (hex/encode hash-bytes)))
 
 
 (defn shape-hash

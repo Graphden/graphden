@@ -456,7 +456,9 @@ function repaintExplorer() {
 /**
  * Initialize the graph editor
  */
-async function initGraph({progressive = false} = {}) {
+async function initGraph({progressive = false, preserveSelection = false} = {}) {
+  const selectionId = preserveSelection && typeof selectedFnId !== 'undefined' ? selectedFnId : null;
+  const selectionHash = window.location.hash;
   const endRefresh = beginGraphRefresh();
   let current = () => true;
   let boot = null;
@@ -512,6 +514,15 @@ async function initGraph({progressive = false} = {}) {
     const navigateHash = () => {
       const hash = window.location.hash.slice(1);
       if (typeof gdRouteSurfaceHash === 'function' && gdRouteSurfaceHash(decodeURIComponent(hash))) return Promise.resolve();
+      if (selectionId && selectedFnId === selectionId && window.location.hash === selectionHash) {
+        // Rename invalidates a name bookmark. Resolve the selected identity
+        // against this fresh branch, without taking back newer navigation.
+        return selectFnByName('fn:' + selectionId, false).then(() => {
+          if (!current() || selectedFnId !== selectionId || window.location.hash !== selectionHash) return;
+          const fn = lookups?.fnMap?.get(selectionId);
+          if (fn) window.history.replaceState(null, '', '#' + getQualifiedFnName(fn));
+        });
+      }
       if (hash) return selectFnByName(decodeURIComponent(hash), false);
       // Reset cancelled any clearing render started by a selected-fn delete.
       // Replace it even without a hash; null selection needs no layout request.
@@ -684,8 +695,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Landing demo entry (?demo=1) — may store a fresh bearer and reload;
   // in that case skip the rest of the boot (the reload re-runs it authed).
   if (typeof maybeStartLandingDemo === 'function' && (await maybeStartLandingDemo())) return;
-  initPrefsLate();
   initAuthLock();
+  initPrefsLate();
   if (typeof initBranchSelector === 'function') initBranchSelector();
   if (typeof initOrgSwitcher === 'function') initOrgSwitcher();
   // Management deep links do not need the graph. Route them before the

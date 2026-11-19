@@ -102,10 +102,11 @@
   (let [jt (ddl/junction-table-name entity-name field-name)]
     (util/with-sql-error-handling "Database error" :read-junction-owners
                                   {:entity-name entity-name :field-name field-name :target-id target-id}
-                                  (let [rows (util/exec! ds
-                                                         (sql/format {:select-distinct [:owner_id]
-                                                                      :from [(keyword jt)]
-                                                                      :where [:= :target_id target-id]}))]
+                                  (let [rows (util/exec-read! ds
+                                                              {:select-distinct [:owner_id]
+                                                               :from [(keyword jt)]
+                                                               :where [:= :target_id target-id]}
+                                                              {:quoted true})]
                                     (mapv :owner_id rows)))))
 
 
@@ -120,14 +121,14 @@
                                     {:entity-name entity-name :field-name field-name}
                                     (reduce
                                       (fn [acc chunk]
-                                        (let [query (sql/format {:select [:owner_id :target_id]
-                                                                 :from [(keyword jt)]
-                                                                 :where [:in :owner_id (vec chunk)]
-                                                                 :order-by [:owner_id :ord]})]
+                                        (let [query {:select [:owner_id :target_id]
+                                                     :from [(keyword jt)]
+                                                     :where [:in :owner_id (vec chunk)]
+                                                     :order-by [:owner_id :ord]}]
                                           (reduce (fn [rows row]
                                                     (update rows (:owner_id row) (fnil conj []) (:target_id row)))
                                                   acc
-                                                  (util/exec! ds query))))
+                                                  (util/exec-read! ds query {:quoted true}))))
                                       {}
                                       (partition-all util/*max-statement-params* (distinct owner-ids)))))))
 

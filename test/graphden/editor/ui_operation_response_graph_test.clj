@@ -1,5 +1,6 @@
 (ns ^:integration ^:serial graphden.editor.ui-operation-response-graph-test
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-creation :as creation]
@@ -63,6 +64,30 @@
       (is (not (str/includes? (pr-str out) "PRIVATE")))
       (when (= endpoint :root)
         (is (= "Editor root is unavailable." (:reason out)))))))
+
+
+(deftest component-batch-reuses-the-individual-response-policy
+  (let [success {:ok true :plan {:checked "fixture"}}
+        missing (failure {:type :browser-plan/unsupported :reason :component-missing})
+        quota (failure {:type :quota/entity-limit})
+        results [success missing quota]
+        out (response :component
+                      {:ok false :batch-complete? true
+                       :items (mapv (fn [component result] {:component component :result result})
+                                    ["canvas" "canvas-values" "explorer"] results)})]
+    (is (true? (:ok out)))
+    (is (= ["canvas" "canvas-values" "explorer"] (mapv :component (:items out))))
+    (is (= [200 422 429] (mapv #(get-in % [:result :status]) (:items out))))
+    (doseq [[native item] (map vector results (:items out))]
+      (is (= (dissoc (response :component native) :http-status)
+             (json/parse-string (get-in item [:result :body]) true))))
+    ;; Internal Ring headers can have keyword keys. The batch serializes them
+    ;; before the browser reconstructs each independent Response.
+    (is (= "1" (get-in (json/parse-string (json/generate-string out))
+                       ["items" 2 "result" "headers" "Retry-After"]))))
+  (let [out (response :component (failure {:type :authz/forbidden}))]
+    (is (= 403 (:http-status out)))
+    (is (not (contains? out :items)))))
 
 
 (deftest server-stale-proof-and-forbidden-status-test

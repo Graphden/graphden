@@ -144,13 +144,13 @@ Invalidates affected caches after a stored change and emits a PostgreSQL notific
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-fn
 :FILE: src/graphden/crud/fn_execution/lookup.clj
-:LINE: 110
+:LINE: 111
 :MINS: 1.2
 :END:
 
 Resolves the function ID or name from an execution request into the stored function row. This lookup begins request execution and result persistence.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution/lookup.clj::(defn resolve-fn][src/graphden/crud/fn_execution/lookup.clj:110]]
+- source :: [[file:../../../src/graphden/crud/fn_execution/lookup.clj::(defn resolve-fn][src/graphden/crud/fn_execution/lookup.clj:111]]
 
 * 12. public-free-entries
 :PROPERTIES:

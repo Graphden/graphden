@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.type-check :as type-check]
+    [graphden.crud.types-api :as types-api]
     [graphden.editor.component-config :as config]
     [graphden.editor.config-activation :as activation]
     [graphden.editor.config-preparation :as preparation]
@@ -12,6 +13,7 @@
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.config-templates :as templates]
     [graphden.editor.config-undo :as undo]
+    [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.composition.core :as composition]
@@ -22,6 +24,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.crud :as pg-crud]
+    [graphden.storage.postgres.util :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.tenancy.context :as tenancy]
@@ -31,7 +34,8 @@
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
-    [graphden.versioning.storage.core :as versioned]))
+    [graphden.versioning.storage.core :as versioned]
+    [next.jdbc :as jdbc]))
 
 
 (def ^:private default-component-roles
@@ -803,3 +807,104 @@
           (is (= (str (:id prepared)) (get-in personal [:body :selection-id])))
           (is (= (get-in default [:body :plan]) (get-in personal [:body :plan])))
           (is (string? (get-in personal [:body :configuration-revision]))))))))
+
+
+(deftest stale-context-hint-cannot-select-an-obsolete-personal-configuration
+  (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
+        path (str "hint-profile-" (random-uuid))
+        home (sp/create-entity storage :ns {:name path})
+        old (sp/create-entity storage :fn {:id (random-uuid) :namespace-id (:id home)
+                                           :name "editor" :parent-ids [resolution/defaults-id]})
+        hint (types-api/load-graph-entities-uncached storage)]
+    (sp/update-entity storage :fn (:id old) {:name "obsolete-editor"})
+    (let [current (sp/create-entity storage :fn {:id (random-uuid) :namespace-id (:id home)
+                                                 :name "editor" :parent-ids [resolution/defaults-id]})]
+      (check/check-fn-def! (type-check/reconstruct-fn-def storage (:id current)))
+      (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+        (tenancy/install-personal-namespace-fn!
+          (constantly {:namespace-path path :source :fixture :isolated? false}))
+        (let [policy (snapshot/capture-context-policy ctx)
+              capture (fn [context guard]
+                        (source/with-snapshot storage
+                                              (fn [fixed authorize!]
+                                                (resolution/capture-for-context context fixed (or guard authorize!) policy))))
+              ordinary (capture (assoc ctx :graph-cache (atom nil)) nil)
+              queries (atom [])
+              observe (fn [execute]
+                        (fn [connection query opts]
+                          (swap! queries conj query)
+                          (execute connection query opts)))
+              hinted (binding [pg/*jdbc-override* {:execute! (observe jdbc/execute!)
+                                                   :execute-one! (observe jdbc/execute-one!)}]
+                       (capture (assoc ctx :graph-cache (atom hint)) nil))
+              obsolete-payload? (fn [query]
+                                  (and (re-find #"(?:FROM|JOIN) (?:public\.)?\"(?:binding|fn_slot)(?:_version)?\"" (first query))
+                                       (some #{(:id old)} (rest query))))]
+          (is (= (:id current) (:id ordinary) (:id hinted)))
+          (is (= (select-keys ordinary [:id :configuration :revision])
+                 (select-keys hinted [:id :configuration :revision])))
+          (is (not-any? obsolete-payload? @queries)
+              "Old hint-owned bindings and slots are not loaded")
+          (is (= :authz/forbidden
+                 (try
+                   (capture (assoc ctx :graph-cache (atom hint))
+                            (fn [row & _]
+                              (when (= (:id current) (:id row))
+                                (throw (ex-info "Selected configuration denied" {:type :authz/forbidden})))))
+                   nil
+                   (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))))
+
+
+(deftest read-only-preview-matches-the-writer-proposal-and-apply-rejects-a-later-root
+  (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
+        path (str "snapshot-preview-" (random-uuid))
+        home (sp/create-entity storage :ns {:name path})
+        ;; Other cases invalidate the shared context cache. Give this count
+        ;; scenario its own complete advisory graph, independent of test order.
+        ctx (assoc ctx :graph-cache (atom (types-api/load-graph-entities-uncached storage)))]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path path :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [before (current-configuration storage)
+            input {:operation "personalize"
+                   :command {:component "fn-picker" :expected-preference {:present false :value nil}
+                             :expected-configuration-revision (:revision before)}}
+            nonce (random-uuid)
+            legacy-reads (atom 0)
+            count-read (fn [execute]
+                         (fn [connection query opts]
+                           (swap! legacy-reads inc)
+                           (execute connection query opts)))
+            legacy (with-redefs [activation/call-with-preview-snapshot activation/call-with-current-configuration
+                                 random-uuid (constantly nonce)]
+                     (binding [pg/*jdbc-override* {:execute! (count-read jdbc/execute!)
+                                                   :execute-one! (count-read jdbc/execute-one!)}]
+                       (activation/preview! (assoc ctx :graph-cache (atom nil)) input)))
+            read-only? (atom [])
+            observe (fn [execute]
+                      (fn [connection query opts]
+                        (swap! read-only? conj (java.sql.Connection/.isReadOnly connection))
+                        (execute connection query opts)))
+            preview (with-redefs [random-uuid (constantly nonce)
+                                  writer/call-with-write
+                                  (fn [& _] (throw (IllegalStateException. "Preview acquired a graph writer")))
+                                  preferences/call-with-lock
+                                  (fn [& _] (throw (IllegalStateException. "Preview acquired a preference lock")))]
+                      (binding [pg/*jdbc-override* {:execute! (observe jdbc/execute!)
+                                                    :execute-one! (observe jdbc/execute-one!)}]
+                        (activation/preview! ctx input)))]
+        (is (seq (:fns (context/cached-graph ctx))) "The reader exercises an existing advisory graph")
+        (is (= legacy preview) "Fresh hinted source preserves the complete unhinted writer proposal")
+        (is (< (count @read-only?) (* 0.75 @legacy-reads))
+            "Batching the root dependency IDs removes at least one quarter of the original SQL reads")
+        (is (seq @read-only?) "The proof observes actual PostgreSQL reads")
+        (is (every? true? @read-only?) "Every observed storage read uses the decorated read-only transaction")
+        (is (empty? (sp/query-entities storage :fn {:namespace-id (:id home)})))
+        ;; Another request creates the ordinary personal root after preview.
+        (preparation/prepare! ctx {:create true})
+        (epoch/seed-watermark! storage)
+        (let [refusal (try (activation/apply-proposal! ctx (:request preview)) nil
+                           (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))]
+          (is (= :stale-configuration refusal)))
+        (is (= 1 (count (sp/query-entities storage :fn {:namespace-id (:id home)}))))))))

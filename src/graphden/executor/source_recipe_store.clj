@@ -1,0 +1,310 @@
+(ns graphden.executor.source-recipe-store
+  "Bounded ownership of source replay recipes, not source authorization.
+   Callers supply conservative charges for all retained data and reserve before
+   capture. No production defaults or global instance are installed here.")
+
+
+(defn create-store
+  "Create an isolated store with explicit positive limits. clock-ms must be
+   monotonic; family deadlines use that clock's domain. closed? must be cheap,
+   nonblocking and must not borrow a connection. Payloads must be immutable."
+  [{:keys [max-bytes max-entries max-pending max-families max-leases max-ttl-ms clock-ms closed?] :as options}]
+  (when-not (and (every? #(and (integer? %) (pos? %))
+                         [max-bytes max-entries max-pending max-families max-leases max-ttl-ms])
+                 (ifn? clock-ms) (ifn? closed?))
+    (throw (ex-info "Source recipe store requires explicit limits and callbacks" {})))
+  {:options options
+   :state (atom {:families {} :pending {} :entries {} :leases {} :tick 0})})
+
+
+(defn- closed-handle?
+  [store physical]
+  (try (boolean ((get-in store [:options :closed?]) physical))
+       (catch Exception _ true)))
+
+
+(defn- retire-entry
+  [state id]
+  (if (some #(= id %) (vals (:leases state)))
+    (assoc-in state [:entries id :retired?] true)
+    (update state :entries dissoc id)))
+
+
+(defn- sweep
+  [store state now]
+  (let [state (update state :families
+                      #(into {} (filter (fn [[_ family]] (< now (:expires-at family)))) %))
+        unavailable? (fn [{:keys [family physical generation]}]
+                       (or (not (identical? generation (get-in state [:families family :generation])))
+                           (closed-handle? store physical)))
+        state (update state :pending
+                      #(into {} (map (fn [[id reservation]]
+                                       [id (cond-> reservation
+                                             (unavailable? reservation) (assoc :revoked? true))])) %))]
+    (reduce (fn [s [id entry]]
+              (if (or (:retired? entry) (unavailable? entry))
+                (retire-entry s id)
+                s)) state (:entries state))))
+
+
+(defn- change!
+  [store f]
+  (let [state (:state store)]
+    (locking state
+      (let [now ((get-in store [:options :clock-ms]))
+            [next-state result] (f (sweep store @state now) now)]
+        (reset! state next-state)
+        result))))
+
+
+(defn- occupied-bytes
+  [state]
+  (+' (reduce +' 0 (map :charge (vals (:entries state))))
+      (reduce +' 0 (map :reserved (vals (:pending state))))))
+
+
+(defn- same-location?
+  [family physical entry]
+  (and (= family (:family entry)) (identical? physical (:physical entry))))
+
+
+(defn- matching-entry
+  [state family physical]
+  (first (filter (fn [[_ entry]]
+                   (and (not (:retired? entry)) (same-location? family physical entry)))
+                 (:entries state))))
+
+
+(defn- bytes-fit?
+  [store state charge]
+  (<= (+' (occupied-bytes state) charge) (get-in store [:options :max-bytes])))
+
+
+(defn- room?
+  [store state charge]
+  (and (bytes-fit? store state charge)
+       (< (+ (count (:entries state)) (count (remove :read? (vals (:pending state)))))
+          (get-in store [:options :max-entries]))))
+
+
+(defn- make-room
+  [store state charge]
+  (let [leased (set (vals (:leases state)))
+        victims (sort-by (comp :used val)
+                         (remove #(contains? leased (key %)) (:entries state)))]
+    (loop [state state victims victims]
+      (if (or (room? store state charge) (empty? victims))
+        state
+        (recur (update state :entries dissoc (ffirst victims)) (rest victims))))))
+
+
+(defn- reclaim-unused-family
+  [state]
+  ;; Metadata can outlive its payload after ordinary entry eviction. Protect
+  ;; every retained/leased entry and pending ticket, including retired ones.
+  ;; Removing only an empty registration cannot invalidate an owned artifact.
+  (let [owned (into #{} (map :family)
+                    (concat (vals (:entries state)) (vals (:pending state))))
+        unused (remove #(contains? owned (key %)) (:families state))
+        victim (first (sort-by (comp :expires-at val) unused))]
+    (if victim (update state :families dissoc (key victim)) state)))
+
+
+(defn create-family!
+  "Register a consumer-owned opaque family ID. Sharing policy is the caller's
+   responsibility. A live registration never extends its fixed expiry. At the
+   metadata limit, reclaim one registration with no entry or pending ticket.
+   Reusing an expired/evicted ID creates a new generation; old tickets cannot
+   publish. A register/reserve race may miss and use ordinary execution."
+  [store family expires-at]
+  (change! store
+           (fn [state now]
+             (cond
+               (contains? (:families state) family) [state family]
+               (and (some? family) (integer? expires-at) (< now expires-at)
+                    (<= expires-at (+' now (get-in store [:options :max-ttl-ms]))))
+               (let [limit (get-in store [:options :max-families])
+                     planned (if (< (count (:families state)) limit)
+                               state (reclaim-unused-family state))]
+                 (if (< (count (:families planned)) limit)
+                   [(assoc-in planned [:families family]
+                              {:expires-at expires-at :generation (Object.)}) family]
+                   [state nil]))
+               :else [state nil]))))
+
+
+(defn reserve!
+  "Reserve aggregate bytes and an entry slot BEFORE allocating a capture.
+   At most one pending capture per family/physical identity. A revoked capture
+   stays charged until publish!/abort!: expiry cannot free a running builder's
+   memory. A denied reservation means ordinary execution without recording."
+  [store family physical max-charge]
+  (change! store
+           (fn [state _]
+             (if (and (contains? (:families state) family) (some? physical)
+                      (not (closed-handle? store physical))
+                      (integer? max-charge) (pos? max-charge)
+                      (<= max-charge (get-in store [:options :max-bytes]))
+                      (< (count (:pending state)) (get-in store [:options :max-pending]))
+                      (not-any? #(same-location? family physical %) (vals (:pending state))))
+               (let [planned (make-room store state max-charge)]
+                 (if (room? store planned max-charge)
+                   (let [ticket (Object.)]
+                     [(assoc-in planned [:pending ticket]
+                                {:family family :physical physical :reserved max-charge
+                                 :generation (get-in state [:families family :generation])}) ticket])
+                   [state nil]))
+               [state nil]))))
+
+
+(defn reserve-read!
+  "Reserve bounded reader scratch against an existing live lease. Readers may
+   share a physical entry; they never evict recipes or publish a replacement.
+   The caller must bound preparation AND restored state before using this API.
+   Keep the reservation until that state's consumer has actually unwound."
+  [store lease max-charge]
+  (change! store
+           (fn [state _]
+             (let [entry (get-in state [:entries (get-in state [:leases lease])])]
+               (if (and entry (not (:retired? entry))
+                        (integer? max-charge) (pos? max-charge)
+                        (< (count (:pending state)) (get-in store [:options :max-pending]))
+                        (bytes-fit? store state max-charge))
+                 (let [ticket (Object.)]
+                   [(assoc-in state [:pending ticket]
+                              (assoc (select-keys entry [:family :physical :generation])
+                                     :reserved max-charge :read? true)) ticket])
+                 [state nil])))))
+
+
+(defn abort!
+  "Release a capture reservation after its builder has unwound. Idempotent."
+  [store ticket]
+  (change! store (fn [state _]
+                   [(update state :pending dissoc ticket) (contains? (:pending state) ticket)])))
+
+
+(defn revoke!
+  "Forbid publication without freeing a running builder's reservation.
+   Request cancellation must not evict a shared family. abort! belongs in the
+   builder's actual finally/on-done, not the timed-out caller's finally."
+  [store ticket]
+  (change! store (fn [state _]
+                   (if (contains? (:pending state) ticket)
+                     [(assoc-in state [:pending ticket :revoked?] true) true]
+                     [state false]))))
+
+
+(defn publish!
+  "Call ONLY after the complete export/invocation, including postcheck, succeeds.
+   Transfers a reservation to retained payload ownership. Charge must include
+   every retained structure and fit its reservation. Rejection keeps the charge
+   until the builder calls abort! in finally after discarding its payload. A stale
+   ticket cannot replace a newer entry or recreate an evicted/expired family."
+  [store ticket payload actual-charge]
+  (change! store
+           (fn [state _]
+             (let [{:keys [family physical generation reserved revoked? read?] :as reservation}
+                   (get-in state [:pending ticket])]
+               (if (and reservation (not revoked?) (not read?)
+                        (integer? actual-charge) (pos? actual-charge) (<= actual-charge reserved))
+                 (let [state (update state :pending dissoc ticket)
+                       old-id (first (matching-entry state family physical))
+                       state (cond-> state old-id (retire-entry old-id))
+                       tick (inc (:tick state))]
+                   [(-> state (assoc :tick tick)
+                        (assoc-in [:entries (Object.)]
+                                  {:family family :physical physical :generation generation :payload payload
+                                   :charge actual-charge :used tick})) true])
+                 [state false])))))
+
+
+(defn- acquire-matching!
+  [store match-entry]
+  (change! store
+           (fn [state _]
+             (if-let [[id _] (when (< (count (:leases state)) (get-in store [:options :max-leases]))
+                               (match-entry state))]
+               (let [lease (Object.) tick (inc (:tick state))]
+                 [(-> state (assoc :tick tick)
+                      (assoc-in [:entries id :used] tick)
+                      (assoc-in [:leases lease] id)) lease])
+               [state nil]))))
+
+
+(defn acquire!
+  "Lease a matching live recipe. Leases are opaque and carry no payload;
+   release! in finally after certificate validation/replay, including failures."
+  [store family physical]
+  (acquire-matching! store #(matching-entry % family physical)))
+
+
+(defn acquire-family!
+  "Lease the most recently used live entry within EXACTLY this family.
+   This lookup does not prove compatibility with another physical handle.
+   The consumer must establish its own fresh session/certificate/authorization
+   proof before returning any payload; release! in finally on every outcome.
+   The scan is bounded by the store's existing max-entries limit."
+  [store family]
+  (acquire-matching!
+    store
+    (fn [state]
+      (reduce (fn [chosen [id entry]]
+                (if (and (not (:retired? entry)) (= family (:family entry))
+                         (or (nil? chosen) (> (:used entry) (:used (second chosen)))))
+                  [id entry]
+                  chosen)) nil (:entries state)))))
+
+
+(defn lease-value
+  "Return the payload while this lease is held, even if its entry was evicted.
+   A released token cannot retain or retrieve a payload."
+  [store lease]
+  (change! store (fn [state _]
+                   [state (get-in state [:entries (get-in state [:leases lease]) :payload])])))
+
+
+(defn retire-lease!
+  "Prevent NEW acquisitions of exactly this failed entry. Existing leases
+   retain both their immutable payload and charge until actual release; other
+   entries and the family's generation are unaffected."
+  [store lease]
+  (change! store
+           (fn [state _]
+             (if-let [id (get-in state [:leases lease])]
+               [(retire-entry state id) true]
+               [state false]))))
+
+
+(defn release!
+  "Release once; a retired entry's charge remains until its LAST lease exits."
+  [store lease]
+  (change! store
+           (fn [state _]
+             (if-let [id (get-in state [:leases lease])]
+               (let [state (update state :leases dissoc lease)]
+                 [(if (get-in state [:entries id :retired?]) (retire-entry state id) state) true])
+               [state false]))))
+
+
+(defn evict-family!
+  "Invalidate the family's generation. Pending builders remain charged and
+   cannot publish; leased payloads remain charged until their owners release."
+  [store family]
+  (change! store
+           (fn [state now]
+             [(sweep store (update state :families dissoc family) now)
+              (contains? (:families state) family)])))
+
+
+(defn stats
+  "Bounded accounting only: no source payloads, handles or authority material."
+  [store]
+  (change! store
+           (fn [state _]
+             [state {:families (count (:families state)) :pending (count (:pending state))
+                     :entries (count (:entries state)) :leases (count (:leases state))
+                     :retired (count (filter :retired? (vals (:entries state))))
+                     :pending-bytes (reduce +' 0 (map :reserved (vals (:pending state))))
+                     :retained-bytes (reduce +' 0 (map :charge (vals (:entries state))))
+                     :charged-bytes (occupied-bytes state)}])))

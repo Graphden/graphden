@@ -1,5 +1,6 @@
 // Stored ordinary graphs drive both new concerns. Keep exact configuration
 // receipts, original native owners, and bounded source-generation evidence.
+const {componentsForRequest, decode: decodeComponentPlanReplies} = require('./component-plan-replies');
 const {chromium} = require('playwright');
 const {assert, newContext, api, nodeApi, BASE, waitForServerHealthy, getEntities, synthArgs} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
@@ -23,12 +24,14 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
   page.on('request', request => {
     if (new URL(request.url()).pathname === '/api/ui/root/plan') rootRequests.set(request, ++rootSequence);
     if (!request.url().endsWith('/ui/configuration/plan')) return;
-    const row = {sequence: requests.length + 1, phase, component: request.postDataJSON()?.component, status: 'pending'};
-    requests.push(row); receipts.set(request, row);
+    const rows = componentsForRequest(request.postDataJSON()).map(component => {
+      const row = {sequence: requests.length + 1, phase, component, status: 'pending'};
+      requests.push(row); return row;
+    });
+    receipts.set(request, rows);
   });
   page.on('requestfailed', request => {
-    const row = receipts.get(request);
-    if (row) { row.status = 'failed'; row.failure = request.failure()?.errorText; }
+    for (const row of receipts.get(request) || []) { row.status = 'failed'; row.failure = request.failure()?.errorText; }
   });
   page.on('response', response => {
     if (new URL(response.url()).pathname === '/api/ui/root/plan') {
@@ -40,12 +43,16 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     }
     if (!response.url().endsWith('/ui/configuration/plan')) return;
     pending.push((async () => {
-      const row = receipts.get(response.request());
-      row.status = response.status(); row.type = response.headers()['content-type'];
+      const rows = receipts.get(response.request());
       const body = await response.json().catch(() => null);
-      plans.push({kind: 'plan', url: response.url(), sequence: row.sequence, component: row.component,
-        status: row.status, ok: body?.ok, fallback: body?.fallback, code: body?.code,
-        selectionId: body?.['selection-id'], retryable: body?.retryable === true});
+      for (const item of decodeComponentPlanReplies(response.request().postDataJSON(), response.status(), body)) {
+        const row = rows.find(row => row.component === item.component);
+        row.status = item.status; row.type = response.headers()['content-type'];
+        plans.push({kind: 'plan', url: response.url(), sequence: row.sequence, component: row.component,
+          transportId: rows[0].sequence, transportStatus: response.status(),
+          status: row.status, ok: item.body?.ok, fallback: item.body?.fallback, code: item.body?.code,
+          selectionId: item.body?.['selection-id'], retryable: item.body?.retryable === true});
+      }
     })());
   });
   async function settle(snapshot) {

@@ -5,6 +5,7 @@
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.browser-source :as source]
     [graphden.executor.compile-runtime :as runtime]
+    [graphden.executor.source-recipe-lifecycle :as recipes]
     [graphden.tenancy.context :as tenancy])
   (:import
     (java.util.concurrent
@@ -31,9 +32,11 @@
    still-unwinding JDBC operation retains both its snapshot and its permit."
   [ctx thunk]
   (let [org (tenancy/current-org)
-        release (persist/acquire-execution-slot! (:storage ctx) org (not= org tenancy/public-org))]
-    (when-not release (reject! :server-capacity))
-    (let [cancelled? (atom false)
+        release-slot (persist/acquire-execution-slot! (:storage ctx) org (not= org tenancy/public-org))]
+    (when-not release-slot (reject! :server-capacity))
+    (let [worker-done (recipes/register-worker!)
+          release (fn [] (try (release-slot) (finally (when worker-done (worker-done)))))
+          cancelled? (atom false)
           deadline (+ (System/nanoTime) (* wall-ms 1000000))
           check! #(when (or @cancelled? (> (System/nanoTime) deadline))
                     (throw (InterruptedException. "Read-only server execution expired")))

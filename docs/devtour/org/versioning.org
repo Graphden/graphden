@@ -7,19 +7,19 @@ Branch-specific reads, conflict detection, and cache refresh.
 
 after: storage
 
-[[file:index.org][index]] · ~105 min
+[[file:index.org][index]] · ~106 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
 :CUSTOM_ID: versioning/wrap-with-versioning
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 1101
+:LINE: 1123
 :MINS: 2.1
 :END:
 
 Wraps ordinary storage with versioning, ensures a ~main~ branch exists, and returns storage bound to that branch. Callers retain the same storage [[file:glossary.org::#term/protocol][protocol]] while reads and writes gain branch-specific behavior.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1101]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn wrap-with-versioning][src/graphden/versioning/storage/core.clj:1123]]
 - same file :: [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 - referenced from :: [[file:crud.org::#crud/resolve-branch-ref][resolve-branch-ref]], [[file:boot.org::#boot/postgres][postgres]]
 
@@ -27,13 +27,13 @@ Wraps ordinary storage with versioning, ensures a ~main~ branch exists, and retu
 :PROPERTIES:
 :CUSTOM_ID: versioning/VersionedStorage
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 769
-:MINS: 16.4
+:LINE: 772
+:MINS: 17.3
 :END:
 
 This [[file:glossary.org::#term/protocol][storage decorator]] forwards non-versioned entities unchanged. For versioned entities it resolves reads in the current branch and appends [[file:glossary.org::#term/branch-view][version rows]] on writes. Follow the delegated functions to inspect each operation separately.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:769]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:772]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
@@ -41,13 +41,13 @@ This [[file:glossary.org::#term/protocol][storage decorator]] forwards non-versi
 :PROPERTIES:
 :CUSTOM_ID: versioning/create-entity-versioned!
 :FILE: src/graphden/versioning/storage/core.clj
-:LINE: 237
+:LINE: 240
 :MINS: 6.0
 :END:
 
 Creates an [[file:glossary.org::#term/branch-view][identity row]] and a [[file:glossary.org::#term/branch-view][version row]], accounting for an existing deterministic ID. Function names and list positions must be unique in the [[file:glossary.org::#term/branch-view][resolved branch view]], so their checks and writes use an [[file:glossary.org::#term/advisory-lock][advisory lock]]. A global table constraint would incorrectly reject legitimate differences between branches.
 
-- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:237]]
+- source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defn- create-entity-versioned!][src/graphden/versioning/storage/core.clj:240]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]]
 
 * 4. in-transaction
@@ -79,13 +79,13 @@ Keeps decisive graph reads, validation and all related writes in one database tr
 :PROPERTIES:
 :CUSTOM_ID: versioning/entity-config
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 169
+:LINE: 170
 :MINS: 3.3
 :END:
 
 Lists the versioned entities: ~:fn~, ~:fn-slot~, ~:binding~, ~:binding-list-item~, and ~:resource-override~. For each entity it distinguishes identity fields in the base table from ~version-data-fields~ stored in [[file:glossary.org::#term/branch-view][version rows]]. Resolution and writes use this configuration.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:169]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:170]]
 - same file :: [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 7. derive-version-fields
@@ -104,39 +104,39 @@ Derives version-table fields from the base entity declarations. Identity-level f
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 326
+:LINE: 327
 :MINS: 1.6
 :END:
 
 Resolves one entity as visible on a branch by reading and combining its version candidates. The selected version is returned, or nil when a [[file:glossary.org::#term/tombstone][deletion marker]] wins.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:326]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:327]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 9. collect-branch-chain
 :PROPERTIES:
 :CUSTOM_ID: versioning/collect-branch-chain
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 528
+:LINE: 535
 :MINS: 1.9
 :END:
 
 Follows ~:base-branch-id~ from a branch to its parent and root, caching the resulting chain. Version resolution and [[file:glossary.org::#term/invalidation][cache invalidation]] use it to determine which branches can contribute visible data. This is branch ancestry, separate from [[file:glossary.org::#term/inheritance][function inheritance]] through ~:parent-ids~.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:528]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:535]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 10. resolve-version-from-cache
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 746
+:LINE: 747
 :MINS: 1.4
 :END:
 
 Resolves cached version candidates along a branch's ancestry. At each level it considers locally written and merged versions using their effective timestamps. Single-entity and whole-graph resolution share this algorithm.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:746]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:747]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 11. effective-branch-local?
@@ -310,7 +310,7 @@ Increments the graph [[file:glossary.org::#term/invalidation][epoch]] before a g
 :CUSTOM_ID: versioning/build-branch-ctx
 :FILE: src/graphden/system/branch_router.clj
 :LINE: 75
-:MINS: 4.5
+:MINS: 4.8
 :END:
 
 Creates a branch-specific [[file:glossary.org::#term/context][execution context]] with storage bound to that branch, independent graph and compiled-registry caches, and a copy of the branch's [[file:glossary.org::#term/rich-types][rich type information]]. The router binds those types while compiling and handling requests, preventing another branch's types from determining this branch's behavior.
@@ -323,13 +323,13 @@ Creates a branch-specific [[file:glossary.org::#term/context][execution context]
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 905
+:LINE: 909
 :MINS: 8.4
 :END:
 
 Resolves a request's branch reference from a header or query parameter and invokes that branch's handler. Unknown branches return 400. The public wrapper handles ~/livez~ before branch compilation so the liveness probe does not depend on the [[file:glossary.org::#term/compiled-registry][compiled registry]].
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:905]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:909]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]
 

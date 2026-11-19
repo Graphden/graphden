@@ -52,10 +52,10 @@
   [ds]
   (if-let [f *read-rows-override*]
     (f ds)
-    (util/exec! ds
-                (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
-                             :from [(keyword metadata-table-name)]}
-                            {:quoted true}))))
+    (util/exec-read! ds
+                     {:select [:uuid :kind :name :parent_uuid :extra]
+                      :from [(keyword metadata-table-name)]}
+                     {:quoted true})))
 
 
 ;; === JSON conversion ===

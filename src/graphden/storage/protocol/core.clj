@@ -189,6 +189,34 @@
      Vector metadata ::candidate-count charges the same candidate budget."))
 
 
+(defprotocol StorageSourceProjection
+  "Opt-in structural source discovery without literal/value transfer.
+   Implementations must project physical columns before decoding. Unsupported
+   requests must refuse, never substitute an ordinary full-row read."
+
+  (read-source-projection
+    [this request]
+    "Internal sealed-snapshot request. Physical operations return complete
+     vectors or refuse overflow. Versioned :source-edges returns bounded graph
+     relationship rows; unknown decorators retain the ordinary source collector."))
+
+
+(defprotocol StorageGroupedRead
+  "Optional grouped read capability. Each request is a scalar operation map:
+   :read-ids (:entity/:ids), :query (:entity/:where/:opts), :latest
+   (:entity/:where/:group-cols), or :candidates
+   (:entity/:where/:version-source/:max-candidates). Results retain request
+   order and scalar shapes, including candidate-count metadata. Implementations
+   preserve every decorator's policies; unknown wrappers use scalar fallback.
+   Candidate operations are barriers: never evaluate a following payload read
+   before candidate overflow has been checked."
+
+  (read-operations
+    [this requests]
+    "Return a vector of scalar results for a finite vector of read requests.
+     Grouping changes transport only, never visibility or version resolution."))
+
+
 (defprotocol StorageBatchCRUD
   "Protocol for batch CRUD operations."
 

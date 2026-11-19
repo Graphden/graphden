@@ -197,6 +197,5 @@
     clearTimeout(refreshTimer);
     window.gdApplyThemePayload(null);
     notify('');
-    if (isAuthenticated() || accountsAuthed) void window.gdPrefsRefresh();
   });
 })();

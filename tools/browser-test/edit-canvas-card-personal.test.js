@@ -1,5 +1,6 @@
 // Actual persisted personal plans for both fn-card concerns, exact receipt
 // cleanup, retained native controls and measured desktop/coarse geometry.
+const {componentsForRequest, decode: decodeComponentPlanReplies} = require('./component-plan-replies');
 const {chromium} = require('playwright');
 const {assert, newContext, api, BASE, waitForServerHealthy, getEntities, synthArgs} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
@@ -30,8 +31,10 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
   page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message, stack: error.stack}));
   page.on('console', message => { if (message.type() === 'error') errors.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('request', request => {
-    if (['/api/ui/configuration/plan', '/api/ui/root/plan'].includes(new URL(request.url()).pathname))
-      requestSequences.set(request, ++requestSequence);
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/ui/root/plan') requestSequences.set(request, ++requestSequence);
+    if (path === '/api/ui/configuration/plan') requestSequences.set(request, new Map(
+      componentsForRequest(request.postDataJSON()).map(component => [component, ++requestSequence])));
   });
   page.on('response', response => {
     const path = new URL(response.url()).pathname;
@@ -43,9 +46,11 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
           ok: body?.ok === true, code: body?.code, retryable: body?.retryable === true});
         return;
       }
-      plans.push({kind: 'plan', url: response.url(), sequence: requestSequences.get(response.request()),
-        component: response.request().postDataJSON()?.component, status: response.status(),
-        ok: body?.ok, fallback: body?.fallback, code: body?.code, selectionId: body?.['selection-id'], retryable: body?.retryable === true});
+      for (const item of decodeComponentPlanReplies(response.request().postDataJSON(), response.status(), body))
+        plans.push({kind: 'plan', url: response.url(), sequence: requestSequences.get(response.request()).get(item.component),
+          transportId: requestSequences.get(response.request()).values().next().value, transportStatus: response.status(),
+          component: item.component, status: item.status, ok: item.body?.ok, fallback: item.body?.fallback,
+          code: item.body?.code, selectionId: item.body?.['selection-id'], retryable: item.body?.retryable === true});
     })());
   });
   async function editLiteral(copy, name, slot, value, position) {

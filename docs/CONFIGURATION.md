@@ -144,6 +144,7 @@ recursive CTEs. The executor auto-migrates its schema on startup.
 | `:password` | string | Database password |
 | `:pool-size` | long | HikariCP pool size |
 | `:schema` | ref | Reference to `:db/schema` |
+| `:source-revision?` | boolean/string | Install transactional source revision triggers; disabled by default |
 
 ```clojure
 :db/postgres
@@ -291,6 +292,8 @@ Executor context for running functions.
 | `:pg-storage` | ref | Raw PG storage for `NOTIFY` emission (`:db/postgres`) |
 | `:base-fns` | ref | Ctx-scoped base-fns map (`:exec/base-fns`) |
 | `:auth-provider` | ref | Reference to `:auth/provider` |
+| `:checker-cache?` | boolean/string | Enable bounded pure checker artifacts for this runtime |
+| `:source-manifest?` | boolean/string | Enable bounded client-source and manifest retention on supported revision-enabled storage |
 
 ```clojure
 :exec/context
@@ -300,6 +303,60 @@ Executor context for running functions.
  :base-fns #ig/ref :exec/base-fns
  :auth-provider #ig/ref :auth/provider}
 ```
+
+Production enables checker artifacts by default. Set `GRAPHDEN_CHECKER_CACHE=false`
+and restart to disable them. Development and test configurations leave the cache
+off, so code reload cannot reuse proofs from an earlier checker implementation.
+An explicitly enabled development runtime must be halted before reloading code.
+
+One cache is shared by all branch contexts in a runtime: 512 MiB of conservative
+retained/reserved charge, at most 256 MiB per checking pass, 16 entries, and a
+10-minute TTL. The limit is not an eager heap allocation. Capacity or admission
+misses perform ordinary checking. Retiring the runtime prevents publication;
+in-flight reservations remain charged until their workers finish.
+
+Only isolated checker artifacts are reused. Every request still captures fresh
+source, checks authorization, validates provenance and native signatures, and
+builds a fresh plan. Raw JDBC/source replay is not enabled by this setting.
+
+#### Optional manifest retention
+
+`GRAPHDEN_SOURCE_REVISION=true` enables coordinated installation of source
+revision triggers during PostgreSQL schema initialization.
+`GRAPHDEN_SOURCE_MANIFEST=true` enables client-source and manifest retention in
+the executor. Client source, manifests, server-only closures and exact witness
+paths use separate cache keys even for equal roots. Server retention stores raw
+rows only: native implementation, type/marker, callable contract and fingerprint
+checks still run, together with the separate fresh post-execution check.
+Both default to false. The second setting requires the first, a supported
+storage/policy adapter and an owned Hikari pool; unsupported setup fails startup.
+
+The revision commits or rolls back with source writes. Each database backend
+updates one of 256 counters; readers compare their MVCC-visible sum and common
+generation. Independent backends usually use different counters, while bucket
+collisions retain normal transaction locking. This certificate does not cache
+authorization: hits read fresh function metadata and repeat policy, namespace
+and source-contract checks. Client server-call targets still require execution
+permission on every hit. Unrelated source writes also invalidate retained source;
+this setting does not accelerate every cold load.
+
+Limits are 64 MiB retained, 64 entries, a 30-second TTL, four admitted snapshots
+and 32 MiB of cumulative copying per snapshot (at most 128 MiB across the four
+admitted snapshots). The client graph uses a columnar row representation that
+stores each schema's field names once. These charges do not describe total JVM
+memory. Capacity or unsupported values retain ordinary collection.
+Ordinary closures accept at most eight roots per retained entry; exact witness
+paths accept up to 128 UUIDs, with their key storage included in the charge.
+
+Source DDL and trigger repair require coordinated maintenance. Retire affected
+controllers before maintenance and reinitialize them afterward. The internal
+`graphden.storage.postgres.source-revision/call-with-maintenance` boundary
+excludes certified readers and writers and rotates the revision generation in
+the maintenance transaction. Disabling triggers or changing source tables
+outside that boundary is unsupported while manifest retention is enabled.
+Database writers need UPDATE permission on the revision table; installation
+does not elevate their privileges. Turning the flags off stops retention but
+does not remove installed triggers or their table.
 
 ### `:exec/compiled-registry`
 
@@ -457,6 +514,7 @@ The production config reads these via `#env`:
 | `VAULT_ADDR` | *(empty)* | OpenBao / Vault address (unset → `:vault-get` errors) |
 | `VAULT_TOKEN` | *(empty)* | OpenBao / Vault token |
 | `AUTH_TOKEN` | *(empty)* | Single-token auth secret |
+| `GRAPHDEN_CHECKER_CACHE` | `true` | Bounded checker artifacts; `false` disables after restart (raw source replay stays off) |
 | `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
 | `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
 | `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |

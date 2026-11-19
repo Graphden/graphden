@@ -330,7 +330,7 @@ function enterFnRenameEditMode(fn, anchorEl) {
       } catch (_) {}
       return false;
     },
-    onSaved() { return typeof initGraph === 'function' ? initGraph() : undefined; }
+    onSaved() { return typeof initGraph === 'function' ? initGraph({preserveSelection: true}) : undefined; }
   });
 }
 // --- fn return-type select (Phase 1) ---

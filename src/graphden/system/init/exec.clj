@@ -11,8 +11,11 @@
     [graphden.clients.sql-pool :as sql-pool]
     [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.executor.checked-source-memo :as checker-memo]
+    [graphden.executor.checked-source-runtime :as checker-runtime]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
+    [graphden.executor.revision-manifest :as manifest]
     [graphden.fleet.command :as fleet-command]
     [graphden.fleet.router :as fleet-router]
     [graphden.http-host.lifecycle :as http-host]
@@ -136,7 +139,7 @@
 
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard app-router verify-domain user-ops sql-pool-scope
+             execute-guard app-router verify-domain user-ops sql-pool-scope checker-cache? source-manifest?
              my-tokens executor-orgs byo-executor? executor-id notify-listener http-host-limits]}]
   (log/info "Creating executor context...")
   (warn-if-auth-off! auth-provider)
@@ -174,6 +177,10 @@
         ;; provider — a cell command is cross-org platform authority.
         fleet-cmd (when (seq executor-id)
                     (fleet-command/make-command-handler (fleet-command/internal-token)))
+        source-manifest (when (env/env-truthy? source-manifest?)
+                          (or (manifest/create-runtime-controller storage (:source-revision-state pg-storage))
+                              (throw (ex-info "Manifest cache requires migrated known storage" {}))))
+        checker-cache (when (env/env-truthy? checker-cache?) (checker-runtime/create-cache))
         manager (sql-pool/create-manager)
         ctx-opts (cond-> (merge {:storage storage :sql-pool-manager manager}
                                 (shard-opts executor-orgs byo-executor?))
@@ -213,7 +220,7 @@
                    fleet-cmd (assoc :fleet-command fleet-cmd))]
     (try
       (cond-> (-> (exec/create-context ctx-opts)
-                  (assoc :notify-emitter emitter))
+                  (assoc :notify-emitter emitter :checker-cache checker-cache :source-manifest source-manifest))
         vault-client (assoc :vault vault-client)
         ;; The LISTEN side of the NOTIFY pair — event-driven SSE
         ;; (`:sse-stream` :wake-on-writes) registers per-stream
@@ -230,11 +237,16 @@
                           :compile-storage (vs/->VersionedStorage
                                              pg-storage (vs/current-branch-id storage))))
       (catch Exception e
+        (when checker-cache (checker-memo/retire! checker-cache))
+        (manifest/retire-controller! source-manifest)
         (sql-pool/close! manager)
         (throw e)))))
 
 
 (defmethod ig/halt-key! :exec/context [_ context]
+  (manifest/retire-controller! (:source-manifest context))
+  (when-let [cache (:checker-cache context)]
+    (checker-memo/retire! cache))
   (when-let [manager (:sql-pool-manager context)]
     (sql-pool/close! manager)))
 

@@ -164,6 +164,10 @@ const PAPER = '#123456';
       // The item partial has no graph dependency. It must open while the
       // initial graph tree is still blocked by this test.
       await landing.waitForSelector('#gd-market-root [data-marketplace-item="' + THEME + '"]', {timeout: 20000});
+      // Surface routing precedes the asynchronous account probe and graph boot,
+      // so the item can render before the tree request has even started.
+      const treeDeadline = Date.now() + 20000;
+      while (!treeBlocked && Date.now() < treeDeadline) await new Promise((resolve) => setTimeout(resolve, 50));
       assert(treeBlocked, 'the initial graph tree is still blocked');
       assert(await landing.evaluate(() => document.body.dataset.surface === 'market'), 'the deep link opens the Marketplace surface');
       assert(await landing.evaluate((t) => document.querySelector('#gd-market-root [data-marketplace]')?.dataset.marketplaceItem === t, THEME),

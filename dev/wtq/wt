@@ -641,39 +641,16 @@ cmd_doctor() {
   say "  to your leftovers. Check the pid, then kill it yourself."
 }
 
-# What a gate run leaves on the host besides the image it built, and what
-# `gc` (and every green landing) reclaims. Measured 2026-09-16 after a week
-# of gates: 57 anonymous volumes (1.1 GB) — exactly two per gate, the e2e
-# stack's two Postgres containers each get one from the image's VOLUME
-# instruction and Testcontainers' stop leaves it behind; 3 GB of build cache
-# no build had touched in days; a handful of Playwright temp dirs from
-# crashed walks. Every removal here is of something nothing references:
-# a dangling anonymous volume is by definition attached to no container
-# (a stopped stack's volumes are named and stay), a dangling image has no
-# tag, build cache unused for 3 days is rebuilt on demand.
+# Automatic cleanup reclaims only build artifacts and old diagnostic logs.
+# Unreferenced Docker volumes can still contain recoverable database state;
+# Trivy databases are retained to avoid downloading them again on gate retries.
+# Neither is disposable merely because a gate needs more free disk space.
 gc_gate_leftovers() {
-  local removed n
-  info "Removing anonymous volumes no container references (the e2e stack's Postgres data) ..."
-  removed="$(docker volume ls -q -f dangling=true | grep -E '^[0-9a-f]{64}$' | xargs -r docker volume rm 2>/dev/null || true)"
-  n="$(printf '%s' "$removed" | grep -c . || true)"
-  [ "$n" -gt 0 ] && ok "  removed $n"
-
   info "Reclaiming dangling image layers ..."
   docker image prune -f >/dev/null 2>&1 || true
 
   info "Dropping build cache unused for 3 days ..."
   docker builder prune -f --filter unused-for=72h 2>/dev/null | tail -1 || true
-
-  # Trivy downloads separate OS and Java vulnerability DBs. The Java DB can
-  # exceed a GiB; reclaiming only db/ left the gate below its disk admission
-  # threshold even after cleanup. Both are reproducible caches.
-  local trivy_cache="${WTQ_TRIVY_CACHE_DIR:-/tmp/trivy-cache}/trivy" trivy_db
-  for trivy_db in "$trivy_cache/db" "$trivy_cache/java-db"; do
-    if [ -f "$trivy_db/trivy.db" ] || [ -f "$trivy_db/trivy-java.db" ]; then
-      info "Reclaiming the downloaded Trivy DB in $trivy_db ..."
-      find "$trivy_db" -maxdepth 1 -type f \( -name trivy.db -o -name trivy-java.db -o -name metadata.json \) -delete
-    fi
-  done
 
   info "Removing stale test temp dirs (Playwright crash artifacts, tour audits older than a day) ..."
   find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \
@@ -1453,7 +1430,7 @@ prior_failed_stage() {
     [ -f "$FAILURE_DIR/$m" ] || continue
     IFS=$'\t' read -r branch sha base stage receipt extra < "$FAILURE_DIR/$m" || continue
     [ -z "$extra" ] && [ "$branch" = "${M_BRANCH[$m]}" ] || continue
-    case "$stage" in ci|build|e2e|visual|integration|fleet) ;; *) continue ;; esac
+    case "$stage" in ci|build|priority|e2e|visual|integration|fleet) ;; *) continue ;; esac
     # Reject reused names, rebases/resets, missing objects and rewritten target.
     git -C "$MAIN_WT" merge-base --is-ancestor "$sha" "${M_SHA[$m]}" 2>/dev/null || continue
     git -C "$MAIN_WT" merge-base --is-ancestor "$base" "$TARGET" 2>/dev/null || continue
@@ -1507,9 +1484,25 @@ remote_proof_cloud_dir() {
   printf '%s\n' "${WTQ_PROOF_CLOUD_DIR:-$(dirname "$MAIN_WT")/graphden-cloud}"
 }
 
+remote_integration_runtime_eligible() {
+  # Hosted integration is Java 21, not evidence for another JDK or an
+  # operator-supplied external database. Inspect metadata without starting a JVM.
+  local path_java="${JAVA_HOME:-}/bin/java" env_name
+  [ -n "${JAVA_HOME:-}" ] && [ -x "$path_java" ] \
+    && [ -r "$JAVA_HOME/release" ] \
+    && [ "$path_java" -ef "$(type -P java)" ] \
+    && grep -Eq '^JAVA_VERSION="21([.+"-]|$)' "$JAVA_HOME/release" || return 1
+  [ -z "${JAVA_CMD:-}" ] || [ "$JAVA_CMD" -ef "$path_java" ] || return 1
+  for env_name in JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS CLJ_JVM_OPTS KAOCHA_PARALLELISM \
+    GRAPHDEN_TEST_PG_JDBC_URL GRAPHDEN_TEST_PG_USERNAME GRAPHDEN_TEST_PG_PASSWORD; do
+    [ -z "${!env_name:-}" ] || return 1
+  done
+}
+
 remote_proof_eligible() {
   local wt="$1" base_sha="$2" sha="$3"
   [ "${WTQ_REMOTE_INTEGRATION_PROOF:-0}" = 1 ] && [ "$NEED_INTEGRATION" = 1 ] \
+    && remote_integration_runtime_eligible \
     && git -C "$wt" diff --quiet "$base_sha" "$sha" -- .github/workflows/checks.yml
 }
 
@@ -1526,23 +1519,28 @@ start_remote_integration_proof() {
 }
 
 credit_remote_integration() {
-  local wt="$1" base_sha="$2" sha="$3" cloud receipt
+  local wt="$1" base_sha="$2" sha="$3" cloud receipt verified
   remote_proof_eligible "$wt" "$base_sha" "$sha" || return 1
   cloud="$(remote_proof_cloud_dir)"
   receipt="$cloud/target/core-proof-early/$sha.edn"
   [ -f "$cloud/scripts/core_proof_early.clj" ] && [ -f "$receipt" ] \
+    && grep -Fq -- '--verify-only' "$cloud/scripts/core_proof_early.clj" \
     && grep -Fq '"integration (testcontainers)"' "$cloud/scripts/release_core.clj" \
     && grep -Fq 'run: bb test-integration' "$wt/.github/workflows/checks.yml" \
     && grep -Eq ':status :green([,}[:space:]]|$)' "$receipt" || return 1
   # The receipt is only a hint. Recheck the live GitHub run, exact SHA,
   # dispatch request and every required job before writing a gate pass.
-  if (cd "$cloud" && timeout -k 5 60 bb core-proof-early "$sha" "$wt") \
-      > "$GRAPHDEN_RESUME_OUT.remote-proof-verify.log" 2>&1; then
-    cp -- "$receipt" "$GRAPHDEN_RESUME_OUT.remote-proof.edn" \
+  verified="$GRAPHDEN_RESUME_OUT.remote-proof.tmp.$$"
+  if (cd "$cloud" && timeout -k 5 60 bb scripts/core_proof_early.clj "$sha" "$wt" --verify-only) \
+      > "$verified" 2> "$GRAPHDEN_RESUME_OUT.remote-proof-verify.log" \
+      && (cd "$wt" && bb scripts/ci_resume_cli.clj verify-proof stages "$verified" "$sha") \
+         >> "$GRAPHDEN_RESUME_OUT.remote-proof-verify.log" 2>&1; then
+    mv -- "$verified" "$GRAPHDEN_RESUME_OUT.remote-proof.edn" \
       || { echo "  GitHub proof receipt could not be saved — running local integration"; return 1; }
     echo "  ✓ integration credited from verified exact-SHA GitHub run ($GRAPHDEN_RESUME_OUT.remote-proof.edn)"
     return 0
   fi
+  rm -f -- "$verified"
   echo "  GitHub proof could not be reverified — running local integration"
   return 1
 }
@@ -1575,10 +1573,16 @@ run_gate_stage() {
           case "$kind" in
             integration)
               if [ -n "$wave_integration" ]; then
+                if [ "$wave" = automatic ] && credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
+                  REMOTE_CREDIT_STAGE=1
+                  step "automatic integration: verified GitHub full-suite proof"
+                  continue
+                fi
                 step "$wave related integration namespaces"
                 ( cd "$wt" && GRAPHDEN_INTEGRATION_ONLY="$wave_integration" bb test-integration ) \
                   || { echo "FAIL: $wave related integration"; return 1; }
                 integration_ran=1
+                LOCAL_INTEGRATION="${LOCAL_INTEGRATION}${LOCAL_INTEGRATION:+$'\n'}$wave_integration"
                 pending_browser_headroom=1
               fi ;;
             browser)
@@ -1633,11 +1637,14 @@ run_gate_stage() {
       step "bb test-visual"
       ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; } ;;
     integration)
-      if [ -z "${PRIORITY_INTEGRATION:-}" ] && credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
+      if credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
+        REMOTE_CREDIT_STAGE=1
         step "integration: verified GitHub exact-SHA proof"
       else
+        # A prior remote automatic pass is not a local execution receipt.
+        # If revalidation now fails, include those namespaces in the fallback.
         step "bb test-integration: remaining namespaces"
-        ( cd "$wt" && GRAPHDEN_INTEGRATION_EXCLUDE="${PRIORITY_INTEGRATION:-}" bb test-integration ) \
+        ( cd "$wt" && GRAPHDEN_INTEGRATION_EXCLUDE="$LOCAL_INTEGRATION" bb test-integration ) \
           || { echo "FAIL: integration"; return 1; }
       fi ;;
     fleet)
@@ -1736,6 +1743,7 @@ gate_suites() {
   done
   local stage_credits="" image_credit=0 reused=0
   local pending_browser_headroom=0
+  local LOCAL_INTEGRATION="" REMOTE_CREDIT_STAGE=0
   local -a WTQ_PROGRESS_MEMBERS=("${WTQ_PROGRESS_MEMBERS[@]}")
   local GRAPHDEN_RESUME_OUT="$LOG_DIR/_train-$WTQ_REPORT_TS"
   local GRAPHDEN_RESUME_FROM="${WTQ_RESUME_FROM:-}"
@@ -1823,6 +1831,7 @@ gate_suites() {
   echo "  stage order: ${ordered[*]}"
   for stage in "${ordered[@]}"; do
     reused=0
+    REMOTE_CREDIT_STAGE=0
     if [ -n "${WTQ_REUSE_FROM:-}" ] \
        && { [ "$stage" = ci ] || [ "$stage" = build ] \
             || printf '%s\n' "$stage_credits" | grep -qx "$stage"; }; then
@@ -1842,9 +1851,28 @@ gate_suites() {
           if [ -z "$PRIORITY_BROWSER" ] || [ "$image_credit" = 1 ]; then reused=1; fi ;;
         integration) reused=1 ;;
       esac
+      if [ "$reused" = 1 ] && { [ "$stage" = priority ] || [ "$stage" = integration ]; }; then
+        local proof_source
+        proof_source="$(cd "$wt" && bb scripts/ci_resume_cli.clj proof-source stages \
+          "$GRAPHDEN_RESUME_FROM.stages.edn" "$stage")" || return 1
+        if [ "$proof_source" = hosted-integration ]; then
+          if credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
+            REMOTE_CREDIT_STAGE=1
+            [ "$stage" != priority ] || LOCAL_INTEGRATION="$MANUAL_INTEGRATION"
+          else reused=0; fi
+        elif [ "$proof_source" = local ]; then
+          [ "$stage" != priority ] || LOCAL_INTEGRATION="$PRIORITY_INTEGRATION"
+        else reused=0
+        fi
+      fi
     fi
     if [ "$reused" = 1 ]; then
-      (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
+      if [ "$REMOTE_CREDIT_STAGE" = 1 ]; then
+        (cd "$wt" && bb scripts/ci_resume_cli.clj mark-hosted-passed stages "$GRAPHDEN_RESUME_OUT.stages.edn" \
+          "$stage" "$GRAPHDEN_RESUME_OUT.remote-proof.edn") || return 1
+      else
+        (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
+      fi
       echo "  ✓ resumed $stage from exact-candidate checkpoint"
       continue
     fi
@@ -1856,7 +1884,7 @@ gate_suites() {
     # An E2E roster leaves enough time for the independent GitHub CI to
     # finish before integration. A resumed browser stage can reattach to its
     # durable request instead of dispatching a second run.
-    if [ "$stage" = e2e ] && [ -z "$PRIORITY_INTEGRATION" ]; then
+    if [ "$stage" = priority ] || { [ "$stage" = e2e ] && [ -z "$PRIORITY_INTEGRATION" ]; }; then
       start_remote_integration_proof "$wt" "$base_sha" "$ci_sha"
     fi
     (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" pending) || return 1
@@ -1889,7 +1917,12 @@ gate_suites() {
       echo "WTQ_FAILED_STAGE=$stage"
       return 1
     fi
-    (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
+    if [ "$REMOTE_CREDIT_STAGE" = 1 ]; then
+      (cd "$wt" && bb scripts/ci_resume_cli.clj mark-hosted-passed stages "$GRAPHDEN_RESUME_OUT.stages.edn" \
+        "$stage" "$GRAPHDEN_RESUME_OUT.remote-proof.edn") || return 1
+    else
+      (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
+    fi
     case "$stage" in integration|fleet) pending_browser_headroom=1 ;; esac
   done
   # Only a complete successful runtime roster may promote this candidate.
@@ -2516,7 +2549,7 @@ train_run() {
   if [ "$grc" = 1 ] && [ "$report_complete" = 1 ]; then
     failure_stage="$(sed -n 's/^WTQ_FAILED_STAGE=//p' "$gate_out" | tail -n1)"
     case "$failure_stage" in
-      ci|build|e2e|visual|integration|fleet) WTQ_FAILURE_RECEIPT="$LOG_DIR/_train-$ts" record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
+      ci|build|priority|e2e|visual|integration|fleet) WTQ_FAILURE_RECEIPT="$LOG_DIR/_train-$ts" record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
     esac
   elif [ "$grc" = 0 ]; then
     for m in "${gated[@]}"; do rm -f "$FAILURE_DIR/$m"; done

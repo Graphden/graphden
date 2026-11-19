@@ -2,11 +2,13 @@
   "CRUD operations for PostgreSQL storage.
    Generic entity operations for create, read, update, delete, query."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.errors :as errors]
     [graphden.storage.postgres.junction :as junction]
+    [graphden.storage.postgres.read-plan :as read-plan]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [honey.sql :as sql]
@@ -174,12 +176,11 @@
    (read-entity ds entity-name id nil))
   ([ds entity-name id fields]
    (let [table-name (keyword (util/kw->snake-case entity-name))
-         query (sql/format {:select [:*]
-                            :from [table-name]
-                            :where [:= :id id]}
-                           {:quoted true})]
+         query {:select [:*]
+                :from [table-name]
+                :where [:= :id id]}]
      (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
-                                   (when-let [row (util/exec-one! ds query)]
+                                   (when-let [row (util/exec-read-one! ds query {:quoted true})]
                                      (let [record (codec/row->entity row fields)]
                                        (if (and fields (junction/has-ref-many? fields))
                                          (first (junction/populate-ref-many-fields ds entity-name [record] fields))
@@ -251,37 +252,6 @@
                                           (util/exec-one! ds query))))))
 
 
-(defn- build-where-clause
-  "Builds the HoneySQL `:where` vector from a `{field value}` map,
-   with the same semantics `query-entities` exposes: nil → IS NULL,
-   collection → IN, else → =. Returns nil when `where` is empty so
-   callers can `cond-> ... when-let`-style splice."
-  [where fields]
-  (when (seq where)
-    (into [:and]
-          (map (fn [[k v]]
-                 (let [col (keyword (util/kw->snake-case k))
-                       field-spec (get fields k)
-                       encoded-v (codec/encode-value v field-spec)]
-                   (cond
-                     (nil? encoded-v)
-                     [:is col nil]
-
-                     ;; Collection = IN clause (for batch lookups). An EMPTY
-                     ;; collection can't be `col IN ()` (invalid SQL in
-                     ;; PostgreSQL) — it matches nothing, so emit an
-                     ;; always-false predicate and let the query return [].
-                     (and (or (vector? v) (set? v) (seq? v))
-                          (not (map? v)))
-                     (if (empty? v)
-                       [:= [:inline 1] [:inline 0]]
-                       [:in col (vec (map #(codec/encode-value % field-spec) v))])
-
-                     :else
-                     [:= col encoded-v])))
-               where))))
-
-
 (defn query-entities
   "Queries entities by conditions.
    where is a map of field->value for equality matching.
@@ -302,36 +272,51 @@
   ([ds entity-name where fields]
    (query-entities ds entity-name where fields nil))
   ([ds entity-name where fields opts]
-   (sp/standard-query-validations! entity-name fields where)
-   (sp/validate-query-opts! entity-name opts)
-   (let [table-name (keyword (util/kw->snake-case entity-name))
-         where-clause (build-where-clause where fields)
-         order-by (when-let [ob (:order-by opts)]
-                    (mapv (fn [[col dir]]
-                            [(keyword (util/kw->snake-case col)) dir])
-                          ob))
-         query (sql/format (cond-> {:select [:*]
-                                    :from [table-name]}
-                             where-clause (assoc :where where-clause)
-                             order-by (assoc :order-by order-by)
-                             (:limit opts) (assoc :limit (:limit opts))
-                             (:offset opts) (assoc :offset (:offset opts)))
-                           {:quoted true})]
+   (let [plan (read-plan/query entity-name where fields opts)
+         where-clause (:where plan)]
      (when-not where-clause
        (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
      (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where :opts opts}
-                                   (let [rows (util/exec! ds query)
+                                   (let [rows (util/exec-read! ds plan {:quoted true})
                                          records (mapv #(codec/row->entity % fields) rows)]
                                      (if (and fields (junction/has-ref-many? fields))
                                        (junction/populate-ref-many-fields ds entity-name records fields)
                                        records))))))
 
 
+(defn- targeted-version-candidates
+  [query where fields {:keys [version-entity version-id-field]}]
+  (let [version-field? #(str/starts-with? (name %) "versions.")
+        version-where (into {} (filter (comp version-field? key)) where)
+        identity-where (into {} (remove (comp version-field? key)) where)
+        identity-predicate (read-plan/where-clause identity-where fields)
+        version-id (keyword (str "versions." (util/kw->snake-case version-id-field)))
+        columns (:select-distinct query)]
+    (if (or (util/flat-read-plans?) (empty? version-where))
+      query
+      ;; Filtering the version index first avoids scanning every identity and
+      ;; evaluating its RLS policy for each owner batch. DISTINCT retains ANY
+      ;; matching version; identity predicates and RLS still run before LIMIT.
+      {:select columns
+       :from [[{:select-distinct [[version-id :owner_id]]
+                :from [[(keyword (util/kw->snake-case version-entity)) :versions]]
+                :where (read-plan/where-clause version-where fields)} :matched]]
+       :cross-join [[[:lateral
+                      {:select columns :from (:from query)
+                       :where (if identity-predicate
+                                [:and [:= :ident.id :matched.owner_id] identity-predicate]
+                                [:= :ident.id :matched.owner_id])
+                       ;; Preserve the correlated PK lookup: flattening this
+                       ;; subquery can restore a whole-table RLS scan.
+                       :offset [:inline 0]}] :ident]]
+       :limit (:limit query)})))
+
+
 (defn query-identity-candidates
   "Cap distinct owner candidates in SQL without projecting payload data.
    For versioned reads, ANY matching version is a conservative superset;
    create-time identity owner columns do not describe branch-local moves."
-  [ds entity-name where fields {:keys [version-entity version-id-field version-data-fields]} max-candidates]
+  [ds entity-name where fields {:keys [version-entity version-id-field version-data-fields] :as version-source} max-candidates]
   (let [where (bounded/candidate-where entity-name where max-candidates)]
     (sp/standard-query-validations! entity-name fields where)
     (let [identity-fields fields
@@ -345,19 +330,20 @@
           where (into {} (map (fn [[field value]] [(qualified field) value])) where)
           columns (cond-> [[:ident.id :id]]
                     (contains? identity-fields :org-id) (conj [:ident.org_id :org_id]))
-          query (sql/format
-                  (cond-> {:select-distinct columns
-                           :from [[(keyword (util/kw->snake-case entity-name)) :ident]]
-                           :where (build-where-clause where fields)
-                           :limit (inc max-candidates)}
-                    version-entity
-                    (assoc :join [[(keyword (util/kw->snake-case version-entity)) :versions]
-                                  [:= :ident.id
-                                   (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))
-                  {:quoted true})]
+          query (cond-> {:select-distinct columns
+                         :from [[(keyword (util/kw->snake-case entity-name)) :ident]]
+                         :where (read-plan/where-clause where fields)
+                         :limit (inc max-candidates)}
+                  version-entity
+                  (assoc :join [[(keyword (util/kw->snake-case version-entity)) :versions]
+                                [:= :ident.id
+                                 (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))
+          query (if version-entity
+                  (targeted-version-candidates query where fields version-source)
+                  query)]
       (util/with-sql-error-handling "Database error" :query-identity-candidates
                                     {:entity-name entity-name}
-                                    (let [rows (util/exec! ds query)]
+                                    (let [rows (util/exec-read! ds query {:quoted true})]
                                       (bounded/check-candidate-count! rows max-candidates)
                                       (with-meta (mapv #(codec/row->entity %
                                                                            (select-keys identity-fields [:id :org-id]))
@@ -388,30 +374,14 @@
    (e.g. the unique-id `:id` of the version row itself) defeats the
    dedup and reverts to query-entities behaviour."
   [ds entity-name where group-cols fields]
-  (sp/standard-query-validations! entity-name fields where)
-  (when (or (empty? group-cols) (not (every? keyword? group-cols)))
-    (throw (ex-info "query-latest-per-group requires non-empty keyword group-cols"
-                    {:type :storage-error/invalid-group-cols
-                     :entity-name entity-name
-                     :group-cols group-cols})))
-  (let [table-name (keyword (util/kw->snake-case entity-name))
-        cols-snake (mapv #(keyword (util/kw->snake-case %)) group-cols)
-        where-clause (build-where-clause where fields)
-        ;; ORDER BY must lead with the DISTINCT-ON cols so Postgres
-        ;; can pick the row per group; the trailing `created_at DESC`
-        ;; is what makes it the LATEST.
-        order-by (conj (vec cols-snake) [:created_at :desc])
-        query (sql/format (cond-> {:select-distinct-on (into [cols-snake] [:*])
-                                   :from [table-name]
-                                   :order-by order-by}
-                            where-clause (assoc :where where-clause))
-                          {:quoted true})]
+  (let [plan (read-plan/latest entity-name where group-cols fields)
+        where-clause (:where plan)]
     (when-not where-clause
       (log/debug "Full table DISTINCT ON scan (no where clause)" {:entity-name entity-name}))
     (util/with-sql-error-handling "Database error" :query-latest-per-group
                                   {:entity-name entity-name :where where
                                    :group-cols group-cols}
-                                  (let [rows (util/exec! ds query)
+                                  (let [rows (util/exec-read! ds plan {:quoted true})
                                         records (mapv #(codec/row->entity % fields) rows)]
                                     (if (and fields (junction/has-ref-many? fields))
                                       (junction/populate-ref-many-fields ds entity-name records fields)
@@ -514,29 +484,26 @@
   ([ds entity-name ids fields]
    (if (empty? ids)
      {}
-     (let [table-name (keyword (util/kw->snake-case entity-name))]
-       (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
-                                     (let [rows (mapcat (fn [chunk]
-                                                          (util/exec! ds
-                                                                      (sql/format {:select [:*]
-                                                                                   :from [table-name]
-                                                                                   :where [:in :id (vec chunk)]}
-                                                                                  {:quoted true})))
-                                                        (chunk-rows ids 1))
-                                           ;; Decode WITHOUT field-specs on purpose: the
-                                           ;; versioned-resolution + compile paths that call
-                                           ;; `read-entities` (versioning/storage/*) rely on the
-                                           ;; raw-shape base row, then overlay version data /
-                                           ;; re-decode themselves. Passing `fields` here (as
-                                           ;; `query-entities` does) double-processes jsonb and
-                                           ;; corrupts the compiled graph — 27 executor tests
-                                           ;; (record/list-type, :fix recursion, versioned-rows)
-                                           ;; break. `fields` is still used for ref-many below.
-                                           records (mapv codec/row->entity rows)
-                                           populated (if (and fields (junction/has-ref-many? fields))
-                                                       (junction/populate-ref-many-fields ds entity-name records fields)
-                                                       records)]
-                                       (into {} (map (fn [e] [(:id e) e])) populated)))))))
+     (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
+                                   (let [rows (mapcat (fn [chunk]
+                                                        (util/exec-read! ds
+                                                                         (read-plan/by-ids entity-name chunk)
+                                                                         {:quoted true}))
+                                                      (chunk-rows ids 1))
+                                         ;; Decode WITHOUT field-specs on purpose: the
+                                         ;; versioned-resolution + compile paths that call
+                                         ;; `read-entities` (versioning/storage/*) rely on the
+                                         ;; raw-shape base row, then overlay version data /
+                                         ;; re-decode themselves. Passing `fields` here (as
+                                         ;; `query-entities` does) double-processes jsonb and
+                                         ;; corrupts the compiled graph — 27 executor tests
+                                         ;; (record/list-type, :fix recursion, versioned-rows)
+                                         ;; break. `fields` is still used for ref-many below.
+                                         records (mapv codec/row->entity rows)
+                                         populated (if (and fields (junction/has-ref-many? fields))
+                                                     (junction/populate-ref-many-fields ds entity-name records fields)
+                                                     records)]
+                                     (into {} (map (fn [e] [(:id e) e])) populated))))))
 
 
 (defn- field-type->cast

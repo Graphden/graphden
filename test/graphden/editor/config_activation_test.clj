@@ -1,8 +1,14 @@
-(ns graphden.editor.config-activation-test
+(ns ^:serial graphden.editor.config-activation-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is]]
-    [graphden.editor.config-activation :as activation]))
+    [graphden.editor.components :as components]
+    [graphden.editor.config-activation :as activation]
+    [graphden.editor.preference-write :as preferences]
+    [graphden.executor.browser-snapshot :as snapshot]
+    [graphden.executor.browser-source :as source]
+    [graphden.storage.graph-writer :as writer]
+    [graphden.storage.tx :as tx]))
 
 
 (deftest activation-command-requires-client-root-and-preference-expectations
@@ -48,3 +54,45 @@
       (is (= :invalid-request
              (try (activation/parse-proposal-command input) nil
                   (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))
+
+
+(deftest preview-keeps-policy-and-epoch-guards-on-the-decorated-read-snapshot
+  (let [storage (Object.) fixed (Object.) policy {:frozen :policy}
+        epoch (atom 0) ctx {:storage storage :invalidation-count epoch}
+        calls (atom [])]
+    (with-redefs [snapshot/capture-context-policy
+                  (fn [actual]
+                    (is (identical? ctx actual))
+                    (swap! calls conj :policy)
+                    policy)
+                  tx/assert-owns-commit!
+                  (fn [actual]
+                    (is (identical? storage actual))
+                    (swap! calls conj :owned))
+                  source/with-snapshot
+                  (fn [actual consume]
+                    (is (identical? storage actual))
+                    (swap! calls conj :snapshot)
+                    (consume fixed (constantly nil)))
+                  components/assert-current-policy!
+                  (fn [actual]
+                    (is (identical? fixed actual))
+                    (swap! calls conj :current-policy))
+                  writer/call-with-write
+                  (fn [& _] (throw (IllegalStateException. "Preview acquired a graph writer")))
+                  preferences/call-with-lock
+                  (fn [& _] (throw (IllegalStateException. "Preview acquired a preference lock")))]
+      (let [result (activation/call-with-preview-snapshot
+                     ctx (fn [actual frozen]
+                           (is (identical? fixed actual))
+                           (is (identical? policy frozen))
+                           (swap! calls conj :operation)
+                           :proposal))]
+        (is (= :proposal result))
+        (is (= [:policy :owned :snapshot :current-policy :operation] @calls)))
+      (let [refusal (try
+                      (activation/call-with-preview-snapshot
+                        ctx (fn [_ _] (swap! epoch inc) :stale-proposal))
+                      nil
+                      (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))]
+        (is (= :policy-refresh-required refusal))))))

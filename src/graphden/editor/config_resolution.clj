@@ -144,9 +144,13 @@
 
 
 (defn- captured-source
-  [storage authorize! id]
-  (let [graph (source/collect-manifest storage id authorize!)]
-    {:graph graph :namespaces (source/collect-namespaces storage graph)}))
+  ([storage authorize! id]
+   (captured-source storage authorize! id nil))
+  ([storage authorize! id graph-hint]
+   (let [graph (if graph-hint
+                 (source/collect-manifest storage id authorize! graph-hint)
+                 (source/collect-manifest storage id authorize!))]
+     {:graph graph :namespaces (source/collect-namespaces storage graph)})))
 
 
 (defn- current-scope
@@ -160,16 +164,18 @@
   "Resolve the handler's protected graph selector in this authenticated
    snapshot. Discovery supplies identity only; the caller checks source and
    execute permission for the selected HOF separately."
-  [storage authorize! policy]
-  (let [scope (current-scope storage (tenancy/current-personal-namespace) "editor-root")
-        resolver (captured-source storage authorize! root-resolver-id)
-        _ (assert-protected-root-source! resolver)
-        _ (snapshot/validate-source! resolver root-resolver-id policy)
-        id (if (:principal-id scope)
-             (:id (resolve-root-identity resolver scope
-                                         (metadata/function-lookup storage authorize! scope)))
-             default-root-id)]
-    {:id id :scope scope}))
+  ([storage authorize! policy]
+   (root-choice storage authorize! policy nil))
+  ([storage authorize! policy graph-hint]
+   (let [scope (current-scope storage (tenancy/current-personal-namespace) "editor-root")
+         resolver (captured-source storage authorize! root-resolver-id graph-hint)
+         _ (assert-protected-root-source! resolver)
+         _ (snapshot/validate-source! resolver root-resolver-id policy)
+         id (if (:principal-id scope)
+              (:id (resolve-root-identity resolver scope
+                                          (metadata/function-lookup storage authorize! scope)))
+              default-root-id)]
+     {:id id :scope scope})))
 
 
 (defn source-revision
@@ -186,12 +192,17 @@
 
 
 (defn root-source-revision
-  "Capture an authorized root source witness for a later exact restore."
-  [storage authorize! policy id scope]
-  (let [graph (source/collect-client-closure storage [id] authorize!)
-        selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
-    (snapshot/validate-source! selected id policy)
-    (source-revision id selected scope)))
+  "Capture an authorized root source witness for a later exact restore.
+   Optional hints select dependency IDs only; source and permissions stay fresh."
+  ([storage authorize! policy id scope]
+   (root-source-revision storage authorize! policy id scope nil))
+  ([storage authorize! policy id scope graph-hint]
+   (let [graph (if graph-hint
+                 (source/collect-client-closure storage [id] authorize! graph-hint)
+                 (source/collect-client-closure storage [id] authorize!))
+         selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+     (snapshot/validate-source! selected id policy)
+     (source-revision id selected scope))))
 
 
 (defn cohort-revision
@@ -251,22 +262,33 @@
    immutable snapshot. Freeze policy before opening that snapshot. Missing
    personal identity selects the ordinary shared defaults; denied/invalid
    source never becomes absence. No provisioning or migration occurs here."
-  [storage authorize! policy]
-  (let [home (tenancy/current-personal-namespace)
-        scope (current-scope storage home "editor")
-        resolver (captured-source storage authorize! resolver-id)
-        _ (assert-protected-source! resolver)
-        _ (snapshot/validate-source! resolver resolver-id policy)
-        lookup (metadata/function-lookup storage authorize! scope)
-        selected-reference (resolve-identity resolver scope lookup)
-        id (:id selected-reference)
-        row (sp/read-entity storage :fn id)
-        _ (when-not row
-            (throw (ex-info "Editor configuration source is unavailable"
-                            {:type :browser-plan/unsupported :reason :source-missing})))
-        _ (authorize! row {:execute? true})
-        selected (captured-source storage authorize! id)
-        _ (snapshot/validate-source! selected id policy)]
-    {:id id :home home :scope scope :snapshot selected
-     :configuration (config/configuration (:graph selected) id)
-     :revision (source-revision id selected scope)}))
+  ([storage authorize! policy]
+   (capture storage authorize! policy nil))
+  ([storage authorize! policy graph-hint]
+   (let [home (tenancy/current-personal-namespace)
+         scope (current-scope storage home "editor")
+         resolver (captured-source storage authorize! resolver-id graph-hint)
+         _ (assert-protected-source! resolver)
+         _ (snapshot/validate-source! resolver resolver-id policy)
+         lookup (metadata/function-lookup storage authorize! scope)
+         selected-reference (resolve-identity resolver scope lookup)
+         id (:id selected-reference)
+         row (sp/read-entity storage :fn id)
+         _ (when-not row
+             (throw (ex-info "Editor configuration source is unavailable"
+                             {:type :browser-plan/unsupported :reason :source-missing})))
+         _ (authorize! row {:execute? true})
+         selected (captured-source storage authorize! id graph-hint)
+         _ (snapshot/validate-source! selected id policy)]
+     {:id id :home home :scope scope :snapshot selected
+      :configuration (config/configuration (:graph selected) id)
+      :revision (source-revision id selected scope)})))
+
+
+(defn capture-for-context
+  "Use the context graph only to batch advisory metadata IDs. Every value,
+   selected identity and permission still comes from the decorated snapshot."
+  [ctx storage authorize! policy]
+  (if-let [hint (some-> (:graph-cache ctx) deref)]
+    (capture storage authorize! policy hint)
+    (capture storage authorize! policy)))

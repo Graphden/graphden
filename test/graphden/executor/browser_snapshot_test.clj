@@ -9,8 +9,11 @@
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.browser-preview :as preview]
+    [graphden.executor.browser-server-execution :as execution]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.checked-source-memo :as checker-memo]
+    [graphden.executor.checked-source-runtime :as checker-runtime]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.source-contract :as source-contract]
@@ -112,6 +115,24 @@
                       (reset! signatures (registry/effective-rich-types))
                       result))]
       {:plan (export f) :scopes @scopes :calls @calls :signatures @signatures})))
+
+
+(deftest runtime-installs-the-reviewed-snapshot-hit-adapter
+  (let [cache (checker-runtime/create-cache)
+        contract (snapshot/checker-hit-contract)]
+    (try
+      (is (= (* 64 1024 1024) (get-in cache [:hit-contract :bytes])))
+      (is (identical? (:restore contract) (get-in cache [:hit-contract :restore])))
+      (finally (checker-memo/retire! cache)))))
+
+
+(deftest bounded-hit-refuses-large-closure-before-ordering-or-projection
+  (let [ordered? (atom false)
+        inputs {:prepared {:reachable (set (range 2049))
+                           :ordering (delay (reset! ordered? true)
+                                            (throw (ex-info "Ordering must stay delayed" {})))}}]
+    (is (nil? (#'snapshot/prepare-bounded-memo-base inputs)))
+    (is (false? @ordered?))))
 
 
 (deftest source-check-memo-is-private-to-one-snapshot-pass
@@ -611,3 +632,198 @@
         (is (= constraint (:constraint (reconstruct private))) "Private rows receive no restoration")))
     (with-redefs [owned/owned-fn-id? (constantly false)]
       (is (= constraint (:constraint (reconstruct captured))) "Unowned rows receive no restoration"))))
+
+
+(deftest reconstruction-does-not-depend-on-incremental-rich-types
+  (let [f (fixture [{:name :inner :parent :const :args {:value {:value 7}}}]
+                   {:args {:value :inner}})
+        graph (get-in f [:snapshot :graph])
+        storage (remote/from-bundle {:fn (:fns graph) :slot (:slots graph)
+                                     :fn-slot (:fn-slots graph) :binding (:bindings graph)
+                                     :binding-list-item (:list-items graph)
+                                     :ns (get-in f [:snapshot :namespaces])})
+        ids (mapv (:ids f) [:inner :leaf])
+        reconstruct (fn [rich]
+                      (binding [registry/*rich-types-override* (atom rich)
+                                registry/*per-org-rich-override* (atom {})
+                                types/*type-aliases-override* (atom (:aliases f))]
+                        (mapv #(type-check/reconstruct-fn-def storage %) ids)))
+        empty-rich (reconstruct {:by-id {} :by-name {}})
+        checked-rich (reconstruct (:rich f))]
+    (is (every? map? empty-rich))
+    (is (= empty-rich checked-rich))))
+
+
+(deftest later-provenance-observes-mutation-by-an-earlier-check
+  (let [literal (java.util.Date. 0)
+        f (fixture [{:name :inner :parent :const :args {}}]
+                   {:parent :inner :args {:value {:value literal}}})
+        check! check/check-fn-def!
+        called (atom [])
+        error (with-redefs [check/check-fn-def!
+                            (fn [definition]
+                              (swap! called conj (:fn-id definition))
+                              (let [result (check! definition)]
+                                (when (= (get-in f [:ids :inner]) (:fn-id definition))
+                                  (java.util.Date/.setTime literal 1000))
+                                result))]
+                (failure #(export f)))]
+    (is (= 1000 (java.util.Date/.getTime literal)))
+    (is (= [(get-in f [:ids :inner])] @called)
+        "Changed later source is rejected before its checker runs")
+    (is (= :type-source-mismatch (:reason error)))
+    (is (= (:id f) (:fn-id error)))))
+
+
+(defn- artifact-memo
+  []
+  (checker-memo/create-memo
+    {:max-bytes 16000000 :max-entries 8 :max-pending 4 :max-families 8
+     :max-leases 8 :max-ttl-ms 1000 :clock-ms (constantly 0)
+     :entry-bytes 4000000 :max-nodes 100000 :ttl-ms 1000
+     :checker-abi "snapshot-test-1" :callbacks []}))
+
+
+(deftest opt-in-artifact-reuses-only-checker-work
+  (let [f (fixture [] {}) m (artifact-memo)
+        changed (update-in f [:snapshot :graph :bindings]
+                           #(mapv (fn [row] (assoc row :value "changed")) %))
+        check! check/check-fn-def! calls (atom 0)]
+    (binding [checker-memo/*memo* m tenancy/*current-org* (random-uuid)]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition] (swap! calls inc) (check! definition))]
+        (let [first-plan (export f) first-count @calls]
+          (is (pos? first-count))
+          (is (= 1 (:entries (checker-memo/stats m))))
+          (is (= first-plan (export f)))
+          (is (= first-count @calls) "Second export restores both isolated registries")
+          (let [policy (assoc-in (policy-of f) [:classes (:id f)] :secret-output)]
+            (is (= :visibility-denied
+                   (:reason (failure #(export (assoc f :policy policy)))))))
+          (is (= first-count @calls) "Fresh policy can veto a checker cache hit")
+          (is (= :type-source-mismatch (:reason (failure #(export changed)))))
+          (is (zero? (:leases (checker-memo/stats m)))))))))
+
+
+(deftest artifact-hit-skips-derived-source-preparation
+  (let [f (fixture [] {}) m (artifact-memo)]
+    (binding [checker-memo/*memo* m tenancy/*current-org* (random-uuid)]
+      (let [expected (export f)]
+        (is (= 1 (:entries (checker-memo/stats m))))
+        (with-redefs [source-contract/fingerprints
+                      (fn [_] (throw (AssertionError. "A hit recomputed source fingerprints")))
+                      type-check/reconstruct-fn-def
+                      (fn [& _] (throw (AssertionError. "A hit reconstructed a definition")))]
+          (is (= expected (export f)))))
+      (is (zero? (:pending (checker-memo/stats m))))
+      (is (zero? (:leases (checker-memo/stats m)))))))
+
+
+(deftest artifact-key-includes-fresh-package-ownership
+  (let [f (fixture [] {}) m (artifact-memo)
+        owned? owned/owned-fn-id? check! check/check-fn-def! calls (atom 0)]
+    (binding [checker-memo/*memo* m tenancy/*current-org* (random-uuid)]
+      (with-redefs [check/check-fn-def! (fn [definition] (swap! calls inc) (check! definition))]
+        (let [expected (export f) checked @calls]
+          (is (pos? checked))
+          (is (= expected (export f)))
+          (is (= checked @calls))
+          (with-redefs [owned/owned-fn-id? (fn [id] (or (= id (:id f)) (owned? id)))]
+            (is (= expected (export f)))
+            (is (= (* 2 checked) @calls) "A changed process-owned witness invalidates the proof")
+            (is (= expected (export f)))
+            (is (= (* 2 checked) @calls))))))))
+
+
+(deftest mutable-source-and-unknown-rule-never-eagerly-prepare
+  (let [literal (java.util.Date. 0)
+        f (fixture [{:name :inner :parent :const :args {}}]
+                   {:parent :inner :args {:value {:value literal}}})
+        check! check/check-fn-def! called (atom []) m (artifact-memo)]
+    (binding [checker-memo/*memo* m]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition]
+                      (swap! called conj (:fn-id definition))
+                      (let [result (check! definition)]
+                        (when (= (get-in f [:ids :inner]) (:fn-id definition))
+                          (java.util.Date/.setTime literal 1000))
+                        result))]
+        (is (= :type-source-mismatch (:reason (failure #(export f)))))
+        (is (= [(get-in f [:ids :inner])] @called))
+        (is (zero? (:entries (checker-memo/stats m))))))))
+
+
+(deftest checker-artifact-key-includes-alias-marker-and-recheck-inputs
+  (let [f (fixture [{:name :aux-type :union [:text :null]}
+                    {:name :aux-tag :marker {:hide-result? false}}] {})
+        m (artifact-memo) check! check/check-fn-def! calls (atom 0)
+        policy (policy-of f)
+        with-constraint (fn [name constraint]
+                          (update-in f [:snapshot :graph :fns]
+                                     #(mapv (fn [row]
+                                              (if (= name (:name row))
+                                                (assoc row :constraint constraint) row)) %)))]
+    (binding [checker-memo/*memo* m]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition] (swap! calls inc) (check! definition))]
+        (export (assoc f :policy policy))
+        (let [one-pass @calls]
+          (is (pos? one-pass))
+          (doseq [changed [(with-constraint "aux-type" [:union :int :null])
+                           (with-constraint "aux-tag" [:marker-def {:hide-result? true}])
+                           (assoc f :policy (assoc policy :type-recheck {:status :running :pending-ids #{}}))]]
+            (let [before @calls]
+              (is (map? (export (update changed :policy #(or % policy)))))
+              (is (= one-pass (- @calls before)) "Changed checker input forces a fresh ordered pass"))))))))
+
+
+(deftest unknown-primitive-callback-never-enters-artifact-cache
+  (let [f (fixture [(assoc constant :return-type-rule (fn [_ _] :text))] [] {})
+        m (artifact-memo) check! check/check-fn-def! calls (atom 0)]
+    (binding [checker-memo/*memo* m]
+      (with-redefs [check/check-fn-def!
+                    (fn [definition] (swap! calls inc) (check! definition))]
+        (is (map? (export f)))
+        (let [first-count @calls]
+          (is (map? (export f)))
+          (is (= (* 2 first-count) @calls)))
+        (is (zero? (:entries (checker-memo/stats m))))))))
+
+
+(deftest cancelled-checker-builder-cannot-publish-and-preserves-interruption
+  (let [f (fixture [] {}) m (artifact-memo)]
+    (binding [checker-memo/*memo* m
+              runtime/*cancel-check* #(throw (InterruptedException. "cancelled"))]
+      (is (thrown-with-msg? InterruptedException #"cancelled" (export f))))
+    (is (zero? (:entries (checker-memo/stats m))))
+    (is (zero? (:pending (checker-memo/stats m))))))
+
+
+(deftest runtime-policy-carries-checker-cache-into-real-execution-worker
+  (let [f (fixture [] {}) cache (checker-runtime/create-cache)
+        ctx {:storage (remote/from-bundle {}) :rich-types-atom (atom (:rich f))
+             :checker-cache cache}
+        check! check/check-fn-def! calls (atom 0)
+        run #(execution/run ctx
+                            (fn []
+                              (let [policy (snapshot/capture-context-policy ctx)]
+                                (snapshot/export-snapshot (:snapshot f) {} {:view (:id f)} policy))))]
+    (try
+      (binding [types/*type-aliases-override* (atom (:aliases f))
+                shapes/*marker-registry-override* (atom (:markers f))
+                tenancy/*current-org* (random-uuid)]
+        (with-redefs [check/check-fn-def! (fn [definition] (swap! calls inc) (check! definition))]
+          (let [plan (run) checked @calls]
+            (is (pos? checked))
+            (is (= 1 (:entries (checker-memo/stats cache))))
+            (is (= plan (run)))
+            (is (= checked @calls) "The worker gets the runtime cache without diagnostic binding")
+            (let [policy (assoc-in (snapshot/capture-context-policy ctx)
+                                   [:classes (:id f)] :secret-output)]
+              (is (= :visibility-denied
+                     (:reason (failure #(snapshot/export-snapshot (:snapshot f) {} {:view (:id f)} policy))))))
+            (is (= checked @calls) "A hit still obeys the fresh policy veto")
+            (checker-memo/retire! cache)
+            (is (= plan (run)))
+            (is (> @calls checked) "Retired runtime falls back to fresh checking"))))
+      (finally (checker-memo/retire! cache)))))

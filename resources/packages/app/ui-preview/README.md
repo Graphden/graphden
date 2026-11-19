@@ -618,6 +618,15 @@ checks the original root, binding, target, contract, captures, authenticated
 session, organization and branch again. The response also requires a newly
 resolved authorization subject and a fresh source/execute policy.
 
+For a single exported entry, a bounded server-owned witness connects that entry
+to the selected call site, including inherited bindings and slot declarations.
+Invocation rereads and authorizes that path and the complete selected server
+target before execution and in a new snapshot before releasing its result.
+An unrelated client sibling's access revocation does not revoke this independent
+call or cause its hidden body to be read. The coarse executor epoch still causes
+a recoverable stale response after unrelated source invalidation. Multi-entry
+exports, long paths and unsupported witnesses retain full client recapture.
+
 `POST /api/ui/server-call` accepts only `{descriptor, input}`, with input in the
 runtime's tagged data format. Descriptors expire after two minutes and are
 local to the issuing executor. The server validates input against a closed

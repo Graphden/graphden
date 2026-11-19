@@ -52,7 +52,9 @@ async function openTypeCreate(page, nsName) {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
       (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
-    target?.querySelector('.ns-plus-btn')?.click();
+    const button = target?.querySelector('.ns-plus-btn');
+    button?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    button?.click();
   }, nsName);
   await page.waitForSelector('.create-menu', {timeout: 5000});
   await page.evaluate(() => {

@@ -116,13 +116,19 @@ const undoToast = (page) => page.evaluate(() => {
       input.dispatchEvent(new Event('input', {bubbles: true}));
       Array.from(pop.querySelectorAll('.arg-value-edit-btn')).find((b) => b.textContent.trim() === 'Save').click();
     }, RENAMED);
-    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
+    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name)
+      && gdGraphEditsReady() && decodeURIComponent(location.hash).endsWith('.' + name)
+      && [...document.querySelectorAll('.node-overlay')].some(el => el.textContent.includes(name))
+      && document.querySelector('#gd-inspector')?.textContent.includes(name),
       RENAMED, {timeout: 30000, polling: 200});
     toast = await undoToast(page);
     assert(toast && toast.visible && toast.label === 'Renamed ' + CHILD + ' → ' + RENAMED,
       'the toast offers to undo the rename: ' + JSON.stringify(toast));
     await page.click('#gd-undo-toast .gd-undo-toast-btn');
-    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
+    await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name)
+      && gdGraphEditsReady() && decodeURIComponent(location.hash).endsWith('.' + name)
+      && [...document.querySelectorAll('.node-overlay')].some(el => el.textContent.includes(name))
+      && document.querySelector('#gd-inspector')?.textContent.includes(name),
       CHILD, {timeout: 30000, polling: 200});
     const back = (await getEntities(page, CHILD)).fns.find((f) => f.name === CHILD);
     assert(back, 'the old name is back after Undo');

@@ -60,7 +60,7 @@
 
 
 (defn- callback-source
-  [storage authorize! role-ids staged-source staged-function-ids]
+  [storage authorize! role-ids staged-source staged-function-ids collect-client!]
   (let [staged-ids (set staged-function-ids)
         staged-roots (filterv staged-ids role-ids)
         staged (when (seq staged-roots)
@@ -71,15 +71,18 @@
         persisted-roots (into (set (remove staged-ids role-ids))
                               (bundle/external-identities staged-records))
         persisted (when (seq persisted-roots)
-                    (source/collect-client-closure storage persisted-roots authorize!))]
+                    (collect-client! storage persisted-roots authorize!))]
     (cohort/merge-source persisted staged)))
 
 
 (defn proposal
   ([storage policy nonce]
    (proposal storage policy nonce {}))
-  ([storage policy nonce {:keys [selection staged-source staged-function-ids renames]}]
-   (let [authorize! (tenancy/browser-source-policy storage)
+  ([storage policy nonce {:keys [selection staged-source staged-function-ids renames graph-hint]}]
+   (let [collect-client! (if graph-hint
+                           #(source/collect-client-closure %1 %2 %3 graph-hint)
+                           source/collect-client-closure)
+         authorize! (tenancy/browser-source-policy storage)
          handler (binding/capture! storage)
          choice (resolution/root-choice storage authorize! policy)
          _ (when-not (= resolution/default-root-id (:root handler))
@@ -98,7 +101,7 @@
                (refuse! :unmanaged-personal-root))
              (writer/assert-write-authorized! storage :fn prior-row (:id prior-row)))
          prior-graph (when prior-row
-                       (source/collect-client-closure storage [(:id prior-row)] authorize!))
+                       (collect-client! storage [(:id prior-row)] authorize!))
          _ (when prior-row
              (snapshot/validate-source!
                {:graph prior-graph :namespaces (source/collect-namespaces storage prior-graph)}
@@ -114,7 +117,7 @@
                                                      (:configuration selection)))))
          callback-graph (when (seq selected-role-ids)
                           (callback-source storage authorize! selected-role-ids
-                                           staged-source staged-function-ids))
+                                           staged-source staged-function-ids collect-client!))
          parsed (migration-parse/parse (str "root-migration." nonce)
                                        (:configuration selection) callback-graph)
          _ (when (sp/read-entity storage :fn (:root-id parsed))
@@ -126,7 +129,7 @@
                      :source-roots (conj role-ids component-root-id)
                      :staged-source staged-source
                      :staged-function-ids staged-function-ids
-                     :collect-external! source/collect-client-closure
+                     :collect-external! collect-client!
                      :normalize-records #(migration-slots/resolve-bindings
                                            %1 (:definitions parsed) %2)
                      :validate-result! validate-root!
@@ -146,7 +149,7 @@
                                       (resolution/source-revision (:id prior-row)
                                                                   {:graph prior-graph} scope)
                                       (resolution/root-source-revision
-                                        storage authorize! policy resolution/default-root-id scope))
+                                        storage authorize! policy resolution/default-root-id scope graph-hint))
                   :namespaces []
                   :changed-functions (if prior-row [(:id prior-row)] [])
                   :previous (when prior-row {:id (:id prior-row) :name prior-name

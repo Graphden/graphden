@@ -8,6 +8,8 @@
   const organization = () => typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
   let configuration = null;
   let generation = 0;
+  let planQueue = [];
+  const planBatches = new Set();
   const branch = () => typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : 'main';
   function contextStamp() {
     return JSON.stringify([window.gdPrefOwner, organization(), branch()]);
@@ -22,6 +24,7 @@
         && !window.isAuthenticated?.());
   }
   function status(component, message) {
+    if (message) window.gdUILoading?.error(component, 'could not be loaded. Built-in controls are available.');
     if (statuses.get(component) === message) return;
     statuses.set(component, message);
     window.dispatchEvent(new Event('gd-ui-components-status'));
@@ -38,13 +41,102 @@
       return evaluator.run(entry, argumentsForGraph, operationBudget);
     }};
   }
+  const cancelled = () => new DOMException('Selection changed', 'AbortError');
+  function directPlan(component, signal) {
+    return window.authFetch(window.API.api_ui_configuration_plan, {
+      method: 'POST', signal, cache: 'no-store',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({component}),
+    });
+  }
+  function settlePlan(entry, response, error = null) {
+    entry.signal?.removeEventListener('abort', entry.abort);
+    if (entry.done) return;
+    entry.done = true;
+    if (entry.signal?.aborted || entry.started !== stamp()) entry.reject(cancelled());
+    else if (error) entry.reject(error);
+    else entry.resolve(response);
+  }
+  async function sendPlans(entries) {
+    const controller = new AbortController();
+    planBatches.add(entries);
+    for (const entry of entries) { entry.transport = controller; entry.peers = entries; }
+    const components = [...new Set(entries.map(entry => entry.component))];
+    try {
+      if (components.length === 1 && entries.length === 1) {
+        settlePlan(entries[0], await directPlan(components[0], controller.signal));
+        return;
+      }
+      const response = await window.authFetch(window.API.api_ui_configuration_plan, {
+        method: 'POST', signal: controller.signal, cache: 'no-store',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({components}),
+      });
+      const result = await response.json();
+      const items = new Map();
+      if (response.ok && result.ok === true && Array.isArray(result.items)) {
+        for (const item of result.items) {
+          if (!components.includes(item.component) || items.has(item.component)
+            || !Number.isInteger(item.result?.status) || item.result.status < 200 || item.result.status > 599
+            || typeof item.result.body !== 'string') throw new Error('Invalid component batch');
+          items.set(item.component, item.result);
+        }
+      }
+      if (items.size !== components.length) {
+        // A global refusal or older server cannot suppress otherwise valid
+        // independent components. Retry each read once through its old path.
+        await Promise.all(entries.map(async entry => {
+          if (entry.done || entry.started !== stamp()) { settlePlan(entry, null, cancelled()); return; }
+          const independent = new AbortController();
+          entry.transport = independent;
+          entry.peers = [entry];
+          try { settlePlan(entry, await directPlan(entry.component, independent.signal)); }
+          catch (error) { settlePlan(entry, null, error); }
+        }));
+        return;
+      }
+      for (const entry of entries) {
+        const item = items.get(entry.component);
+        settlePlan(entry, new Response(item.body, {status: item.status, headers: item.headers}));
+      }
+    } catch (error) {
+      for (const entry of entries) settlePlan(entry, null, error);
+    } finally {
+      planBatches.delete(entries);
+    }
+  }
+  function flushPlans() {
+    const queued = planQueue;
+    planQueue = [];
+    const groups = new Map();
+    for (const entry of queued) {
+      if (entry.done || entry.started !== stamp()) { settlePlan(entry, null, cancelled()); continue; }
+      const group = groups.get(entry.started) || [];
+      group.push(entry);
+      groups.set(entry.started, group);
+    }
+    for (const group of groups.values()) {
+      // Three roles per snapshot preserve parallel work and leave capacity
+      // for a root read beside the eight legacy hosts. Ordinary deployments
+      // keep their individual requests unless the fresh preferences opt in.
+      const size = window.gdUIPlanBatchMax === 3 ? 3 : 1;
+      for (let index = 0; index < group.length; index += size) void sendPlans(group.slice(index, index + size));
+    }
+  }
+  function requestPlan(component, started, signal) {
+    return new Promise((resolve, reject) => {
+      const entry = {component, started, signal, resolve, reject, done: false, transport: null};
+      entry.abort = () => {
+        settlePlan(entry, null, cancelled());
+        if (entry.transport && entry.peers.every(peer => peer.done)) entry.transport.abort();
+      };
+      if (signal?.aborted) { entry.abort(); return; }
+      signal?.addEventListener('abort', entry.abort, {once: true});
+      if (!planQueue.length) void Promise.resolve().then(flushPlans);
+      planQueue.push(entry);
+    });
+  }
   async function loadPlan(component, started, signal) {
     return window.gdReadGraphResponse(
-      () => window.authFetch(window.API.api_ui_configuration_plan, {
-        method: 'POST', signal, cache: 'no-store',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({component}),
-      }), signal, () => started === stamp(),
+      () => requestPlan(component, started, signal), signal, () => started === stamp(),
       (response, result) => response.status === 422 && !response.ok && result.ok === false
         && result.code === 'policy-refresh-required' && result.retryable === true);
   }
@@ -94,8 +186,10 @@
   };
   let refreshTimer = null;
   function refresh(root = true) {
+    window.gdUILoading?.clear(true);
     if (root) void window.gdEditorRoot?.reload();
     generation++;
+    for (const entry of [...planQueue, ...[...planBatches].flat()]) entry.abort();
     configuration = null;
     catalog = null;
     runtimeIdentities.clear();

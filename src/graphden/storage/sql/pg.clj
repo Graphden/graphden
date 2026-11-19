@@ -101,7 +101,9 @@
     ;; JDBC statement timeout (`*query-timeout-ms*` → seconds) so a
     ;; tenant's raw-SQL `select pg_sleep(3600)` can't pin a pool
     ;; connection indefinitely and starve the shared pool.
-    (vec (jdbc/execute! target stmt {:builder-fn rs/as-unqualified-maps
+    ;; Application SQL stays unclassified at the scoped storage read seam.
+    ;; A source observer must not mistake arbitrary SQL for an admitted read.
+    (vec (pg-util/exec! target stmt {:builder-fn rs/as-unqualified-maps
                                      :timeout (pg-util/get-query-timeout-seconds)}))))
 
 
@@ -115,7 +117,7 @@
   [ctx hsql]
   (let [target (pg-target ctx)
         stmt   (format-hsql hsql)
-        result (jdbc/execute-one! target stmt
+        result (pg-util/exec-one! target stmt
                                   {:return-keys false
                                    :timeout (pg-util/get-query-timeout-seconds)})]
     (long (or (:next.jdbc/update-count result) 0))))

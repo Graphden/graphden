@@ -11,7 +11,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.system.branch-router :as br]))
+    [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.recheck :as recheck]))
 
 
 (def ^:dynamic *graph* nil)
@@ -25,15 +26,24 @@
     (exec/with-clean-registry
       #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
          (try
-           (binding [*graph* graph] (t))
+           (binding [*graph* graph
+                     ;; Keep the test truly unswept: create-router otherwise
+                     ;; schedules a background recovery on this same pool.
+                     recheck/*ctx-build-async-recheck?* false]
+             (t))
            (finally (setup/close-graph! graph)))))))
 
 
 (deftest router-answers-off-an-unswept-registry
-  (let [router (br/create-router (:ctx *graph*) "_app-ring-response")
+  (let [state (get-in *graph* [:ctx :type-recheck-state])
+        initial-state @state
+        router (br/create-router (:ctx *graph*) "_app-ring-response")
         ;; A DB-backed route (`/version` wants the build-hashes resource an
         ;; uberjar carries; the test classpath has none).
         resp (br/dispatch router {:request-method :get :uri "/api/branches" :headers {}})]
+    (testing "router creation leaves the unswept state untouched"
+      (is (= {:status :idle :generation 0} initial-state))
+      (is (= initial-state @state)))
     (testing "the ring chain returns a response map, not the router callable"
       (is (map? resp))
       (is (= 200 (:status resp)))

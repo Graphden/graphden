@@ -23,6 +23,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.traits-seed :as traits-seed]
     [graphden.system.sse :as sse]
+    [graphden.util.env :as env]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
@@ -88,12 +89,13 @@
 (defn- init-storage!
   "Unified storage initialization.
    Creates storage using create-fn, initializes with schema, seeds traits."
-  [storage-name create-fn {:keys [jdbc-url username password pool-size schema]}]
+  [storage-name create-fn {:keys [jdbc-url username password pool-size schema source-revision?]}]
   (log/info (str "Connecting to " storage-name ":") (redact-jdbc-url jdbc-url))
   (let [storage (-> (create-fn {:jdbc-url jdbc-url
                                 :username username
                                 :password password
-                                :pool-size pool-size})
+                                :pool-size pool-size
+                                :source-revision? (env/env-truthy? source-revision?)})
                     (sp/initialize-with-cleanup! schema))]
     (traits-seed/seed-traits! storage)
     (log/info (str storage-name " initialized"))

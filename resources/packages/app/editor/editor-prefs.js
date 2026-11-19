@@ -244,7 +244,8 @@ function initPrefsLate() {
   gdPrefApply('keymap');
   installViewportWatcher();
   // the per-user server copy (theme + keymap) — wins over the mirror
-  void gdPrefsRefresh(true).finally(() => _prefsInitialReady());
+  _prefsStarted = true;
+  void refreshPrefsAfterAuth();
 }
 
 // Re-apply auto-collapse decision when the viewport crosses the
@@ -420,10 +421,14 @@ const _prefWrittenGen = {};
 const _prefPendingGen = {};
 let _prefsIdentityGen = 0;
 let _prefsRefreshGen = 0;
+let _prefsStarted = false;
+let _prefsInitialPending = true;
+let _prefsAuthRefresh = null;
 let _prefsInitialReady;
 window.gdPrefsInitialReady = new Promise(resolve => { _prefsInitialReady = resolve; });
 window.gdPrefsReady = false;
 window.gdPrefOwner = null;
+window.gdUIPlanBatchMax = 1;
 
 function gdPrefRead(key) { return _prefs?.[key] ?? null; }
 
@@ -440,6 +445,24 @@ function gdPrefApply(key) {
 
 function gdPrefNotify(key, detail) {
   for (const fn of _prefListeners) { try { fn(key, gdPrefRead(key), detail); } catch (_) {} }
+}
+
+// Boot and its account-discovery event share one refresh for the current
+// identity. Explicit refreshes remain fresh requests (including PUT conflicts).
+function refreshPrefsAfterAuth() {
+  const identity = _prefsIdentityGen;
+  if (_prefsAuthRefresh?.identity === identity) return _prefsAuthRefresh.promise;
+  const request = {identity};
+  request.promise = Promise.resolve(window.gdAccountsReady).catch(() => {}).then(() => {
+    if (identity === _prefsIdentityGen) return gdPrefsRefresh(_prefsInitialPending);
+  }).finally(() => {
+    if (_prefsAuthRefresh !== request) return;
+    _prefsAuthRefresh = null;
+    _prefsInitialPending = false;
+    _prefsInitialReady();
+  });
+  _prefsAuthRefresh = request;
+  return request.promise;
 }
 
 // Component plans resolve the server's selection, so publish that preference
@@ -521,12 +544,17 @@ async function gdPrefsRefresh(initial = false) {
     }
     _prefs = merged;
     window.gdPrefOwner = owner;
+    // Grouping helps the bounded retention path. Keep ordinary deployments
+    // parallel, and never restore a hint from a previous owner's response.
+    window.gdUIPlanBatchMax = r.headers?.get('X-Graphden-UI-Plan-Batch-Max') === '3' ? 3 : 1;
     window.gdPrefsReady = true;
     writePrefsMirror(_prefs);
     gdPrefApply('theme');
     gdPrefApply('keymap');
     gdPrefNotify('theme');
     gdPrefNotify('keymap');
+    // An unchanged selection can resolve different source or permissions after
+    // a package install. Explicit refresh must still revalidate its plans.
     gdPrefNotify('components', {initial});
   } catch (_) { /* offline / signed out — the mirror stands */ }
 }
@@ -544,11 +572,15 @@ window.addEventListener('gd-auth-changed', () => {
   for (const key of Object.keys(_prefPendingGen)) delete _prefPendingGen[key];
   window.gdPrefsReady = false;
   window.gdPrefOwner = null;
+  window.gdUIPlanBatchMax = 1;
   gdPrefApply('theme');
   gdPrefApply('keymap');
   gdPrefNotify('theme');
   gdPrefNotify('keymap');
   gdPrefNotify('components');
+  if (_prefsStarted && (_prefsInitialPending
+      || (typeof isAuthenticated === 'function' && isAuthenticated())
+      || (typeof accountsAuthed !== 'undefined' && accountsAuthed))) void refreshPrefsAfterAuth();
 });
 
 window.gdThemeTokens = THEME_TOKENS;

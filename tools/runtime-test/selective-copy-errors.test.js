@@ -80,3 +80,20 @@ test('observed policy recovery requires the same nonmissing loader identity', ()
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [retry], true, true), [error]);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...retry, code: null}, success], true, true), [error]);
 });
+
+test('item fallback in an HTTP 200 batch cannot waive any network-console refusal', () => {
+  const reply = {...missing, transportId: 1, transportStatus: 200};
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [reply], true), [error]);
+});
+
+test('one global batch refusal authorizes one console occurrence only after every component recovers', () => {
+  const retries = ['canvas', 'canvas-values'].map((component, index) => ({kind: 'plan', url, component,
+    status: 422, code: 'policy-refresh-required', retryable: true, sequence: index + 1,
+    transportId: 1, transportStatus: 422}));
+  const success = {...retries[0], sequence: 3, status: 200, ok: true, transportId: 3, transportStatus: 200};
+  const fallback = {...missing, component: 'canvas-values', sequence: 4, transportId: 4, transportStatus: 200};
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [...retries, success, fallback], true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [...retries, success], true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [...retries, success,
+    {...fallback, component: 'canvas-metadata'}], true), [error]);
+});

@@ -65,7 +65,11 @@
 (deftest export-refusals-disclose-only-the-exact-retryable-category
   (testing "invalid requests keep the existing opaque refusal and never read source"
     (with-redefs [source/with-snapshot (fn [& _] (throw (AssertionError. "Unexpected source read")))]
-      (doseq [input [nil {} {:component "unknown"} {:component "fn-picker" :fn-id fn-id}]]
+      (doseq [input [nil {} {:component "unknown"} {:component "fn-picker" :fn-id fn-id}
+                     {:components []} {:components ["canvas" "canvas"]}
+                     {:components ["canvas" "unknown"]} {:component "canvas" :components ["canvas"]}
+                     {:components ["canvas" "canvas-values" "canvas-inheritance" "canvas-metadata"
+                                   "canvas-bindings" "canvas-type-structure" "explorer" "inspector" "feedback"]}]]
         (is (= unavailable (components/export-resolved {:storage {}} input))))))
   (testing "ACL, invalid source and unknown failures retain their distinct safe categories"
     (doseq [[error status]
@@ -131,8 +135,8 @@
                                              (swap! events conj [:component frozen]) {:valid true})]
       (is (:ok (components/export-resolved ctx {:component "fn-picker"})))
       (is (= [:epoch [:capture {:original :secret}] :snapshot
-              [:manifest (assoc policy :type-recheck nil)]
-              [:component (assoc policy :type-recheck nil)] :epoch] @events)))))
+              [:manifest (assoc policy :type-recheck nil :checker-cache nil)]
+              [:component (assoc policy :type-recheck nil :checker-cache nil)] :epoch] @events)))))
 
 
 (deftest resolved-export-uses-authorized-configuration-not-legacy-selector
@@ -141,14 +145,16 @@
         policy {:original :policy}
         calls (atom [])
         authorize! (constantly nil)
-        ctx {:storage storage :rich-types-atom (atom {})}]
+        hint {:untrusted-selection "unselected-hint-identity"}
+        ctx {:storage storage :rich-types-atom (atom {}) :graph-cache (atom hint)}]
     (with-redefs [snapshot/capture-policy (constantly policy)
                   source/with-snapshot (fn [actual f]
                                          (is (= storage actual))
                                          (f actual authorize!))
-                  resolution/capture (fn [actual guard frozen]
+                  resolution/capture (fn [actual guard frozen graph-hint]
                                        (swap! calls conj :resolve)
-                                       (is (= [storage authorize! (assoc policy :type-recheck nil)]
+                                       (is (identical? hint graph-hint))
+                                       (is (= [storage authorize! (assoc policy :type-recheck nil :checker-cache nil)]
                                               [actual guard frozen]))
                                        {:id selected :revision "authoritative-revision"
                                         :configuration {:fn-picker {:view fn-id}}
@@ -163,14 +169,14 @@
                                       (is (= {:limit 2} opts))
                                       (swap! calls conj :preference)
                                       [{:value {:fn-id "unselected-legacy-identity"}}])
-                  source/collect-closure (fn [actual ids _]
+                  source/collect-closure (fn [actual ids _ _]
                                            (is (= storage actual))
                                            (is (= [fn-id] (vec ids)))
                                            (swap! calls conj :body) {})
                   source/collect-namespaces (constantly [])
                   snapshot/export-snapshot (fn [_ _ entries frozen]
                                              (is (= {:view fn-id} entries))
-                                             (is (= (assoc policy :type-recheck nil) frozen))
+                                             (is (= (assoc policy :type-recheck nil :checker-cache nil) frozen))
                                              (swap! calls conj :export) {:checked true})]
       (let [result (components/export-resolved ctx {:component "fn-picker"})]
         (is (:ok result))
@@ -178,3 +184,90 @@
         (is (= "authoritative-revision" (:configuration-revision result)))
         (is (= {:present true :value {:fn-id "unselected-legacy-identity"}} (:configuration-preference result)))
         (is (= [:resolve :body :export :preference] @calls))))))
+
+
+(defn- with-batch-source
+  [configuration consume]
+  (let [events (atom [])
+        ctx {:storage {} :rich-types-atom (atom {})}]
+    (with-redefs [snapshot/capture-policy (constantly {})
+                  context/invalidation-epoch (constantly 7)
+                  source/with-snapshot (fn [storage f]
+                                         (swap! events conj :snapshot)
+                                         (f storage (fn [row _] (swap! events conj [:authorize (:id row)]))))
+                  resolution/capture (fn [& _]
+                                       (swap! events conj :resolve)
+                                       {:id fn-id :configuration configuration :revision "revision"})
+                  resolution/owned-writable-components (constantly {})
+                  components/assert-current-policy! (constantly nil)
+                  sp/read-entity (fn [_ _ id] {:id id})
+                  sp/query-entities (constantly [])
+                  source/collect-retained-closure (fn [_ ids authorize! _]
+                                                    (doseq [id ids] (authorize! {:id id} false))
+                                                    {:fns []})
+                  source/collect-namespaces (constantly [])
+                  snapshot/export-snapshot (fn [_ _ entries _] {:entries entries})]
+      (consume ctx events))))
+
+
+(deftest component-batch-shares-resolution-without-sharing-body-authority
+  (let [other (random-uuid)]
+    (with-batch-source {:canvas {:view fn-id} :canvas-values {:view other}}
+      (fn [ctx events]
+        (let [batch (components/export-resolved ctx {:components ["canvas" "canvas-values"]})]
+          (is (true? (:ok batch)))
+          (is (true? (:batch-complete? batch)))
+          (is (= 1 (count (filter #{:snapshot} @events))))
+          (is (= 1 (count (filter #{:resolve} @events))))
+          (is (some #{[:authorize fn-id]} @events))
+          (is (some #{[:authorize other]} @events))
+          (is (= (mapv #(components/export-resolved ctx {:component %}) ["canvas" "canvas-values"])
+                 (mapv :result (:items batch)))))))))
+
+
+(deftest missing-component-is-an-independent-batch-fallback
+  (with-batch-source {:canvas {:view fn-id}}
+    (fn [ctx _]
+      (let [result (components/export-resolved ctx {:components ["canvas" "canvas-values"]})]
+        (is (false? (:ok result)) "Partial batches cannot publish staged replay recipes as full success")
+        (is (true? (:batch-complete? result)))
+        (is (= ["canvas" "canvas-values"] (mapv :component (:items result))))
+        (is (true? (get-in result [:items 0 :result :ok])))
+        (is (= (assoc unavailable :failure-reason "component-missing")
+               (get-in result [:items 1 :result])))))))
+
+
+(deftest batch-errors-never-return-earlier-successful-plans
+  (doseq [error [(ex-info "private denial" {:type :authz/forbidden})
+                 (java.sql.SQLException. "private SQL")
+                 (InterruptedException. "private cancellation")]]
+    (with-batch-source {:canvas {:view fn-id} :canvas-values {:view (random-uuid)}}
+      (fn [ctx _]
+        (let [calls (atom 0)]
+          (with-redefs [snapshot/export-snapshot (fn [& _]
+                                                   (when (= 2 (swap! calls inc)) (throw error))
+                                                   {:checked true})]
+            (let [result (components/export-resolved ctx {:components ["canvas" "canvas-values"]})]
+              (is (= 2 @calls))
+              (is (false? (:ok result)))
+              (is (not (contains? result :items)))
+              (is (not (str/includes? (pr-str result) "private"))))))))))
+
+
+(deftest batch-preserves-outer-cancellation-and-discards-oversize-output
+  (with-batch-source {:canvas {:view fn-id} :canvas-values {:view (random-uuid)}}
+    (fn [ctx _]
+      (let [checks (atom 0)]
+        (binding [source/*snapshot-check* #(when (= 2 (swap! checks inc))
+                                             (throw (InterruptedException. "cancelled")))]
+          (let [result (components/export-resolved ctx {:components ["canvas" "canvas-values"]})]
+            (is (false? (:ok result)))
+            (is (not (contains? result :items))))))
+      (let [exports (atom 0)]
+        (with-redefs [snapshot/export-snapshot (fn [& _]
+                                                 (swap! exports inc)
+                                                 {:wire (str/join (repeat (* 5 1024 1024) "x"))})]
+          (let [result (components/export-resolved ctx {:components ["canvas" "canvas-values"]})]
+            (is (false? (:ok result)))
+            (is (not (contains? result :items)))
+            (is (= 1 @exports) "Stop before allocating the remaining component plans")))))))

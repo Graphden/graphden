@@ -25,3 +25,15 @@ test('page errors and unrelated console errors are always fatal', () => {
     assert.deepEqual(unexpectedPolicyRetryErrors([e], [refusal, success], true), [e]);
   }
 });
+
+test('batched item refusals only waive the actual deduplicated failing transport', () => {
+  const url = 'http://localhost/api/ui/configuration/plan';
+  const error = {kind: 'console', url, text: 'Failed to load resource: the server responded with a status of 422 (Unprocessable Entity)'};
+  const retries = ['canvas', 'canvas-values'].map((component, index) => ({url, component, sequence: index + 1,
+    status: 422, code: 'policy-refresh-required', retryable: true, transportId: 1, transportStatus: 422}));
+  const successes = retries.map((reply, index) => ({...reply, sequence: index + 3, status: 200, ok: true,
+    transportId: index + 3, transportStatus: 200}));
+  assert.deepEqual(unexpectedPolicyRetryErrors([error, error], [...retries, ...successes], true), [error]);
+  assert.deepEqual(unexpectedPolicyRetryErrors([error], [...retries.map(row => ({...row, transportStatus: 200})), ...successes], true), [error]);
+  assert.deepEqual(unexpectedPolicyRetryErrors([error], [...retries, successes[0]], true), [error]);
+});

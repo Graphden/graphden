@@ -67,7 +67,7 @@ test('an unknown historical refusal remains fatal even after a successful reply'
   await assert.rejects(drainUIPlanReplies(requests, replies, [], true), /known terminal receipt/);
 });
 
-test('the test observer retains native responses and correlates only finite metadata by actual signal', async () => {
+test('the test observer retains native responses and correlates finite metadata by loader invocation', async () => {
   const originals = [], signals = [];
   const context = vm.createContext({URL, crypto: {randomUUID: () => 'document-one'}, location: {href: 'http://localhost/'}, window: {
     fetch: async (_url, options) => {
@@ -86,18 +86,21 @@ test('the test observer retains native responses and correlates only finite meta
   };
   const observed = await observeUIPlanLoads(page);
   const first = new AbortController(), second = new AbortController();
+  context.window.gdLoadUIComponentRuntime = () => {};
   const invoke = signal => context.window.fetch('/api/ui/configuration/plan',
     {method: 'POST', signal, body: JSON.stringify({component: 'canvas-bindings'})});
+  context.window.gdLoadUIComponentRuntime('canvas-bindings', null, {}, first.signal);
   assert.equal(await invoke(first.signal), originals[0]);
+  await invoke(second.signal); // A retry may get a fresh transport signal.
+  context.window.gdLoadUIComponentRuntime('canvas-bindings', null, {}, first.signal);
   await invoke(first.signal);
-  await invoke(second.signal);
   await observed.flush();
   await drainUIPlanReplies(observed.requests, observed.replies, [], true);
   assert.equal(signals[0], first.signal);
   assert.equal(observed.requests[0].loadId, observed.requests[1].loadId);
   assert.notEqual(observed.requests[0].loadId, observed.requests[2].loadId);
   assert.deepEqual(Object.keys(observed.replies[0]).sort(),
-    ['code', 'component', 'documentId', 'fallback', 'kind', 'loadId', 'ok', 'retryable', 'sequence', 'status', 'url']);
+    ['code', 'component', 'documentId', 'fallback', 'kind', 'loadId', 'ok', 'retryable', 'sequence', 'status', 'transportId', 'transportStatus', 'url']);
   assert.equal(JSON.stringify(observed).includes('not recorded'), false);
 });
 
@@ -201,4 +204,113 @@ test('the observer freezes cancellation facts at rejection and never records exc
   assert.equal(observed.requests[1].abortError, true);
   assert.equal(observed.requests[1].signalAborted, true);
   assert.equal(JSON.stringify(observed).includes('private-abort-payload'), false);
+});
+
+function observerPage(fetch) {
+  const context = vm.createContext({URL, crypto: {randomUUID: () => 'document-one'},
+    location: {href: 'http://localhost/'}, window: {fetch}});
+  return {context, page: {
+    async exposeFunction(name, callback) { context.window[name] = (...args) => Promise.resolve(callback(...args)); },
+    async addInitScript(callback, argument) {
+      context.argument = argument;
+      vm.runInContext('(' + callback.toString() + ')(argument)', context);
+    },
+    async evaluate(callback) { return vm.runInContext('(' + callback.toString() + ')()', context); },
+  }};
+}
+const batchResponse = items => new Response(JSON.stringify({ok: true, items: items.map(([component, status, body]) =>
+  ({component, result: {status, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}}))}));
+
+test('a batch records each logical invocation and retains its identity across independent retries', async () => {
+  let count = 0;
+  const {page, context} = observerPage(async () => ++count === 1
+    ? batchResponse([['canvas-bindings', 422, {ok: false, code: 'policy-refresh-required', retryable: true}],
+      ['canvas-metadata', 422, {ok: false, code: 'component-missing', fallback: 'builtin'}]])
+    : new Response(JSON.stringify({ok: true})));
+  const observed = await observeUIPlanLoads(page);
+  context.window.gdLoadUIComponentRuntime = () => {};
+  const first = new AbortController(), second = new AbortController();
+  context.window.gdLoadUIComponentRuntime('canvas-bindings', null, {}, first.signal);
+  context.window.gdLoadUIComponentRuntime('canvas-metadata', null, {}, second.signal);
+  await context.window.fetch('/api/ui/configuration/plan', {method: 'POST', signal: new AbortController().signal,
+    body: JSON.stringify({components: ['canvas-bindings', 'canvas-metadata']})});
+  await observed.flush();
+  assert.deepEqual(observed.requests.map(row => row.sequence), [1, 2]);
+  assert.notEqual(observed.requests[0].loadId, observed.requests[1].loadId);
+  assert.deepEqual(observed.replies.map(row => [row.component, row.status, row.code]),
+    [['canvas-bindings', 422, 'policy-refresh-required'], ['canvas-metadata', 422, 'component-missing']]);
+  await context.window.fetch('/api/ui/configuration/plan', {method: 'POST', signal: new AbortController().signal,
+    body: JSON.stringify({component: 'canvas-bindings'})});
+  await observed.flush();
+  assert.equal(observed.requests[0].loadId, observed.requests[2].loadId);
+  await drainUIPlanReplies(observed.requests, observed.replies, [], true);
+});
+
+test('configuration capture receives its own logical invocation identity', async () => {
+  const {page, context} = observerPage(async () => new Response(JSON.stringify({ok: true})));
+  const observed = await observeUIPlanLoads(page);
+  const returned = Promise.resolve('unchanged');
+  context.window.gdCaptureUIConfiguration = () => returned;
+  assert.equal(context.window.gdCaptureUIConfiguration(), returned);
+  await context.window.fetch('/api/ui/configuration/plan', {method: 'POST', body: JSON.stringify({component: 'account-menu'})});
+  await observed.flush();
+  context.window.gdCaptureUIConfiguration();
+  await context.window.fetch('/api/ui/configuration/plan', {method: 'POST', body: JSON.stringify({component: 'account-menu'})});
+  await observed.flush();
+  assert.notEqual(observed.requests[0].loadId, observed.requests[1].loadId);
+});
+
+test('malformed batches make the receipt barrier fail while preserving the native response', async () => {
+  const native = batchResponse([['canvas-bindings', 200, {ok: true}], ['canvas-bindings', 200, {ok: true}]]);
+  const {page, context} = observerPage(async () => native);
+  const observed = await observeUIPlanLoads(page);
+  assert.equal(await context.window.fetch('/api/ui/configuration/plan', {method: 'POST',
+    body: JSON.stringify({components: ['canvas-bindings', 'canvas-metadata']})}), native);
+  await assert.rejects(observed.flush(), /Invalid UI plan observer receipt/);
+  assert.equal(observed.replies.length, 0);
+});
+
+test('shared transport failures retain each original consumer cancellation fact', async () => {
+  let reject;
+  const {page, context} = observerPage(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const observed = await observeUIPlanLoads(page);
+  context.window.gdLoadUIComponentRuntime = () => {};
+  const first = new AbortController(), second = new AbortController(), transport = new AbortController();
+  context.window.gdLoadUIComponentRuntime('canvas-bindings', null, {}, first.signal);
+  context.window.gdLoadUIComponentRuntime('canvas-metadata', null, {}, second.signal);
+  const native = context.window.fetch('/api/ui/configuration/plan', {method: 'POST', signal: transport.signal,
+    body: JSON.stringify({components: ['canvas-bindings', 'canvas-metadata']})});
+  first.abort(); transport.abort();
+  reject(Object.assign(new Error('not recorded'), {name: 'AbortError'}));
+  await assert.rejects(native, error => error.name === 'AbortError');
+  await observed.flush();
+  assert.deepEqual(observed.requests.map(row => [row.abortError, row.signalAborted]), [[true, true], [true, false]]);
+  await assert.rejects(drainUIPlanReplies(observed.requests, observed.replies, [], true, async () => {}), /request failed/);
+});
+
+
+test('a retired transport records cancellation even while its consumer signal stays active', async () => {
+  let reject;
+  const {page, context} = observerPage(() => new Promise((_resolve, fail) => { reject = fail; }));
+  const observed = await observeUIPlanLoads(page);
+  const consumer = new AbortController(), transport = new AbortController();
+  context.window.gdLoadUIComponentRuntime = () => {};
+  context.window.gdLoadUIComponentRuntime('canvas-bindings', null, {}, consumer.signal);
+  const response = context.window.fetch('/api/ui/configuration/plan', {method: 'POST', signal: transport.signal,
+    body: JSON.stringify({component: 'canvas-bindings'})});
+  transport.abort();
+  reject(Object.assign(new Error('Selection changed'), {name: 'AbortError'}));
+  await assert.rejects(response, error => error.name === 'AbortError');
+  await observed.flush();
+  assert.equal(consumer.signal.aborted, false);
+  assert.equal(observed.requests[0].abortError, true);
+  assert.equal(observed.requests[0].signalAborted, false);
+  assert.equal(observed.requests[0].transportSignalAborted, true);
+  // A captured transport abort still requires a newer successful load before
+  // the receipt can be treated as superseded.
+  await assert.rejects(drainUIPlanReplies(observed.requests, observed.replies, [], true, async () => {}), /request failed/);
+  const replacement = {...observed.requests[0], sequence: 2, loadId: 2, status: 200};
+  const terminal = await drainUIPlanReplies([...observed.requests, replacement],
+    [{...replacement, kind: 'plan', ok: true}], [], true, async () => {});
+  assert.equal(terminal.superseded.length, 1);
 });

@@ -127,30 +127,19 @@
     }
   }
 
-  // Operate panels are normally mounted as a side effect of the sidebar render
-  // at boot. If they're missing — e.g. the sidebar last rendered in search mode,
-  // which skips the ops sections — repopulate so Operate never opens empty.
+  // Management panels load on entry, independently of Explorer search or
+  // filters. Repainting the Explorer would also start unrelated cache reads.
   function gdRenderOperate() {
     const host = document.getElementById('gd-operate-panels');
-    if (host && host.children.length === 0
-        && typeof updateEntityList === 'function' && typeof graphData !== 'undefined' && graphData) {
-      updateEntityList(graphData);
-    }
-    // Live panels (Assets today — the code diagnostics live in the Build
-    // drawer now) are cached once mounted, so re-fetch them each time
-    // Operate opens — that is when the user is viewing them and they must
-    // reflect edits made since the last open.
-    if (typeof window.reloadDynamicOpsSections === 'function') window.reloadDynamicOpsSections();
+    const mounted = !!host?.children.length;
+    if (typeof mountOpsSections === 'function') mountOpsSections();
+    // First mount already starts the live panels; only a later entry needs
+    // another fresh body, reflecting edits made while the surface was closed.
+    if (mounted && typeof window.reloadDynamicOpsSections === 'function') window.reloadDynamicOpsSections();
   }
 
-  // Platform panels mount the same way (sidebar render → #gd-platform-panels);
-  // repopulate if the surface opens empty. Same guard as Operate.
   function gdRenderPlatform() {
-    const host = document.getElementById('gd-platform-panels');
-    if (host && host.children.length === 0
-        && typeof updateEntityList === 'function' && typeof graphData !== 'undefined' && graphData) {
-      updateEntityList(graphData);
-    }
+    if (typeof mountOpsSections === 'function') mountOpsSections();
   }
 
   // The surfaces that own a real <section> (vs the placeholder overlay).

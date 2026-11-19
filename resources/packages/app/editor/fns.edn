@@ -64,6 +64,7 @@
                   "packages/app/editor/editor-marketplace.js"
                   "packages/app/editor/editor-theme.js"
                   "packages/app/editor/editor-ui-policy.js"
+                  "packages/app/editor/editor-ui-loading.js"
                   "packages/app/editor/editor-theme-graph.js"
                   "packages/app/editor/editor-ui-component-catalog.js"
                   ;; Feedback ("Report a problem") — early so its uncaught-

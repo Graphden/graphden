@@ -1,5 +1,5 @@
 'use strict';
-const {unexpectedPolicyRetryErrors, samePlanLoad} = require('./policy-retry-errors');
+const {samePlanLoad, uniqueConsoleTransports} = require('./policy-retry-errors');
 // Keep the finite console-recovery contract in sync with the shipped graph
 // component catalog. The runtime test checks these exact names and root keys.
 const componentRoots = Object.freeze({'account-menu': 'menu-id', 'fn-picker': 'picker-id',
@@ -28,21 +28,20 @@ function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified, requir
         && success.url === reply.url && success.component === reply.component
         && samePlanLoad(reply, success, requireLoadIdentity)
         && success.status === 200 && success.ok === true)))) return errors;
-  const remaining = unexpectedPolicyRetryErrors(errors, replies.filter(reply => reply.kind === 'plan'
-    && (reply.status === 200 || reply.code === 'policy-refresh-required') && !fallbackRecovery(reply, replies, requireLoadIdentity)),
-  behaviorVerified, requireLoadIdentity);
-  if (!behaviorVerified) return remaining;
+  if (!behaviorVerified) return errors;
   const allowed = new Map();
-  for (const reply of replies) {
+  for (const reply of uniqueConsoleTransports(replies.filter(reply => reply.status === 422 || reply.kind === 'activation'))) {
     const fallback = builtinFallback(reply) || fallbackRecovery(reply, replies, requireLoadIdentity);
     const conflict = reply.kind === 'activation' && reply.status === 409 && reply.code === 'stale-preference'
       && reply.noValue === true;
-    if (fallback || conflict) {
+    const policy = reply.kind === 'plan' && reply.status === 422
+      && reply.code === 'policy-refresh-required' && reply.retryable === true;
+    if (fallback || conflict || policy) {
       const key = reply.url + ':' + reply.status;
       allowed.set(key, (allowed.get(key) || 0) + 1);
     }
   }
-  return remaining.filter(error => {
+  return errors.filter(error => {
     const match = error.text?.match(/^Failed to load resource: the server responded with a status of (422) \((?:Unprocessable Entity|Unprocessable Content)\)$|^Failed to load resource: the server responded with a status of (409) \(Conflict\)$/);
     const status = match?.[1] || match?.[2];
     const key = error.url + ':' + status;

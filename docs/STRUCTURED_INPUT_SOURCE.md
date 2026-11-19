@@ -78,6 +78,33 @@ retain collection kind and the distinction between absent and present nil.
 The adapter uses the legacy declaration lowerer temporarily. The v2 parser
 handles binding expressions and its own row validation.
 
+### Proving a reference-use address
+
+`graphden.input.source-scope/verify-binding` checks a source-plan entry whose
+only blocker is one cross-reference binding. Supply its original source path,
+a frozen v2 snapshot containing the owner's other bindings, and a function
+that calls `analyze-effective-input` with the checker for that snapshot.
+
+The verifier accepts one direct value-producing reference owned by the
+source function. It finds the legacy slot UUID in all declared use scopes,
+including occupied uses. The unique occurrence must have a free public
+input route, and the reference, field and binding identities must match
+the legacy rows. Reanalysis on a private snapshot checks the new binding
+and each pre-existing occupied address. The result contains the scoped row
+and its source and public paths. Keep this result private like the plan.
+The original source blocker stays in place pending a scoped EDN writer.
+
+A field of a named result record can have the same name as a constructor
+input. The legacy parser may target the result type's field UUID even when
+the public input surface displays the constructor's field under that name.
+The verifier rejects that substitution. Repeated uses of the same target
+slot also require a separate migration rule.
+
+Run the cross-stage regression with `bb scripts/structured_input_scope_test.clj`
+on an assembled checkout. For separate branches, pass the effective-input
+analyzer checkout as the sole argument. The test uses its analyzer and type
+solver with the current source reader, parser and migration code.
+
 A base argument's documenting `:value` annotation remains a free input;
 conversion does not create a new binding or runtime default. Existing
 implementation fallback behavior is preserved. Ordinary fields named

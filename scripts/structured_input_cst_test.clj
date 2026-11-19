@@ -4,8 +4,7 @@
     [babashka.classpath :as classpath]
     [clojure.edn :as edn]
     [clojure.string :as str]
-    [clojure.test :refer [deftest is run-tests testing]]
-    [structured-input-cst :as cst])
+    [clojure.test :refer [deftest is run-tests testing]])
   (:import
     (java.security
       MessageDigest)))
@@ -14,7 +13,8 @@
 (classpath/add-classpath "src")
 
 
-(require '[graphden.input.source :as source]
+(require '[structured-input-cst :as cst]
+         '[graphden.input.source :as source]
          '[graphden.input.syntax :as syntax]
          '[graphden.packages.records.parse :as parse])
 
@@ -310,6 +310,20 @@
     (is (str/includes? target ":ref ; producer\r\n :producer"))
     (is (str/includes? target "[:x] {:type ; list type\r\n [:list :text] ; type tail\r\n}"))
     (is (str/includes? target ":value ; literal\r\n \"a\r\nb\""))))
+
+
+(deftest inline-single-argument-cst-keeps-literal-and-ref-source-spans
+  (let [original (str "{:namespace \"demo.main\" :fns [{:name :sink :return-type :any "
+                      ":args {:x :any :y :any :z :any}} {:name :producer :return-type :any} "
+                      "{:name :child :parent :sink :args {"
+                      ":x {:args ; bind here\r\n {:x {:value ; payload\r\n {:parent :datum :text \"a\r\nb\"}}} :parent :sink} "
+                      ":y {:parent :demo.main/sink :args {:x ; qualified ref\r\n :demo.main/producer}} "
+                      ":z {:parent :sink :args {:x ; bare nil\r\n nil}} :added {:type :any}}}]}")
+        target (migrate-child original)]
+    (is (str/includes? target ":x [:ref {:bind ; bind here\r\n {:x [:value ; payload\r\n {:parent :datum :text \"a\r\nb\"}]} :parent :sink}]"))
+    (is (str/includes? target ":y [:ref {:parent :demo.main/sink :bind {:x ; qualified ref\r\n [:ref :demo.main/producer]}}]"))
+    (is (str/includes? target ":z [:ref {:parent :sink :bind {:x ; bare nil\r\n nil}}]"))
+    (is (not (str/includes? target "_anon-")))))
 
 
 (deftest own-field-positions-survive-a-large-mixed-map

@@ -7,6 +7,7 @@
     [graphden.input.format :as format]
     [graphden.input.rows :as rows]
     [graphden.input.syntax :as syntax]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
 
@@ -159,19 +160,33 @@
 (declare ^:private parse-definition)
 
 
+(defn- normalize-inline-origin
+  [body origin namespace normalize-ref]
+  (let [resolve-ref #(normalize-ref namespace %)
+        [_ form] (first (:bind body))
+        parent (resolve-ref (:parent origin))]
+    (when-not (keyword? parent) (reject! :unresolved-inline-parent))
+    (when (and (keyword? form) (resolve-ref form))
+      (reject! :inline-binding-origin-mismatch))
+    (when (and (vector? form) (= :ref (first form)) (not (keyword? (resolve-ref (second form)))))
+      (reject! :unresolved-inline-reference))
+    (rebase/rewrite-references origin #(or (resolve-ref %) %))))
+
+
 (defn- inline-definitions
   [source namespace {:keys [contract scope]} {:keys [normalize-inline-parent] :as options}]
   (into (sorted-map)
         (keep (fn [[field expression]]
                 (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
-                  (let [body (second expression)]
-                    (when-not (and (= 2 (count expression)) (format/inline-leaf? body)
+                  (let [body (second expression)
+                        origin (format/inline-origin body)]
+                    (when-not (and (= 2 (count expression)) origin
                                    (or (:parent source) (:parents source)))
                       (reject! :unsupported-inline-declaration))
                     (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
-                    (let [parent (normalize-inline-parent namespace (:parent body))
-                          _ (when-not (keyword? parent) (reject! :unresolved-inline-parent))
-                          child (parse/inline-declaration {:parent parent} [(:name source) field] namespace)
+                    (let [normalized (normalize-inline-origin body origin namespace normalize-inline-parent)
+                          named (parse/inline-declaration normalized [(:name source) field] namespace)
+                          child (merge (dissoc named :args) (select-keys body [:bind]))
                           path (:path (input/resolve-address contract scope [field]))]
                       [path (assoc (parse-definition child namespace options) :inline-body body)])))))
         (when (map? (:bind source)) (:bind source))))
@@ -209,7 +224,7 @@
    namespace attached. Contexts supply source-derived :fn-id, :scope [id []],
    :input-type-id, :contract, resolved :name->id, :binding-id, declaration rows
    and an opaque :origin-ledger. For direct inline refs, :normalize-inline-parent
-   resolves [module-namespace parent-name] to its canonical legacy spelling,
+   resolves semantic refs in the child to their canonical legacy spelling,
    and context-for also receives the derived child declaration. Type-only
    contexts need no callable input.
 

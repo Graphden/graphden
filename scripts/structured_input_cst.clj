@@ -4,6 +4,7 @@
    No package evaluation, filesystem writes, or semantic classification."
   (:require
     [clojure.string :as str]
+    [graphden.input.format :as format]
     [rewrite-clj.zip :as z]
     [structured-input-inventory :as inventory])
   (:import
@@ -103,15 +104,39 @@
     (node-edit source starts key-node (constantly (str target)))))
 
 
+(declare ^:private leaf-edit)
+(declare ^:private patched-text)
+
+
+(defn- inline-edit
+  [source starts loc op path]
+  (let [body (z/sexpr loc)
+        span (node-edit source starts loc identity)]
+    (when-not (and (format/legacy-inline? body) (= (= op :wrap-inline-ref) (format/inline-leaf? body)))
+      (refuse :unsupported-inline-declaration {:path path}))
+    (let [edits (when-let [[field value] (first (:args body))]
+                  (let [leaf (value-at loc [:args field])
+                        edit (case op
+                               :inline-bare-value
+                               (if (coll? value)
+                                 (refuse :unsupported-inline-declaration {:path path})
+                                 (node-edit source starts leaf identity))
+                               :inline-bare-ref (leaf-edit source starts leaf :wrap-ref path)
+                               :inline-wrapped-value
+                               (if (and (map? value) (= #{:value} (set (keys value))))
+                                 (leaf-edit source starts leaf :map-expression-to-vector path)
+                                 (refuse :unsupported-inline-declaration {:path path})))]
+                    [(rename-edit source starts loc nil [:args] :bind) edit]))
+          local (mapv #(-> % (update :start - (:start span)) (update :end - (:start span))) edits)]
+      (assoc span :after (str "[:ref " (patched-text (:before span) local) "]")))))
+
+
 (defn- leaf-edit
   [source starts leaf op path]
   (case op
     :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
-    :wrap-inline-ref
-    (let [body (z/sexpr leaf)]
-      (when-not (and (map? body) (= #{:parent} (set (keys body))) (keyword? (:parent body)))
-        (refuse :unsupported-inline-declaration {:path path}))
-      (node-edit source starts leaf #(str "[:ref " % "]")))
+    (:wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value)
+    (inline-edit source starts leaf op path)
     :wrap-ref
     (do
       (when-not (keyword? (z/sexpr leaf))
@@ -229,7 +254,8 @@
           (refuse :not-composed-definition {:definition definition}))
         (rename-edit source starts loc definition path :bind))
 
-      (:wrap-value :wrap-ref :wrap-inline-ref :map-expression-to-vector)
+      (:wrap-value :wrap-ref :wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value
+                   :map-expression-to-vector)
       (leaf-edit source starts (argument-loc loc path) op path)
 
       :partition-composed-args
@@ -246,8 +272,7 @@
   [source {:keys [source-path kind expression policy]}]
   (let [[operator payload] expression
         raw (get-in source source-path)
-        inline? (and (= :ref operator) (map? raw) (= #{:parent} (set (keys raw)))
-                     (keyword? (:parent raw)) (= payload raw))
+        inline? (and (= :ref operator) (format/legacy-inline? raw) (= raw (format/inline-origin payload)))
         wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))
         typed? (and wrapper? (= #{operator :type} (set (keys raw)))
                     (or (keyword? (:type raw)) (vector? (:type raw)))
@@ -264,7 +289,11 @@
                          (keyword? (get raw operator))))
                 (if (= :value operator) (= payload raw) (or (keyword? raw) inline?)))
       (refuse :planner-ledger-mismatch {:path source-path}))
-    {:op (cond inline? :wrap-inline-ref
+    {:op (cond inline? (if-let [[_ form] (first (:bind payload))]
+                         (if (vector? form)
+                           (if (= :ref (first form)) :inline-bare-ref :inline-wrapped-value)
+                           :inline-bare-value)
+                         :wrap-inline-ref)
                typed? :typed-expression
                wrapper? :map-expression-to-vector
                (= :value operator) :wrap-value

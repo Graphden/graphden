@@ -8,6 +8,47 @@
   (and (map? form) (= #{:parent} (set (keys form))) (keyword? (:parent form))))
 
 
+(defn- scalar?
+  [x]
+  (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x)))
+
+
+(defn- single-field?
+  [fields]
+  (and (map? fields) (= 1 (count fields)) (simple-keyword? (ffirst fields))))
+
+
+(defn legacy-inline?
+  "Direct use-sites whose source spelling can be reconstructed from v2."
+  [body]
+  (or (inline-leaf? body)
+      (and (map? body) (= #{:parent :args} (set (keys body))) (keyword? (:parent body))
+           (single-field? (:args body))
+           (let [v (val (first (:args body)))]
+             (or (scalar? v) (and (map? v) (= #{:value} (set (keys v)))))))))
+
+
+(defn inline-origin
+  "Recover the original anonymous body for use-site identity. Explicit v2
+   values preserve v1 value wrappers; bare scalar values preserve their bare
+   spelling. An explicit ref here came from a bare graph name. V1 ref wrappers
+   would lose that distinction and are outside this reversible subset."
+  [body]
+  (cond
+    (inline-leaf? body) body
+    (and (map? body) (= #{:parent :bind} (set (keys body))) (keyword? (:parent body))
+         (single-field? (:bind body)))
+    (let [[field form] (first (:bind body))
+          leaf (fn [v] {:parent (:parent body) :args {field v}})]
+      (cond
+        (scalar? form) (leaf form)
+        (and (vector? form) (= 2 (count form)))
+        (case (first form)
+          :value (leaf {:value (second form)})
+          :ref (when (keyword? (second form)) (leaf (second form)))
+          nil)))))
+
+
 (defn configuration-type?
   "Named types and collection shapes whose leaves resolve to named types.
    Forms that require new inline type rows are outside this source format slice."

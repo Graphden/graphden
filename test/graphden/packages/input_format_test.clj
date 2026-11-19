@@ -22,7 +22,7 @@
 
 (defn- with-sources
   [sources f]
-  (let [root (.toFile (Files/createTempDirectory "graphden-format-test-" (make-array java.nio.file.attribute.FileAttribute 0)))
+  (let [root (java.nio.file.Path/.toFile (Files/createTempDirectory "graphden-format-test-" (make-array java.nio.file.attribute.FileAttribute 0)))
         resource io/resource
         reads (atom [])]
     (try
@@ -36,7 +36,7 @@
                                       (do
                                         (swap! reads conj path)
                                         (let [file (io/file root path)]
-                                          (when (.isFile file) (.toURL (.toURI file)))))
+                                          (when (java.io.File/.isFile file) (java.net.URI/.toURL (java.io.File/.toURI file)))))
                                       (resource path)))]
           (f {:root root :reads reads})))
       (finally
@@ -68,7 +68,7 @@
 
 
 (deftest late-unsupported-header-prevents-all-earlier-implementation-effects
-  (doseq [format [2 19 nil "2"]
+  (doseq [input-format [2 19 nil "2"]
           across-dependency? [false true]]
     (let [effects (atom 0)
           early-package (if across-dependency? "format-fixture-dep" "format-fixture-main")
@@ -81,7 +81,7 @@
                            ;; Invalid legacy keys would fail the old validator:
                            ;; the header must win, before validation or eval.
                            "packages/format-fixture-main/late/fns.edn"
-                           (pr-str {:input-format format :fns [{:name :late "bad-key" 1}]})}
+                           (pr-str {:input-format input-format :fns [{:name :late "bad-key" 1}]})}
                     across-dependency?
                     (assoc "packages/format-fixture-dep/package.edn"
                            (pr-str {:name "format-fixture-dep" :version "1.0.0" :modules ["early"]})))]

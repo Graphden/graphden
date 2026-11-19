@@ -23,19 +23,19 @@
 
 
 (defn- sha256
-  [bytes]
-  (let [digest (.digest (MessageDigest/getInstance "SHA-256") ^bytes bytes)]
-    (apply str (map #(format "%02x" (bit-and % 255)) digest))))
+  [source-bytes]
+  (let [digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
+    (str/join (map #(format "%02x" (bit-and % 255)) digest))))
 
 
 (defn checked-source
   "Read source bytes once and verify their inventory checksum BEFORE parsing.
    Returns private source data; callers must not log this value or reader errors."
   [root path checksum]
-  (let [bytes (Files/readAllBytes (fs/path root path))]
-    (when-not (= checksum (sha256 bytes))
+  (let [source-bytes (Files/readAllBytes (fs/path root path))]
+    (when-not (= checksum (sha256 source-bytes))
       (throw (ex-info "Source differs from inventory" {:code :source-checksum-mismatch :file path})))
-    (inventory/read-edn path (String. ^bytes bytes "UTF-8"))))
+    (inventory/read-edn path (String. ^bytes source-bytes "UTF-8"))))
 
 
 (defn- problem
@@ -247,7 +247,7 @@
                 :packages summaries
                 :blockers (cond-> (into orphan-blockers (mapcat :blockers summaries))
                             (not complete?) (conj {:code :definition-coverage-mismatch}))}]
-    (assoc report :report-sha256 (sha256 (.getBytes (inventory/report-text report) "UTF-8")))))
+    (assoc report :report-sha256 (sha256 (String/.getBytes (inventory/report-text report) "UTF-8")))))
 
 
 (defn dry-run

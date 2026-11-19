@@ -161,8 +161,8 @@
 
 
 (defn- normalize-inline-origin
-  [body origin namespace normalize-ref]
-  (let [resolve-ref #(normalize-ref namespace %)
+  [body origin module-namespace normalize-ref]
+  (let [resolve-ref #(normalize-ref module-namespace %)
         [_ form] (first (:bind body))
         parent (resolve-ref (:parent origin))]
     (when-not (keyword? parent) (reject! :unresolved-inline-parent))
@@ -174,7 +174,7 @@
 
 
 (defn- inline-definitions
-  [source namespace {:keys [contract scope]} {:keys [normalize-inline-parent] :as options}]
+  [source module-namespace {:keys [contract scope]} {:keys [normalize-inline-parent] :as options}]
   (into (sorted-map)
         (keep (fn [[field expression]]
                 (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
@@ -184,23 +184,23 @@
                                    (or (:parent source) (:parents source)))
                       (reject! :unsupported-inline-declaration))
                     (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
-                    (let [normalized (normalize-inline-origin body origin namespace normalize-inline-parent)
-                          named (parse/inline-declaration normalized [(:name source) field] namespace)
+                    (let [normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
+                          named (parse/inline-declaration normalized [(:name source) field] module-namespace)
                           child (merge (dissoc named :args) (select-keys body [:bind]))
                           path (:path (input/resolve-address contract scope [field]))]
-                      [path (assoc (parse-definition child namespace options) :inline-body body)])))))
+                      [path (assoc (parse-definition child module-namespace options) :inline-body body)])))))
         (when (map? (:bind source)) (:bind source))))
 
 
 (defn- parse-definition
-  [source namespace {:keys [context-for] :as options}]
-  (let [definition (assoc source :namespace namespace)
+  [source module-namespace {:keys [context-for] :as options}]
+  (let [definition (assoc source :namespace module-namespace)
         ctx (context definition context-for)
-        common {:source source :namespace namespace :fn-id (:fn-id ctx)
+        common {:source source :namespace module-namespace :fn-id (:fn-id ctx)
                 :declaration-records (:declaration-records ctx) :origin-ledger (:origin-ledger ctx)}]
     (if (type-only? definition)
       common
-      (let [inlines (inline-definitions source namespace ctx options)
+      (let [inlines (inline-definitions source module-namespace ctx options)
             expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {})
                                                 (assoc ctx :inline-at inlines))
             state (input/bind-input (:contract ctx) {} (:scope ctx) expression)
@@ -253,8 +253,8 @@
 
 (defn- emit-definition
   [parsed context-for]
-  (let [{:keys [source namespace]} parsed
-        ctx (context (assoc source :namespace namespace) context-for)]
+  (let [{module-namespace :namespace :keys [source]} parsed
+        ctx (context (assoc source :namespace module-namespace) context-for)]
     (when-not (= (select-keys parsed [:fn-id :input-type-id :contract :declaration-records :origin-ledger])
                  (select-keys ctx [:fn-id :input-type-id :contract :declaration-records :origin-ledger]))
       (reject! :export-context-drift))

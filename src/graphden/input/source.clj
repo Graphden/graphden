@@ -228,8 +228,8 @@
   "Conservatively block ancestor input transformations and occupied targets.
    No attempt is made to reimplement legacy rename/capture compilation."
   [source definition context arguments]
-  (let [ancestors (vec (ancestor-definitions definition context))
-        ancestor-rows (mapcat (::records-of context) ancestors)
+  (let [ancestor-defs (vec (ancestor-definitions definition context))
+        ancestor-rows (mapcat (::records-of context) ancestor-defs)
         occupied (into #{} (comp (filter #(and (= :binding (:kind %))
                                                (or (:value-present %) (:ref-fn-id %)
                                                    (:terminal %))))
@@ -442,8 +442,8 @@
 
 (defn- verify-definition
   [environment definition]
-  (let [{:keys [source proposed legacy identity]} definition
-        prepared (get-in environment [:definition-by-id identity])
+  (let [{definition-id :identity :keys [source proposed legacy]} definition
+        prepared (get-in environment [:definition-by-id definition-id])
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
         legacy-context (source-context/declaration-context environment prepared records bindings)

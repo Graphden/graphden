@@ -21,7 +21,7 @@
   [text]
   (let [sha (MessageDigest/getInstance "SHA-256")]
     (str/join (map #(format "%02x" (bit-and % 255))
-                   (.digest sha (.getBytes ^String text "UTF-8"))))))
+                   (MessageDigest/.digest sha (String/.getBytes text "UTF-8"))))))
 
 
 (defn- children
@@ -50,11 +50,11 @@
 
 
 (defn- module-definitions
-  [source namespace]
+  [source module-namespace]
   (let [module (inventory/read-edn "<CST source>" source)]
-    (when-not (and (map? module) (or (nil? namespace) (string? namespace)) (= namespace (:namespace module))
+    (when-not (and (map? module) (or (nil? module-namespace) (string? module-namespace)) (= module-namespace (:namespace module))
                    (vector? (:fns module)) (every? map? (:fns module)))
-      (refuse :invalid-module {:namespace namespace}))
+      (refuse :invalid-module {:namespace module-namespace}))
     (let [names (map :name (:fns module))]
       (when-not (every? keyword? names)
         (refuse :unnamed-definition {}))
@@ -69,8 +69,8 @@
   [source]
   (let [matcher (re-matcher #"\r\n|\r|\n" source)]
     (loop [starts [0]]
-      (if (.find matcher)
-        (recur (conj starts (.end matcher)))
+      (if (java.util.regex.Matcher/.find matcher)
+        (recur (conj starts (java.util.regex.Matcher/.end matcher)))
         starts))))
 
 
@@ -226,9 +226,9 @@
     {:start (:start key-edit) :end (:end map-span)
      :before (subs source (:start key-edit) (:end map-span))
      :after (str (:after key-edit) (subs source (:end key-edit) (:start map-span))
-                 (when (seq declarations) (str "{" (apply str ordered) "}"))
+                 (when (seq declarations) (str "{" (str/join ordered) "}"))
                  (when (and (seq declarations) (seq binds)) " :bind ")
-                 (when (seq binds) (str "{" (apply str (map second binds)) "}"))
+                 (when (seq binds) (str "{" (str/join (map second binds)) "}"))
                  (when (seq configs) (str " :configure {" (str/join " " configs) "}")))}))
 
 
@@ -337,7 +337,7 @@
         (when-not (and (or (not has-args?) (map? (:args source)))
                        (vector? arguments) (= (count paths) (count (set paths)))
                        (= (count arguments) (+ (count fields) (count binds)))
-                       (= (set paths) (set (map #(vector :args %) (keys (:args source)))))
+                       (= (set paths) (set (for [field (keys (:args source))] [:args field])))
                        (every? #(= (:spec %) (get-in source (:source-path %))) fields)
                        (= proposed (cond-> (dissoc source :args)
                                      (seq fields) (assoc :input declarations)
@@ -370,7 +370,7 @@
         (when (< start cursor)
           (refuse :overlapping-operations {:start start :previous-end cursor}))
         (recur (next remaining) end (conj parts (subs source cursor start) after)))
-      (apply str (conj parts (subs source cursor))))))
+      (str/join (conj parts (subs source cursor))))))
 
 
 (defn- reverse-edits
@@ -393,16 +393,16 @@
    [:args]; wrap requires an explicit path below :args. Overlaps refuse.
    A planner-owned field partition separates composed declarations and bindings.
    Unclassified entry moves refuse."
-  [source {:keys [namespace operations]}]
+  [source {module-namespace :namespace :keys [operations]}]
   (when-not (and (string? source) (vector? operations))
     (refuse :invalid-request {}))
-  (let [definitions (module-definitions source namespace)
+  (let [definitions (module-definitions source module-namespace)
         starts (line-starts source)
         edits (vec (sort-by :start (map #(operation-edit source starts definitions %) operations)))
         target (patched-text source edits)]
     ;; A splice must remain one valid EDN module before it can leave the planner.
-    (module-definitions target namespace)
-    {:namespace namespace
+    (module-definitions target module-namespace)
+    {:namespace module-namespace
      :original-sha256 (sha256 source)
      :target-sha256 (sha256 target)
      :target-text target

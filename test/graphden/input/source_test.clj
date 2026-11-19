@@ -1,6 +1,7 @@
 (ns ^:serial graphden.input.source-test
   (:require
     [clojure.edn :as edn]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
@@ -51,7 +52,7 @@
       (is (= (:args declaration) (get-in planned [:legacy :rich-input])))
       (is (empty? (filter #(= :binding (:kind %)) rows))))
     (testing "optional remains free and structural source survives primitive rows"
-      (is (= false (:required (first (filter #(= "pretty" (:name %)) rows)))))
+      (is (false? (:required (first (filter #(= "pretty" (:name %)) rows)))))
       (is (= [:list 'a] (get-in planned [:proposed :input :items]))))))
 
 
@@ -153,7 +154,7 @@
     (is (contains? (codes (result report :secret)) :resolver-binding-required))
     (is (= #{:inline-identity-or-source-mapping-required}
            (codes (result report :anonymous))))
-    (is (not (.contains (pr-str (:blockers report)) "private-payload")))))
+    (is (not (str/includes? (pr-str (:blockers report)) "private-payload")))))
 
 
 (deftest identity-and-context-mismatches-never-pick-an-arbitrary-match
@@ -259,7 +260,7 @@
     (is (not (contains? secret :proposed)))
     (is (= (ids/fn-id "web.vault" :vault-get)
            (get-in secret [:legacy :arguments 0 :policy :resolver-fn-id])))
-    (is (not (.contains (pr-str (:blockers report)) "private/vault/path")))
+    (is (not (str/includes? (pr-str (:blockers report)) "private/vault/path")))
     (is (= [:value {:secret-path "ordinary data"}]
            (get-in (result report :data) [:proposed :bind :x])))))
 
@@ -320,7 +321,7 @@
             (ids/slot-id (:identity parent-plan) :items)]
            (mapv :id (:fields contract))))
     (is (= options (:declaration option-field)))
-    (is (= false (:required option-field)))
+    (is (false? (:required option-field)))
     (is (= [{:name :flag :type :bool :required false}]
            (mapv #(select-keys % [:name :type :required]) (:fields option-field))))
     (is (= [[:list 'a]] (mapv :type (drop 2 (:fields contract)))))
@@ -391,9 +392,9 @@
                :args {:x {:ref :producer :type [:list :demo/producer]}}}
         defs [base producer child]
         context (prepared defs)
-        plan (source/plan-module defs context)
-        entry (result (source/verify-module plan context) :shape)
-        altered (assoc-in plan [:definitions 2 :proposed :configure [:x] :type] [:list :int])]
+        planned (source/plan-module defs context)
+        entry (result (source/verify-module planned context) :shape)
+        altered (assoc-in planned [:definitions 2 :proposed :configure [:x] :type] [:list :int])]
     (is (= :authored-source-equivalent (:verification entry)))
     (is (= {:type [:list :producer] :type-override-fn-id (ids/primitive-fn-id :sequence)}
            (select-keys (get-in entry [:v2 :configurations [:x]]) [:type :type-override-fn-id])))
@@ -489,14 +490,14 @@
         conflict {:name :conflict :namespace "demo" :parents [:left :different]}
         report (verified [base left right diamond different conflict])]
     (is (= [:x :items] (mapv :name (get-in (result report :diamond) [:v2 :contract :fields]))))
-    (is (= false (get-in (result report :diamond) [:v2 :bindings 0 :value])))
+    (is (false? (get-in (result report :diamond) [:v2 :bindings 0 :value])))
     (is (= #{:ambiguous-inherited-input} (codes (result report :conflict))))))
 
 
 (deftest indirect-parent-cycles-do-not-verify
-  (let [first {:name :first :namespace "demo" :parent :second}
-        second {:name :second :namespace "demo" :parent :first}
-        report (verified [first second])]
+  (let [first-definition {:name :first :namespace "demo" :parent :second}
+        second-definition {:name :second :namespace "demo" :parent :first}
+        report (verified [first-definition second-definition])]
     (is (= {:supported 0 :blocked 2} (:counts report)))
     (is (= #{:cyclic-parent-input} (set (map :code (:blockers report)))))))
 
@@ -553,9 +554,9 @@
         remote (assoc local :namespace "other")
         sources [local remote]
         context (prepared (into [base producer (assoc producer :namespace "other")] sources))
-        verified (source/verify-module (source/plan-module sources context) context)
-        inlines (mapv #(first (vals (get-in % [:v2 :inline-definitions]))) (:definitions verified))]
-    (is (= {:supported 2 :blocked 0} (:counts verified)))
+        verified-report (source/verify-module (source/plan-module sources context) context)
+        inlines (mapv #(first (vals (get-in % [:v2 :inline-definitions]))) (:definitions verified-report))]
+    (is (= {:supported 2 :blocked 0} (:counts verified-report)))
     (is (apply distinct? (map :fn-id inlines)))
     (doseq [[s child] (map vector sources inlines)]
       (is (= (keyword (:namespace s) "producer") (get-in child [:source :parent])))
@@ -599,9 +600,9 @@
   (let [host {:name :host :namespace "demo" :parent :sink
               :args {:x {:parent :sink :args {:x {:value false}}}}}
         ctx (prepared [base producer host])
-        plan (source/plan-module [host] ctx)]
+        planned (source/plan-module [host] ctx)]
     (doseq [replacement [false [:value nil] [:ref :producer] :producer [:value {:ref :producer}]]]
-      (let [changed (assoc-in plan [:definitions 0 :proposed :bind :x 1 :bind :x] replacement)]
+      (let [changed (assoc-in planned [:definitions 0 :proposed :bind :x 1 :bind :x] replacement)]
         (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))
     (let [wrapper (assoc-in host [:args :x :args :x] {:ref :producer})
           report (source/plan-module [wrapper] (prepared [base producer wrapper]))]

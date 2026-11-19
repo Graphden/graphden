@@ -13,10 +13,10 @@
 (classpath/add-classpath "src")
 
 
-(require '[structured-input-cst :as cst]
-         '[graphden.input.source :as source]
+(require '[graphden.input.source :as source]
          '[graphden.input.syntax :as syntax]
-         '[graphden.packages.records.parse :as parse])
+         '[graphden.packages.records.parse :as parse]
+         '[structured-input-cst :as cst])
 
 
 (defn- request
@@ -187,9 +187,9 @@
   (let [source "{:namespace \"demo.main\" :fns [{:name :base :args {:x 1}}]}"
         patch (cst/plan source (request (wrap-value :base [:args :x])))
         target (str/replace (:target-text patch) "demo.main" "tampered.main")
-        digest (.digest (MessageDigest/getInstance "SHA-256") (.getBytes ^String target "UTF-8"))
+        digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") (String/.getBytes target "UTF-8"))
         tampered (assoc patch :target-text target
-                        :target-sha256 (apply str (map #(format "%02x" (bit-and % 255)) digest)))]
+                        :target-sha256 (str/join (map #(format "%02x" (bit-and % 255)) digest)))]
     (is (= :invalid-plan (reason #(cst/apply-text tampered source))))
     (is (= :invalid-plan (reason #(cst/apply-text tampered target))))))
 
@@ -256,14 +256,14 @@
 
 (defn- migrate-child
   [text]
-  (let [{:keys [namespace fns]} (edn/read-string text)
-        definitions (mapv #(assoc % :namespace namespace) fns)
+  (let [{module-namespace :namespace :keys [fns]} (edn/read-string text)
+        definitions (mapv #(assoc % :namespace module-namespace) fns)
         ctx (parse/prepare-module definitions {} {})
         planned (source/plan-module [(peek definitions)] ctx)
         entry (first (:definitions planned))
-        patch (cst/plan text {:namespace namespace :operations (cst/entry-operations entry)})
+        patch (cst/plan text {:namespace module-namespace :operations (cst/entry-operations entry)})
         target (:target-text patch)
-        authored (assoc (peek (:fns (edn/read-string target))) :namespace namespace)
+        authored (assoc (peek (:fns (edn/read-string target))) :namespace module-namespace)
         verified (source/verify-module (assoc-in planned [:definitions 0 :proposed] authored) ctx)]
     (is (= :authored-source-equivalent (get-in verified [:definitions 0 :verification])))
     (is (= {:status :already-applied :text target} (cst/apply-text patch target)))

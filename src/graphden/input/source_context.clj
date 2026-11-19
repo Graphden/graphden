@@ -124,33 +124,33 @@
 
 
 (defn- field-specs
-  [{:keys [args type list refine parent parents]}]
+  [{list-type :list :keys [args type refine parent parents]}]
   (cond
     (or parent parents) (into {} (filter (comp types/own-slot-declaration? val)) args)
     type type
-    list {:items :sequence}
+    list-type {:items :sequence}
     refine {:value (:base refine)}
     :else args))
 
 
 (defn- declared-input
-  [environment own binding-origins]
+  [source-environment own binding-origins]
   (let [{:keys [owner]} own
-        ordered (parent-order environment own)
+        ordered (parent-order source-environment own)
         _ (ensure-acyclic! ordered)
-        fields (into [] (mapcat (fn [{:keys [records definition owner]}]
-                                  (fields records (:id owner) (field-specs definition) [:input])))
-                     ordered)
+        input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
+                                        (fields records (:id owner) (field-specs definition) [:input])))
+                           ordered)
         members (into [] (mapcat #(memberships (:records %) (get-in % [:owner :id]))) ordered)
         id (:id owner)
         descriptor (migration/input-type-record owner)
         input-id (:id descriptor)
         mapping (migration/identity-mapping {id members} binding-origins)]
-    (when (or (not= (count fields) (count (set (map :id fields))))
-              (not= (count fields) (count (set (map :name fields)))))
+    (when (or (not= (count input-fields) (count (set (map :id input-fields))))
+              (not= (count input-fields) (count (set (map :name input-fields)))))
       (reject! :ambiguous-inherited-input [:input]))
     {:scope [id []] :input-type-id input-id
-     :contract (record-node input-id fields)
+     :contract (record-node input-id input-fields)
      :declaration-records (into [(assoc descriptor :kind :fn)]
                                 (map #(migration/input-membership-record owner %))
                                 members)
@@ -161,19 +161,19 @@
 (defn declaration-context
   "Resolve replayed source declarations and their inherited field membership.
    Input binding identities come exclusively from the frozen legacy ledger."
-  [environment definition records binding-origins]
+  [source-environment definition records binding-origins]
   (let [{:keys [owner] :as entry} (scope-entry definition records)
         id (:id owner)
         common {:fn-id id :declaration-records (into [] (filter #(contains? #{:fn :slot :fn-slot} (:kind %))) records)
                 :origin-ledger {:source-owner id}}]
     (if (or (:return-type-fn-id owner) (seq (:parent-ids owner)))
-      (let [declared (declared-input environment entry binding-origins)
+      (let [declared (declared-input source-environment entry binding-origins)
             input-id (:input-type-id declared)]
         (-> (merge common declared)
-            (assoc :name->id (resolved-names environment (:namespace definition) binding-origins))
+            (assoc :name->id (resolved-names source-environment (:namespace definition) binding-origins))
             (assoc :resolve-config-type
                    (fn [type]
-                     (let [names (get-in environment [:context :name->id])
+                     (let [names (get-in source-environment [:context :name->id])
                            resolved (rebase/rewrite-type-references
                                       type #(parse/normalize-ref % names (:namespace definition)))]
                        (when (seq (types/inline-fn-type-rows-from-form resolved))

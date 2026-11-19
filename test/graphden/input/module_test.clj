@@ -23,15 +23,15 @@
 
 
 (defn- context-for
-  [{:keys [namespace name type]}]
-  (let [owner (ids/fn-id namespace name)
+  [{module-namespace :namespace :keys [name type]}]
+  (let [owner (ids/fn-id module-namespace name)
         input-id (ids/fn-id "fixture" :input)
         common {:fn-id owner :origin-ledger {:source-owner owner}}]
     (if type
       (assoc common :declaration-records [{:kind :fn :id owner :type type}])
       (merge common
              {:scope [owner []] :input-type-id input-id :contract contract
-              :name->id {:leaf (ids/fn-id namespace :leaf)
+              :name->id {:leaf (ids/fn-id module-namespace :leaf)
                          :other/leaf (ids/fn-id "other" :leaf)}
               :binding-id (fn [scope path] (ids/uuid-v5 owner (pr-str [scope path])))
               :declaration-records [{:kind :fn :id owner :input-type-fn-id input-id}]}))))
@@ -94,9 +94,9 @@
 (deftest declared-defaults-and-missing-required-input-do-not-create-bindings
   (let [source (source-module {:input {:value {:type :int :value 42 :required false}}})
         parsed (parse source)
-        {:keys [contract binding-state fn-id bindings]} (first (:definitions parsed))]
+        {input-contract :contract :keys [binding-state fn-id bindings]} (first (:definitions parsed))]
     (is (empty? bindings))
-    (is (seq (:missing (input/remaining-input contract binding-state [fn-id []]))))
+    (is (seq (:missing (input/remaining-input input-contract binding-state [fn-id []]))))
     (is (= source (module/emit-module-v2 parsed {:context-for context-for}))))
   (let [parsed (parse (source-module {:bind {}}))]
     (is (empty? (get-in parsed [:definitions 0 :bindings])))))
@@ -111,11 +111,11 @@
 
 
 (deftest frozen-reference-context-is-namespace-specific
-  (doseq [namespace ["left" "right" nil]]
+  (doseq [module-namespace ["left" "right" nil]]
     (let [source (assoc (source-module {:bind {:value [:ref :leaf] :hof [:ref :other/leaf]}})
-                        :namespace namespace)
+                        :namespace module-namespace)
           rows (get-in (parse source) [:definitions 0 :bindings])]
-      (is (= #{(ids/fn-id namespace :leaf) (ids/fn-id "other" :leaf)} (set (map :ref-fn-id rows))))))
+      (is (= #{(ids/fn-id module-namespace :leaf) (ids/fn-id "other" :leaf)} (set (map :ref-fn-id rows))))))
   (is (= :invalid-input-context
          (error-code #(module/parse-module-v2 (source-module {})
                                               {:context-for (fn [definition]

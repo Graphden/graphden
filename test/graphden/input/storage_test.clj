@@ -1,4 +1,4 @@
-(ns ^:integration ^{:clj-kondo/config (quote {:lint-as {graphden.input.storage-test/with-storage clojure.core/let}})} graphden.input.storage-test
+(ns ^:integration ^#:clj-kondo{:config (quote {:lint-as #:graphden.input.storage-test{with-storage clojure.core/let}})} graphden.input.storage-test
   "Real PostgreSQL checks of offline v2 storage, using the normal decorators."
   (:require
     [clojure.test :refer [deftest is use-fixtures]]

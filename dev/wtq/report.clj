@@ -120,7 +120,7 @@
     (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha)
                    (= 1 (:schema receipt) (:schema expected))
                    (true? (:complete receipt))
-                   (= 0 (:exit receipt))
+                   (contains? #{0} (:exit receipt))
                    (= :validate (:mode receipt))
                    (= :validated (:outcome receipt))
                    (nil? (:failed-stage receipt))

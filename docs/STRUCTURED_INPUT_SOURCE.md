@@ -330,7 +330,6 @@ Legacy `:required true` on an item retains
 `:positional-list-annotation-required` because the old parser does not
 make that owner input mandatory.
 
-
 ## Focused verification
 
 ```sh

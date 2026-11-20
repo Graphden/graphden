@@ -128,7 +128,8 @@
  ;; (120s under the gate's global multiplier) clipped healthy runs at 119–120s.
  {:name "ci-selftest"   :bb "ci-test"       :timeout 120000 :group :infra
   :relevant ["^scripts/ci" "^scripts/checks\\.edn$" "^bb\\.edn$"]}
- {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs
+ ;; The full Markdown scan is cheap. Fail here before starting broad linters.
+ {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs :stage :affected
   :relevant ["\\.md$" "^\\.markdownlint" "^bb\\.edn$"]}
  {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs
   :relevant ["\\.md$" "^\\.lychee" "^bb\\.edn$"]}

@@ -150,16 +150,15 @@
 
 
 (deftest named-browser-input-checks-a-union-of-wire-primitives
-  (let [type [:union :null :text]
-        source (-> definitions
-                   (assoc-in [:root :input :coll :name] type)
-                   (assoc-in [:name :input :value] type)
-                   (assoc-in [:name :return] type)
-                   (update-in [:name :bindings] dissoc [:value]))
-        {:keys [analysis options]} (checked-model source)
+  (let [source {:root {:input {:value [:union :null :text]} :return :any}}
+        {:keys [analysis context]} (fixture/model source :root)
+        implementations (fixture/implementations source {:root (get-in @loaded [:const :impl])})
+        options {:context context :snapshot-id (:snapshot-id context) :allow-fn? (constantly true)
+                 :implementations (assoc-in implementations [(fixture/id :root) :base-fn-id]
+                                            (ids/fn-id "core.logic" :const))}
         invoke (jvm/compile-named analysis options)
         plan (browser/export-named analysis options)
-        args (fn [value] {:coll {:name {:value value}}})
+        args (fn [value] {:value value})
         values [nil "Ada"]
         [null-result text-result invalid] (run-browser plan (mapv args (conj values false)))]
     (is (= values (mapv #(invoke (args %) nil) values)))

@@ -12,10 +12,14 @@
     [graphden.input.list-execution :as list-execution]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.source :as source]
+    [graphden.input.source-named-types :as named-types]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
+    [graphden.packages.sync :as sync]
+    [graphden.types.check.literals :as literals]
+    [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
 
 
@@ -277,6 +281,96 @@
     (is (= :deferred (get-in route [:proof :status])))
     (is (seq (:obligations result)))
     (is (some #{[[id []] [alias-id]]} (:required-addresses result)))))
+
+
+(defn- package-declarations
+  [resource names]
+  (let [{module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource resource)))]
+    (for [d fns :when (contains? names (:name d))]
+      (assoc d :namespace module-ns :source-file resource))))
+
+
+(defn- package-record-pin
+  [resource record-name host-name]
+  (let [selected (package-declarations resource #{record-name host-name})
+        module-ns (:namespace (first selected))
+        defs (into (filterv #(= :get (:name %)) (sources "collections")) selected)
+        prepared (parse/prepare-module defs {} {})
+        package (snapshot/package-index prepared defs)
+        owner (ids/fn-id module-ns host-name)
+        record-id (ids/fn-id module-ns record-name)
+        ctx (assoc prepared :fn-defs [(get-in package [:declarations record-id])])
+        orig (get-in package [:originals record-id])
+        entry (first (:definitions (source/verify-module (source/plan-module orig ctx) ctx)))]
+    {:prepared package :owner owner :record-id record-id :record entry}))
+
+
+(deftest stored-record-fields-survive-checked-base-signature
+  (let [[record] (package-declarations "packages/web/crud/fns.edn" #{:_tighten-parsed-shape})
+        [base] (package-declarations "packages/web/crud-seq/fns.edn" #{:try-apply-tighten})
+        [dictionary] (package-declarations "packages/core/refinements/fns.edn" #{:keyword-map})
+        ds [record base dictionary]
+        id (ids/fn-id (:namespace base) (:name base))
+        type-id (ids/fn-id (:namespace record) (:name record))
+        package (snapshot/package-index (parse/prepare-module ds {} {}) ds)
+        implementations (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                                  types/*type-aliases-override* (atom {})
+                                  shapes/*marker-registry-override* (atom (shapes/markers-snapshot))]
+                          (let [loaded (loader/load-packages ["core" "web"])]
+                            (sync/register-type-aliases! ds)
+                            (registry/record-rich-types! id (:name base) (get-in loaded [:base-fn-defs (:name base)]))
+                            (:by-id @registry/*rich-types-override*)))
+        {:keys [context options]} (snapshot/freeze-closure package [id] implementations)
+        graph (analysis/analyze-effective-input context id options)
+        [field] (get-in graph [:scopes [] :configured-contract :fields])]
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (true? (get-in graph [:coverage :signatures])))
+    (is (= #{:db} (get-in graph [:scopes [] :signature :effects])))
+    (let [check-literal (fn [value]
+                          ((:check-expression options) {:address [[id []] [(:id field)]]
+                                                        :expected (:type field) :actual (literals/classify-literal value)
+                                                        :expression {:kind :value :value value} :substitution {}}))
+          complete {:binding-id id :effects-val "read" :args-val 1 :ret-val 2 :delta true}]
+      (is (= :checked (:status (check-literal complete))))
+      (is (= :named-record-mismatch (:reason (failure #(check-literal (dissoc complete :delta)))))))
+    (is (= type-id (:type-id field)))
+    (is (= (:type record) (:type field)))
+    (is (= (into {} (map (fn [[name _]] [name (ids/slot-id type-id name)])) (:type record))
+           (into {} (map (juxt :name :id) (:fields field)))))))
+
+
+(deftest named-record-pin-keeps-route-and-original-field-memberships
+  (doseq [[file name host alias] [["packages/app/ui-inspector/fns.edn" :_inspector-usages-state :_usages-query :state]
+                                  ["packages/app-base/prefs/fns.edn" :_ui-pref-row-shape :_ui-pref-key :row]]]
+    (let [{:keys [prepared owner record-id record]} (package-record-pin file name host)
+          report (snapshot/projection-readiness prepared owner @roots)
+          [route] (:projections report)
+          evidence ((named-types/lookup prepared (constantly record)) name)
+          {:keys [body rows]} evidence
+          member-ids (into {} (comp (filter #(= :fn-slot (:kind %))) (map (juxt :slot-id :id))) rows)
+          target (ids/slot-id (ids/fn-id "core.collections" :get) :coll)]
+      (is (= :incomplete (:status report)) (pr-str (:diagnostics report)))
+      (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
+      (is (= (ids/binding-id owner target) (:binding-id route)))
+      (is (= [[owner []] [(ids/slot-id owner alias)]] (:source route)))
+      (is (= (get-in record [:source :type]) body (:actual-type route)))
+      (is (= (count body) (count member-ids)))
+      (doseq [field (keys body) :let [id (ids/slot-id record-id field)]]
+        (is (= (ids/fn-slot-id record-id id) (member-ids id))))
+      (let [[field type] (first body)]
+        (doseq [unsupported [{:type type :required true} {:nested type}]]
+          (let [changed (assoc-in record [:v2 :source :type field] unsupported)]
+            (is (= :named-record-evidence-required
+                   (:code (failure #((named-types/lookup prepared (constantly changed)) name))))))))
+      (doseq [[kind alter] [[:fn #(assoc % :expects-effects #{:db})]
+                            [:fn-slot #(update % :position inc)]
+                            [:fn-slot #(assoc % :fn-id owner)]
+                            [:slot #(assoc % :type-fn-id (ids/primitive-fn-id :null))]
+                            [:slot #(assoc % :required false)]]]
+        (let [changed (update-in record [:v2 :declaration-records]
+                                 (partial mapv (fn [row] (if (= kind (:kind row)) (alter row) row))))]
+          (is (= :named-record-evidence-required
+                 (:code (failure #((named-types/lookup prepared (constantly changed)) name))))))))))
 
 
 (deftest named-dictionary-rename-reaches-the-scoped-checker

@@ -148,6 +148,14 @@ floats, booleans and lists. A union with an unresolved named member requires
 further declaration evidence. A known literal must fit a union member. A
 reference whose return is too broad retains its runtime validation obligation.
 
+A named record with bare primitive fields can also supply a typed projection.
+The snapshot retains its original field map and checks every slot and membership
+against the record UUID, ordinal, field name and primitive type UUID. A
+projection pin must still join the authored alias, the original target binding
+and the declared record UUID. The checker reports any missing implementation
+signature separately. Wrapped field policies and nested record declarations
+require additional evidence.
+
 A scalar rename can project a direct or inherited field when the legacy
 alias slot points at the declaring field's UUID. Its input declaration keeps
 the prepared type expression, including type variables. Supported pins retain

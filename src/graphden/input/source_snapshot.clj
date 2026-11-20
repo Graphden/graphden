@@ -114,11 +114,12 @@
 (defn- snapshot
   [entries markers named]
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
-        (reduce merge-record {} (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries)))
+        (reduce merge-record {} (concat (mapcat val (:type-rows named))
+                                        (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries))))
         inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))]
     (context/build-context
-      (assoc named
-             :fns (merge (:fns named) fns) :fields (or fields {}) :bindings (or bindings {})
+      (assoc (dissoc named :type-rows)
+             :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
              :type-bodies inputs
              :source-return-types (into {} (keep (fn [[id {:keys [owner list-implementation]}]]

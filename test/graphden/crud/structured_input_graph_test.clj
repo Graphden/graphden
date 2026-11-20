@@ -70,7 +70,11 @@
         owner (binding [access/*offline?* true] (seed-owner! storage))
         create {:action "bind" :fn-id (str owner) :path ["profile" "name"] :value "original"}]
     (is (= 403 (:status (send-command app token "preview" (assoc create :offline? true)))))
+    (is (nil? (get-in (remaining-fields app token owner) [0 :fields 0 :bind-path])))
     (binding [access/*offline?* true]
+      (let [fields (remaining-fields app token owner)]
+        (is (nil? (get-in fields [0 :bind-path])))
+        (is (= (:path create) (get-in fields [0 :fields 0 :bind-path]))))
       (is (= 401 (:status (send-command app nil "preview" create))))
       (is (= 400 (:status (send-command app token "preview" []))))
       (is (= 422 (:status (send-command app token "preview" (assoc create :value 42)))))

@@ -1675,8 +1675,15 @@
     {:file "resources/packages/app/editor/editor-overlay-strips.js" :defn appendStructuredInputStrip
      :say "The current root card opens the server's remaining input projection in the existing
            type popover. A captured projection is usable only while its root is current. Nested
-           reference inputs have their own group, and the rows are read-only."
+           reference inputs have their own group. A writable offline fixture supplies named
+           paths for its own free leaves."
      :see [[:editor "recordExpansionFields"] [:crud "read-input"]]}
+
+    {:file "resources/packages/app/editor/editor-edit-modes.js" :defn openStructuredBindPopover
+     :say "Binds a literal entered in the shared inline edit popover to a leaf confirmed by the
+           current subtree. The editor repeats the exact command with its preview basis and
+           reloads the graph after apply. A refused proposal keeps the draft in the popover."
+     :see [[:editor "appendStructuredInputStrip"] [:crud "with-plan"]]}
 
     {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection
      :say "Projects authorized source labels, finite seal facts and flag-form copy into a passive

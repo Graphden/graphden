@@ -416,7 +416,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     host = content;
   }
   if (c.inputDescriptor) {
-    appendStructuredInputFields(host, c.inputDescriptor, path, c.ancestorTypes);
+    appendStructuredInputFields(host, path, c);
     return;
   }
   // Human-readable description from the type-row's `description`
@@ -623,12 +623,26 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
   }
 }
 
-function appendStructuredInputFields(host, descriptor, path, ancestors) {
-  for (const field of descriptor.fields) {
+function appendStructuredInputFields(host, path, {inputDescriptor, ancestorTypes, structuredBind}) {
+  for (const field of inputDescriptor.fields) {
     const label = field.required === false ? field.name + ' (optional)' : field.name;
     const type = field.fields ? (field.kind === 'reference-inputs' ? 'Reference inputs' : 'Record') : field.type;
-    host.appendChild(buildInlineTypeRow(label, type, path + '/input/' + encodeURIComponent(field.name), ancestors,
-      {fieldLabel: label, inputDescriptor: field.fields ? field : null}));
+    const row = buildInlineTypeRow(label, type, path + '/input/' + encodeURIComponent(field.name), ancestorTypes,
+      {fieldLabel: label, inputDescriptor: field.fields ? field : null, structuredBind});
+    const bindPath = field['bind-path'];
+    if (structuredBind && !field.fields && Array.isArray(bindPath) && bindPath.length) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'arg-type-chip';
+      button.textContent = 'Bind';
+      button.setAttribute('aria-label', 'Bind ' + bindPath.join('.'));
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (structuredBind.isCurrent()) openStructuredBindPopover(button, structuredBind, bindPath, type);
+      });
+      row.insertBefore(button, row.querySelector('.type-inline-child'));
+    }
+    host.appendChild(row);
   }
 }
 

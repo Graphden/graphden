@@ -547,6 +547,9 @@
           case 'supplied':
             if (!structured) throw new Error('Unsupported browser expression');
             return checkedInput(frame.slots.get(value.slot), value.type);
+          case 'validate':
+            if (!structured) throw new Error('Unsupported browser expression');
+            return checkedInput(expr(value.expr, frame), value.type);
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
           case 'record': {

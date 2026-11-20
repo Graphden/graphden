@@ -129,3 +129,21 @@
     (is (= expected (mapv #(invoke % nil) inputs)))
     (is (= (mapv #(hash-map :value (wire/encode-value %) :sequence false) expected)
            (run-browser plan inputs)))))
+
+
+(deftest browser-checks-primitive-reference-obligations-only-when-read
+  (let [source (-> definitions
+                   (assoc-in [:name :return] :any)
+                   (assoc-in [:name :input :value] :any)
+                   (assoc-in [:name :bindings [:value] :value] 42))
+        {:keys [analysis options]} (checked-model source)
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        [result] (run-browser plan [{}])]
+    (is (= [:field-read] (mapv :trigger (:obligations analysis))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not match" (invoke {} nil)))
+    (is (= "Value does not match the required graph input type" (:error result)))
+    (agrees-with-browser (-> source
+                             (assoc-in [:root :bindings [:key] :value] :missing)
+                             (assoc-in [:root :bindings [:default] :value] "fallback"))
+                         "fallback")))

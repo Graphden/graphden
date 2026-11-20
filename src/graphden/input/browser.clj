@@ -51,6 +51,13 @@
                            fields)}))
 
 
+(defn- validate-expression
+  [expression type]
+  (if type
+    {:kind "validate" :type (supplied-type! type) :expr expression}
+    expression))
+
+
 (defn- check-depth!
   [expressions scopes root]
   ;; Count the actual browser function chain, including the const wrappers.
@@ -122,7 +129,7 @@
     (ir/reject! :browser-visibility-policy-required {}))
   (let [{:keys [root-scope expressions scopes parameters value-obligations] :as plan}
         (ir/lower-checked analysis options)]
-    (when (or (and closed? (seq parameters)) (seq value-obligations))
+    (when (and closed? (seq parameters))
       (ir/reject! :browser-input-validation-required {}))
     (when (> (+ (count expressions) (count scopes)) browser/max-functions)
       (ir/reject! :browser-function-limit {}))
@@ -139,10 +146,14 @@
                                             (scope-arguments scope argument-paths address-ids)))
                            scopes)
           expression-plans (map (fn [[address expression]]
-                                  (let [id (get address-ids address)]
+                                  (let [id (get address-ids address)
+                                        obligation (get value-obligations address)
+                                        supplied? (= :supplied (:op expression))
+                                        expression (cond-> expression (and supplied? obligation) (assoc :type obligation))
+                                        emitted (browser-expression expression id address-ids scope-ids encode)]
                                     (function-plan id const-id
                                                    [{:name "value"
-                                                     :expr (browser-expression expression id address-ids scope-ids encode)}])))
+                                                     :expr (validate-expression emitted (when-not supplied? obligation))}])))
                                 expressions)]
       {:format 2 :primitiveAbi capabilities/browser-primitive-abi
        :entries {"root" entry}

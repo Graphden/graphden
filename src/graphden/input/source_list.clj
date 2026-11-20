@@ -30,6 +30,51 @@
         (conj chain current)))))
 
 
+(defn items
+  "Read the direct position vector of a legacy list contribution."
+  [source]
+  (if (vector? source) source (:append source)))
+
+
+(defn inline-item?
+  [item]
+  (and (map? item) (or (contains? item :parent) (contains? item :parents))))
+
+
+(defn has-inline-items?
+  [form]
+  (let [values (items form)]
+    (when (vector? values) (some inline-item? values))))
+
+
+(defn- replace-inline-items
+  [source inline-items]
+  (let [with-refs (reduce-kv (fn [values position child]
+                               (assoc values position {:ref (:ref child)}))
+                             (items source) inline-items)]
+    (if (vector? source) with-refs (assoc source :append with-refs))))
+
+
+(defn source-form
+  "Render the authored contribution using independently recovered inline children."
+  [source name->id inline-items]
+  (reduce-kv (fn [form position child]
+               (assoc-in form [1 :items position] [:ref (:inline-body child)]))
+             (builder/source-form (replace-inline-items source inline-items) name->id)
+             inline-items))
+
+
+(defn- inline-items
+  [{:keys [inline-list-item] :as context} source prepared field original]
+  (let [prepared-items (items (get-in prepared [:args field]))]
+    (into (sorted-map)
+          (keep-indexed (fn [position raw]
+                          (when (inline-item? raw)
+                            (when-not inline-list-item (reject! :inline-list-item-origin-required))
+                            [position (inline-list-item context source [field position] raw (get prepared-items position))])))
+          (items original))))
+
+
 (defn field-names
   "Resolve ambiguous bare item refs in their authoring namespace. Only direct
    ref positions participate; literal payloads remain opaque."
@@ -42,7 +87,7 @@
 
 
 (defn- contribution
-  [definition records original-for name->id target field]
+  [{:keys [name->id] :as context} definition records original-for target field]
   (let [rows (group-by :kind records)
         owner (:fn-id definition)
         matching (filter #(and (= owner (:fn-id %)) (= target (:slot-id %))) (:binding rows))]
@@ -52,9 +97,11 @@
     (when-let [[binding & more] (seq matching)]
       (when (seq more) (reject! :ambiguous-list-binding))
       (let [original (original-for definition)
-            items (filter #(= (:id binding) (:binding-id %)) (:binding-list-item rows))]
+            item-rows (filter #(= (:id binding) (:binding-id %)) (:binding-list-item rows))]
         (when-not (contains? (:args original) field) (reject! :list-source-origin-required))
         (let [form (get-in original [:args field])
+              inlines (inline-items context original definition field form)
+              form (replace-inline-items form inlines)
               typed? #(and (positions/marker? %) (contains? % :type))
               normalize (fn [item]
                           (if (typed? item)
@@ -65,11 +112,11 @@
                          (not-any? typed? (if (vector? form) form (:append form))) form
                          (vector? form) (mapv normalize form)
                          :else (update form :append #(mapv normalize %)))
-              fragment (builder/source-fragment binding items prepared (field-names name->id (:namespace original) form))
+              fragment (builder/source-fragment binding item-rows prepared (field-names name->id (:namespace original) form))
               anchors (when (some :source-id (:items fragment)) (positions/inputs owner rows name->id))]
           (when-not (every? (set (map :id (vals anchors))) (keep :source-id (:items fragment)))
             (reject! :positional-list-field-mismatch))
-          fragment)))))
+          {:fragment fragment :inline-items inlines})))))
 
 
 (defn- materialize
@@ -93,9 +140,10 @@
   [trace source module-ns name->id]
   (when (:records trace)
     (let [names (field-names name->id module-ns source)
-          form (builder/source-form source names)
-          refs (keep (fn [[op payload]] (when (= :ref op) payload)) (get-in form [1 :items]))]
-      {:expression form :list-ref-names (select-keys names refs)})))
+          inlines (:inline-items trace)
+          form (source-form source names inlines)
+          refs (keep (fn [[op payload]] (when (and (= :ref op) (keyword? payload)) payload)) (get-in form [1 :items]))]
+      {:expression form :list-ref-names (select-keys names refs) :list-inline-items inlines})))
 
 
 (defn verified-traces
@@ -116,7 +164,7 @@
   "Resolve the actual single-parent chain and ordered appends for one field.
    The retained fragment forms describe each authored contribution separately.
    Unsupported or unavailable ancestry keeps an explicit source diagnostic."
-  [{:keys [defs-by-name name->id]} records-of original-for definition field target binding-id]
+  [{:keys [defs-by-name name->id] :as context} records-of original-for definition field target binding-id]
   (try
     (let [chain (ordered-ancestry definition defs-by-name)
           owner-name (slots/own-ref definition defs-by-name)
@@ -128,12 +176,14 @@
                      (or (= type :sequence) (and (vector? type) (= :list (first type))))
                      (some #(= (get name->id slot-owner) (:fn-id %)) chain))
         (reject! :list-target-origin-required))
-      (let [fragments (into [] (keep #(contribution % (records-of %) original-for name->id target field)) chain)
+      (let [contributions (into [] (keep #(contribution context % (records-of %) original-for target field)) chain)
+            fragments (mapv :fragment contributions)
             slot (some #(when (and (= :slot (:kind %)) (= target (:id %))) %) (records-of slot-definition))]
         (when-not (and slot (= binding-id (:binding-id (peek fragments)))) (reject! :list-binding-origin-mismatch))
-        (materialize (assoc (builder/link-fragments fragments) :fragments fragments)
-                     {:type type :type-id (:type-fn-id slot)} name->id)))
+        (assoc (materialize (assoc (builder/link-fragments fragments) :fragments fragments)
+                            {:type type :type-id (:type-fn-id slot)} name->id)
+               :inline-items (:inline-items (peek contributions)))))
     (catch clojure.lang.ExceptionInfo error
       (if (= :input/list-builder (:type (ex-data error)))
-        {:blocker (:code (ex-data error))}
+        (select-keys (assoc (ex-data error) :blocker (:code (ex-data error))) [:blocker :inline-blockers])
         (throw error)))))

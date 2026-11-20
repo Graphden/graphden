@@ -29,7 +29,7 @@
 
 
 (defn- parse-item
-  [binding-id name->id owner position form]
+  [binding-id name->id owner inline-at position form]
   (when-not (and (vector? form)
                  (or (= 2 (count form))
                      (and (= 3 (count form)) (= :project (first form))
@@ -42,9 +42,11 @@
       :project (if (and (uuid? owner) (vector? payload) (= 1 (count payload)) (simple-keyword? (first payload)))
                  (merge {:id id :position position :kind :projection :source-id (ids/slot-id owner (first payload))} (get form 2))
                  (reject! :positional-list-field-mismatch))
-      :ref (let [ref-id (get name->id payload)]
-             (when-not (and (keyword? payload) (uuid? ref-id))
-               (reject! :unresolved-list-item-ref))
+      :ref (let [child (get inline-at position)
+                 ref-id (cond
+                          (keyword? payload) (get name->id payload)
+                          (and (map? payload) (= payload (:inline-body child))) (:fn-id child))]
+             (when-not (uuid? ref-id) (reject! :unresolved-list-item-ref))
              {:id id :position position :kind :ref :fn-id ref-id})
       (reject! :invalid-list-item))))
 
@@ -53,7 +55,8 @@
   "Parse an explicit builder at a particular binding occurrence. A fragment's
    continuation belongs only to this occurrence, even for identical contents."
   ([binding-id form name->id] (parse-fragment binding-id form name->id nil))
-  ([binding-id form name->id owner]
+  ([binding-id form name->id owner] (parse-fragment binding-id form name->id owner {}))
+  ([binding-id form name->id owner inline-at]
    (when-not (and (uuid? binding-id) (vector? form) (= 2 (count form)) (= :list-builder (first form)))
      (reject! :invalid-list-builder))
    (let [{:keys [items tail] :as spec} (second form)
@@ -63,30 +66,34 @@
        (reject! :invalid-list-builder))
      {:binding-id binding-id :builder-id builder-id :tail tail
       :tail-id (ids/slot-id builder-id :tail)
-      :items (into [] (map-indexed (partial parse-item binding-id name->id owner)) items)})))
+      :items (into [] (map-indexed (partial parse-item binding-id name->id owner inline-at)) items)})))
 
 
 (defn reference-expression
   "Verify a previously lowered occurrence before using its callable as the
    field expression. The caller may have supplied a different expression."
-  [trace form name->id]
-  (let [fragment (peek (:fragments trace))]
-    (when-not (and fragment
-                   (migration/same-edn? (dissoc fragment :owner-id :target-id)
-                                        (parse-fragment (:binding-id fragment) form name->id (:owner-id fragment))))
-      (reject! :list-fragment-mismatch))
-    {:kind :ref :fn-id (:builder-id fragment)}))
+  ([trace form name->id] (reference-expression trace form name->id {}))
+  ([trace form name->id inline-at]
+   (let [fragment (peek (:fragments trace))]
+     (when-not (and fragment
+                    (migration/same-edn? (dissoc fragment :owner-id :target-id)
+                                         (parse-fragment (:binding-id fragment) form name->id (:owner-id fragment) inline-at)))
+       (reject! :list-fragment-mismatch))
+     {:kind :ref :fn-id (:builder-id fragment)})))
 
 
 (defn emit-fragment
   "Emit structured source. Every reference must resolve in the frozen index."
   ([fragment id->name] (emit-fragment fragment id->name {}))
-  ([{:keys [tail items]} id->name field-names]
+  ([fragment id->name field-names] (emit-fragment fragment id->name field-names {}))
+  ([{:keys [tail items]} id->name field-names inline-at]
    [:list-builder
     {:tail tail
-     :items (mapv (fn [{:keys [kind value fn-id source-id] :as item}]
+     :items (mapv (fn [{:keys [kind value fn-id source-id position] :as item}]
                     (case kind
-                      :ref [:ref (or (get id->name fn-id) (reject! :unresolved-list-item-ref))]
+                      :ref [:ref (if-let [child (get inline-at position)]
+                                   (if (= fn-id (:fn-id child)) (:inline-body child) (reject! :list-item-origin-mismatch))
+                                   (or (get id->name fn-id) (reject! :unresolved-list-item-ref)))]
                       :projection (positions/expression (or (get field-names source-id) (reject! :positional-list-field-mismatch)) item)
                       :value [:value value]
                       (reject! :invalid-list-item)))

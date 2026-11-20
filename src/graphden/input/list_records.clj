@@ -139,14 +139,14 @@
 (defn parse-contribution
   "Read the current fragment against frozen list ancestry. Reconstruct the
    complete chain before exporting this contribution's own declarations."
-  [{:keys [fn-id scope binding-id name->id list-history list-type-names contract]} field form]
+  [{:keys [fn-id scope binding-id name->id list-history list-type-names contract list-inline-at]} field form]
   (let [target (:id field)
         path [target]
         prior (get list-history path)
         origin (builder/origin fn-id target)]
     (when-not (vector? prior) (reject! :list-history-required))
     (when-not (= (:binding-id origin) (binding-id scope path)) (reject! :list-binding-origin-mismatch))
-    (let [fragment (merge origin (builder/parse-fragment (:binding-id origin) form name->id fn-id))
+    (let [fragment (merge origin (builder/parse-fragment (:binding-id origin) form name->id fn-id (get list-inline-at path)))
           descriptor (select-keys field [:type :type-id])
           names (or list-type-names name->id)
           fragments (conj prior fragment)

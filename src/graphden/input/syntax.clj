@@ -38,14 +38,14 @@
 
 
 (defn- parse-leaf
-  [path form {:keys [name->id binding-id scope inline-at list-at root-contract]}]
+  [path form {:keys [name->id binding-id scope inline-at list-at list-inline-at root-contract]}]
   (when-not (and (vector? form) (= 2 (count form)))
     (reject! :explicit-expression-required path))
   (let [[operator payload] form
         expression (case operator
                      :value {:kind :value :value payload}
                      :list-builder (if-let [trace (get list-at path)]
-                                     (builder/reference-expression trace form name->id)
+                                     (builder/reference-expression trace form name->id (get list-inline-at path))
                                      (reject! :missing-list-construction path))
                      :project (do
                                 (when-not (and (= 1 (count path)) (format/local-projection? form))
@@ -125,7 +125,9 @@
            (cond
              fragment (do
                         (when-not (= (:builder-id fragment) (:fn-id expression)) (reject! :list-reference-mismatch path))
-                        (builder/emit-fragment fragment id->name (into {} (map (juxt :id :name)) (get-in context [:root-contract :fields]))))
+                        (builder/emit-fragment fragment id->name
+                                               (into {} (map (juxt :id :name)) (get-in context [:root-contract :fields]))
+                                               (get-in context [:list-inline-at path])))
              child (if (= (:fn-id child) (:fn-id expression))
                      [:ref (:inline-body child)]
                      (reject! :inline-reference-mismatch path))

@@ -2,7 +2,8 @@
   "Pure lowering of a checked input plan for the fixture compiler. This is
    an internal execution IR, not authoring syntax or a production entry point."
   (:require
-    [graphden.input.descriptor :as descriptor]))
+    [graphden.input.descriptor :as descriptor]
+    [graphden.types.core :as types]))
 
 
 (defn reject!
@@ -22,20 +23,27 @@
 
 
 (defn- value-obligations
-  [analysis expressions]
+  [analysis expressions closures]
   (let [obligations (distinct (concat (:obligations analysis)
                                       (mapcat :obligations (vals (:scopes analysis)))))]
     (doseq [{:keys [address kind trigger expected-type]} obligations]
       (when-not (and (= :value-type kind) (= :field-read trigger)
-                     (contains? #{:any :null :bool :text :int :float :decimal :numeric
-                                  :keyword :uuid :timestamptz :bytes :jsonb} expected-type)
+                     (if-let [closure (get closures address)]
+                       (= expected-type (:type closure))
+                       (contains? #{:any :null :bool :text :int :float :decimal :numeric
+                                    :keyword :uuid :timestamptz :bytes :jsonb} expected-type))
                      (contains? expressions address))
         (reject! :runtime-obligations-required {:address address :kind kind :trigger trigger})))
     (let [by-address (group-by :address obligations)]
       (doseq [[address entries] by-address]
         (when-not (= 1 (count entries))
           (reject! :conflicting-runtime-obligations {:address address})))
-      (into {} (map (fn [[address entries]] [address (:expected-type (first entries))])) by-address))))
+      ;; The closure is built by the compiler with the already-proved
+      ;; invocation contract. Validating an arbitrary host function cannot
+      ;; establish a structural callable type.
+      (into {} (keep (fn [[address entries]]
+                       (when-not (contains? closures address)
+                         [address (:expected-type (first entries))]))) by-address))))
 
 
 (defn- lower-binding
@@ -180,8 +188,8 @@
     (when-not (= addresses (set (keys plans)))
       (reject! :closure-plan-mismatch {}))
     (into {}
-          (map (fn [[address {:keys [parameters call-sites captures external-captures]}]]
-                 (let [{:keys [scope binding-id]} (get expressions address)
+          (map (fn [[address {:keys [parameters call-sites captures external-captures callable-type]}]]
+                 (let [{:keys [scope binding-id type]} (get expressions address)
                        owner (first address)
                        contract (get-in analysis [:scopes (second scope) :configured-contract])
                        reference (get-in analysis [:scopes (second owner) :bindings address :reference])]
@@ -189,6 +197,11 @@
                                   (empty? external-captures) (vector? parameters)
                                   (every? keyword? parameters) (= (count parameters) (count (set parameters))))
                      (reject! :unsupported-closure-scope {:address address}))
+                   (when-not (and (= callable-type (:callable-type reference))
+                                  (types/fn-type? type) (types/fn-type? callable-type)
+                                  (not (some #(types/type-any? types/type-var? %) [type callable-type]))
+                                  (types/subtype? callable-type type))
+                     (reject! :unproved-closure-contract {:address address}))
                    (doseq [{:keys [from source role via] :as capture} captures]
                      (when-not (and (= :capture role) (= binding-id via) (= owner (first source))
                                     (= (select-keys capture route-keys)
@@ -197,7 +210,12 @@
                    (let [sites (mapv (partial call-site! contract scope expressions) call-sites)]
                      (when-not (= (frequencies parameters) (frequencies (map :name sites)))
                        (reject! :callback-parameter-shape-required {:scope scope}))
-                     [address {:scope scope :parameters parameters :call-sites sites}]))))
+                     (when (and (seq sites)
+                                (not= (types/fn-args callable-type)
+                                      (into {} (map (fn [{:keys [name address]}]
+                                                      [name (:type (get expressions address))])) sites)))
+                       (reject! :callback-parameter-type-mismatch {:scope scope}))
+                     [address {:scope scope :type type :parameters parameters :call-sites sites}]))))
           plans)))
 
 
@@ -265,5 +283,5 @@
       {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
        :closures closures :frame-layouts layouts :presence-program program
        :required-addresses (get-in layouts [root :required-addresses])
-       :value-obligations (value-obligations analysis expressions)
+       :value-obligations (value-obligations analysis expressions closures)
        :parameters (get-in layouts [root :parameters])})))

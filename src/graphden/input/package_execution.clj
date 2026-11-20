@@ -48,8 +48,11 @@
     (when-not (contains? (:staged-proposals package) root)
       (ir/reject! :staged-root-required {}))
     (let [frozen (snapshot/freeze-closure package [root] roots)
-          executable (keys (get-in frozen [:options :implementations]))]
-      (when-not (every? visible-fn-ids executable)
+          executable (get-in frozen [:options :implementations])]
+      (when-not (every? (fn [[target-id {:keys [base-fn-id]}]]
+                          (and (contains? visible-fn-ids target-id)
+                               (contains? visible-fn-ids base-fn-id)))
+                        executable)
         (ir/reject! :staged-function-not-visible {}))
       (assoc (compile-frozen frozen root implementations)
              :staged-source {:sha256 sha256 :namespace (:namespace module)}))))

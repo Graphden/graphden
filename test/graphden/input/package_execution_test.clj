@@ -74,30 +74,30 @@
 
 (deftest staged-module-replays-byte-derived-bindings-before-execution
   (let [module-ns "offline.fixture"
-        name :fixed-negation
+        name :fixed-floor
         root (ids/fn-id module-ns name)
-        neg (ids/fn-id "core.arithmetic" :neg)
-        legacy {:namespace module-ns :fns [{:name name :parent :neg :args {:number 8}}]}
+        floor (ids/fn-id "core.arithmetic" :floor)
+        legacy {:namespace module-ns :fns [{:name name :parent :floor :args {:number 8.75}}]}
         source (into (mapv #(assoc % :namespace module-ns) (:fns legacy))
-                     (declarations "packages/core/arithmetic/fns.edn" #{:neg}))
+                     (declarations "packages/core/arithmetic/fns.edn" #{:floor}))
         prepared (parse/prepare-module source {} {})
         proposal (get-in (source/plan-module [(first source)] prepared) [:definitions 0 :proposed])
         module (assoc legacy :input-format 2 :fns [(dissoc proposal :namespace)])
         run (fn [options] (runtimes source root #(execution/compile-staged-module %1 %2 %3 %4 options)))
-        options (staged-options legacy module #{root neg})
+        options (staged-options legacy module #{root floor})
         {:keys [canonical staged-source] legacy-invoke :legacy} (run options)]
     (is (= (:sha256 options) (:sha256 staged-source)))
-    (is (= -8 (legacy-invoke {}) (canonical {})))
+    (is (= 8 (legacy-invoke {}) (canonical {})))
     (is (= :staged-function-not-visible
            (rejection-code #(run (assoc options :visible-fn-ids #{root})))))
     (is (= :staged-function-not-visible
-           (rejection-code #(run (assoc options :visible-fn-ids #{neg})))))
+           (rejection-code #(run (assoc options :visible-fn-ids #{floor})))))
     (let [changed (assoc-in module [:fns 0 :bind :number] [:value 9])
-          changed-options (staged-options (:legacy-module options) changed #{root neg})]
+          changed-options (staged-options (:legacy-module options) changed #{root floor})]
       (is (= :unverified-staged-declaration (rejection-code #(run changed-options)))))
     (let [changed (assoc module :fns [])]
       (is (= :staged-module-ledger-mismatch
-             (rejection-code #(run (staged-options legacy changed #{root neg}))))))))
+             (rejection-code #(run (staged-options legacy changed #{root floor}))))))))
 
 
 (deftest prepared-package-rename-executes-through-both-compilers

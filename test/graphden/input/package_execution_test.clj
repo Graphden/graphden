@@ -94,9 +94,13 @@
         {:keys [canonical legacy analysis]} (runtimes (map-source) root)]
     (is (= :checked (:status analysis)))
     (is (= [:list :text] (get-in analysis [:scopes [] :signature :return])))
+    (is (= [:list :text] (get-in analysis [:public-input :routes [:coll] :type])))
     (is (= [[:string]] (mapv :parameters (vals (:closures analysis)))))
     (doseq [[input expected] [[[] []] [["a" "" "a" "graph"] ["A" "" "A" "GRAPH"]]]]
-      (is (= expected (legacy {:coll input}) (canonical {:coll input}))))))
+      (is (= expected (legacy {:coll input}) (canonical {:coll input}))))
+    (is (= :execution-error/type-mismatch
+           (try (canonical {:coll [1]})
+                (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))
 
 
 (deftest prepared-web-state-requires-a-compile-time-value-lowering

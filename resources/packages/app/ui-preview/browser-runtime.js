@@ -454,18 +454,24 @@
     for (const id of input.required) if (!present.has(id)) throw new Error('Missing graph input field');
     return present;
   }
-  function checkedInput(value, type) {
+  function matchesPrimitiveInput(value, type) {
     switch (type) {
-      case 'any': return value;
-      case 'null': if (value === null) return value; break;
-      case 'bool': if (typeof value === 'boolean') return value; break;
-      case 'text': if (typeof value === 'string') return value; break;
+      case 'any': return true;
+      case 'null': return value === null;
+      case 'bool': return typeof value === 'boolean';
+      case 'text': return typeof value === 'string';
       case 'int':
-      case 'numeric': if (Number.isSafeInteger(value)) return value; break;
-      case 'keyword': if (value instanceof Keyword) return value; break;
-      default: break;
+      case 'numeric': return Number.isSafeInteger(value);
+      case 'keyword': return value instanceof Keyword;
+      default: return false;
     }
-    throw new Error('Value does not match the required graph input type');
+  }
+  function checkedInput(value, type) {
+    const matches = typeof type === 'string'
+      ? matchesPrimitiveInput(value, type)
+      : Array.isArray(type?.anyOf) && type.anyOf.some((candidate) => matchesPrimitiveInput(value, candidate));
+    if (!matches) throw new Error('Value does not match the required graph input type');
+    return value;
   }
   function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {
     if ((plan.format !== 1 && plan.format !== 2) || plan.primitiveAbi !== 1) {

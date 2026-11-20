@@ -4,7 +4,8 @@
     [graphden.executor.browser-plan :as browser]
     [graphden.executor.capabilities :as capabilities]
     [graphden.input.ir :as ir]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
 (def ^:private const-id (ids/fn-id "core.logic" :const))
@@ -30,11 +31,18 @@
   {:id id :primitive (str primitive) :aliases [] :env [] :args args})
 
 
+(def ^:private browser-input-types #{:any :null :bool :text :int :numeric :keyword})
+
+
 (defn- supplied-type!
   [type]
-  (when-not (contains? #{:any :null :bool :text :int :numeric :keyword} type)
-    (ir/reject! :unsupported-browser-input-type {}))
-  (name type))
+  (cond
+    (contains? browser-input-types type) (name type)
+    (and (types/union-type? type)
+         (seq (types/union-members type))
+         (every? browser-input-types (types/union-members type)))
+    {:anyOf (mapv name (types/union-members type))}
+    :else (ir/reject! :unsupported-browser-input-type {})))
 
 
 (defn- browser-expression

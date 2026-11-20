@@ -147,3 +147,22 @@
                              (assoc-in [:root :bindings [:key] :value] :missing)
                              (assoc-in [:root :bindings [:default] :value] "fallback"))
                          "fallback")))
+
+
+(deftest named-browser-input-checks-a-union-of-wire-primitives
+  (let [type [:union :null :text]
+        source (-> definitions
+                   (assoc-in [:root :input :coll :name] type)
+                   (assoc-in [:name :input :value] type)
+                   (assoc-in [:name :return] type)
+                   (update-in [:name :bindings] dissoc [:value]))
+        {:keys [analysis options]} (checked-model source)
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        args (fn [value] {:coll {:name {:value value}}})
+        values [nil "Ada"]
+        [null-result text-result invalid] (run-browser plan (mapv args (conj values false)))]
+    (is (= values (mapv #(invoke (args %) nil) values)))
+    (is (= [{:value ["nil"] :sequence false} {:value ["string" "Ada"] :sequence false}]
+           [null-result text-result]))
+    (is (= "Value does not match the required graph input type" (:error invalid)))))

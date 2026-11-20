@@ -167,8 +167,8 @@ The offline exporter takes a fully authorized frozen source closure and checks
 the visibility of each lowered target and base implementation again. It emits
 only known pure browser primitives and shares browser codec limits.
 `export-named` adds a nested residual input descriptor and uses the same
-presence rules as the JVM. It accepts the wire codec's primitive leaves and
-runs their type checks when read. Deferred validation of a computed primitive
+presence rules as the JVM. It accepts wire-compatible primitives and their
+unions and checks them when read. Deferred validation of a computed primitive
 field uses the same value-read boundary. Unsupported types and container
 obligations fail during export. The production browser exporter uses format 1.
 

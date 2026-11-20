@@ -14,24 +14,25 @@
 (declare dependency-distances namespace-entry)
 
 
+(defn- browser-local-graph
+  [sources browser-paths]
+  (let [sources (into {} (map (fn [path] [(str (fs/file-name path)) (get sources path)])) browser-paths)]
+    (reduce-kv
+      (fn [graph file source]
+        (reduce (fn [g [_ dependency]]
+                  (let [dependency (if (str/ends-with? dependency ".js")
+                                     dependency (str dependency ".js"))]
+                    (if (contains? sources dependency)
+                      (update g dependency (fnil conj #{}) file)
+                      g)))
+                graph
+                (re-seq #"require\(['\"]\./([^'\"]+)['\"]\)" source)))
+      {} sources)))
+
+
 (defn- browser-local-consumers
-  [browser-files owners]
-  (let [sources (into {}
-                      (map (fn [path]
-                             [(str (fs/file-name path)) (slurp (str path))]))
-                      (fs/glob "tools/browser-test" "*.js"))
-        consumers (reduce-kv
-                    (fn [graph file source]
-                      (reduce (fn [g [_ dependency]]
-                                (let [dependency (if (str/ends-with? dependency ".js")
-                                                   dependency (str dependency ".js"))]
-                                  (if (contains? sources dependency)
-                                    (update g dependency (fnil conj #{}) file)
-                                    g)))
-                              graph
-                              (re-seq #"require\(['\"]\./([^'\"]+)['\"]\)" source)))
-                    {} sources)
-        distances (dependency-distances consumers owners)]
+  [browser-files local-graph owners]
+  (let [distances (dependency-distances local-graph owners)]
     (->> browser-files
          (filter #(contains? distances %))
          (sort-by (juxt distances identity)))))
@@ -124,7 +125,8 @@
                                          g)))
                                    graph (browser-selectors (get sources path))))
                          reverse-graph scripts)]
-     {:sources sources :reverse reverse-graph})))
+     {:sources sources :reverse reverse-graph
+      :local (browser-local-graph sources browser)})))
 
 
 (def ^:private cached-browser-source-graph
@@ -189,7 +191,7 @@
 (defn- precise-component-consumers
   "Explicit component runtime reads and their local helper importers precede
    broad shared-global and selector matches. Smaller helper fanout goes first."
-  [browser-files {:keys [sources]} path]
+  [browser-files {:keys [sources local]} path]
   (when-let [roles (seq (package-component-roles path))]
     (let [seeds (component-source-seeds sources roles)
           tests (set browser-files)
@@ -198,7 +200,7 @@
                              (map (comp str fs/file-name)))
           direct (sort (filter tests browser-seeds))
           helper-groups (for [helper (remove tests browser-seeds)
-                              :let [consumers (browser-local-consumers browser-files #{helper})]
+                              :let [consumers (browser-local-consumers browser-files local #{helper})]
                               :when (seq consumers)]
                           [helper consumers])]
       (concat direct
@@ -207,7 +209,7 @@
 
 
 (defn- browser-source-consumers
-  [browser-files {:keys [sources] reverse-graph :reverse} path]
+  [browser-files {:keys [sources local] reverse-graph :reverse} path]
   (let [package-module (second (re-matches #"resources/packages/[^/]+/([^/]+)/fns\.edn" path))
         roles (when package-module (package-component-roles path))
         exact-seeds (when (seq roles) (component-source-seeds sources roles))
@@ -235,7 +237,7 @@
                          (when (contains? tests name) name))) reached)
         helpers (into #{} (map (comp str fs/file-name))
                       (remove #(contains? tests (str (fs/file-name %))) reached))]
-    (concat direct (browser-local-consumers browser-files helpers))))
+    (concat direct (browser-local-consumers browser-files local helpers))))
 
 
 (def ^:private cached-api-source-graph
@@ -340,7 +342,7 @@
   "A browser test or local helper that uses two of the editor API consumer's
    data attributes observes the returned DOM contract. One shared attribute
    alone is too common to establish a useful early-test link."
-  [browser-files sources script]
+  [browser-files {:keys [sources local]} script]
   (let [contracts (set (re-seq #"data-[a-z][a-z0-9-]{4,}" (get sources script "")))
         matches (->> sources
                      (keep (fn [[file source]]
@@ -353,54 +355,51 @@
         tests (set browser-files)]
     (concat (filter tests matches)
             (mapcat (fn [helper]
-                      (let [consumers (browser-local-consumers browser-files #{helper})]
+                      (let [consumers (browser-local-consumers browser-files local #{helper})]
                         (when (<= (count consumers) 15) consumers)))
                     (remove tests matches)))))
 
 
+(defn- browser-api-module-consumers
+  "Find browser files connected to one package's declared HTTP paths."
+  [browser-files {:keys [sources local] :as graph} definitions package-source?]
+  (when (fs/exists? definitions)
+    (let [paths (package-api-paths definitions package-source?)
+          consumers (->> sources
+                         (keep (fn [[file source]]
+                                 (when (api-consumer? paths source package-source?) file)))
+                         sort)
+          tests (set browser-files)
+          direct (filter #(contains? tests (str (fs/file-name %))) consumers)
+          ;; Common cleanup helpers mention many APIs; their whole
+          ;; importer fanout is weaker evidence than a direct call.
+          helper-groups (for [helper consumers
+                              :when (str/starts-with? helper "tools/browser-test/")
+                              :when (not (contains? tests (str (fs/file-name helper))))
+                              :let [files (browser-local-consumers browser-files local
+                                                                   #{(str (fs/file-name helper))})]
+                              :when (<= (count files) 15)]
+                          [helper files])
+          editor-groups (for [script consumers
+                              :when (and package-source? (str/starts-with? script "resources/packages/"))
+                              :let [files (editor-api-selector-consumers browser-files graph script)]
+                              :when (seq files)]
+                          [script files])]
+      (vec (concat (map (comp str fs/file-name) direct)
+                   (mapcat second (sort-by (fn [[helper files]] [(count files) helper]) helper-groups))
+                   (mapcat second (sort-by (fn [[script files]] [(count files) script]) editor-groups)))))))
+
+
 (defn- browser-api-consumers
-  "Follow backend dependencies to declared literal HTTP paths, then direct
-   browser consumers, local helper importers and editor source consumers."
-  [browser-files graph path]
+  [module-consumers path]
   (let [modules (if (re-matches #"resources/packages/[^/]+/[^/]+/(?:fns\.edn|impls\.clj)" path)
                   [path]
                   (source-api-modules path))
-        sources (:sources graph)
-        tests (set browser-files)]
-    (mapcat
-      (fn [module-path]
-        (let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
-          (when (fs/exists? definitions)
-            (let [paths (package-api-paths definitions
-                                           (str/starts-with? path "resources/packages/"))
-                  consumers (->> sources
-                                 (keep (fn [[file source]]
-                                         (when (api-consumer? paths source
-                                                              (str/starts-with? path "resources/packages/"))
-                                           file)))
-                                 sort)
-                  direct (filter #(contains? tests (str (fs/file-name %))) consumers)
-                  ;; Common cleanup helpers mention many APIs; their whole
-                  ;; importer fanout is weaker evidence than a direct call.
-                  helper-groups (for [helper consumers
-                                      :when (str/starts-with? helper "tools/browser-test/")
-                                      :when (not (contains? tests (str (fs/file-name helper))))
-                                      :let [files (browser-local-consumers browser-files
-                                                                           #{(str (fs/file-name helper))})]
-                                      :when (<= (count files) 15)]
-                                  [helper files])
-                  editor-groups (for [script consumers
-                                      :when (and (str/starts-with? path "resources/packages/")
-                                                 (str/starts-with? script "resources/packages/"))
-                                      :let [files (editor-api-selector-consumers browser-files sources script)]
-                                      :when (seq files)]
-                                  [script files])]
-              (concat (map (comp str fs/file-name) direct)
-                      (mapcat second (sort-by (fn [[helper files]] [(count files) helper])
-                                              helper-groups))
-                      (mapcat second (sort-by (fn [[script files]] [(count files) script])
-                                              editor-groups)))))))
-      modules)))
+        package-source? (str/starts-with? path "resources/packages/")]
+    (mapcat (fn [module-path]
+              (let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
+                (module-consumers definitions package-source?)))
+            modules)))
 
 
 (defn changed-paths
@@ -421,7 +420,8 @@
                              (map (comp str fs/file-name))
                              sort
                              vec)
-          graph (cached-browser-source-graph)
+          {:keys [local] :as graph} (cached-browser-source-graph)
+          api-module-consumers (memoize (partial browser-api-module-consumers browser-files graph))
           editor-js? #(and (str/starts-with? % "resources/packages/app/editor/")
                            (str/ends-with? % ".js"))
           changed-editor-js (sort (filter editor-js? changed))
@@ -429,7 +429,7 @@
           changed-helper-groups (for [path changed-other
                                       :when (re-matches #"tools/browser-test/[^/]+\.js" path)
                                       :when (not (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path))
-                                      :let [files (browser-local-consumers browser-files
+                                      :let [files (browser-local-consumers browser-files local
                                                                            #{(str (fs/file-name path))})]
                                       :when (seq files)]
                                   [path files])
@@ -439,7 +439,7 @@
                                []
 
                                (re-matches #"tools/browser-test/[^/]+\.js" path)
-                               (browser-local-consumers browser-files
+                               (browser-local-consumers browser-files local
                                                         #{(str (fs/file-name path))})
 
                                (str/starts-with? path "resources/packages/app/editor/")
@@ -467,7 +467,7 @@
              ;; Direct editor modules are stronger evidence than generic API
              ;; roots or shared package graphs, which often reach every file.
              (mapcat source-consumers changed-editor-js)
-             (mapcat #(browser-api-consumers browser-files graph %) (sort changed))
+             (mapcat #(browser-api-consumers api-module-consumers %) (sort changed))
              (mapcat source-consumers changed-other))
            distinct
            (filter #(fs/exists? (str "tools/browser-test/" %)))

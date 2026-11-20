@@ -97,6 +97,45 @@
                  (array-map key value :type type))])))))))
 
 
+(defn- list-origin?
+  [spelling]
+  (and (vector? spelling) (= 3 (count spelling)) (= :list-origin (first spelling))
+       (contains? #{:vector [:append] [:append :closed] [:closed :append]} (second spelling))
+       (map? (peek spelling))
+       (every? nat-int? (keys (peek spelling)))
+       (every? #{:value-wrapper :ref-wrapper} (vals (peek spelling)))))
+
+
+(defn- original-list-item
+  [item spelling]
+  (when (and (vector? item) (= 2 (count item)))
+    (let [[op value] item]
+      (case op
+        :value (case spelling nil [value] :value-wrapper [{:value value}] nil)
+        :ref (case spelling
+               nil (cond (keyword? value) [value]
+                         (map? value) (when-let [origin (inline-origin value)] [origin]))
+               :ref-wrapper (when (keyword? value) [{:ref value}])
+               nil)
+        nil))))
+
+
+(defn- original-list
+  [{:keys [items tail] :as spec} spelling]
+  (when (and (list-origin? spelling) (map? spec) (= #{:items :tail} (set (keys spec)))
+             (vector? items) (#{:open :closed} tail))
+    (let [[_ wrapper overrides] spelling
+          originals (mapv #(original-list-item %2 (get overrides %1)) (range) items)
+          closed? (= :closed tail)]
+      (when (and (every? #(< % (count items)) (keys overrides))
+                 (every? some? originals)
+                 (or (not closed?) (and (vector? wrapper) (some #{:closed} wrapper))))
+        (let [items (mapv first originals)]
+          [(if (= :vector wrapper)
+             items
+             (apply array-map (mapcat #(vector % (if (= % :append) items closed?)) wrapper)))])))))
+
+
 (defn- original-leaf
   [form spelling type]
   (cond
@@ -105,6 +144,7 @@
     (and (vector? form) (= 2 (count form)))
     (let [[op value] form]
       (case op
+        :list-builder (original-list value spelling)
         :value (case spelling
                  nil [{:value value}]
                  :bare-value (when (coll? value) [value])
@@ -161,7 +201,8 @@
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
                             (every? (set (keys bind)) (keys legacy-forms))
-                            (every? #(or (#{:bare-value :ref-wrapper :type-first} %) (inline-type-position? %))
+                            (every? #(or (#{:bare-value :ref-wrapper :type-first} %)
+                                         (inline-type-position? %) (list-origin? %))
                                     (vals legacy-forms)))))
           (let [originals (mapv (fn [[k form]]
                                   (when-let [[original] (original-leaf form (get legacy-forms k)
@@ -182,11 +223,27 @@
          (when (= :type (ffirst raw)) :type-first)]))))
 
 
+(defn- list-spelling
+  [raw]
+  (let [bare? (vector? raw)
+        items (if bare? raw (:append raw))]
+    [:list-origin (if bare? :vector (vec (keys raw)))
+     (into (sorted-map)
+           (keep-indexed (fn [position item]
+                           (when (map? item)
+                             (case (set (keys item))
+                               #{:value} [position :value-wrapper]
+                               #{:ref} [position :ref-wrapper]
+                               nil))))
+           items)]))
+
+
 (defn- migrated-leaf
   [raw [op _ :as expression] assertion]
   (if assertion
     (migrated-asserted-leaf raw expression)
     (case op
+      :list-builder [expression (list-spelling raw)]
       :value (cond
                (and (map? raw) (= #{:value} (set (keys raw)))) [expression nil]
                (coll? raw) [expression :bare-value]

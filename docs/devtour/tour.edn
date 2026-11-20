@@ -1644,6 +1644,14 @@
            completed generation enters the cache; retained bodies refresh without replacing controls."
      :see [[:editor "mountCanvasBody"] [:editor "createRuntime"]]}
 
+    {:file "resources/packages/app/editor/editor-type-expand-render.js" :defn recordExpansionFields
+     :say "The argument type popover reads names and field types from the resolved record shape.
+           When the authorized graph subtree carries the complete declaration, its slot order and
+           optional flags supply the row labels. An inferred shape can still expand without this
+           metadata. Field chips reuse the graph's passive labels and identify their nested panels
+           for keyboard users. The structured descriptor is the source of field identity for writes."
+     :see [[:editor "format"] [:types "resolve-contract"]]}
+
     {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection
      :say "Projects authorized source labels, finite seal facts and flag-form copy into a passive
            graph view. The pure initial role supplies checked and disabled flag-form state, validated

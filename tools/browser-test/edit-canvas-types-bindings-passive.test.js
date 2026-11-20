@@ -9,7 +9,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
   const page = await browser.newPage({hasTouch: !!process.env.GRAPHDEN_VIEWPORT,
     viewport: process.env.GRAPHDEN_VIEWPORT ? {width: 390, height: 844} : {width: 1280, height: 720}});
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => errors.push(error.stack || error.message));
   try {
     await page.setContent('<main id="canvas" style="width:300px;padding:20px"></main>');
     await page.addStyleTag({path: path.join(source, 'resources/packages/app/editor/editor-styles.css')});
@@ -38,6 +38,9 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       window.gdLoadUIComponentRuntime = async identity => fixture.selected[identity] || null;
       window.installTabTrap = () => {};
       window.returnFocusTo = element => element?.focus();
+      window.graph = {nodes: new Map()};
+      window.reflowFromMeasuredHeights = () => false;
+      window.updateOverlayPositions = () => {};
       window.implementationFnIds = new Set(['fn']);
       window.lookups = {fnMap: new Map([['fn', {id: 'fn', name: 'child'}]]), fnByName: new Map(),
         bindingByFnSlot: new Map([['fn|slot', {'list-append': true}]]),
@@ -68,8 +71,8 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
     });
     for (const file of ['editor-passive-canvas.js', 'editor-canvas-values-graph.js',
       'editor-canvas-type-structure-graph.js', 'editor-canvas-bindings-graph.js',
-      'editor-literal-types.js', 'editor-type-format.js', 'editor-type-expand-render.js',
-      'editor-overlay-type-expand.js', 'editor-edit-modes.js', 'editor-overlay-seal.js']) {
+      'editor-data.js', 'editor-literal-types.js', 'editor-type-format.js', 'editor-type-expand-render.js',
+      'editor-overlay-type-expand.js', 'editor-edit-modes.js', 'editor-overlay-seal.js', 'editor-overlay-arg.js']) {
       await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
     }
     await page.evaluate(() => {
@@ -100,7 +103,49 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
         positionInlineHost(fixture.top, fixture.chip);
       };
       fixture.zoom = 1; window.gv = {ready: () => true, zoom: () => fixture.zoom, onViewportChange(callback) { fixture.viewportChanged = callback; }};
+
+      for (const name of ['delivery', 'address']) {
+        lookups.fnMap.set(name, {id: name, name, role: 'record'});
+      }
+      richTypes.delivery = {return: {recipient: 'address', sender: 'address'}, 'type-row?': true};
+      richTypes.address = {return: {street: 'text', line2: 'text'}, 'type-row?': true};
+      lookups.fnSlotsByFn = new Map([
+        ['delivery', [{'slot-id': 'sender'}, {'slot-id': 'recipient'}]],
+        ['address', [{'slot-id': 'line2'}, {'slot-id': 'street'}]],
+      ]);
+      for (const [name, type, required] of [['shipping', 'delivery', true], ['sender', 'address', true],
+        ['recipient', 'address', true], ['street', 'text', true], ['line2', 'text', false]]) {
+        lookups.slotMap.set(name, {id: name, name, 'type-fn-id': type, required});
+      }
+      const arg = {'fn-id': 'fn', 'slot-id': 'shipping', name: 'shipping', type: 'delivery'};
+      const chip = createTypeChip(arg, {readOnly: true, owner: canvas});
+      canvas.appendChild(chip);
+      attachArgChipExpand(chip, arg, 'shipping', {editable: false});
     });
+    const argChip = page.locator('[data-inline-anchor="shipping/arg-chip"]');
+    await argChip.press('Enter');
+    const argPanel = page.getByRole('group', {name: 'Fields of shipping'});
+    assert.equal(await argChip.getAttribute('aria-controls'), await argPanel.getAttribute('id'));
+    assert.equal(await argPanel.evaluate(el => el === document.activeElement), true);
+    assert.deepEqual(await argPanel.locator('.type-inline-label').allTextContents(), ['sender', 'recipient']);
+    const sender = argPanel.getByRole('button', {name: /^sender — Type:/});
+    const recipient = argPanel.getByRole('button', {name: /^recipient — Type:/});
+    await page.keyboard.press('Tab');
+    assert.equal(await sender.evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('Space');
+    assert.equal(await sender.getAttribute('aria-expanded'), 'true');
+    assert.equal(await recipient.getAttribute('aria-expanded'), 'false');
+    const senderFields = argPanel.locator('[id=' + JSON.stringify(await sender.getAttribute('aria-controls')) + ']');
+    assert.deepEqual(await senderFields.locator('.type-inline-label').allTextContents(), ['line2 (optional)', 'street']);
+    await recipient.click();
+    assert.equal(await recipient.getAttribute('aria-expanded'), 'true');
+    assert.notEqual(await recipient.getAttribute('aria-controls'), await sender.getAttribute('aria-controls'));
+    assert.match(await argPanel.ariaSnapshot(), /button "sender — Type: .*" \[expanded\]/);
+    await page.keyboard.press('Escape');
+    assert.equal(await argPanel.isVisible(), false);
+    assert.equal(await argChip.evaluate(el => el === document.activeElement), true);
+    assert.equal(await argChip.getAttribute('aria-expanded'), 'false');
+    console.log('PASS argument record order, distinct nested disclosures, optional field and keyboard focus');
     for (const [name, declarations] of [['empty', null], ['hidden', {display: 'none'}],
       ['transparent', {opacity: '0'}], ['zero', {display: 'block', width: '0', 'font-size': '0'}],
       ['large', {display: 'block', width: '4096px', padding: '16px', 'font-size': '48px'}]]) {

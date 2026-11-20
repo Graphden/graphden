@@ -124,6 +124,7 @@ Keeps format 2 outside the production loader. Unsupported headers and mixed stru
 Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs come from memberships; aliases retain those identities, marker/refinement obligations survive, and ambiguous union roots are rejected. This descriptor never stores generated reference dependencies or the remaining input back into the declaration.
 
 - source :: [[file:../../../src/graphden/input/descriptor.clj::(defn resolve-contract][src/graphden/input/descriptor.clj:164]]
+- referenced from :: [[file:editor.org::#editor/recordExpansionFields][recordExpansionFields]]
 
 * 10. analyze-effective-input
 :PROPERTIES:

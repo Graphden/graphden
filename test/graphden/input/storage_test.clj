@@ -4,6 +4,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities.list :as entity-list]
+    [graphden.crud.structured-input-bind :as bind-command]
     [graphden.executor.context :as exec-context]
     [graphden.input.access :as access]
     [graphden.input.migration :as migration]
@@ -137,6 +138,76 @@
       (binding [access/*offline?* false]
         (is (= :input/offline-only
                (attempt #(sp/create-entity v :input-binding (literal ids [user] {})))))))))
+
+
+(deftest preview-bind-is-branch-owned-and-rechecks-authorization-test
+  (with-storage [base (base-storage)]
+    (let [main (vs/wrap-with-versioning base)
+          {:keys [owner input user name]} (seed! main)
+          branch (vs/create-branch! main "structured-preview")
+          storage (vs/switch-branch main (:id branch))
+          ctx (exec-context/create-context {:storage storage :base-fns {}})
+          main-ctx (exec-context/create-context {:storage main :base-fns {}})
+          protected (vs/create-branch! main "structured-protected" {:require-merge? true})
+          protected-ctx (assoc ctx :storage (vs/switch-branch main (:id protected)))
+          request {:fn-id owner :path ["user" "name"] :value "Alice"}
+          preview (bind-command/preview ctx request)
+          apply-request (assoc request :expected-state (:expected-state preview))]
+      (is (:ok preview))
+      (is (empty? (sp/query-entities storage :input-binding {})))
+      (is (= :input/leaf-unavailable
+             (attempt #(bind-command/preview ctx (assoc request :path ["user"])))))
+      (is (= :types/check-failed
+             (attempt #(bind-command/preview ctx (assoc request :value 42)))))
+      (is (= :branch/merge-required (attempt #(bind-command/preview protected-ctx request))))
+      (is (= :input/stale-preview (attempt #(bind-command/bind! main-ctx apply-request))))
+      (is (= :input/stale-preview
+             (attempt #(bind-command/bind! ctx (assoc apply-request :value "Different")))))
+      (binding [access/*offline?* false]
+        (is (= :input/offline-only (attempt #(bind-command/bind! ctx apply-request)))))
+      (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+        (tenancy/install-browser-source-policy!
+          (constantly (fn [row]
+                        (when (= (:id row) input)
+                          (throw (ex-info "denied" {:type :authz/forbidden}))))))
+        (is (= :authz/forbidden (attempt #(bind-command/bind! ctx apply-request)))))
+      (is (empty? (sp/query-entities storage :input-binding {})))
+      (let [ready (promise)
+            writes (mapv (fn [_]
+                           (future @ready (attempt #(bind-command/bind! ctx apply-request)))) [1 2])]
+        (deliver ready true)
+        (is (= #{:ok :input/stale-preview} (set (map #(deref % 15000 :timeout) writes)))))
+      (is (= :input/leaf-unavailable (attempt #(bind-command/preview ctx request))))
+      (is (empty? (sp/query-entities main :input-binding {})))
+      (let [[row :as rows] (sp/query-entities storage :input-binding {})]
+        (is (= 1 (count rows)))
+        (is (= [user name] (:target-path (rows/normalize row))))
+        (is (= "Alice" (:value row)))))))
+
+
+(deftest structured-bind-keeps-explicit-nil-false-and-opaque-maps-test
+  (with-storage [base (base-storage)]
+    (let [storage (vs/wrap-with-versioning base)
+          {:keys [owner input]} (seed! storage)
+          ctx (exec-context/create-context {:storage storage :base-fns {}})
+          bool-type (sp/create-entity storage :fn {:id (:bool (record-ids/primitive-fn-ids)) :name "bool"})
+          jsonb (sp/create-entity storage :fn {:id (:jsonb (record-ids/primitive-fn-ids)) :name "jsonb"})
+          nullable (sp/create-entity storage :fn {:constraint [:union :null :text]})
+          active (sp/create-entity storage :slot {:name "active" :type-fn-id (:id bool-type)})
+          note (sp/create-entity storage :slot {:name "note" :type-fn-id (:id nullable)})
+          metadata (sp/create-entity storage :slot {:name "metadata" :type-fn-id (:id jsonb)})]
+      (sp/create-entities storage :fn-slot
+                          [{:fn-id input :slot-id (:id active) :position 1}
+                           {:fn-id input :slot-id (:id note) :position 2}
+                           {:fn-id input :slot-id (:id metadata) :position 3}])
+      (doseq [[path value] [[[:active] false] [[:note] nil] [[:metadata] {:value 42 :ref "opaque"}]]]
+        (let [request {:fn-id owner :path path :value value}
+              preview (bind-command/preview ctx request)
+              result (bind-command/bind! ctx (assoc request :expected-state (:expected-state preview)))
+              row (sp/read-entity storage :input-binding (:binding-id result))]
+          (is (:committed result))
+          (is (true? (:value-present row)))
+          (is (= value (:value row))))))))
 
 
 (deftest offline-identity-and-version-writes-each-invalidate-source

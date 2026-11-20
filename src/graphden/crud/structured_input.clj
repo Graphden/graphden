@@ -46,20 +46,30 @@
         (assoc info :type type)))))
 
 
-(defn project
-  "Serialize only remaining field names, types and requiredness. Keep bound
-   values, address ledgers, hidden fields and runtime contracts on the server."
+(defn analyze
+  "Check a frozen stored declaration with its witnessed return types."
   [ctx root]
   (when (get-in ctx [:fns root :input-type-fn-id])
-    (let [ctx (assoc ctx :signatures (signature-view ctx))
-          graph (analysis/analyze-effective-input ctx root {:check-expression check/check-input-binding})
-          incomplete? (or (not= :checked (:status graph))
-                          (seq (:obligations graph))
-                          (not (get-in graph [:coverage :recursive-availability]))
-                          (some #(#{:graph-callable :callable-producer} (:mode %)) (:dependencies graph)))]
-      (if incomplete?
-        {:status :unavailable}
-        (some-> (get-in graph [:public-input :root]) wire-node (assoc :status :available))))))
+    (analysis/analyze-effective-input (assoc ctx :signatures (signature-view ctx)) root
+                                      {:check-expression check/check-input-binding})))
+
+
+(defn project-analysis
+  "Serialize only remaining field names, types and requiredness. Keep bound
+   values, address ledgers, hidden fields and runtime contracts on the server."
+  [graph]
+  (when graph
+    (if (or (not= :checked (:status graph))
+            (seq (:obligations graph))
+            (not (get-in graph [:coverage :recursive-availability]))
+            (some #(#{:graph-callable :callable-producer} (:mode %)) (:dependencies graph)))
+      {:status :unavailable}
+      (some-> (get-in graph [:public-input :root]) wire-node (assoc :status :available)))))
+
+
+(defn project
+  [ctx root]
+  (project-analysis (analyze ctx root)))
 
 
 (defn read-input

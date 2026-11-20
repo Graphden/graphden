@@ -11,6 +11,12 @@
     [graphden.versioning.storage.uniqueness :as uniqueness]))
 
 
+(defn lock-bindings!
+  "Join the structured binding lock in the caller's write transaction."
+  [storage]
+  (uniqueness/xact-lock! (tx/datasource storage) ["structured-input-bindings"]))
+
+
 (defn- change!
   [storage id expected-version operation]
   (access/assert-write! :input-binding {})

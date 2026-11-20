@@ -7,6 +7,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]
     [graphden.types.core.shapes :as shapes]
+    [structured-input-cst :as cst]
     [structured-input-dry-run :as dry]
     [structured-input-inventory :as inventory]))
 
@@ -230,6 +231,51 @@
         (is (= {:linked-fields 2 :reparsed-fields 2 :reconstructed-fields 2 :reparsed-definitions 2} stats))
         (is (= {:supported 3 :blocked 0} (:counts report)))
         (is (empty? (codes report)))))))
+
+
+(deftest migration-artifact-emits-only-complete-module-replacements
+  (with-repository
+    (fn [root roots]
+      (let [supported "resources/packages/example/main/fns.edn"
+            blocked "resources/packages/example/review/fns.edn"]
+        (package! root "example" []
+                  [["main" "example" [identity-fn
+                                      {:name :reader :args {:deep :any} :return-type :any}]]
+                   ["review" "example"
+                    [{:name :ref-scoped :parent :id :args {:x :reader :deep "private literal"}}]]])
+        (let [manifest (inventory/inventory roots)
+              run (dry/migration-artifact roots manifest)
+              by-path (into {} (map (juxt :path identity)) (:modules run))
+              original (slurp (str (fs/path root supported)))
+              patch (get-in by-path [supported :patch])
+              result (cst/apply-text patch original)]
+          (is (= 1 (:artifact-format run)))
+          (is (= :verified (get-in by-path [supported :status])))
+          (is (= 2 (:input-format (edn/read-string (:text result)))))
+          (is (= :whole-module-proof-required (get-in by-path [blocked :reason])))
+          (is (nil? (get-in by-path [blocked :patch])))
+          (is (not (str/includes? (pr-str (:report run)) "private literal")))
+          (is (= manifest (inventory/inventory roots))))))))
+
+
+(deftest artifact-cli-publishes-a-new-file-without-overwriting-an-existing-one
+  (with-repository
+    (fn [root _]
+      (package! root "example" [] [["main" "example" [identity-fn]]])
+      (fs/with-temp-dir [destination {:prefix "structured-source-artifact-"}]
+        (let [file (fs/path destination "migration.edn")
+              run #(process/shell {:out :string :err :string :continue true}
+                                  "bb" "--classpath" "src:scripts"
+                                  "scripts/structured_input_dry_run.clj" "--repo" "fixture" (str root)
+                                  "--artifact" (str file))
+              {:keys [exit out]} (run)
+              payload (slurp (str file))]
+          (is (zero? exit))
+          (is (= 1 (:artifact-format (edn/read-string payload))))
+          (is (= {:supported 1 :blocked 0} (:counts (edn/read-string out))))
+          (is (= 2 (:exit (run))))
+          (is (= payload (slurp (str file))))
+          (is (= [file] (fs/list-dir destination))))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-dry-run-test)]

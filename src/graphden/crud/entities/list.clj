@@ -10,6 +10,7 @@
     [graphden.crud.graph-refs :as refs]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
+    [graphden.crud.structured-input :as structured-input]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.owned :as owned]
@@ -76,7 +77,7 @@
    memo's delta re-lint) see an unchanged concealed fn as unchanged."
   [row]
   (or (java.util.Map/.get blanked-rows row)
-      (let [b (assoc row :parent-ids [])]
+      (let [b (-> row (assoc :parent-ids []) (dissoc :structured-input))]
         (java.util.Map/.put blanked-rows row b)
         b)))
 
@@ -741,7 +742,13 @@
   "The fn-view slice reachable from `root-id` — empty rows for a nil or
    unknown root."
   [ctx root-id]
-  (list-scope-subtree (env ctx) root-id))
+  (let [subtree (list-scope-subtree (env ctx) root-id)
+        root (some #(when (= root-id (:id %)) %) (:fns subtree))]
+    (if-let [input (when (:input-type-fn-id root)
+                     (structured-input/read-input (:storage ctx) root-id))]
+      (update subtree :fns (fn [fns]
+                             (mapv #(cond-> % (= root-id (:id %)) (assoc :structured-input input)) fns)))
+      subtree)))
 
 
 (defn graph-full

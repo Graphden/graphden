@@ -92,7 +92,7 @@ function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
   // expandable chip. parentAncestors is a Set<string> threaded
   // through from renderInlineExpansionInto; missing → empty.
   const ancestors = parentAncestors || new Set();
-  const richName = (typeof rich === 'string') ? rich : null;
+  const richName = (typeof rich === 'string' && !editContext?.inputDescriptor) ? rich : null;
   const isCycle = !!(richName && ancestors.has(richName));
 
   const chip = document.createElement('span');
@@ -109,7 +109,7 @@ function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
     return row;
   }
   const nativeTitle = 'Type: ' + formatTypeHint(rich);
-  const expandable = isTypeExpandable(rich);
+  const expandable = editContext?.inputDescriptor ? editContext.inputDescriptor.fields.length > 0 : isTypeExpandable(rich);
   const mark = expandable ? window.gdAppendTypeControlMark(chip,
     expandedTypePaths.has(path) ? '▾' : '▸') : null;
   const display = () => ({label: shortTypeLabel(rich), title: 'Type: ' + formatTypeHumanReadable(rich)});
@@ -415,6 +415,10 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     host.appendChild(content);
     host = content;
   }
+  if (c.inputDescriptor) {
+    appendStructuredInputFields(host, c.inputDescriptor, path, c.ancestorTypes);
+    return;
+  }
   // Human-readable description from the type-row's `description`
   // field — surfaces author intent without taking a popover detour
   // through the `i` badge.
@@ -616,6 +620,15 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       host.appendChild(buildInlineTypeRow(label, type, path + '/f/' + encodeURIComponent(name), c.ancestorTypes,
         {...childEdit([name]), fieldLabel: label, recordTypeId: declaration?.['type-fn-id']}));
     }
+  }
+}
+
+function appendStructuredInputFields(host, descriptor, path, ancestors) {
+  for (const field of descriptor.fields) {
+    const label = field.required === false ? field.name + ' (optional)' : field.name;
+    const type = field.fields ? (field.kind === 'reference-inputs' ? 'Reference inputs' : 'Record') : field.type;
+    host.appendChild(buildInlineTypeRow(label, type, path + '/input/' + encodeURIComponent(field.name), ancestors,
+      {fieldLabel: label, inputDescriptor: field.fields ? field : null}));
   }
 }
 

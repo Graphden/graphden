@@ -170,7 +170,7 @@
 (defprotocol StorageBoundedQuery
   "Complete owner-bounded reads with an identity-candidate resource budget.
    Overflow is refused before payload/version reads; this is not pagination.
-   Supports exact function namespace/name, fn-slot/binding fn-id and
+   Supports exact function namespace/name, fn-slot/binding/input-binding fn-id and
    list-item binding-id predicates. Versioned mutable predicates use all
    matching version rows. Unknown decorators must explicitly opt in and preserve ACLs."
 

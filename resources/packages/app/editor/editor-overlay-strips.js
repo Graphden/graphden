@@ -57,6 +57,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   const c = { overlay, cardFnEntity, originalFnId, isNavRoot, stripFacts,
               rt, rtEditable, flagEditable };
   appendReturnTypeStrip(c);
+  if (isNavRoot) appendStructuredInputStrip(overlay, originalFnId);
   appendEffectsStrip(c);
   appendEditTypeRowStrip(c);
   appendSetParentStrip(c);
@@ -66,6 +67,27 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot, stripFacts) {
   // same payload duplicated in two places turned the card into a
   // noisy stack of labels.)
   appendBranchLocalStrip(c);
+}
+
+function appendStructuredInputStrip(overlay, fnId) {
+  const input = window.gdStructuredInputFor?.(fnId);
+  if (!input) return;
+  const strip = document.createElement('div');
+  strip.className = 'structured-input-strip';
+  overlay.appendChild(strip);
+  if (input.status !== 'available' || !input.fields?.length) {
+    strip.textContent = input.status === 'available' ? 'No visible input fields' : 'Input fields unavailable';
+    return;
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'arg-type-chip arg-type-chip-readonly';
+  button.textContent = 'Remaining inputs';
+  strip.appendChild(button);
+  attachInlineExpand(button, null, fnId + '/structured-input', {
+    inputDescriptor: input,
+    isCurrent: () => window.gdStructuredInputFor?.(fnId) === input,
+  });
 }
 
 // The strips below take the context `appendFnMetadataStrips` computed once:

@@ -1,13 +1,16 @@
-(ns ^:integration ^#:clj-kondo{:config (quote {:lint-as #:graphden.input.storage-test{with-storage clojure.core/let}})} graphden.input.storage-test
+(ns ^:integration ^{:clj-kondo/config (quote {:lint-as {graphden.input.storage-test/with-storage clojure.core/let}})} graphden.input.storage-test
   "Real PostgreSQL checks of offline v2 storage, using the normal decorators."
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.crud.entities.list :as entity-list]
+    [graphden.executor.context :as exec-context]
     [graphden.input.access :as access]
     [graphden.input.migration :as migration]
     [graphden.input.offline :as offline]
     [graphden.input.references :as input-refs]
     [graphden.input.rows :as rows]
     [graphden.input.storage :as input-edit]
+    [graphden.packages.records.ids :as record-ids]
     [graphden.schema.graph.schema :as graph]
     [graphden.schema.malli.core :as malli]
     [graphden.schema.protocol.protocol :as schema]
@@ -17,6 +20,7 @@
     [graphden.storage.postgres.source-revision :as revision]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.tenancy.context :as tenancy]
     [graphden.versioning.identity-repair :as identity-repair]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.input :as input-storage]
@@ -53,7 +57,7 @@
 
 (defn- seed!
   [storage]
-  (let [text (sp/create-entity storage :fn {:name "text"})
+  (let [text (sp/create-entity storage :fn {:id (:text (record-ids/primitive-fn-ids)) :name "text"})
         record (sp/create-entity storage :fn {:name "user"})
         root (sp/create-entity storage :fn {:name "input"})
         name-field (sp/create-entity storage :slot {:name "name" :type-fn-id (:id text)})
@@ -78,6 +82,38 @@
 (defn- attempt
   [f]
   (try (f) :ok (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
+
+
+(deftest viewer-graph-subtree-projects-only-remaining-inputs-test
+  (with-storage [base (base-storage)]
+    (let [storage (vs/wrap-with-versioning base)
+          {:keys [owner user name input] :as ids} (seed! storage)
+          ctx (exec-context/create-context {:storage storage :base-fns {}})
+          row (sp/create-entity storage :input-binding (literal ids [user name] "private literal"))
+          secret-type (sp/create-entity storage :fn {:name "sensitive-text" :constraint [:secret :text]})
+          secret (sp/create-entity storage :slot {:name "vault-token" :type-fn-id (:id secret-type)
+                                                  :required true})
+          _ (sp/create-entity storage :fn-slot {:fn-id input :slot-id (:id secret) :position 1})
+          subtree (fn [root] (entity-list/graph-subtree ctx root))
+          structured (fn [root]
+                       (some #(when (= root (:id %)) (:structured-input %)) (:fns (subtree root))))
+          stripped (entity-list/strip-impl-of (subtree owner) #{owner})]
+      (binding [access/*offline?* false]
+        (let [view (structured owner)]
+          (is (= :available (:status view)))
+          (is (= [:user] (mapv :name (:fields view))))
+          (is (= [{:kind :input-field :name :email :type :text :required false :required-now? false}]
+                 (get-in view [:fields 0 :fields])))
+          (is (not (.contains (pr-str view) "private literal")))
+          (is (not (.contains (pr-str view) (str (:id row)))))
+          (is (nil? (structured input)))
+          (is (not-any? :structured-input (:fns stripped)))))
+      (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+        (tenancy/install-browser-source-policy!
+          (constantly (fn [row]
+                        (when (= (:id row) input)
+                          (throw (ex-info "denied" {:type :authz/forbidden}))))))
+        (is (nil? (structured owner)))))))
 
 
 (deftest persisted-roundtrip-and-offline-admission-test

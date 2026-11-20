@@ -115,6 +115,18 @@ rows only. Nested scopes/paths and projection expressions fail explicitly. It is
 not a second writer or a complete v2 runtime reader. The legacy history UI and
 interactive editor tutorials remain on v1 until their later transition stages.
 
+## Editor input snapshot
+
+The standard graph subtree response may attach `structured-input` to the
+selected function row when that function has a persisted v2 input declaration.
+The server reads the branch and source grants in one read-only snapshot and
+batches both membership and binding reads by reachable owner. The projection
+contains the remaining visible fields, their types and requiredness. The
+server retains bound data, hidden fields and the route ledger. The editor
+keeps the projection with the installed subtree and displays it in the root
+card's **Remaining inputs** popover. The editor reports unavailable input
+fields when the snapshot lacks sufficient signature evidence.
+
 ## Verification
 
 `graphden.input.storage-test` uses PostgreSQL and the ordinary schema/versioning

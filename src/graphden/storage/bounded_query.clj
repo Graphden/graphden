@@ -6,7 +6,7 @@
 
 
 (def ^:private owner-fields
-  {:fn-slot :fn-id :binding :fn-id :binding-list-item :binding-id})
+  {:fn-slot :fn-id :binding :fn-id :binding-list-item :binding-id :input-binding :fn-id})
 
 
 (defn candidate-where

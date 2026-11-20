@@ -231,3 +231,37 @@
     (is (= (set (for [use-id uses] [[owner [use-id]] [field]])) (set (map :from routes))))
     (is (= (set (for [use-id uses] [[owner [use-id]] [alias-id]])) (set (map :source routes))))
     (is (every? #(= :checked (get-in % [:proof :status])) routes))))
+
+
+(deftest projected-field-bindings-preserve-their-origin-across-diamond-and-reference-uses
+  (let [core (into (filterv #(= :str-trim (:name %)) (sources "strings"))
+                   (filter #(= :equal? (:name %)) (sources "logic")))
+        web (edn/read-string (slurp (io/resource "packages/web/crud-parse/fns.edn")))
+        renamed (assoc (some #(when (= :_parse-fn-form-pid-trim-item (:name %)) %) (:fns web)) :namespace (:namespace web))
+        left {:namespace "test" :name :left :parent (:name renamed) :args {:item {:value "  text  "}}}
+        right {:namespace "test" :name :right :parent (:name renamed)}
+        merged {:namespace "test" :name :merged :parents [:left :right]}
+        caller {:namespace "test" :name :compare :parent :equal? :args {:a :merged :b :merged}}
+        ds (into core [renamed left right merged caller])
+        replay (fn [xs]
+                 (snapshot/projection-readiness (snapshot/package-index (parse/prepare-module xs {} {}) xs)
+                                                (ids/fn-id "test" :compare) @roots))
+        graph (replay ds)
+        trim-id (ids/fn-id "core.strings" :str-trim)
+        original (ids/fn-id (:namespace web) (:name renamed))
+        alias-id (ids/slot-id original :item)
+        owner (ids/fn-id "test" :compare)
+        left-id (ids/fn-id "test" :left)
+        use-ids (mapv #(ids/binding-id owner (ids/slot-id (ids/fn-id "core.logic" :equal?) %)) [:a :b])
+        routes (:projections graph)
+        conflicting (mapv #(if (= :right (:name %)) (assoc % :args {:item "different"}) %) ds)]
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (= 2 (count routes)))
+    (is (= #{(ids/binding-id original (ids/slot-id trim-id :string))} (set (map :binding-id routes))))
+    (is (= (set (map (fn [id]
+                       {:address [[owner [id]] [alias-id]]
+                        :binding-id (ids/binding-id left-id alias-id)
+                        :origin-fn-id left-id :expression-kind "value"}) use-ids))
+           (set (map :source-binding routes))))
+    (is (= :blocked (:status (replay conflicting))))
+    (is (some #{:inherited-projection-required} (get-in (replay conflicting) [:diagnostics 0 :blockers])))))

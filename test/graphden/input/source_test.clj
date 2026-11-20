@@ -848,3 +848,30 @@
         entry (result (plan [base producer host]) :host)]
     (is (= #{:inline-list-item-origin-required} (codes entry)))
     (is (nil? (:proposed entry)))))
+
+
+(deftest descendants-bind-an-inherited-alias-using-the-declaring-slot
+  (let [renamed {:namespace "demo" :name :renamed :parent :sink :args {:x {:as :public-x}}}
+        left {:namespace "demo" :name :left :parent :renamed}
+        right {:namespace "demo" :name :right :parent :renamed}
+        member {:namespace "demo" :name :member :parents [:left :right] :args {:public-x false}}
+        ds [base renamed left right member]
+        replay (fn [xs] (let [ctx (prepared xs)] (result (source/verify-module (source/plan-module xs ctx) ctx) :member)))
+        entry (replay ds)
+        alias-id (ids/slot-id (ids/fn-id "demo" :renamed) :public-x)
+        [row] (get-in entry [:v2 :bindings])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= [alias-id] (:target-path row)))
+    (is (= (ids/binding-id (ids/fn-id "demo" :member) alias-id) (:id row)))
+    (is (= [:value false] (get-in entry [:proposed :bind :public-x])))
+    (is (contains? (codes (replay (conj (pop ds) (assoc member :args {:x false})))) :inherited-occupancy-required))
+    (is (contains? (codes (replay [base producer renamed left (assoc right :parent :producer) member])) :inherited-projection-required))))
+
+
+(deftest declared-field-keeps-authored-type-spelling-for-source-edits
+  (let [named {:namespace "types" :name :shape :type {:v :text}}
+        host {:namespace "demo" :name :host :parent :sink :args {:exact {:type :types/shape}}}
+        entry (result (verified [base named host]) :host)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:type :types/shape} (get-in entry [:legacy :arguments 0 :spec])))
+    (is (= {:type :types/shape} (get-in entry [:proposed :input :exact])))))

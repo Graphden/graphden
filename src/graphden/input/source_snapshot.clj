@@ -4,6 +4,7 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.inheritance :as inheritance]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
     [graphden.input.source-rename :as rename]
@@ -78,8 +79,7 @@
                             {:type :input/source-snapshot :code :unverified-source-declaration
                              :fn-id id :blockers (mapv :code (:blockers entry))})))
           (when (seq (:list-builders v2)) (reject! :list-builder-signature-required id))
-          (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2))
-                         (<= (count (:parent-ids owner)) 1))
+          (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2)))
             (reject! :unsupported-scope-declaration id))
           (recur (into (into (pop pending) (:parent-ids owner))
                        (keep :ref-fn-id) (:bindings v2))
@@ -141,12 +141,11 @@
 
 
 (defn- root-id
-  [entries id]
-  (loop [id id seen #{}]
-    (when (contains? seen id) (reject! :cyclic-inheritance id))
-    (if-let [parent (first (get-in entries [id :owner :parent-ids]))]
-      (recur parent (conj seen id))
-      id)))
+  [context id]
+  (let [order (inheritance/declaration-order context id)
+        roots (filterv #(empty? (get-in context [:fns % :parent-ids])) order)]
+    (when-not (= 1 (count roots)) (reject! :multiple-implementation-roots id))
+    (first roots)))
 
 
 (defn- exact-projection-pin?
@@ -190,8 +189,8 @@
 
 
 (defn- implementation
-  [entries roots id]
-  (let [base (root-id entries id)
+  [context entries roots id]
+  (let [base (root-id context id)
         entry (get roots base)
         declaration (get entries base)
         fields (get-in declaration [:contract :fields])
@@ -215,7 +214,7 @@
   (context/call-with-types
     ctx
     (fn []
-      {:implementations (into {} (map (fn [id] [id (implementation entries roots id)])) (keys entries))
+      {:implementations (into {} (map (fn [id] [id (implementation ctx entries roots id)])) (keys entries))
        :check-expression check/check-input-binding
        :infer-signature check/infer-input-signature})))
 
@@ -232,17 +231,35 @@
     {:context ctx :options (implementation-options ctx entries roots)}))
 
 
+(defn- source-binding
+  "Preserve the identity of a declaration that supplies a projected field
+   at this use. Only the occurrence address is rebased under a reference."
+  [owner by-id graph [scope path :as address]]
+  (when-let [entry (get-in graph [:scopes (second scope) :bindings address])]
+    (let [id (:binding-id entry)
+          row (get by-id id)
+          kind (:expression-kind row)]
+      (when-not (and row (= (:fn-id row) (:origin-fn-id entry))
+                     (empty? (:scope-path row)) (= path (:target-path row))
+                     (= id (ids/binding-id (:fn-id row) (first path)))
+                     (= kind (name (get-in entry [:expression :kind]))))
+        (reject! :projection-source-binding-mismatch owner))
+      {:address address :binding-id id :origin-fn-id (:fn-id row) :expression-kind kind})))
+
+
 (defn- confirmed-projections
   [owner bindings graph]
   (let [by-id (into {} (map (juxt :id identity)) bindings)]
     (mapv (fn [{[scope path :as address] :from :as route}]
             (let [bound (get-in graph [:scopes (second scope) :bindings address])
                   id (:binding-id bound)
-                  row (get by-id id)]
-              (when-not (and row (= (:fn-id row) (:origin-fn-id bound))
+                  row (get by-id id)
+                  supplied (source-binding owner by-id graph (:source route))]
+              (when-not (and (= "projection" (:expression-kind row)) (= (:fn-id row) (:origin-fn-id bound))
                              (= path (:target-path row)) (= [scope (:projection-path row)] (:source route)))
                 (reject! :projection-origin-mismatch owner))
-              (assoc route :binding-id id :origin-fn-id (:fn-id row) :proof (get-in graph [:proofs address]))))
+              (cond-> (assoc route :binding-id id :origin-fn-id (:fn-id row) :proof (get-in graph [:proofs address]))
+                supplied (assoc :source-binding supplied))))
           (:projections graph))))
 
 
@@ -253,9 +270,8 @@
   [package owner roots]
   (try
     (let [entries (closure package [owner])
-          bindings (filter #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %)))
-                           (mapcat :bindings (vals entries)))
-          _ (when-not (seq bindings) (reject! :missing-source-projection owner))
+          bindings (mapcat :bindings (vals entries))
+          _ (when-not (some #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %))) bindings) (reject! :missing-source-projection owner))
           ctx (verified-context package entries)
           options (try (implementation-options ctx entries roots)
                        (catch clojure.lang.ExceptionInfo error

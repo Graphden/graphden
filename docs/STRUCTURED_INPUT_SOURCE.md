@@ -139,6 +139,15 @@ the prepared type expression, including type variables. Supported pins retain
 the original binding UUID and a separate `:configure` assertion. Ambiguous
 names, conflicting pins and occupied ancestor fields remain diagnostics.
 
+Descendants may bind the alias slot through a common inheritance root. Each
+declaring ancestor's local projection must account for the stored source-slot
+link. Ancestor rows must occupy distinct slot addresses across the lineage.
+This includes diamonds whose two arms share one declaration. Binding the
+projected destination directly, competing inherited bindings and multiple
+implementation roots retain diagnostics. At each reference use, a supplied
+alias carries the consuming binding's original UUID and its scoped address in
+`:source-binding` on the analyzer's projection route.
+
 A named pin on a union field uses the prepared package's namespace-resolved
 type definitions. The source planner checks finite expansion, marker
 preservation and directional subtyping. The pin must expand to a concrete

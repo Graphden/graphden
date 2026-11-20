@@ -2,9 +2,15 @@
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile-eager :as eager]
+    [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
+    [graphden.input.list-builder :as list-builder]
+    [graphden.input.list-execution :as list-execution]
+    [graphden.input.list-signature :as list-signature]
     [graphden.input.source :as source]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -28,13 +34,17 @@
   (filterv #(contains? #{:str-upper :_csv-escape-cell} (:name %)) (sources "strings")))
 
 
+(def ^:private loaded-bases (delay (:base-fn-defs (loader/load-packages ["core"]))))
+
+
 (def ^:private roots
   (delay
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
-      (let [loaded (:base-fn-defs (loader/load-packages ["core"]))]
+      (let [loaded @loaded-bases]
         (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
                                                         (filter #(= :get (:name %)) (sources "collections"))
-                                                        (filter #(#{:str-trim :re-find?} (:name %)) (sources "strings"))
+                                                        (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
+                                                        (filter #(= :shipped-asset (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
@@ -113,6 +123,49 @@
     (is (= :blocked
            (get-in (source/verify-module {:definitions [(assoc-in rewritten [:proposed :parent] :inner)]}
                                          (:prepared pkg)) [:definitions 0 :status])))))
+
+
+(defn- execute-list-comparison
+  [package originals owner target]
+  (let [prepared (:prepared package)
+        plan (source/verify-module (source/plan-module originals prepared) prepared)
+        entry (some #(when (= owner (:identity %)) %) (:definitions plan))
+        trace (get-in entry [:v2 :list-builders [target]])
+        grouped (group-by :kind (parse/parse-prepared-module prepared))
+        env (lookups/build-lookups {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+                                    :bindings (:binding grouped) :list-items (:binding-list-item grouped)})
+        callables (eager/compile-all (assoc env :base-fns (registry/compute-base-fns-map @loaded-bases)))
+        missing-slots (update trace :records (partial remove #(= :slot (:kind %))))
+        builder (list-execution/compile-rows [owner] target (:field trace) (:name->id prepared) (:records trace)
+                                             {:child-callables callables :lookups env :lazy-seq? false})]
+    (is (= :list-declaration-mismatch
+           (:code (failure #(list-signature/entry owner (:name->id prepared) missing-slots)))))
+    [(str/join (builder {} {})) ((callables owner) {} {})]))
+
+
+(deftest verified-auth-page-builder-uses-the-stored-operand-identities
+  (let [auth (edn/read-string (slurp (io/resource "packages/app/auth-pages/fns.edn")))
+        originals (concat (filter #(= :str (:name %)) (sources "strings"))
+                          (filter #(= :shipped-asset (:name %)) (sources "system"))
+                          (for [d (:fns auth) :when (#{:_auth-reset-body :_auth-reset-js} (:name d))]
+                            (assoc d :namespace (:namespace auth))))
+        package (snapshot/package-index (parse/prepare-module originals {} {}) originals)
+        owner (ids/fn-id "app.auth-pages" :_auth-reset-body)
+        target (ids/slot-id (ids/fn-id "core.strings" :str) :parts)
+        {:keys [binding-id builder-id tail-id]} (list-builder/origin owner target)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        checked (analysis/analyze-effective-input context owner options)
+        signature (get-in checked [:scopes [binding-id] :signature])
+        item (ids/slot-id builder-id :item-1)
+        js (ids/fn-id "app.auth-pages" :_auth-reset-js)]
+    (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
+    (is (= [:list :any] (:return signature)))
+    (is (= :text (get-in checked [:scopes [] :signature :return])))
+    (is (= js (:ref-fn-id (some #(when (= [item] (:target-path %)) %) (vals (:bindings context))))))
+    (is (= [tail-id] (get-in options [:implementations builder-id :argument-paths :tail])))
+    (let [[migrated legacy] (execute-list-comparison package originals owner target)]
+      (is (= legacy migrated))
+      (is (str/includes? migrated (slurp (io/resource "packages/app/auth-pages/reset.js")))))))
 
 
 (deftest absent-or-incompatible-package-evidence-is-rejected-test

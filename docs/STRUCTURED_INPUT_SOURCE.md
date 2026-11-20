@@ -80,7 +80,9 @@ verification checks the child's declarations and the builder's item UUID.
 The CST writer edits the original item span and retains its comments.
 Lists inside anonymous bodies use a `:list-origin` entry in `:legacy-forms`.
 It preserves the original vector or append wrapper, including key order,
-and records explicit value and reference wrappers by ordinal.
+and records explicit value and reference wrappers by ordinal. Positional
+input markers reconstruct their key order from the same entry and their
+type from the anonymous function's declared input.
 
 Unsupported list origins and rename projections, referenced input scopes,
 assertions that require inline type rows and unknown binding policies

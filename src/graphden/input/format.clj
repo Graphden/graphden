@@ -97,35 +97,67 @@
                  (array-map key value :type type))])))))))
 
 
+(defn- positional-spelling?
+  [spelling]
+  (and (vector? spelling) (= 2 (count spelling)) (= :position (first spelling))
+       (let [fields (second spelling)]
+         (and (vector? fields) (= (count fields) (count (set fields)))
+              (some #{:as} fields)
+              (every? #{:as :type :description :required} fields)))))
+
+
+(defn- list-projection-name
+  [form]
+  (when (and (vector? form) (<= 2 (count form) 3) (local-projection? (subvec form 0 2)))
+    (first (second form))))
+
+
+(defn- original-position
+  [form spelling input]
+  (when-let [field (list-projection-name form)]
+    (let [fields (second spelling)
+          spec (get input field)
+          policy (get form 2 {})]
+      (when (and (positional-spelling? spelling) (map? policy)
+                 (= (set (keys policy)) (disj (set fields) :as :type))
+                 (map? spec) (contains? spec :type))
+        (let [raw (assoc policy :as field :type (:type spec))]
+          [(apply array-map (mapcat (juxt identity raw) fields))])))))
+
+
 (defn- list-origin?
   [spelling]
   (and (vector? spelling) (= 3 (count spelling)) (= :list-origin (first spelling))
        (contains? #{:vector [:append] [:append :closed] [:closed :append]} (second spelling))
        (map? (peek spelling))
        (every? nat-int? (keys (peek spelling)))
-       (every? #{:value-wrapper :ref-wrapper} (vals (peek spelling)))))
+       (every? #(or (#{:value-wrapper :ref-wrapper} %) (positional-spelling? %))
+               (vals (peek spelling)))))
 
 
 (defn- original-list-item
-  [item spelling]
-  (when (and (vector? item) (= 2 (count item)))
+  [item spelling input]
+  (when (vector? item)
     (let [[op value] item]
-      (case op
-        :value (case spelling nil [value] :value-wrapper [{:value value}] nil)
-        :ref (case spelling
-               nil (cond (keyword? value) [value]
-                         (map? value) (when-let [origin (inline-origin value)] [origin]))
-               :ref-wrapper (when (keyword? value) [{:ref value}])
-               nil)
-        nil))))
+      (if (= :project op)
+        (original-position item spelling input)
+        (when (= 2 (count item))
+          (case op
+            :value (case spelling nil [value] :value-wrapper [{:value value}] nil)
+            :ref (case spelling
+                   nil (cond (keyword? value) [value]
+                             (map? value) (when-let [origin (inline-origin value)] [origin]))
+                   :ref-wrapper (when (keyword? value) [{:ref value}])
+                   nil)
+            nil))))))
 
 
 (defn- original-list
-  [{:keys [items tail] :as spec} spelling]
+  [{:keys [items tail] :as spec} spelling input]
   (when (and (list-origin? spelling) (map? spec) (= #{:items :tail} (set (keys spec)))
              (vector? items) (#{:open :closed} tail))
     (let [[_ wrapper overrides] spelling
-          originals (mapv #(original-list-item %2 (get overrides %1)) (range) items)
+          originals (mapv #(original-list-item %2 (get overrides %1) input) (range) items)
           closed? (= :closed tail)]
       (when (and (every? #(< % (count items)) (keys overrides))
                  (every? some? originals)
@@ -137,14 +169,14 @@
 
 
 (defn- original-leaf
-  [form spelling type]
+  [form spelling type input]
   (cond
     type (typed-origin form spelling type)
     (and (nil? spelling) (not (coll? form))) [form]
     (and (vector? form) (= 2 (count form)))
     (let [[op value] form]
       (case op
-        :list-builder (original-list value spelling)
+        :list-builder (original-list value spelling input)
         :value (case spelling
                  nil [{:value value}]
                  :bare-value (when (coll? value) [value])
@@ -170,9 +202,17 @@
                    configure))))
 
 
+(defn- projection-fields
+  [form]
+  (cond
+    (local-projection? form) [(first (second form))]
+    (and (vector? form) (= :list-builder (first form)) (vector? (get-in form [1 :items])))
+    (keep list-projection-name (get-in form [1 :items]))))
+
+
 (defn- valid-inline-input?
   [{:keys [bind input] :as body}]
-  (let [aliases (into #{} (keep #(when (local-projection? %) (first (second %)))) (vals bind))]
+  (let [aliases (into #{} (mapcat projection-fields) (vals bind))]
     (if (contains? body :input)
       (and (seq aliases) (map? input) (= aliases (set (keys input))))
       (empty? aliases))))
@@ -196,7 +236,7 @@
   (when (inline-shape? body #{:parent :parents :bind :legacy-forms :legacy-order :input :configure})
     (if-not (contains? body :bind)
       (when-not (some #(contains? body %) [:legacy-forms :legacy-order :input :configure]) body)
-      (let [{:keys [bind legacy-forms configure]} body]
+      (let [{:keys [bind input legacy-forms configure]} body]
         (when (and (fields? bind) (valid-inline-configuration? body) (valid-inline-input? body)
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
@@ -206,7 +246,7 @@
                                     (vals legacy-forms)))))
           (let [originals (mapv (fn [[k form]]
                                   (when-let [[original] (original-leaf form (get legacy-forms k)
-                                                                       (get-in configure [[k] :type]))]
+                                                                       (get-in configure [[k] :type]) input)]
                                     [k original]))
                                 bind)]
             (when (every? some? originals)
@@ -234,7 +274,8 @@
                              (case (set (keys item))
                                #{:value} [position :value-wrapper]
                                #{:ref} [position :ref-wrapper]
-                               nil))))
+                               (when (contains? item :as)
+                                 [position [:position (vec (keys item))]])))))
            items)]))
 
 

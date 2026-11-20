@@ -72,7 +72,8 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
     for (const file of ['editor-passive-canvas.js', 'editor-canvas-values-graph.js',
       'editor-canvas-type-structure-graph.js', 'editor-canvas-bindings-graph.js',
       'editor-data.js', 'editor-literal-types.js', 'editor-type-format.js', 'editor-type-expand-render.js',
-      'editor-overlay-type-expand.js', 'editor-edit-modes.js', 'editor-overlay-seal.js', 'editor-overlay-arg.js']) {
+      'editor-overlay-type-expand.js', 'editor-edit-modes.js', 'editor-overlay-seal.js', 'editor-overlay-arg.js',
+      'editor-overlay-strips.js']) {
       await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
     }
     await page.evaluate(() => {
@@ -146,6 +147,31 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
     assert.equal(await argChip.evaluate(el => el === document.activeElement), true);
     assert.equal(await argChip.getAttribute('aria-expanded'), 'false');
     console.log('PASS argument record order, distinct nested disclosures, optional field and keyboard focus');
+    await page.evaluate(() => {
+      const canvas = document.getElementById('canvas');
+      fixture.structuredInput = {status: 'available', kind: 'input-record', fields: [
+        {name: 'sender', kind: 'input-field', required: true,
+          fields: [{name: 'city', kind: 'input-field', required: true, type: 'text'}]},
+        {name: 'recipient', kind: 'reference-inputs',
+          fields: [{name: 'email', kind: 'input-field', required: false, type: 'text'}]},
+      ]};
+      window.gdStructuredInputFor = fnId => fnId === 'structured' ? fixture.structuredInput : null;
+      appendStructuredInputStrip(canvas, 'structured');
+      appendStructuredInputStrip(canvas, 'legacy');
+    });
+    const remaining = page.getByRole('button', {name: 'Remaining inputs', exact: true});
+    assert.equal(await remaining.count(), 1);
+    await remaining.press('Enter');
+    const projected = page.getByRole('group', {name: 'Remaining inputs'});
+    const resultInputs = projected.getByRole('button', {name: /recipient — Type: Reference inputs/});
+    await resultInputs.press('Enter');
+    assert.deepEqual(await projected.locator('.type-inline-label').allTextContents(), ['sender', 'recipient', 'email (optional)']);
+    assert.equal(await projected.getByRole('button', {name: /bind|change type/i}).count(), 0);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => { fixture.structuredInput = null; });
+    await remaining.press('Enter');
+    assert.equal(await projected.isVisible(), false);
+    console.log('PASS authorized graph card renders read-only residual input and fences stale disclosures');
     for (const [name, declarations] of [['empty', null], ['hidden', {display: 'none'}],
       ['transparent', {opacity: '0'}], ['zero', {display: 'block', width: '0', 'font-size': '0'}],
       ['large', {display: 'block', width: '4096px', padding: '16px', 'font-size': '48px'}]]) {

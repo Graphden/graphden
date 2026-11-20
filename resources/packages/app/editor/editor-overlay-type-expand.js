@@ -622,10 +622,10 @@ document.addEventListener('keydown', (e) => {
 });
 
 function attachInlineExpand(chipEl, rich, path, ctx) {
-  const expandable = isTypeExpandable(rich);
   const c = ctx || {};
+  const expandable = c.inputDescriptor ? c.inputDescriptor.fields.length > 0 : isTypeExpandable(rich);
   const editable = !!c.editable && typeof c.onEdit === 'function';
-  const generation = typeof graphTypeGeneration === 'function' ? graphTypeGeneration() : null;
+  const generation = !c.inputDescriptor && typeof graphTypeGeneration === 'function' ? graphTypeGeneration() : null;
   const pending = generation != null && !graphTypesReady();
   if (pending) {
     chipEl.setAttribute('aria-disabled', 'true');
@@ -633,6 +633,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   }
   const actionReady = () => chipEl.getAttribute('aria-disabled') !== 'true'
     && (generation == null || (generation === graphTypeGeneration() && graphTypesReady()))
+    && (!c.isCurrent || c.isCurrent())
     && (!c.arg || (typeof expectedSlotType === 'function' && typeof structEq === 'function'
       && structEq(expectedSlotType(c.arg), rich)));
 
@@ -656,7 +657,9 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   }
 
   installInlinePositionListeners();
-  const recordArg = c.arg && typeKindLabel(resolveOneHop(rich)) === 'Record';
+  const groupName = c.inputDescriptor ? 'Remaining inputs'
+    : c.arg && typeKindLabel(resolveOneHop(rich)) === 'Record'
+      ? (c.arg.name ? 'Fields of ' + c.arg.name : 'Record fields') : null;
   chipEl.dataset.inlineAnchor = path;
   chipEl.classList.add('type-chip-expandable');
   const mark = window.gdAppendTypeControlMark(chipEl, expandedTypePaths.has(path) ? '▾' : '▸');
@@ -671,10 +674,10 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
 
   const show = () => {
     const host = ensureInlineHost(path);
-    if (recordArg) {
+    if (groupName) {
       host.tabIndex = -1;
       host.setAttribute('role', 'group');
-      host.setAttribute('aria-label', c.arg.name ? 'Fields of ' + c.arg.name : 'Record fields');
+      host.setAttribute('aria-label', groupName);
     } else {
       host.removeAttribute('tabindex');
       host.removeAttribute('role');
@@ -706,7 +709,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
       // simultaneously duplicates the same provenance chain.
       if (typeof hideMismatchExplainer === 'function') hideMismatchExplainer();
       const host = show();
-      if (recordArg && e.detail === 0) focusSafely(host);
+      if (groupName && e.detail === 0) focusSafely(host);
     }
   });
   // Keyboard activation for the button-role chip.

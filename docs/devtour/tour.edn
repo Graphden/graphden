@@ -930,6 +930,11 @@
      :say "Resolves the requested branch by UUID or name before writing. The resulting branch
            determines which versioned-storage view receives the change."
      :see [[:versioning "wrap-with-versioning"]]}
+    {:ns graphden.crud.structured-input :defn read-input
+     :say "Reads the selected v2 declaration and its reachable owners under one decorated
+           branch snapshot and source policy. Bounded owner batches feed the existing analyzer.
+           The graph subtree attaches only a viewer-safe projection to its root row."
+     :see [[:types "analyze-effective-input"] [:editor "appendStructuredInputStrip"]]}
     {:ns graphden.crud.entities :defn create-entity
      :say "Creates one row through the generic write API. It checks the caller's
            [capability](#term/auth), validates the proposed change with `write-rej`, writes through
@@ -1661,6 +1666,12 @@
            metadata. Field chips reuse the graph's passive labels and identify their nested panels
            for keyboard users. The structured descriptor is the source of field identity for writes."
      :see [[:editor "format"] [:types "resolve-contract"]]}
+
+    {:file "resources/packages/app/editor/editor-overlay-strips.js" :defn appendStructuredInputStrip
+     :say "The current root card opens the server's remaining input projection in the existing
+           type popover. A captured projection is usable only while its root is current. Nested
+           reference inputs have their own group, and the rows are read-only."
+     :see [[:editor "recordExpansionFields"] [:crud "read-input"]]}
 
     {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection
      :say "Projects authorized source labels, finite seal facts and flag-form copy into a passive

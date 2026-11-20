@@ -213,6 +213,11 @@ async function ensureSubtreeFor(fnId) {
     if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
     const sub = await r.json();
     if (resetEpoch !== _subtreeResetEpoch) return false;
+    // Keep the authorized input view scoped to the installed subtree, away
+    // from known function rows which outlive selection changes.
+    const root = sub.fns?.find(row => row.id === fnId);
+    const input = root?.['structured-input'] ?? null;
+    if (root) delete root['structured-input'];
     if (epoch !== _subtreeEpoch) {
       mergeKnownFns(sub.fns);
       syncKnownFnsIntoGraph();
@@ -226,6 +231,7 @@ async function ensureSubtreeFor(fnId) {
     graphData['fn-slots'] = sub['fn-slots'];
     graphData.bindings = sub.bindings;
     graphData['list-items'] = sub['list-items'];
+    graphData['structured-input'] = input;
     _subtreeRootId = fnId;
     syncKnownFnsIntoGraph();
     return true;
@@ -238,6 +244,10 @@ async function ensureSubtreeFor(fnId) {
   }
 }
 window.ensureSubtreeFor = ensureSubtreeFor;
+
+window.gdStructuredInputFor = function structuredInputFor(fnId) {
+  return _subtreeRootId === fnId ? graphData?.['structured-input'] : null;
+};
 
 // Fresh empty graph shell seeded from a `:tree` payload. Slots/bindings are
 // filled per-fn by ensureSubtreeFor; fns accumulate via the cache.

@@ -548,7 +548,7 @@
    :return-type {:fns [:list :keyword-map] :namespaces [:list :keyword-map]}}
 
   {:name :graph-subtree
-   :description "The fn-view slice: the fns transitively reachable from `root-id` via parent-ids + binding refs + type overrides + list-item refs + own-slot type-fn-ids, plus the rows they own (~98% smaller than the full dump). Empty rows for a nil / unknown root."
+   :description "The fn-view slice: the fns transitively reachable from `root-id` via parent-ids + binding refs + type overrides + list-item refs + own-slot type-fn-ids, plus the rows they own (~98% smaller than the full dump). An authorized structured root row may include `:structured-input` with its remaining fields. Empty rows for a nil / unknown root."
    :args {:root-id {:type :nullable-uuid :description "Anchor of the closure."}}
    :return-type {:fns [:list :keyword-map] :slots [:list :keyword-map] :fn-slots [:list :keyword-map]
                  :bindings [:list :keyword-map] :list-items [:list :keyword-map]

@@ -852,8 +852,9 @@
 
 (deftest nested-inline-list-builders-recover-their-legacy-list-wrappers
   (let [inner {:args {:x false} :parent :sink}
+        marker (array-map :type :text :as :pin :description "Element")
         body {:parent :sink :args {:items (array-map :closed false
-                                                     :append [{:value nil} {:ref :producer} inner])}}
+                                                     :append [{:value nil} {:ref :producer} inner marker])}}
         host {:name :host :namespace "demo" :parent :sink :args {:items [body]}}
         context (prepared [base producer host])
         planned (source/plan-module [host] context)
@@ -864,7 +865,9 @@
         provenance-path [:definitions 0 :proposed :bind :items 1 :items 0 1 :legacy-forms :items]
         altered (assoc-in planned (conj provenance-path 1) [:append :closed])]
     (is (= :authored-source-equivalent (:verification entry)))
-    (is (= [:list-origin [:closed :append] {0 :value-wrapper 1 :ref-wrapper}]
+    (is (= [:list-origin [:closed :append] {0 :value-wrapper 1 :ref-wrapper
+                                            3 [:position [:type :as :description]]}]
            (get-in planned provenance-path)))
+    (is (= {:pin {:type :text :required false}} (get-in child [:inline-body :input])))
     (is (= (:fn-id grandchild) (get-in child [:list-builders [slot] :fragments 0 :items 2 :fn-id])))
     (is (= :blocked (:status (result (source/verify-module altered context) :host))))))

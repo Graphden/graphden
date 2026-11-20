@@ -584,11 +584,13 @@
                   "{:name :producer :return-type :any}"
                   "{:name :child :parent :sink :args {:items [{:parent :sink :args {:items "
                   "{:closed false ; keep tail\r\n :append [{:value nil} {:ref ; qualified\r\n :demo.main/producer}"
-                  " {:parent :sink :args {:x 7}}]}}}]}}]}")
+                  " {:parent :sink :args {:x 7}} {:type ; positional type\r\n :text :as :pin}]}}}]}}]}")
         target (migrate-child text)]
     (is (str/includes? target ":tail :open ; keep tail\r\n :items"))
     (is (str/includes? target "[:ref ; qualified\r\n :demo.main/producer]"))
     (is (str/includes? target ":legacy-forms {:items [:list-origin [:closed :append]"))
+    (is (str/includes? target ":input {:pin {:type :text, :required false}}"))
+    (is (str/includes? target "; positional type\r\n"))
     (is (not (str/includes? target "_anon-")))))
 
 

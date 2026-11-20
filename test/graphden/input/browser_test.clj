@@ -173,18 +173,18 @@
                        :bindings {[:func] {:ref :callback}}}
                 :callback {:input {:string :text} :return :text}}
         {:keys [analysis context]} (fixture/model source :root)
-        functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:str-upper :impl])}
+        functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:str-lower :impl])}
         implementations (-> (fixture/implementations source functions)
                             (assoc-in [(fixture/id :root) :base-fn-id] (ids/fn-id "core.hof" :map))
-                            (assoc-in [(fixture/id :callback) :base-fn-id] (ids/fn-id "core.strings" :str-upper)))
+                            (assoc-in [(fixture/id :callback) :base-fn-id] (ids/fn-id "core.strings" :str-lower)))
         options {:context context :snapshot-id (:snapshot-id context)
                  :implementations implementations :allow-fn? (constantly true)}
         invoke (jvm/compile-named analysis options)
         plan (browser/export-named analysis options)
-        args {:coll ["one" "two" "one"]}
+        args {:coll ["ONE" "TWO" "ONE"]}
         expected (invoke args nil)
         [result bad-member] (run-browser plan [args {:coll ["one" 2]}])]
-    (is (= ["ONE" "TWO" "ONE"] expected))
+    (is (= ["one" "two" "one"] expected))
     (is (= {:value (wire/encode-result expected) :sequence true} result))
     (is (= "Value does not match the required graph input type" (:error bad-member)))))
 

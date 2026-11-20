@@ -72,10 +72,16 @@ binding's `:configure`. The referenced declaration keeps its original UUID.
 For nested uses, `[:inline-type position]` records the pin's position when
 reconstructing the enclosing declaration's hash.
 
-Inline list items, unsupported list origins and rename projections,
-referenced input scopes, assertions that require inline type rows and
-unknown binding policies have explicit blockers. Secret paths keep
-resolver semantics.
+An anonymous list item uses `[:ref {…}]` within the builder's `:items`.
+Its legacy use-site hash includes the ordinal within the original
+contribution, including when the contribution appends to an inherited list.
+Identical bodies at different positions keep distinct identities. Source
+verification checks the child's declarations and the builder's item UUID.
+The CST writer edits the original item span and retains its comments.
+
+Unsupported list origins and rename projections, referenced input scopes,
+assertions that require inline type rows and unknown binding policies
+have explicit blockers. Secret paths keep resolver semantics.
 
 `graphden.input.source/verify-module` checks each supported plan entry against
 the same prepared package context. The offline adapter lowers the actual

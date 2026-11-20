@@ -542,7 +542,7 @@
 
 (deftest unsupported-inline-shapes-stay-at-their-source-field
   (doseq [body [{:parent :producer :tag :unsupported}
-                [{:parent :producer}] {:append [{:parent :producer}]}]]
+                [[{:parent :producer}]]]]
     (let [d {:name :child :namespace "demo" :parent :sink :args {:items body}}
           entry (result (plan [base producer d]) :child)]
       (is (= [{:code :inline-identity-or-source-mapping-required :definition ["demo" :child]
@@ -813,3 +813,38 @@
     (is (= (:fn-id outer-v2) (:fn-id unpinned-outer)))
     (is (= (ids/primitive-fn-id :keyword) (get-in entry [:v2 :bindings 0 :type-override-fn-id])))
     (is (= (ids/primitive-fn-id :text) (get-in outer-v2 [:bindings 0 :type-override-fn-id])))))
+
+
+(deftest inline-list-items-retain-parent-field-and-position
+  (let [body {:parent :sink :args {:x {:ref :producer}}}
+        host {:name :host :namespace "demo" :parent :sink :args {:items [nil body body]}}
+        child {:name :child :namespace "demo" :parent :host
+               :args {:items {:append [body] :closed true}}}
+        context (prepared [base producer host child])
+        planned (source/plan-module [base producer host child] context)
+        checked (source/verify-module planned context)
+        slot (ids/slot-id (ids/fn-id "demo" :sink) :items)
+        owner (result checked :host)
+        inherited (result checked :child)
+        host-inlines (get-in owner [:v2 :inline-definitions])
+        own-child (get-in inherited [:v2 :inline-definitions [slot 0]])
+        fragments (get-in inherited [:v2 :list-builders [slot] :fragments])
+        expected-ids (mapv (fn [[name position]]
+                             (let [origin (parse/inline-declaration body [name :items position] "demo")]
+                               (ids/fn-id "demo" (:name origin))))
+                           [[:host 1] [:host 2] [:child 0]])
+        changed (update-in planned [:definitions 2 :proposed :bind :items 1 :items]
+                           #(into [[:value 0]] %))]
+    (is (= {:supported 4 :blocked 0} (:counts checked)))
+    (is (= expected-ids [(get-in host-inlines [[slot 1] :fn-id])
+                         (get-in host-inlines [[slot 2] :fn-id]) (:fn-id own-child)]))
+    (is (= expected-ids (into [] (comp (mapcat :items) (keep :fn-id)) fragments)))
+    (is (= :closed (:tail (peek fragments))))
+    (is (= :blocked (:status (result (source/verify-module changed context) :host))))))
+
+
+(deftest inline-items-in-a-legacy-literal-vector-stay-blocked
+  (let [host {:name :host :namespace "demo" :parent :sink :args {:x [{:parent :producer}]}}
+        entry (result (plan [base producer host]) :host)]
+    (is (= #{:inline-list-item-origin-required} (codes entry)))
+    (is (nil? (:proposed entry)))))

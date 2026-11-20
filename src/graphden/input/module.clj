@@ -178,23 +178,43 @@
     (rebase/rewrite-references origin #(or (resolve-ref %) %))))
 
 
+(defn- inline-definition
+  [source module-namespace {:keys [contract scope]}
+   {:keys [normalize-inline-parent] :as options} [field position expression]]
+  (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
+    (let [body (second expression)
+          origin (format/inline-origin body)]
+      (when-not (and (= 2 (count expression)) origin (or (:parent source) (:parents source)))
+        (reject! :unsupported-inline-declaration))
+      (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
+      (let [normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
+            host (cond-> [(:name source) field] (some? position) (conj position))
+            named (parse/inline-declaration normalized host module-namespace)
+            child (merge (dissoc named :args) (select-keys body [:bind :input :configure]))
+            path (:path (input/resolve-address contract scope [field]))]
+        [(cond-> path (some? position) (conj position))
+         (assoc (parse-definition child module-namespace options) :inline-body body)]))))
+
+
+(defn- inline-sites
+  [[field form]]
+  (if (and (vector? form) (= :list-builder (first form)) (vector? (get-in form [1 :items])))
+    (map-indexed #(vector field %1 %2) (get-in form [1 :items]))
+    [[field nil form]]))
+
+
 (defn- inline-definitions
-  [source module-namespace {:keys [contract scope]} {:keys [normalize-inline-parent] :as options}]
+  [source module-namespace ctx options]
   (into (sorted-map)
-        (keep (fn [[field expression]]
-                (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
-                  (let [body (second expression)
-                        origin (format/inline-origin body)]
-                    (when-not (and (= 2 (count expression)) origin
-                                   (or (:parent source) (:parents source)))
-                      (reject! :unsupported-inline-declaration))
-                    (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
-                    (let [normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
-                          named (parse/inline-declaration normalized [(:name source) field] module-namespace)
-                          child (merge (dissoc named :args) (select-keys body [:bind :input :configure]))
-                          path (:path (input/resolve-address contract scope [field]))]
-                      [path (assoc (parse-definition child module-namespace options) :inline-body body)])))))
+        (comp (mapcat inline-sites) (keep (partial inline-definition source module-namespace ctx options)))
         (when (map? (:bind source)) (:bind source))))
+
+
+(defn- list-inline-at
+  [inlines]
+  (reduce-kv (fn [result [field position] child]
+               (if (some? position) (assoc-in result [[field] position] child) result))
+             {} inlines))
 
 
 (defn- list-builders
@@ -217,6 +237,7 @@
     (if (type-only? definition)
       common
       (let [inlines (inline-definitions source module-namespace ctx options)
+            ctx (assoc ctx :list-inline-at (list-inline-at inlines))
             builders (list-builders source ctx)
             expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {})
                                                 (assoc ctx :inline-at inlines :list-at builders))
@@ -280,7 +301,8 @@
     (if (contains? source :bind)
       (assoc source :bind (syntax/emit-expression (:contract ctx) (:expression parsed)
                                                   {:scope (:scope ctx) :id->name (id->name (:name->id ctx))
-                                                   :list-at (:list-builders parsed) :inline-at (:inline-definitions parsed)}))
+                                                   :list-at (:list-builders parsed) :inline-at (:inline-definitions parsed)
+                                                   :list-inline-at (list-inline-at (:inline-definitions parsed))}))
       source)))
 
 

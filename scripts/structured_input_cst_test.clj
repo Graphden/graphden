@@ -565,5 +565,19 @@
     (is (= {:xs [:project [:items]]} (:bind child)))))
 
 
+(deftest inline-list-cst-keeps-comments-and-two-identical-bodies
+  (let [body "{:args {:x {:ref ; qualified\r\n :demo.main/producer}} :parent :sink}"
+        text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :items :sequence} :return-type :any}"
+                  "{:name :producer :return-type :any}"
+                  "{:name :child :parent :sink :args {:items {:closed true :append [nil ; first item\r\n "
+                  body " ; second item\r\n " body "]}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target "[:value nil] ; first item\r\n [:ref"))
+    (is (str/includes? target " ; second item\r\n [:ref"))
+    (is (str/includes? target ":x [:ref ; qualified\r\n :demo.main/producer]"))
+    (is (str/includes? target ":tail :closed"))
+    (is (not (str/includes? target "_anon-")))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

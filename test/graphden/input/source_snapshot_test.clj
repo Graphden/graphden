@@ -168,6 +168,30 @@
       (is (str/includes? migrated (slurp (io/resource "packages/app/auth-pages/reset.js")))))))
 
 
+(deftest direct-inline-source-freezes-at-its-authored-use
+  (let [host {:namespace "fixture" :name :format-cell :parent :_csv-escape-cell
+              :args {:value {:parent :str-upper :args {:string "checked"}}}}
+        originals (conj strings host)
+        package (snapshot/package-index (parse/prepare-module originals {} {}) originals)
+        child-id (:fn-id (first (remove #(contains? (:originals package) (:fn-id %))
+                                        (get-in package [:prepared :fn-defs]))))
+        base (ids/fn-id "core.strings" :str-upper)
+        field (ids/slot-id base :string)
+        edge (ids/binding-id host-id (ids/slot-id (ids/fn-id "core.strings" :_csv-escape-cell) :value))
+        {:keys [context options]} (snapshot/freeze-closure package [host-id] @roots)
+        checked (analysis/analyze-effective-input context host-id options)]
+    (is (uuid? child-id))
+    (is (= child-id (get-in context [:bindings edge :ref-fn-id])))
+    (is (= [base] (get-in context [:fns child-id :parent-ids])))
+    (is (= "checked" (get-in context [:bindings (ids/binding-id child-id field) :value])))
+    (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
+    (is (= :text (get-in checked [:scopes [edge] :signature :return])))
+    (is (= :conflicting-inline-declaration
+           (:code (failure #(snapshot/freeze-closure (assoc-in package [:originals child-id] [host]) [host-id] @roots)))))
+    (is (= :missing-original-declaration
+           (:code (failure #(snapshot/freeze-closure (update package :originals dissoc base) [host-id] @roots)))))))
+
+
 (deftest absent-or-incompatible-package-evidence-is-rejected-test
   (let [package (fixture "checked")
         reader (ids/fn-id "core.strings" :str-upper)]

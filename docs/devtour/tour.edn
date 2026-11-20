@@ -292,8 +292,8 @@
            cancellation and any configured execution-permission guard, then binds the [allowed
            effects](#term/effect) for the call. The [compiled registry](#term/compiled-registry) maps
            function IDs to [closures](#term/closure): callable Clojure functions retaining their
-           prepared dependencies. `execute` looks up the [closure](#term/closure), translates named
-           input into slot-ID and name keys, and calls `(closure translated ctx)`."
+           prepared dependencies. `execute` uses the selected closure's input ABI. Legacy closures
+           receive name and slot-ID keys. A structured closure routes the original named input."
      :see [[:executor "registry"]]}
 
     {:ns graphden.executor.context :defn create-context

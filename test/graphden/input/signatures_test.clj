@@ -31,6 +31,24 @@
     (is (not (contains? (get-in facts [:bindings-info :renamed]) :ref)))))
 
 
+(deftest optional-abi-argument-distinguishes-a-free-field-from-a-bound-nil
+  (let [{:keys [scope text graph]} (fixture)
+        address [scope [text]]
+        graph (-> graph
+                  (assoc-in [:scopes [] :configured-contract :type :other] :any)
+                  (update-in [:scopes [] :configured-contract :fields 1] assoc :type :any :required false))
+        paths {:default [text]}
+        absent (signatures/binding-facts graph scope paths)
+        explicit (signatures/binding-facts (assoc-in graph [:scopes [] :bindings address]
+                                                     {:address address :expression {:kind :value :value nil}
+                                                      :reference {:mode :literal :actual-type :null}})
+                                           scope paths)]
+    (is (= #{:default} (:free-arguments absent)))
+    (is (= {:type :any :address address} (get-in absent [:bindings-info :default])))
+    (is (empty? (:free-arguments explicit)))
+    (is (= {:type :null :value nil :value-present true :address address} (get-in explicit [:bindings-info :default])))))
+
+
 (deftest ancestor-whole-binding-and-lexical-routes-retain-free-provenance-test
   (let [{:keys [scope record child text graph]} (fixture)
         source [scope [record]]

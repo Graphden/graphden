@@ -293,10 +293,11 @@
         package (snapshot/package-index prepared defs)
         owner (ids/fn-id module-ns host-name)
         record-id (ids/fn-id module-ns record-name)
-        ctx (assoc prepared :fn-defs [(get-in package [:declarations record-id])])
-        orig (get-in package [:originals record-id])
-        entry (first (:definitions (source/verify-module (source/plan-module orig ctx) ctx)))]
-    {:prepared package :owner owner :record-id record-id :record entry}))
+        entry (fn [id]
+                (let [ctx (assoc prepared :fn-defs [(get-in package [:declarations id])])
+                      orig (get-in package [:originals id])]
+                  (first (:definitions (source/verify-module (source/plan-module orig ctx) ctx)))))]
+    {:prepared package :owner owner :record-id record-id :record (entry record-id) :use-entry (entry owner)}))
 
 
 (deftest stored-record-fields-survive-checked-base-signature
@@ -334,15 +335,25 @@
 
 
 (deftest named-record-pin-keeps-route-and-original-field-memberships
-  (doseq [[file name host alias] [["packages/app/ui-inspector/fns.edn" :_inspector-usages-state :_usages-query :state]
-                                  ["packages/app-base/prefs/fns.edn" :_ui-pref-row-shape :_ui-pref-key :row]]]
-    (let [{:keys [prepared owner record-id record]} (package-record-pin file name host)
+  (doseq [[file name host alias default]
+          [["packages/app/ui-inspector/fns.edn" :_inspector-usages-state :_usages-query :state {:value ""}]
+           ["packages/app-base/prefs/fns.edn" :_ui-pref-row-shape :_ui-pref-key :row {:value nil}]
+           ["packages/app/ui-authoring/fns.edn" :_namespace-choice :_choice-key :choice {}]]]
+    (let [{:keys [prepared owner record-id record use-entry]} (package-record-pin file name host)
           report (snapshot/projection-readiness prepared owner @roots)
           [route] (:projections report)
           evidence ((named-types/lookup prepared (constantly record)) name)
           {:keys [body rows]} evidence
           member-ids (into {} (comp (filter #(= :fn-slot (:kind %))) (map (juxt :slot-id :id))) rows)
-          target (ids/slot-id (ids/fn-id "core.collections" :get) :coll)]
+          get-id (ids/fn-id "core.collections" :get)
+          default-id (ids/slot-id get-id :default)
+          default-row (some #(when (= [default-id] (:target-path %)) %) (get-in use-entry [:v2 :bindings]))
+          target (ids/slot-id get-id :coll)]
+      (is (= :authored-source-equivalent (:verification use-entry)))
+      (is (= default (select-keys default-row [:value])))
+      (if (contains? default :value)
+        (is (= [(ids/binding-id owner default-id) "value"] [(:id default-row) (:expression-kind default-row)]))
+        (is (nil? default-row)))
       (is (= :incomplete (:status report)) (pr-str (:diagnostics report)))
       (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
       (is (= (ids/binding-id owner target) (:binding-id route)))
@@ -351,6 +362,8 @@
       (is (= (count body) (count member-ids)))
       (doseq [field (keys body) :let [id (ids/slot-id record-id field)]]
         (is (= (ids/fn-slot-id record-id id) (member-ids id))))
+      (let [missing (assoc-in record [:v2 :declaration-records] [])]
+        (is (= :named-record-evidence-required (:code (failure #((named-types/lookup prepared (constantly missing)) name))))))
       (let [[field type] (first body)]
         (doseq [unsupported [{:type type :required true} {:nested type}]]
           (let [changed (assoc-in record [:v2 :source :type field] unsupported)]

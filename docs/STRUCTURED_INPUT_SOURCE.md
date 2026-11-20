@@ -153,8 +153,11 @@ The snapshot retains its original field map and checks every slot and membership
 against the record UUID, ordinal, field name and primitive type UUID. A
 projection pin must still join the authored alias, the original target binding
 and the declared record UUID. The checker reports any missing implementation
-signature separately. Wrapped field policies and nested record declarations
-require additional evidence.
+signature separately. An optional argument with no effective binding appears
+in `:free-arguments` and has no value key in the ABI facts. An explicit nil has `:value nil` and
+`:value-present true` and is bound. Both forms retain their authored source
+when the implementation returns the same record member type. Wrapped field
+policies and nested record declarations require additional evidence.
 
 A scalar rename can project a direct or inherited field when the legacy
 alias slot points at the declaring field's UUID. Its input declaration keeps

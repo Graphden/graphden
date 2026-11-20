@@ -106,8 +106,10 @@
     (if (and (empty? records) (empty? unions))
       check
       (let [mismatch (memoize (fn [expected]
-                                (cond (types/type-any? records expected) :named-record-mismatch
-                                      (types/type-any? unions expected) :named-union-mismatch)))]
+                                (condp types/type-any? expected
+                                  records :named-record-mismatch
+                                  unions :named-union-mismatch
+                                  nil)))]
         (fn [{:keys [expression expected actual address] :as request}]
           (let [proof (check request)
                 expected (types/resolve-alias expected)

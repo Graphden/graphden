@@ -335,7 +335,7 @@
 
 
 (deftest named-record-pin-keeps-route-and-original-field-memberships
-  (doseq [[file name host alias default]
+  (doseq [[file name host alias-name default]
           [["packages/app/ui-inspector/fns.edn" :_inspector-usages-state :_usages-query :state {:value ""}]
            ["packages/app-base/prefs/fns.edn" :_ui-pref-row-shape :_ui-pref-key :row {:value nil}]
            ["packages/app/ui-authoring/fns.edn" :_namespace-choice :_choice-key :choice {}]]]
@@ -357,7 +357,7 @@
       (is (= :incomplete (:status report)) (pr-str (:diagnostics report)))
       (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
       (is (= (ids/binding-id owner target) (:binding-id route)))
-      (is (= [[owner []] [(ids/slot-id owner alias)]] (:source route)))
+      (is (= [[owner []] [(ids/slot-id owner alias-name)]] (:source route)))
       (is (= (get-in record [:source :type]) body (:actual-type route)))
       (is (= (count body) (count member-ids)))
       (doseq [field (keys body) :let [id (ids/slot-id record-id field)]]
@@ -369,13 +369,13 @@
           (let [changed (assoc-in record [:v2 :source :type field] unsupported)]
             (is (= :named-record-evidence-required
                    (:code (failure #((named-types/lookup prepared (constantly changed)) name))))))))
-      (doseq [[kind alter] [[:fn #(assoc % :expects-effects #{:db})]
-                            [:fn-slot #(update % :position inc)]
-                            [:fn-slot #(assoc % :fn-id owner)]
-                            [:slot #(assoc % :type-fn-id (ids/primitive-fn-id :null))]
-                            [:slot #(assoc % :required false)]]]
+      (doseq [[kind mutate-row] [[:fn #(assoc % :expects-effects #{:db})]
+                                 [:fn-slot #(update % :position inc)]
+                                 [:fn-slot #(assoc % :fn-id owner)]
+                                 [:slot #(assoc % :type-fn-id (ids/primitive-fn-id :null))]
+                                 [:slot #(assoc % :required false)]]]
         (let [changed (update-in record [:v2 :declaration-records]
-                                 (partial mapv (fn [row] (if (= kind (:kind row)) (alter row) row))))]
+                                 (partial mapv (fn [row] (if (= kind (:kind row)) (mutate-row row) row))))]
           (is (= :named-record-evidence-required
                  (:code (failure #((named-types/lookup prepared (constantly changed)) name))))))))))
 

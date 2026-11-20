@@ -62,7 +62,11 @@
     if (Array.isArray(value) || value instanceof LazySequence) {
       const items = []; for (const item of value) items.push(child(item)); return ['vector', items];
     }
-    if (value instanceof Map) return ['map', [...value].map(([k, v]) => [child(mapKey(k)), child(v)])];
+    if (value instanceof Map) {
+      const entries = [];
+      for (const [k, v] of value) entries.push([child(mapKey(k)), child(v)]);
+      return ['map', entries];
+    }
     throw new Error('Unsupported graph value');
   }
   function encode(value, nodeLimit = 50000) { return encodeValue(value, {nodes: nodeLimit}, 0); }
@@ -89,6 +93,25 @@
     }
   }
   const force = (value) => value instanceof Thunk ? value.force() : value;
+  // A structured input is an immutable Map view. Presence, key iteration
+  // and size need no values. The other Map operations consume only the
+  // entries they visit and use the same invocation-local cells as lookup.
+  class DeferredRecord extends Map {
+    constructor(fields) {
+      super();
+      for (const [key, cell] of fields) super.set(key, cell);
+    }
+    get(key) { return force(super.get(key)); }
+    *entries() { for (const key of this.keys()) yield [key, this.get(key)]; }
+    *values() { for (const key of this.keys()) yield this.get(key); }
+    [Symbol.iterator]() { return this.entries(); }
+    forEach(callback, self) {
+      for (const [key, value] of this) callback.call(self, value, key, this);
+    }
+    set() { throw new Error('Cannot mutate a browser input record'); }
+    delete() { throw new Error('Cannot mutate a browser input record'); }
+    clear() { throw new Error('Cannot mutate a browser input record'); }
+  }
   class LazySequence {
     constructor(items) { this.items = items; }
     *[Symbol.iterator]() { for (const item of this.items) yield force(item); }
@@ -401,7 +424,9 @@
     return token;
   }
   function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {
-    if (plan.format !== 1 || plan.primitiveAbi !== 1) throw new Error('Unsupported browser graph format');
+    if ((plan.format !== 1 && plan.format !== 2) || plan.primitiveAbi !== 1) {
+      throw new Error('Unsupported browser graph format');
+    }
     if (!Number.isSafeInteger(valueNodeLimit) || valueNodeLimit < 1 || valueNodeLimit > 200000) {
       throw new Error('Invalid browser graph value limit');
     }
@@ -472,6 +497,20 @@
           case 'literal': return decode(value.value);
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
+          case 'record': {
+            if (plan.format !== 2 || !Array.isArray(value.fields) || value.fields.length > valueNodeLimit) {
+              throw new Error('Invalid browser input record');
+            }
+            const fields = new Map();
+            for (const field of value.fields) {
+              tick();
+              if (typeof field?.expr?.kind !== 'string') throw new Error('Invalid browser input field');
+              const key = mapKey(decodeValue(field.key, {nodes: 1}, 0));
+              if (fields.has(key)) throw new Error('Duplicate browser input field');
+              fields.set(key, new Thunk(() => expr(field.expr, frame)));
+            }
+            return new DeferredRecord(fields);
+          }
           case 'closure': return closure(value, frame);
           case 'server': return new GraphClosure(item => {
             if (typeof serverCall !== 'function') throw new Error('Server call transport is unavailable');

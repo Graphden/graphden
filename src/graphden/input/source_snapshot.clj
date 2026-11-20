@@ -1,5 +1,5 @@
 (ns graphden.input.source-snapshot
-  "Offline package-declaration adapter for unique direct legacy references."
+  "Offline package-declaration adapter for certified legacy reference uses."
   (:require
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
@@ -7,6 +7,7 @@
     [graphden.input.inheritance :as inheritance]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
+    [graphden.input.source-context :as source-context]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
@@ -293,12 +294,7 @@
           (throw error))))))
 
 
-(defn verify-binding
-  "Certify one flat binding with a single ref-scope blocker in the original
-   plan. Walk verified parent/ref declarations by UUID in a private baseline.
-   roots are frozen registry entries keyed by base function ID, including
-   implementation type rules. The existing signature and directional checkers
-   analyze both snapshots. Returns evidence; does not promote a source plan."
+(defn- scope-evidence
   [package owner roots]
   (let [entry (plan-entry package owner)
         [blocker & others] (:blockers entry)
@@ -307,8 +303,39 @@
                    (= 2 (count path)) (= :args (first path)))
       (reject! :unsupported-scope-source owner))
     (let [baseline (omit-argument package owner (second path))
+          _ (when-not (source-context/has-reference-use? (:prepared baseline) (get-in baseline [:declarations owner]))
+              (reject! :missing-reference-use owner))
           ;; The removed value may itself be a reference. Its declaration
           ;; must already belong to the frozen closure before overlay replay.
           targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))
           {:keys [context options]} (freeze-closure baseline (into [owner] targets) roots)]
-      (scope/verify-binding entry path context #(analysis/analyze-effective-input %1 %2 options)))))
+      {:entry entry :baseline baseline
+       :certificate (scope/verify-binding entry path context #(analysis/analyze-effective-input %1 %2 options))})))
+
+
+(defn verify-binding
+  "Certify one flat binding with a single ref-scope blocker in the original
+   plan. Walk verified parent/ref declarations by UUID in a private baseline.
+   roots are frozen registry entries keyed by base function ID, including
+   implementation type rules. The existing signature and directional checkers
+   analyze both snapshots. Returns evidence; does not promote a source plan."
+  [package owner roots]
+  (:certificate (scope-evidence package owner roots)))
+
+
+(defn migrate-binding
+  "Write a unique certified reference input as a public path key in :bind. Verify
+   the resulting v2 rows against the original package's legacy authored rows.
+   Missing type evidence, unavailable uses and ambiguous occurrences refuse."
+  [package owner roots]
+  (let [{:keys [entry baseline certificate]} (scope-evidence package owner roots)
+        {:keys [source-path public-path]} certificate
+        arguments (mapv #(cond-> % (= source-path (:source-path %)) (assoc :scope-certificate certificate))
+                        (get-in entry [:legacy :arguments]))
+        arg (some #(when (:scope-certificate %) %) arguments)
+        proposed (:proposed (plan-entry baseline owner))]
+    (when-not (and proposed arg (not (contains? (:bind proposed) public-path))) (reject! :unsupported-scope-source owner))
+    (let [candidate (-> entry (assoc :status :supported :blockers []
+                                     :proposed (assoc-in proposed [:bind public-path] (:expression arg)))
+                        (assoc-in [:legacy :arguments] arguments))]
+      (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))

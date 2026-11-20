@@ -7,6 +7,7 @@
     [graphden.input.format :as format]
     [graphden.input.list-records :as list-records]
     [graphden.input.rows :as rows]
+    [graphden.input.scoped-source :as scoped]
     [graphden.input.syntax :as syntax]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -236,18 +237,23 @@
                 :declaration-records (:declaration-records ctx) :origin-ledger (:origin-ledger ctx)}]
     (if (type-only? definition)
       common
-      (let [inlines (inline-definitions source module-namespace ctx options)
+      (let [bind (get source :bind {})
+            local (scoped/local-form bind)
+            local-source (assoc source :bind local)
+            inlines (inline-definitions local-source module-namespace ctx options)
             ctx (assoc ctx :list-inline-at (list-inline-at inlines))
-            builders (list-builders source ctx)
-            expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {})
+            builders (list-builders local-source ctx)
+            expression (syntax/parse-expression (:contract ctx) (:scope ctx) local
                                                 (assoc ctx :inline-at inlines :list-at builders))
             state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
                                                      (:scope ctx) builders)
+            routes (scoped/parse-bindings ctx state bind)
             configs (resolve-configurations ctx state (:configure source))
             by-path (into {} (map (juxt :target-path identity)) (vals configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
-               :expression expression :binding-state state :bindings bindings :configurations configs
+               :expression expression :binding-state (scoped/binding-state state routes)
+               :bindings (into bindings (map :row) (vals routes)) :configurations configs :scoped-inputs routes
                :inline-definitions inlines :list-builders builders)))))
 
 
@@ -299,10 +305,12 @@
                  (select-keys ctx [:fn-id :input-type-id :contract :declaration-records :origin-ledger]))
       (reject! :export-context-drift))
     (if (contains? source :bind)
-      (assoc source :bind (syntax/emit-expression (:contract ctx) (:expression parsed)
-                                                  {:scope (:scope ctx) :id->name (id->name (:name->id ctx))
-                                                   :list-at (:list-builders parsed) :inline-at (:inline-definitions parsed)
-                                                   :list-inline-at (list-inline-at (:inline-definitions parsed))}))
+      (let [names (id->name (:name->id ctx))
+            local (syntax/emit-expression (:contract ctx) (:expression parsed)
+                                          {:scope (:scope ctx) :id->name names
+                                           :list-at (:list-builders parsed) :inline-at (:inline-definitions parsed)
+                                           :list-inline-at (list-inline-at (:inline-definitions parsed))})]
+        (assoc source :bind (scoped/emit-bindings local (:scoped-inputs parsed) names)))
       source)))
 
 

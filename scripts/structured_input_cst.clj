@@ -404,6 +404,17 @@
                 (refuse :missing-definition {:definition definition}))]
     (case op
       :list-builder (list-builder-edit source starts (argument-loc loc path) operation)
+      :scope-key
+      (let [public-path (:public-path operation)
+            old (second path)]
+        (when-not (and (= [:args old] path) (< 1 (count public-path)) (every? simple-keyword? public-path)
+                       (= old (peek public-path)))
+          (refuse :invalid-scoped-path {:path path}))
+        (let [args (value-at loc [:args])
+              field (or (key-loc args old) (refuse :missing-path {:path path}))]
+          (when (key-loc args public-path) (refuse :existing-target {:path path}))
+          (node-edit source starts field (constantly (pr-str public-path)))))
+
       :rename-input
       (do
         (when (some #(key-loc loc %)
@@ -534,7 +545,13 @@
             alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
             position-inputs (positions/declarations arguments)
             declarations (merge declarations alias-input position-inputs)
-            bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
+            bindings (into {} (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
+            scopes (keep (fn [{:keys [scope-certificate source-path origin]}]
+                           (when-let [{:keys [public-path row]} scope-certificate]
+                             (when-not (and (= source-path (:source-path scope-certificate)) (= (:id row) (:binding-id origin))
+                                            (= [(:slot-id origin)] (:target-path row)))
+                               (refuse :planner-ledger-mismatch {:path source-path}))
+                             {:op :scope-key :definition (:name source) :path source-path :public-path public-path})) binds)
             operations (mapv (partial binding-operation source) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
                                            (when (or (= :typed-expression op)
@@ -564,7 +581,7 @@
             :declarations (vec (remove (set (keys position-inputs)) (keys declarations)))
             :position-inputs position-inputs
             :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
-          :else (into (rename :rename-bind) operations)))
+          :else (into (into (rename :rename-bind) scopes) operations)))
 
       (refuse :unsupported-source-entry {}))))
 

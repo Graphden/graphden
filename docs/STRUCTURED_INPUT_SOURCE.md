@@ -109,14 +109,16 @@ only blocker is one cross-reference binding. Supply its original source path,
 a frozen v2 snapshot containing the owner's other bindings, and a function
 that calls `analyze-effective-input` with the checker for that snapshot.
 
-The verifier accepts one direct value-producing reference owned by the
-source function. It finds the legacy slot UUID in all declared use scopes,
+The verifier follows value-producing reference edges from the owner, including
+edges inherited from an ancestor. It finds the legacy slot UUID in all declared use scopes,
 including occupied uses. The unique occurrence must have a free public
 input route, and the reference, field and binding identities must match
 the legacy rows. Reanalysis on a private snapshot checks the new binding
 and each pre-existing occupied address. The result contains the scoped row
 and its source and public paths. Keep this result private like the plan.
-The original source blocker stays in place pending a scoped EDN writer.
+`source-snapshot/migrate-binding` consumes that certificate and returns the
+source plan entry after a v2 parse, emit and reparse against the original
+legacy rows. Without a checked frozen closure the planner retains its blocker.
 
 A field of a named result record can have the same name as a constructor
 input. The legacy parser may target the result type's field UUID even when
@@ -135,8 +137,8 @@ Single-parent closures can also retain a source-declared type variable or a
 collection of primitive and variable types when the exact field UUID and its
 storage type agree. This preserves a rich field whose storage FK also occurs
 on an unrelated `:any` field. A declaration gap identifies the dependency UUID and source
-blocker codes. Public source files and source-plan counts require a separate
-scoped writer.
+blocker codes. A package can migrate each candidate independently once its
+frozen closure includes the implementation signatures it requires.
 
 A scalar rename can project a direct or inherited field when the legacy
 alias slot points at the declaring field's UUID. Its input declaration keeps
@@ -193,6 +195,15 @@ explicit value wrapper; bare scalar keywords are literal values. References
 are explicit and remain unevaluated. The expected field type is retained for
 later value/HOF dispatch. The caller supplies binding origins and a resolved
 namespace context; a global bare-name index is insufficient.
+
+A vector key in a composed `:bind` names a public input reached through a
+checked chain of value-producing references. For example,
+`{:left [:ref :demo/reader] [:left :deep] [:value "text"]}` supplies the
+reader's `:deep` input. Each preceding path component identifies one reference
+use. The reader checks the original binding UUID, leaf slot, reference edges
+and owner lineage against the prepared context. The writer currently handles
+one scoped legacy binding with a literal or named reference per owner.
+Repeated occurrences of the same legacy slot remain ambiguous.
 
 The Babashka `structured-input-cst` helper converts supported planner entries
 into exact source edits. It can rename argument keys, wrap literal/ref leaves

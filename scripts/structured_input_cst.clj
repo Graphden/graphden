@@ -591,6 +591,19 @@
             [0 []] edits)))
 
 
+(defn- patch
+  [source module-ns edits]
+  (let [edits (vec (sort-by :start edits))
+        target (patched-text source edits)]
+    ;; A splice must remain one valid EDN module before it can leave the planner.
+    (module-definitions target module-ns)
+    {:namespace module-ns
+     :original-sha256 (sha256 source)
+     :target-sha256 (sha256 target)
+     :target-text target
+     :edits edits}))
+
+
 (defn plan
   "Plan edits against one exact source string. Request: {:namespace STRING-OR-NIL
    :operations [{:op KEYWORD :definition KEYWORD :path VECTOR}]}.
@@ -604,16 +617,63 @@
   (when-not (and (string? source) (vector? operations))
     (refuse :invalid-request {}))
   (let [definitions (module-definitions source module-namespace)
+        starts (line-starts source)]
+    (patch source module-namespace (map #(operation-edit source starts definitions %) operations))))
+
+
+(defn- module-header-edit
+  [source starts module]
+  (let [root (z/of-string source {:track-position? true})]
+    (if (contains? module :input-format)
+      (node-edit source starts (value-at root [:input-format]) (constantly "2"))
+      (node-edit source starts (z/down root) #(str ":input-format 2 " %)))))
+
+
+(defn- verified-entry?
+  [entry]
+  (and (= :supported (:status entry))
+       (= :authored-source-equivalent (:verification entry))
+       (empty? (:blockers entry))))
+
+
+(defn- verified-entries
+  [definitions entries]
+  (let [entries-by-name (into {} (map (juxt #(get-in % [:source :name]) identity)) entries)
+        ordered (mapv #(get entries-by-name (:name %)) definitions)]
+    (when-not (and (= (count entries-by-name) (count entries) (count ordered))
+                   (every? verified-entry? ordered)
+                   (every? (fn [[authored entry]]
+                             (migration/same-edn? (dissoc authored :namespace :source-file)
+                                                  (dissoc (:source entry) :namespace :source-file)))
+                           (map vector definitions ordered)))
+      (refuse :whole-module-proof-required {}))
+    ordered))
+
+
+(defn plan-verified-module
+  "Return a checksum-bound v2 patch only when every original definition has
+   an authored proof and the checked context accepts every CST result again.
+   verify receives the entries whose proposed forms came from the target text.
+   The operation preserves untouched text and never writes any source file."
+  [source entries verify]
+  (let [module (inventory/read-edn "<CST source>" source)
+        module-ns (:namespace module)
+        _ (format/require-legacy! module "<CST source>")
+        ordered (verified-entries (:fns module) entries)
+        definitions (module-definitions source module-ns)
         starts (line-starts source)
-        edits (vec (sort-by :start (map #(operation-edit source starts definitions %) operations)))
-        target (patched-text source edits)]
-    ;; A splice must remain one valid EDN module before it can leave the planner.
-    (module-definitions target module-namespace)
-    {:namespace module-namespace
-     :original-sha256 (sha256 source)
-     :target-sha256 (sha256 target)
-     :target-text target
-     :edits edits}))
+        edits (into [(module-header-edit source starts module)]
+                    (map #(operation-edit source starts definitions %))
+                    (mapcat entry-operations ordered))
+        result (patch source module-ns edits)
+        target (inventory/read-edn "<CST target>" (:target-text result))
+        replay (mapv (fn [entry proposed]
+                       (assoc entry :proposed (merge (select-keys (:proposed entry) [:namespace :source-file]) proposed)))
+                     ordered (:fns target))
+        verified (verify replay)]
+    (format/require-v2! target)
+    (verified-entries (:fns module) verified)
+    result))
 
 
 (defn apply-text

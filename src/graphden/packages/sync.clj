@@ -34,7 +34,7 @@
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
-    [graphden.packages.records.types :as record-types]
+    [graphden.packages.type-declaration :as type-declaration]
     [graphden.packages.type-seed :as type-seed]
     [graphden.services.port-check :as port-check]
     [graphden.storage.graph-writer :as writer]
@@ -98,50 +98,9 @@
 
 
 (defn type-row-alias-body
-  "The type expression a type-row fn-def declares — `:refine` / record
-   `:type` / `:list` / `:union` / `:map` / `:variant` / `:fn-type` — or nil
-   for a fn-def that is not a type-row. Pure: the alias registration
-   below and the data-only package audits (the `:any`-slot taint guard)
-   read the same desugaring, so an alias body cannot mean one thing to
-   the checker and another to a guard."
+  "Canonical alias body shared with offline source verification."
   [fd]
-  (cond
-    (:refine fd)
-    (let [{:keys [base constraint]} (:refine fd)]
-      (when base [:refine base (or constraint [:any])]))
-
-    (and (:type fd) (map? (:type fd)))
-    (:type fd)
-
-    (:list fd)
-    [:list (:list fd)]
-
-    (:union fd)
-    (into [:union] (:union fd))
-
-    ;; Homogeneous map alias — `:map {:key K :value V}` is sugar
-    ;; for the structural `[:map K V]`. Without this branch the
-    ;; alias-body fn ignored the declaration and downstream slot
-    ;; references (`:list-entities :where :_storage-where-map`)
-    ;; saw a bare keyword the alias registry didn't know about,
-    ;; so the type-checker treated it as opaque and a literal
-    ;; `{:value {}}` failed against it.
-    (and (:map fd) (map? (:map fd)))
-    (let [{:keys [key value]} (:map fd)]
-      (when (and key value) [:map key value]))
-
-    ;; `:variant [:tag1 T1 :tag2 T2 …]` desugars to a union of
-    ;; tag-pinned records (see types/desugar-variant). Without
-    ;; this branch the EDN-declared `:result-text`,
-    ;; `:result-int`, `:validation` aliases never reached
-    ;; `register-type-alias!` and the type-checker treated
-    ;; them as unknown keywords — defeating the whole point
-    ;; of a variant declaration.
-    (:variant fd)
-    (types/desugar-variant (:variant fd))
-
-    (:fn-type fd)
-    (record-types/fn-type-declaration (:fn-type fd))))
+  (type-declaration/type-row-alias-body fd))
 
 
 (defn register-type-aliases!

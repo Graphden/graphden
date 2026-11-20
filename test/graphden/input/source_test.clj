@@ -7,7 +7,8 @@
     [graphden.input.source :as source]
     [graphden.input.syntax :as syntax]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse]))
+    [graphden.packages.records.parse :as parse]
+    [graphden.types.core :as types]))
 
 
 (def base
@@ -684,6 +685,44 @@
     (is (= (ids/binding-id owner target) (:id row)))
     (is (= [[target] [alias-id]] ((juxt :target-path :projection-path) row)))
     (is (= :blocked (:status (replay changed))))))
+
+
+(deftest pinned-rename-uses-namespace-resolved-type-bodies
+  (let [target '[:union :null [:map a :any] [:list :any]]
+        lookup {:namespace "core" :name :lookup :args {:coll {:type target}} :return-type :any}
+        record {:namespace "left" :name :shape :type {:id :text}}
+        other {:namespace "right" :name :shape :refine {:base :text}}
+        child {:namespace "left" :name :read :parent :lookup :args {:coll {:as :item :type :shape}}}
+        replay (fn [ds]
+                 (let [ctx (prepared ds)]
+                   (first (:definitions (source/verify-module (source/plan-module [(last ds)] ctx) ctx)))))
+        checked (replay [lookup record other child])
+        [row] (get-in checked [:v2 :bindings])
+        owner (ids/fn-id "left" :read)
+        coll-id (ids/slot-id (ids/fn-id "core" :lookup) :coll)]
+    (is (= :authored-source-equivalent (:verification checked)))
+    (is (= :shape (get-in checked [:proposed :input :item :type])))
+    (is (= (ids/fn-id "left" :shape) (:type-override-fn-id row)))
+    (is (= (ids/binding-id owner coll-id) (:id row)))
+    (is (= [(ids/slot-id owner :item)] (:projection-path row)))
+    (is (= [coll-id] (:target-path row)))
+    (let [ambient {:left/shape :text :right/shape {:leaked :int}}
+          qualified (assoc-in child [:args :coll :type] :left/shape)]
+      (binding [types/*type-aliases-override* (atom ambient)]
+        (is (= :authored-source-equivalent (:verification (replay [lookup record other qualified]))))
+        (is (= ambient (types/aliases-snapshot)))))
+    (doseq [shape [(assoc other :namespace "left")
+                   (assoc record :type {:id :shape})
+                   (assoc record :type {:id :missing-type})
+                   (assoc record :type {:id 'b})]]
+      (is (contains? (codes (replay [lookup shape other child])) :rename-projection-required)))
+    (let [different (assoc-in child [:args :coll :type] :right/shape)
+          masked (assoc record :type {:id :text})
+          secret-base (assoc-in lookup [:args :coll :type] '[:union :null [:map a [:secret :text]]])
+          repeated (assoc-in lookup [:args :coll :type] '[:union :null [:map a a]])]
+      (is (contains? (codes (replay [lookup record other different])) :rename-projection-required))
+      (is (contains? (codes (replay [secret-base masked child])) :rename-projection-required))
+      (is (contains? (codes (replay [repeated record child])) :rename-projection-required)))))
 
 
 (deftest nested-inline-declarations-retain-order-and-all-use-sites

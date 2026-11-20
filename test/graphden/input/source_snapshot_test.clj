@@ -178,6 +178,27 @@
     (is (some #{[[id []] [alias-id]]} (:required-addresses result)))))
 
 
+(deftest named-dictionary-rename-reaches-the-scoped-checker
+  (let [web (edn/read-string (slurp (io/resource "packages/web/crud/fns.edn")))
+        child (assoc (some #(when (= :_apply-error-code (:name %)) %) (:fns web)) :namespace (:namespace web))
+        ds (conj (filterv #(= :get (:name %)) (sources "collections"))
+                 (some #(when (= :keyword-map (:name %)) %) (sources "refinements")) child)
+        owner (ids/fn-id (:namespace child) (:name child))
+        dictionary (ids/fn-id (:namespace (second ds)) :keyword-map)
+        package (snapshot/package-index (parse/prepare-module ds {} {}) ds)
+        report (snapshot/projection-readiness package owner @roots)
+        [route] (:projections report)
+        field (ids/slot-id (ids/fn-id "core.collections" :get) :coll)]
+    (is (= :incomplete (:status report)))
+    (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
+    (is (= (ids/binding-id owner field) (:binding-id route)))
+    (is (= [[owner []] [(ids/slot-id owner :outcome)]] (:source route)))
+    (is (= [:map :keyword :any] (:actual-type route)))
+    (is (= :missing-original-declaration
+           (-> (snapshot/projection-readiness (update package :originals dissoc dictionary) owner @roots)
+               :diagnostics first :code)))))
+
+
 (deftest nested-uses-retain-two-scopes-and-one-original-rename
   (let [core (into (filterv #(#{:str-trim :re-find?} (:name %)) (sources "strings"))
                    (filter #(= :equal? (:name %))) (sources "logic"))
@@ -203,6 +224,6 @@
     (is (= 2 (count routes)))
     (is (= #{origin} (set (map :origin-fn-id routes))))
     (is (= #{(ids/binding-id origin field)} (set (map :binding-id routes))))
-    (is (= (set (for [use uses] [[owner [use]] [field]])) (set (map :from routes))))
-    (is (= (set (for [use uses] [[owner [use]] [alias-id]])) (set (map :source routes))))
+    (is (= (set (for [use-id uses] [[owner [use-id]] [field]])) (set (map :from routes))))
+    (is (= (set (for [use-id uses] [[owner [use-id]] [alias-id]])) (set (map :source routes))))
     (is (every? #(= :checked (get-in % [:proof :status])) routes))))

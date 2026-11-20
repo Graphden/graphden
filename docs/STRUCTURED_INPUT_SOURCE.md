@@ -133,12 +133,22 @@ the prepared type expression, including type variables. Supported pins retain
 the original binding UUID and a separate `:configure` assertion. Ambiguous
 names, conflicting pins and occupied ancestor fields remain diagnostics.
 
+A named pin on a union field uses the prepared package's namespace-resolved
+type definitions. The source planner checks finite expansion, marker
+preservation and directional subtyping. The pin must expand to a concrete
+type and the target may carry each type variable once. Unknown references,
+recursive aliases and unsupported declaration shapes keep the migration blocked.
+
 `source-snapshot/projection-readiness` returns the analyzer's scoped routes,
 binding UUIDs, directional proofs, runtime obligations and signature coverage.
 Missing implementation evidence or a custom rule's missing signature view
 produces an incomplete result with a diagnostic. For example, a rename of
 `core.collections/get`'s generic collection input can have a verified route
 and a deferred field-read obligation while its return rule needs that view.
+A named dictionary can supply its field type to this analysis when the
+verified original declaration and stored type UUID agree on a homogeneous
+map with primitive key and value types. Other named bodies still require
+their own declaration and field-identity evidence.
 
 Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-test
 --focus graphden.input.source-snapshot-test`.

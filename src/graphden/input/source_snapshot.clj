@@ -102,15 +102,39 @@
           {} (into [] (comp (mapcat #(get-in % [:contract :fields])) (remove (comp keyword? :type))) (vals entries))))
 
 
+(defn- dictionary-evidence
+  "Capture a named homogeneous map only when the original, prepared identity,
+   parsed fn row and primitive key/value body all agree."
+  [package entries]
+  (let [lookup (memoize (partial plan-entry package))]
+    (reduce
+      (fn [evidence {:keys [type type-id]}]
+        (if (and (keyword? type) (= type-id (get-in package [:prepared :name->id type]))
+                 (get-in package [:declarations type-id :map]))
+          (let [{:keys [verification v2]} (lookup type-id)
+                {:keys [key value]} (get-in v2 [:source :map])
+                body [:map key value]
+                [row & more] (:declaration-records v2)]
+            (when-not (and (= :authored-source-equivalent verification)
+                           (every? types/primitive? [key value]) (= body (:constraint row))
+                           (= :fn (:kind row)) (= type-id (:id row)) (empty? more))
+              (reject! :named-dictionary-evidence-required type-id))
+            (-> evidence (assoc-in [:aliases type] body) (assoc-in [:alias-ids type] type-id)
+                (assoc-in [:fns type-id] row)))
+          evidence))
+      {:aliases {} :alias-ids {} :fns {}} (mapcat #(get-in % [:contract :fields]) (vals entries)))))
+
+
 (defn- snapshot
-  [entries markers]
+  [entries markers dictionaries]
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
         (reduce merge-record {} (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries)))
         inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))]
     (context/build-context
-      {:fns fns :fields (or fields {}) :bindings (or bindings {})
-       :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
-       :type-bodies inputs :source-field-types (source-field-types entries) :aliases {} :markers markers})))
+      (assoc dictionaries
+             :fns (merge (:fns dictionaries) fns) :fields (or fields {}) :bindings (or bindings {})
+             :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
+             :type-bodies inputs :source-field-types (source-field-types entries) :markers markers))))
 
 
 (defn- root-id
@@ -123,7 +147,7 @@
 
 
 (defn- exact-projection-pin?
-  [contract bindings {:keys [target-path type type-override-fn-id]}]
+  [type-ids contract bindings {:keys [target-path type type-override-fn-id]}]
   (let [row (some #(when (= target-path (:target-path %)) %) bindings)
         field-by-id (into {} (map (juxt :id identity)) (:fields contract))
         target (get field-by-id (first target-path))
@@ -131,16 +155,17 @@
     (and (= "projection" (:expression-kind row)) (= [] (:scope-path row) (:projection-scope-path row))
          (= [(:id target)] target-path) (= [(:id source)] (:projection-path row))
          (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row) (:type-id source))
-         (= type (:type source)) (= type-override-fn-id (get (ids/primitive-fn-ids) type)))))
+         (= type (:type source)) (= type-override-fn-id (get type-ids type)))))
 
 
 (defn- check-type-provenance!
-  [{:keys [source contract owner configurations bindings]}]
+  [named-ids {:keys [source contract owner configurations bindings]}]
   (let [primitives (ids/primitive-fn-ids)
+        type-ids (merge primitives named-ids)
         return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
-    (when-not (every? #(exact-projection-pin? contract bindings %) (vals configurations))
+    (when-not (every? #(exact-projection-pin? type-ids contract bindings %) (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? primitives return)
@@ -149,9 +174,16 @@
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))
                                            (every? #{:type :required :description} (keys declaration))))
-                                  (descriptor/stored-source-type? type type-id)))
+                                  (or (descriptor/stored-source-type? type type-id) (and (uuid? type-id) (= type-id (get named-ids type))))))
                            (:fields contract)))
       (reject! :rich-type-source-required (:id owner)))))
+
+
+(defn- verified-context
+  [package entries]
+  (let [dictionaries (dictionary-evidence package entries)]
+    (doseq [entry (vals entries)] (check-type-provenance! (:alias-ids dictionaries) entry))
+    (snapshot entries (:markers package) dictionaries)))
 
 
 (defn- implementation
@@ -192,10 +224,9 @@
    signature view and are rejected here. Include any ref introduced by an overlay in
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
-  (let [entries (closure package function-ids)]
-    (doseq [entry (vals entries)] (check-type-provenance! entry))
-    (let [ctx (snapshot entries (:markers package))]
-      {:context ctx :options (implementation-options ctx entries roots)})))
+  (let [entries (closure package function-ids)
+        ctx (verified-context package entries)]
+    {:context ctx :options (implementation-options ctx entries roots)}))
 
 
 (defn- confirmed-projections
@@ -222,8 +253,7 @@
           bindings (filter #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %)))
                            (mapcat :bindings (vals entries)))
           _ (when-not (seq bindings) (reject! :missing-source-projection owner))
-          _ (doseq [entry (vals entries)] (check-type-provenance! entry))
-          ctx (snapshot entries (:markers package))
+          ctx (verified-context package entries)
           options (try (implementation-options ctx entries roots)
                        (catch clojure.lang.ExceptionInfo error
                          (if (#{:implementation-signature-required :rule-signature-view-required} (:code (ex-data error)))

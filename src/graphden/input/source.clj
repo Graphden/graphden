@@ -422,7 +422,7 @@
   [sources context]
   (let [originals (group-by definition-key sources)
         prepared (group-by definition-key (:fn-defs context))
-        planning-context (assoc context
+        planning-context (assoc (rename/prepare-context context)
                                 ::records-of (memoize (partial parse-one context))
                                 ::original-of (fn [definition]
                                                 (let [[original & more] (get originals (definition-key definition))]

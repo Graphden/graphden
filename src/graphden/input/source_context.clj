@@ -21,7 +21,7 @@
   "Capture the package's resolved dependency index and reuse legacy parses."
   [{:keys [defs-by-name name->id] :as context}]
   (let [definitions (concat (vals defs-by-name) (:fn-defs context))]
-    {:context context
+    {:context (rename/prepare-context context)
      :names-by-id (group-by val (filter (comp uuid? val) name->id))
      :definition-by-id (into {} (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)

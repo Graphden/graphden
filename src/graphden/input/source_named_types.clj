@@ -27,7 +27,7 @@
   (let [by-id (into {} (map (juxt :id identity)) children)
         primitive-ids (ids/primitive-fn-ids)]
     (when-not (and (map? form) (seq form) (every? simple-keyword? (keys form))
-                   (nil? (:constraint row)) (empty? (:parent-ids row))
+                   (map? row) (nil? (:constraint row)) (empty? (:parent-ids row))
                    (not-any? row [:base-fn-id :element-fn-id :return-type-fn-id :input-type-fn-id
                                   :anonymous-hash :expects-effects :lambda-params])
                    (= (* 2 (count form)) (count children) (count by-id)))

@@ -90,6 +90,8 @@
   "Resolve rule facts for explicit ABI paths from canonical bindings and cell
    routes. Literal maps remain data. Whole-record reads retain content markers;
    partial records expose a literal only when every field is statically known.
+   A free argument has no value key. A bound nil has :value nil and
+   :value-present true and is absent from :free-arguments.
    This function neither invokes references nor reads a registry."
   [graph scope argument-paths]
   (when-not (and (map? argument-paths) (every? keyword? (keys argument-paths))

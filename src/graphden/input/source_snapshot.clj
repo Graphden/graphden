@@ -5,6 +5,7 @@
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.inheritance :as inheritance]
+    [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
     [graphden.input.source-context :as source-context]
@@ -79,12 +80,15 @@
             (throw (ex-info "Unverified dependency in source closure"
                             {:type :input/source-snapshot :code :unverified-source-declaration
                              :fn-id id :blockers (mapv :code (:blockers entry))})))
-          (when (seq (:list-builders v2)) (reject! :list-builder-signature-required id))
           (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2)))
             (reject! :unsupported-scope-declaration id))
-          (recur (into (into (pop pending) (:parent-ids owner))
-                       (keep :ref-fn-id) (:bindings v2))
-                 (assoc entries id (assoc v2 :owner owner)))))
+          (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]))
+                                (vals (:list-builders v2)))
+                declared (assoc v2 :owner owner)
+                added (conj generated declared)
+                next-entries (into entries (map (juxt (comp :id :owner) identity)) added)
+                refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
+            (recur (into (into (pop pending) (:parent-ids owner)) refs) next-entries))))
       entries)))
 
 
@@ -138,7 +142,10 @@
       (assoc dictionaries
              :fns (merge (:fns dictionaries) fns) :fields (or fields {}) :bindings (or bindings {})
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
-             :type-bodies inputs :source-field-types (source-field-types entries) :markers markers))))
+             :type-bodies inputs
+             :source-return-types (into {} (keep (fn [[id {:keys [owner list-implementation]}]]
+                                                   (when list-implementation [[id (:return-type-fn-id owner)] (get-in list-implementation [:root-entry :return])]))) entries)
+             :source-field-types (source-field-types entries) :markers markers))))
 
 
 (defn- root-id
@@ -185,7 +192,8 @@
 (defn- verified-context
   [package entries]
   (let [dictionaries (dictionary-evidence package entries)]
-    (doseq [entry (vals entries)] (check-type-provenance! (:alias-ids dictionaries) entry))
+    (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
+      (check-type-provenance! (:alias-ids dictionaries) entry))
     (snapshot entries (:markers package) dictionaries)))
 
 
@@ -215,7 +223,8 @@
   (context/call-with-types
     ctx
     (fn []
-      {:implementations (into {} (map (fn [id] [id (implementation ctx entries roots id)])) (keys entries))
+      {:implementations (into {} (map (fn [[id entry]]
+                                        [id (or (:list-implementation entry) (implementation ctx entries roots id))])) entries)
        :check-expression check/check-input-binding
        :infer-signature check/infer-input-signature})))
 
@@ -290,7 +299,7 @@
       (let [data (ex-data error)
             code (or (:code data) (when (= :types/check-failed (:type data)) :types/check-failed))]
         (if code
-          {:fn-id owner :status :blocked :diagnostics [(assoc (select-keys data [:fn-id :blockers :address]) :code code)]}
+          {:fn-id owner :status :blocked :diagnostics [(assoc (select-keys data [:fn-id :blockers :address :reason]) :code code)]}
           (throw error))))))
 
 

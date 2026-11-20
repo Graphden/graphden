@@ -178,6 +178,15 @@
       name (assoc-in [:by-name name] base-fn-id))))
 
 
+(defn- declared-return
+  [ctx {:keys [id return-type-fn-id]}]
+  (if-let [witness (get-in ctx [:source-return-types [id return-type-fn-id]])]
+    (if (descriptor/stored-source-type? witness return-type-fn-id)
+      witness
+      (context/reject! :return-type-witness-mismatch {:fn-id id :type-id return-type-fn-id}))
+    (:type (descriptor/resolve-descriptor ctx return-type-fn-id))))
+
+
 (defn infer-use
   "Infer one use from resolved dependency signatures through the supplied
    existing-engine callback. The implementation descriptor is shared with the
@@ -194,7 +203,7 @@
         declaration (get-in ctx [:fns (:fn-id node)])
         declaration (cond-> declaration
                       (:return-type-fn-id declaration)
-                      (assoc :return-type (:type (descriptor/resolve-descriptor ctx (:return-type-fn-id declaration)))))
+                      (assoc :return-type (declared-return ctx declaration)))
         facts (binding-facts graph scope argument-paths)
         result (infer-signature
                  (assoc facts :fn-id (:fn-id node) :root-entry root-entry

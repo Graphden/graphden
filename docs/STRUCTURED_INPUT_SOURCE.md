@@ -307,6 +307,16 @@ A closed contribution binds an empty vector to its own tail. Repeated refs keep
 their target UUIDs and run through the existing sequence item compiler, which
 applies the receiving base function's delay policy and shared call cache.
 
+A frozen package closure can analyze a single builder fragment containing
+literals and named references at a field of type `[:list T]`, where `T` is
+`:any`, `:bool`, `:int`, `:numeric` or `:text`. It rebuilds the generated rows,
+takes each argument path from its stored membership, and retains the receiving
+field's exact list type for the tail and return. The existing signature checker
+checks each operand and its referenced function. The analysis reports runtime
+obligations for dynamically typed values. Generic and named element types,
+positional projections, inline items and inherited chains need additional
+signature evidence.
+
 The package dry run reports these field proofs under
 `:verification :list-builders`. It counts edges linked to their source origins
 and field splices reparsed from checksummed modules. The offline v2 module

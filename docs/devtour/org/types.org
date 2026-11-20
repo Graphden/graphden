@@ -171,13 +171,13 @@ Includes checked named residual routes for primitive inputs. Browser and JVM use
 :PROPERTIES:
 :CUSTOM_ID: types/infer-use
 :FILE: src/graphden/input/signatures.clj
-:LINE: 181
+:LINE: 190
 :MINS: 3.0
 :END:
 
 Feeds canonical scoped input facts through the existing type-rule engine using explicit implementation argument paths. Frozen registry views preserve rule lookup isolation; implementation functions never run here. Returned substitutions and proofs must join graph checking before the inferred signature can be treated as checked.
 
-- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:181]]
+- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:190]]
 
 * 14. primitives
 :PROPERTIES:

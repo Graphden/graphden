@@ -23,6 +23,8 @@
    :type-bodies/:signatures and an already namespace-resolved :aliases map.
    A verified source may provide :source-field-types keyed by [field-id type-id]
    for generic field types erased by the legacy storage representation.
+   :source-return-types uses [fn-id type-id] for the same erased collection
+   return on a verified generated list builder.
    Missing aliases never fall back to the process registry. Marker policy is
    captured once unless explicitly supplied. :snapshot-id identifies this
    graph/type-policy snapshot for a caller-owned cache, not only the fn row.
@@ -31,10 +33,10 @@
    an explicitly stored nil remains false in either context."
   [snapshot]
   (let [context (merge {:fns {} :fields {} :members {} :bindings {}
-                        :type-bodies {} :source-field-types {} :signatures {} :aliases {} :alias-ids {}
+                        :type-bodies {} :source-field-types {} :source-return-types {} :signatures {} :aliases {} :alias-ids {}
                         :markers (shapes/markers-snapshot) :snapshot-id (random-uuid)
                         :field-default-required? false} snapshot)]
-    (doseq [key [:fns :fields :members :bindings :type-bodies :source-field-types :signatures :aliases :alias-ids :markers]]
+    (doseq [key [:fns :fields :members :bindings :type-bodies :source-field-types :source-return-types :signatures :aliases :alias-ids :markers]]
       (when-not (map? (get context key))
         (reject! :snapshot-map-required {:component key})))
     (when-not (boolean? (:field-default-required? context))

@@ -338,6 +338,19 @@
     (is (not (str/includes? target "_anon-")))))
 
 
+(deftest inline-type-assertions-and-projection-retain-comments
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :text :y :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:parent :sink :args {:x {:type ; typed reference\r\n :any :ref :producer}}} "
+                  ":y {:parent :sink :args {:x {:as ; alias\r\n :exposed :type ; pin\r\n :text}}}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (str/includes? target "[:x] {:type ; typed reference\r\n :any}"))
+    (is (str/includes? target ":project ; alias\r\n [:exposed]"))
+    (is (str/includes? target ":type ; pin\r\n :text"))
+    (is (= {:exposed {:type :text :required false}} (get-in child [:bind :y 1 :input])))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))

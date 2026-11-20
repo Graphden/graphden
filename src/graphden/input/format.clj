@@ -42,17 +42,34 @@
         (keep (fn [[k v]]
                 (cond
                   (= from k) [to fields]
-                  (= :legacy-forms k) nil
+                  (#{:legacy-forms :input :configure} k) nil
                   :else [k v])))
         body))
 
 
-(declare inline-origin)
+(declare inline-origin configuration-type?)
+
+
+(defn- typed-origin
+  [form spelling type]
+  (when (and (vector? form) (= 2 (count form)) (contains? #{nil :type-first} spelling))
+    (let [[op value] form
+          key (case op
+                :value :value
+                :ref (when (keyword? value) :ref)
+                :project (when (local-projection? form) :as)
+                nil)
+          value (if (= key :as) (first value) value)]
+      (when key
+        [(if (= :type-first spelling)
+           (array-map :type type key value)
+           (array-map key value :type type))]))))
 
 
 (defn- original-leaf
-  [form spelling]
+  [form spelling type]
   (cond
+    type (typed-origin form spelling type)
     (and (nil? spelling) (not (coll? form))) [form]
     (and (vector? form) (= 2 (count form)))
     (let [[op value] form]
@@ -67,25 +84,46 @@
                      (map? value) (when-let [origin (inline-origin value)] [origin]))
                :ref-wrapper (when (keyword? value) [{:ref value}])
                nil)
+        :project (when (and (nil? spelling) (local-projection? form)) [{:as (first value)}])
         nil))))
+
+
+(defn- valid-inline-configuration?
+  [{:keys [bind configure] :as body}]
+  (or (not (contains? body :configure))
+      (and (map? configure)
+           (every? (fn [[path spec]]
+                     (and (vector? path) (= 1 (count path)) (contains? bind (first path))
+                          (map? spec) (= #{:type} (set (keys spec)))
+                          (configuration-type? (:type spec))))
+                   configure))))
+
+
+(defn- valid-inline-input?
+  [{:keys [bind input] :as body}]
+  (let [aliases (into #{} (keep #(when (local-projection? %) (first (second %)))) (vals bind))]
+    (if (contains? body :input)
+      (and (seq aliases) (map? input) (= aliases (set (keys input))))
+      (empty? aliases))))
 
 
 (defn inline-origin
   "Recover the legacy body from direct v2 binds. :legacy-forms records
-   spellings that explicit :value and :ref expressions would otherwise erase.
+   spellings that explicit expressions or configuration would erase.
    The prefix and position of an inline use are supplied by its parent."
   [body]
-  (when (inline-shape? body #{:parent :parents :bind :legacy-forms})
+  (when (inline-shape? body #{:parent :parents :bind :legacy-forms :input :configure})
     (if-not (contains? body :bind)
-      (when-not (contains? body :legacy-forms) body)
-      (let [{:keys [bind legacy-forms]} body]
-        (when (and (fields? bind)
+      (when-not (some #(contains? body %) [:legacy-forms :input :configure]) body)
+      (let [{:keys [bind legacy-forms configure]} body]
+        (when (and (fields? bind) (valid-inline-configuration? body) (valid-inline-input? body)
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
                             (every? (set (keys bind)) (keys legacy-forms))
-                            (every? #{:bare-value :ref-wrapper} (vals legacy-forms)))))
+                            (every? #{:bare-value :ref-wrapper :type-first} (vals legacy-forms)))))
           (let [originals (mapv (fn [[k form]]
-                                  (when-let [[original] (original-leaf form (get legacy-forms k))]
+                                  (when-let [[original] (original-leaf form (get legacy-forms k)
+                                                                       (get-in configure [[k] :type]))]
                                     [k original]))
                                 bind)]
             (when (every? some? originals)
@@ -93,34 +131,41 @@
 
 
 (defn- migrated-leaf
-  [raw [op value :as expression]]
-  (case op
-    :value (cond
-             (and (map? raw) (= #{:value} (set (keys raw)))) [expression nil]
-             (coll? raw) [expression :bare-value]
-             :else [raw nil])
-    :ref (cond
-           (legacy-inline? raw) [expression nil]
-           (keyword? raw) [[:ref raw] nil]
-           (and (map? raw) (= #{:ref} (set (keys raw))) (keyword? (:ref raw)))
-           [[:ref (:ref raw)] :ref-wrapper])
-    nil))
+  [raw [op _ :as expression] assertion]
+  (if assertion
+    (when-let [key (case op :value :value :ref :ref :project :as nil)]
+      (when (and (map? raw) (= #{:type key} (set (keys raw))))
+        [(if (= op :ref) [:ref (:ref raw)] expression)
+         (when (= :type (ffirst raw)) :type-first)]))
+    (case op
+      :value (cond
+               (and (map? raw) (= #{:value} (set (keys raw)))) [expression nil]
+               (coll? raw) [expression :bare-value]
+               :else [raw nil])
+      :ref (cond
+             (legacy-inline? raw) [expression nil]
+             (keyword? raw) [[:ref raw] nil]
+             (and (map? raw) (= #{:ref} (set (keys raw))) (keyword? (:ref raw)))
+             [[:ref (:ref raw)] :ref-wrapper])
+      :project (when (local-projection? expression) [expression nil])
+      nil)))
 
 
 (defn migrate-inline
   "Form a direct v2 body with the source argument order and spelling. The
    caller must compare the reconstructed body and independently check its UUID."
-  [body expressions]
+  [body {:keys [bind configure] :as proposed}]
   (if-not (contains? body :args)
     body
     (let [leaves (mapv (fn [[k raw]]
-                         (when-let [[form spelling] (migrated-leaf raw (get expressions k))]
+                         (when-let [[form spelling] (migrated-leaf raw (get bind k) (get configure [k]))]
                            [k form spelling]))
                        (:args body))]
       (when (every? some? leaves)
         (let [fields (into (empty (:args body)) (map (fn [[k form _]] [k form])) leaves)
               spellings (into (array-map) (keep (fn [[k _ spelling]] (when spelling [k spelling]))) leaves)]
-          (cond-> (replace-inline-fields body :args :bind fields)
+          (cond-> (into (replace-inline-fields body :args :bind fields)
+                        (select-keys proposed [:input :configure]))
             (seq spellings) (assoc :legacy-forms spellings)))))))
 
 

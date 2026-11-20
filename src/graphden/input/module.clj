@@ -190,7 +190,7 @@
                     (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
                     (let [normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
                           named (parse/inline-declaration normalized [(:name source) field] module-namespace)
-                          child (merge (dissoc named :args) (select-keys body [:bind]))
+                          child (merge (dissoc named :args) (select-keys body [:bind :input :configure]))
                           path (:path (input/resolve-address contract scope [field]))]
                       [path (assoc (parse-definition child module-namespace options) :inline-body body)])))))
         (when (map? (:bind source)) (:bind source))))

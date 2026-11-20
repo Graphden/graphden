@@ -679,3 +679,37 @@
     (is (= 3 (count nodes)))
     (is (= (set legacy-owners) (set (map :fn-id nodes))))
     (is (= :blocked (:status (result (source/verify-module edited context) :host))))))
+
+
+(deftest inline-type-assertions-retain-wrapper-order-and-rich-types
+  (let [host-base (assoc base :args {:x :any :y :any})
+        child {:parent :sink :args {:x (array-map :type [:list :int] :ref :producer)
+                                    :y (array-map :value nil :type :text)}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x child}}
+        ctx (prepared [host-base producer host])
+        planned (source/plan-module [host] ctx)
+        entry (result (source/verify-module planned ctx) :host)
+        inline (first (vals (get-in entry [:v2 :inline-definitions])))
+        rewritten (get-in entry [:proposed :bind :x 1])
+        changed (update-in planned [:definitions 0 :proposed :bind :x 1 :legacy-forms] dissoc :x)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {[:x] {:type [:list :int]} [:y] {:type :text}} (:configure rewritten)))
+    (is (= {:x :type-first} (:legacy-forms rewritten)))
+    (is (= {[:x] [:list :int] [:y] :text} (update-vals (:configurations inline) :type)))
+    (is (= :blocked (:status (result (source/verify-module changed ctx) :host))))))
+
+
+(deftest inline-scalar-rename-preserves-the-own-alias-slot
+  (let [sink (assoc-in base [:args :x] :text)
+        child {:parent :sink :args {:x (array-map :type :text :as :alias)}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x child}}
+        entry (result (verified [sink host]) :host)
+        inline (first (vals (get-in entry [:v2 :inline-definitions])))
+        alias-id (ids/slot-id (:fn-id inline) :alias)
+        original (ids/slot-id (ids/fn-id "demo" :sink) :x)
+        [binding] (:bindings inline)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:alias {:type :text :required false}} (get-in entry [:proposed :bind :x 1 :input])))
+    (is (= {:x [:project [:alias]]} (get-in entry [:proposed :bind :x 1 :bind])))
+    (is (= [original] (:target-path binding)))
+    (is (= [alias-id] (:projection-path binding)))))

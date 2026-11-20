@@ -318,8 +318,7 @@
         (if (or (nil? child) (seq duplicates))
           (problem :missing-inline-declaration)
           (let [{:keys [proposed arguments blockers]} (inline-child-plan body child context)
-                v2 (when (and proposed (not-any? #(contains? proposed %) [:input :configure]))
-                     (format/migrate-inline body (:bind proposed)))]
+                v2 (when proposed (format/migrate-inline body proposed))]
             (cond
               (seq blockers)
               (assoc argument :blockers
@@ -434,6 +433,20 @@
    :bindings (mapv binding-meaning (sort-by :id bindings))})
 
 
+(defn- legacy-authored-meaning
+  [definition context bindings arguments]
+  (assoc (authored-meaning definition context bindings)
+         :asserted-types (update-vals (field-assertions definition arguments) :type)))
+
+
+(defn- v2-authored-meaning
+  [definition parsed]
+  (let [bindings (mapv (partial rename/legacy-binding (:declaration-records parsed)) (:bindings parsed))]
+    (assoc (authored-meaning definition parsed bindings)
+           :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
+                                 (:configurations parsed)))))
+
+
 (defn- read-emitted
   [form]
   (edn/read-string {:readers wire/wire-readers}
@@ -453,17 +466,16 @@
               bindings (filterv #(= :binding (:kind %)) records)
               ctx (source-context/declaration-context environment child records bindings)
               raw-child (assoc body :namespace (:namespace source))]
-          [[(:slot-id origin)] {:origin body :meaning (authored-meaning child ctx bindings)
+          [[(:slot-id origin)] {:origin body :meaning (legacy-authored-meaning child ctx bindings inline-arguments)
                                 :children (into {} (keep #(legacy-inline-meaning environment raw-child child %))
                                                 inline-arguments)}])))))
 
 
 (defn- v2-inline-meaning
   [[path child]]
-  (let [bindings (mapv migration/legacy-binding (:bindings child))]
-    [path {:origin (format/inline-origin (:inline-body child))
-           :meaning (authored-meaning (dissoc (:source child) :bind) child bindings)
-           :children (into {} (map v2-inline-meaning) (:inline-definitions child))}]))
+  [path {:origin (format/inline-origin (:inline-body child))
+         :meaning (v2-authored-meaning (dissoc (:source child) :bind :input :configure) child)
+         :children (into {} (map v2-inline-meaning) (:inline-definitions child))}])
 
 
 (defn- verify-inline-children!
@@ -507,11 +519,8 @@
         reread (module/parse-module-v2 (read-emitted emitted) options)
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
-        legacy-meaning (assoc (authored-meaning prepared legacy-context bindings)
-                              :asserted-types (update-vals (field-assertions prepared (:arguments legacy)) :type))
-        v2-meaning (assoc (authored-meaning lowered v2 (mapv (partial rename/legacy-binding (:declaration-records v2)) (:bindings v2)))
-                          :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
-                                                (:configurations v2)))]
+        legacy-meaning (legacy-authored-meaning prepared legacy-context bindings (:arguments legacy))
+        v2-meaning (v2-authored-meaning lowered v2)]
     (verify-inline-children! environment definition prepared v2)
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"

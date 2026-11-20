@@ -59,9 +59,11 @@ value wrapper `{:value x}` becomes `[:value x]`. The child declaration's
 `:legacy-forms` map records the field keys whose original spelling needs
 extra information to recover the legacy hash. `:ref-wrapper` preserves
 `{:ref P}`, and `:bare-value` preserves a bare collection treated as a
-whole value by the legacy loader. The reader keeps absent arguments
-distinct from `:bind {}`. It derives and verifies the rows and binding
-origins recursively for every child.
+whole value by the legacy loader. Inline children use the same
+`:configure` assertions and scalar alias projections as named
+declarations. `:type-first` preserves the original wrapper key order
+when restoring a configured binding. The reader keeps absent arguments
+distinct from `:bind {}` and verifies rows and binding origins recursively.
 
 Inline annotations on the enclosing binding and inline list items still
 have explicit blockers. List builders, rename projections, referenced

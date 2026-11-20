@@ -53,26 +53,26 @@ Normalizes partial record maps and explicit value/ref expressions against a supp
 :PROPERTIES:
 :CUSTOM_ID: types/plan-module
 :FILE: src/graphden/input/source.clj
-:LINE: 382
+:LINE: 381
 :MINS: 3.0
 :END:
 
 Compares original source forms with a prepared legacy module to plan supported rewrites. It retains rich declarations and binding origins, while reporting unsupported list, rename, ref-scope and policy forms as explicit blockers. A completed report does not prove runtime equivalence or authorize dropping an unsupported definition.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:382]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:381]]
 - same file :: [[file:types.org::#types/verify-module][verify-module]]
 
 * 5. verify-module
 :PROPERTIES:
 :CUSTOM_ID: types/verify-module
 :FILE: src/graphden/input/source.clj
-:LINE: 525
+:LINE: 534
 :MINS: 2.4
 :END:
 
 Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:525]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:534]]
 - same file :: [[file:types.org::#types/plan-module][plan-module]]
 
 * 6. parse-module-v2
@@ -105,13 +105,13 @@ Exports offline definitions using the same declared descriptors and identity cal
 :PROPERTIES:
 :CUSTOM_ID: types/require-legacy!
 :FILE: src/graphden/input/format.clj
-:LINE: 148
+:LINE: 193
 :MINS: 1.7
 :END:
 
 Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
 
-- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:148]]
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:193]]
 
 * 9. resolve-contract
 :PROPERTIES:

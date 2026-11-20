@@ -106,7 +106,7 @@
 
 
 (declare ^:private leaf-edit)
-(declare ^:private projection-leaf)
+(declare ^:private projection-leaf ^:private typed-leaf)
 (declare ^:private patched-text)
 
 
@@ -114,15 +114,37 @@
 
 
 (defn- inline-binding-edit
-  [source starts loc form spelling path]
+  [source starts loc form spelling configured? path]
   (cond
     (not (vector? form)) nil
+    (= :project (first form)) (projection-leaf source starts loc)
+    configured? (typed-leaf source starts loc)
     (and (= :ref (first form)) (map? (second form)))
     (inline-edit source starts loc (second form) path)
     (= spelling :bare-value) (leaf-edit source starts loc :wrap-value path)
     (or (= spelling :ref-wrapper) (= :value (first form)))
     (leaf-edit source starts loc :map-expression-to-vector path)
     :else (leaf-edit source starts loc :wrap-ref path)))
+
+
+(defn- inline-field-edits
+  [source starts loc {:keys [bind input configure legacy-forms]} path]
+  (let [fields (mapv (fn [[field form]]
+                       (let [arg-path [:args field]]
+                         [field (inline-binding-edit source starts (value-at loc arg-path) form
+                                                     (get legacy-forms field) (contains? configure [field])
+                                                     (into path arg-path))]))
+                     bind)
+        configurations (keep (fn [[field edit]]
+                               (when-let [spec (:configuration edit)]
+                                 (str (migration/stable-edn [field]) " " spec)))
+                             fields)
+        key (rename-edit source starts loc nil [:args] :bind)]
+    (cons (assoc key :after (str (when (seq input) (str ":input " (migration/stable-edn input) " "))
+                                 (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
+                                 (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
+                                 ":bind"))
+          (keep second fields))))
 
 
 (defn- inline-edit
@@ -132,16 +154,7 @@
     (when-not (and (format/legacy-inline? original)
                    (migration/same-edn? original (format/inline-origin body)))
       (refuse :unsupported-inline-declaration {:path path}))
-    (let [edits (when (contains? original :args)
-                  (let [spellings (:legacy-forms body)
-                        key (rename-edit source starts loc nil [:args] :bind)
-                        key (cond-> key
-                              (seq spellings) (assoc :after (str ":legacy-forms " (migration/stable-edn spellings) " :bind")))]
-                    (cons key (keep (fn [[field form]]
-                                      (let [arg-path [:args field]]
-                                        (inline-binding-edit source starts (value-at loc arg-path) form
-                                                             (get spellings field) (into path arg-path))))
-                                    (:bind body)))))
+    (let [edits (when (contains? original :args) (inline-field-edits source starts loc body path))
           local (into [] (map #(-> % (update :start - (:start span)) (update :end - (:start span))))
                       (sort-by :start edits))]
       (assoc span :after (str "[:ref " (patched-text (:before span) local) "]")))))

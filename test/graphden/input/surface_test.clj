@@ -1,18 +1,20 @@
 (ns graphden.input.surface-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.crud.structured-input :as structured]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.input.core :as input]
     [graphden.input.surface :as surface]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.check :as check]))
 
 
 (defn- ref-fixture
   []
   (let [[owner target root result-record target-input user result-name input-name edge] (repeatedly 9 random-uuid)
         text (:text (ids/primitive-fn-ids))]
-    {:owner owner :user user :result-name result-name :input-name input-name :edge edge
+    {:owner owner :target target :user user :result-name result-name :input-name input-name :edge edge
      :context (context/build-context
                 {:fns {owner {:input-type-fn-id root} target {:input-type-fn-id target-input}}
                  :signatures {target {:return {:name :text}}}
@@ -27,6 +29,17 @@
 
 
 (def options {:name->id {} :binding-id (fn [_ _] (random-uuid))})
+
+
+(deftest read-view-refuses-deferred-binding-types-test
+  (let [{:keys [owner target context]} (ref-fixture)
+        ctx (-> context
+                (assoc-in [:fns target :return-type-fn-id] (:any (ids/primitive-fn-ids)))
+                (assoc-in [:signatures target :return] :any))
+        graph (analysis/analyze-effective-input ctx owner {:check-expression check/check-input-binding})]
+    (is (= :checked (:status graph)))
+    (is (= [:container-type] (mapv :kind (:obligations graph))))
+    (is (= {:status :unavailable} (structured/project ctx owner)))))
 
 
 (deftest dependency-input-name-never-reopens-the-same-named-result-field-test

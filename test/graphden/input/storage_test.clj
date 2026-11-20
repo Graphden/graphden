@@ -1,6 +1,7 @@
 (ns ^:integration ^{:clj-kondo/config (quote {:lint-as {graphden.input.storage-test/with-storage clojure.core/let}})} graphden.input.storage-test
   "Real PostgreSQL checks of offline v2 storage, using the normal decorators."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities.list :as entity-list]
     [graphden.executor.context :as exec-context]
@@ -104,8 +105,8 @@
           (is (= [:user] (mapv :name (:fields view))))
           (is (= [{:kind :input-field :name :email :type :text :required false :required-now? false}]
                  (get-in view [:fields 0 :fields])))
-          (is (not (.contains (pr-str view) "private literal")))
-          (is (not (.contains (pr-str view) (str (:id row)))))
+          (is (not (str/includes? (pr-str view) "private literal")))
+          (is (not (str/includes? (pr-str view) (str (:id row)))))
           (is (nil? (structured input)))
           (is (not-any? :structured-input (:fns stripped)))))
       (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
@@ -113,7 +114,13 @@
           (constantly (fn [row]
                         (when (= (:id row) input)
                           (throw (ex-info "denied" {:type :authz/forbidden}))))))
-        (is (nil? (structured owner)))))))
+        (is (nil? (structured owner)))
+        (let [text-id (:text (record-ids/primitive-fn-ids))]
+          (tenancy/install-browser-source-policy!
+            (constantly (fn [row] (when (= (:id row) text-id) :bare-type))))
+          (is (= :available (:status (structured owner))))
+          (sp/update-entity storage :fn text-id {:constraint [:refine :text [:matches "private"]]})
+          (is (= {:status :unavailable} (structured owner))))))))
 
 
 (deftest persisted-roundtrip-and-offline-admission-test

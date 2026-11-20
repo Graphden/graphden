@@ -114,13 +114,16 @@
 (declare ^:private patched-text)
 
 
-(declare ^:private inline-edit)
+(declare ^:private inline-edit ^:private list-builder-edit)
 
 
 (defn- inline-binding-edit
   [source starts loc form spelling configured? path]
   (cond
     (not (vector? form)) nil
+    (= :list-builder (first form))
+    (let [{:keys [before]} (node-edit source starts loc identity)]
+      (list-builder-edit source starts loc {:original (inventory/read-edn path before) :form form :path path}))
     (= :project (first form)) (projection-leaf source starts loc)
     (and (= :ref (first form)) (map? (second form)))
     (inline-edit source starts loc (second form) path)
@@ -259,9 +262,6 @@
       (refuse :unsupported-expression-map {}))
     (assoc raw :after (str "[" (get parts operator) "]")
            :configuration (str "{" (:type parts) "}"))))
-
-
-(declare ^:private list-builder-edit)
 
 
 (defn- partition-composed-edit

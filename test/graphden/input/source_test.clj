@@ -848,3 +848,23 @@
         entry (result (plan [base producer host]) :host)]
     (is (= #{:inline-list-item-origin-required} (codes entry)))
     (is (nil? (:proposed entry)))))
+
+
+(deftest nested-inline-list-builders-recover-their-legacy-list-wrappers
+  (let [inner {:args {:x false} :parent :sink}
+        body {:parent :sink :args {:items (array-map :closed false
+                                                     :append [{:value nil} {:ref :producer} inner])}}
+        host {:name :host :namespace "demo" :parent :sink :args {:items [body]}}
+        context (prepared [base producer host])
+        planned (source/plan-module [host] context)
+        entry (result (source/verify-module planned context) :host)
+        child (first (vals (get-in entry [:v2 :inline-definitions])))
+        grandchild (first (vals (:inline-definitions child)))
+        slot (ids/slot-id (ids/fn-id "demo" :sink) :items)
+        provenance-path [:definitions 0 :proposed :bind :items 1 :items 0 1 :legacy-forms :items]
+        altered (assoc-in planned (conj provenance-path 1) [:append :closed])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= [:list-origin [:closed :append] {0 :value-wrapper 1 :ref-wrapper}]
+           (get-in planned provenance-path)))
+    (is (= (:fn-id grandchild) (get-in child [:list-builders [slot] :fragments 0 :items 2 :fn-id])))
+    (is (= :blocked (:status (result (source/verify-module altered context) :host))))))

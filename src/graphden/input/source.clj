@@ -338,6 +338,11 @@
 (defn- inline-child-plan
   [body child context]
   (let [source (assoc body :name (:name child) :namespace (:namespace child))
+        original-for (::original-of context)
+        context (assoc context ::original-of (fn [definition]
+                                               (if (= (:fn-id child) (:fn-id definition))
+                                                 source
+                                                 (original-for definition))))
         plan (composed-plan source child context ((::records-of context) child))]
     (lower-inlines source child context plan)))
 
@@ -395,7 +400,7 @@
                      (mapv #(merge % (blocker source (:code %) (into source-path (:source-path %)))) blockers))
               (not (and v2 (migration/same-edn? body (format/inline-origin v2))))
               (problem :inline-binding-origin-required)
-              :else (assoc argument :expression [:ref v2] :inline-arguments arguments))))))))
+              :else (assoc argument :expression [:ref v2] :inline-arguments arguments :inline-fn-id (:fn-id child)))))))))
 
 
 (defn- lower-inlines
@@ -506,16 +511,27 @@
    :bindings (mapv binding-meaning (sort-by :id bindings))})
 
 
+(defn- ordinary-bindings
+  [bindings traces]
+  (let [list-ids (set (map (comp :binding-id peek :fragments) (vals traces)))]
+    (remove #(contains? list-ids (:id %)) bindings)))
+
+
 (defn- legacy-authored-meaning
   [definition context bindings arguments]
-  (assoc (authored-meaning definition context bindings)
-         :asserted-types (update-vals (field-assertions definition arguments) :type)))
+  (let [traces (source-list/verified-traces arguments)]
+    (assoc (authored-meaning definition context (ordinary-bindings bindings traces))
+           :list-builders traces
+           :asserted-types (update-vals (field-assertions definition arguments) :type))))
 
 
 (defn- v2-authored-meaning
   [definition parsed]
-  (let [bindings (mapv (partial rename/legacy-binding (:declaration-records parsed)) (:bindings parsed))]
+  (let [traces (or (:list-builders parsed) {})
+        bindings (mapv (partial rename/legacy-binding (:declaration-records parsed))
+                       (ordinary-bindings (:bindings parsed) traces))]
     (assoc (authored-meaning definition parsed bindings)
+           :list-builders traces
            :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
                                  (:configurations parsed)))))
 
@@ -583,25 +599,35 @@
       (filterv #(= :binding (:kind %)) ((:records-of environment) child)))))
 
 
+(defn- child-arguments
+  [[_ arguments]]
+  (mapcat (fn [{:keys [inline-fn-id inline-arguments list-inline-items]}]
+            (cond-> (mapv (juxt :fn-id :arguments) (vals list-inline-items))
+              inline-fn-id (conj [inline-fn-id inline-arguments])))
+          arguments))
+
+
+(defn- verification-context
+  [environment owner-id arguments bindings]
+  (let [index (into {} (tree-seq (comp seq second) child-arguments [owner-id arguments]))
+        type-names (get-in environment [:context :name->id])]
+    (fn [v2]
+      (let [[lowered rows] (source-context/lower-declarations environment v2)
+            id (ids/fn-id (:namespace lowered) (:name lowered))
+            args (get index id)
+            origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
+        (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
+                                    (source-list/verified-traces args) args type-names)))))
+
+
 (defn- verify-definition
   [environment definition]
   (let [{definition-id :identity :keys [source proposed legacy]} definition
         prepared (get-in environment [:definition-by-id definition-id])
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
-        list-traces (source-list/verified-traces (:arguments legacy))
-        list-ids (set (map (comp :binding-id peek :fragments) (vals list-traces)))
-        ordinary (fn [rows] (remove #(contains? list-ids (:id %)) rows))
         legacy-context (source-context/declaration-context environment prepared records bindings)
-        context-for (fn [v2]
-                      (let [[lowered rows] (source-context/lower-declarations environment v2)]
-                        (if (= (:name lowered) (:name source))
-                          (source-list/replay-context
-                            (source-context/declaration-context environment lowered rows bindings)
-                            list-traces (:arguments legacy) (get-in environment [:context :name->id]))
-                          (source-context/declaration-context environment lowered rows
-                                                              (inline-binding-origins environment lowered)))))
-        options {:context-for context-for
+        options {:context-for (verification-context environment definition-id (:arguments legacy) bindings)
                  :normalize-inline-parent
                  (fn [ns-id parent]
                    (let [names (get-in environment [:context :name->id])
@@ -613,10 +639,8 @@
         reread (module/parse-module-v2 (read-emitted emitted) options)
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
-        legacy-meaning (assoc (legacy-authored-meaning prepared legacy-context (ordinary bindings) (:arguments legacy))
-                              :list-builders list-traces)
-        v2-meaning (assoc (v2-authored-meaning lowered (update v2 :bindings ordinary))
-                          :list-builders (or (:list-builders v2) {}))]
+        legacy-meaning (legacy-authored-meaning prepared legacy-context bindings (:arguments legacy))
+        v2-meaning (v2-authored-meaning lowered v2)]
     (verify-inline-children! environment definition prepared v2)
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"

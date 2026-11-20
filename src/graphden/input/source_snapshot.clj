@@ -107,21 +107,30 @@
         (seq (:inline-definitions v2)) (conj (direct-inline-entry package v2))))))
 
 
+(defn- add-closure-entry
+  [entries {:keys [owner] :as entry}]
+  (let [id (:id owner)]
+    (when (contains? entries id) (reject! :conflicting-declaration-record id))
+    (assoc entries id entry)))
+
+
 (defn- closure
   [package roots resolve-named]
-  (loop [pending (vec roots) entries {}]
+  (loop [pending (vec roots) entries {} undeclared []]
     (if-let [id (peek pending)]
-      (if (contains? entries id)
-        (recur (pop pending) entries)
+      (cond
+        (contains? entries id) (recur (pop pending) entries undeclared)
+        ;; An overlay or another dependency can request the anonymous UUID
+        ;; before its enclosing source has supplied the verified declaration.
+        (not (contains? (:originals package) id)) (recur (pop pending) entries (conj undeclared id))
+        :else
         (let [added (closure-entries package id resolve-named)
-              next-entries (reduce (fn [acc entry]
-                                     (let [id (get-in entry [:owner :id])]
-                                       (when (contains? acc id) (reject! :conflicting-declaration-record id))
-                                       (assoc acc id entry))) entries added)
               parents (mapcat #(get-in % [:owner :parent-ids]) added)
               refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
-          (recur (into (into (pop pending) parents) refs) next-entries)))
-      entries)))
+          (recur (into (into (pop pending) parents) refs) (reduce add-closure-entry entries added) undeclared)))
+      (if-let [missing (first (remove #(contains? entries %) undeclared))]
+        (reject! :missing-original-declaration missing)
+        entries))))
 
 
 (defn- merge-record

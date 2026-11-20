@@ -178,7 +178,7 @@
         base (ids/fn-id "core.strings" :str-upper)
         field (ids/slot-id base :string)
         edge (ids/binding-id host-id (ids/slot-id (ids/fn-id "core.strings" :_csv-escape-cell) :value))
-        {:keys [context options]} (snapshot/freeze-closure package [host-id] @roots)
+        {:keys [context options]} (snapshot/freeze-closure package [host-id child-id] @roots)
         checked (analysis/analyze-effective-input context host-id options)]
     (is (uuid? child-id))
     (is (= child-id (get-in context [:bindings edge :ref-fn-id])))
@@ -186,6 +186,8 @@
     (is (= "checked" (get-in context [:bindings (ids/binding-id child-id field) :value])))
     (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
     (is (= :text (get-in checked [:scopes [edge] :signature :return])))
+    (is (= child-id (get-in (snapshot/freeze-closure package [child-id host-id] @roots) [:context :fns child-id :id])))
+    (is (= :missing-original-declaration (:code (failure #(snapshot/freeze-closure package [child-id] @roots)))))
     (is (= :conflicting-inline-declaration
            (:code (failure #(snapshot/freeze-closure (assoc-in package [:originals child-id] [host]) [host-id] @roots)))))
     (is (= :missing-original-declaration

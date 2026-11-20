@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.core :as input]
+    [graphden.input.list-records :as list-records]
     [graphden.input.module :as module]
     [graphden.packages.records.ids :as ids]))
 
@@ -265,3 +266,30 @@
     (is (= :leaf (get-in data [:bindings 0 :value])))
     (doseq [[value code] [[:leaf :inline-binding-origin-mismatch] [[:ref :missing] :unresolved-inline-reference]]]
       (is (= code (error-code #(read-form value)))))))
+
+
+(deftest list-uses-recover-from-the-combined-records-of-a-v2-module
+  (let [field-id (ids/slot-id (ids/fn-id "fixture" :base) :items)
+        field {:id field-id :name :items :type :sequence :type-id (ids/primitive-fn-id :sequence)}
+        context (fn [source]
+                  (let [ctx (context-for source)]
+                    (assoc ctx :contract {:type {:items :sequence} :fields [field]}
+                           :binding-id (fn [[owner _] [slot]] (ids/binding-id owner slot))
+                           :list-history {[field-id] []})))
+        definition (fn [name value]
+                     {:name name :parent :fixture/base
+                      :bind {:items [:list-builder {:items [[:value value]] :tail :open}]}})
+        module {:namespace "fixture" :input-format 2 :fns [(definition :left 1) (definition :right 2)]}
+        {:keys [definitions records]} (module/parse-module-v2 module {:context-for context})
+        [left right] definitions
+        recover #(list-records/recover-use [%1] field-id (select-keys field [:type :type-id]) {} %2)
+        left-trace (get-in left [:list-builders [field-id]])
+        edge (first (:bindings left-trace))
+        overlay (assoc edge :id (ids/fn-id "fixture" :extra) :scope-path [(:id edge)]
+                       :target-path [(get-in left-trace [:fragments 0 :tail-id])])]
+    (is (= [1] (mapv :value (get-in (recover (:fn-id left) records) [:fragments 0 :items]))))
+    (is (= [2] (mapv :value (get-in (recover (:fn-id right) records) [:fragments 0 :items]))))
+    (is (= :list-declaration-mismatch (error-code #(recover (:fn-id left) (conj records overlay)))))
+    (is (= [2] (mapv :value (get-in (recover (:fn-id right) (conj records overlay)) [:fragments 0 :items]))))
+    (is (= :list-declaration-mismatch
+           (error-code #(recover (:fn-id left) (remove (fn [row] (= (:id edge) (:id row))) records)))))))

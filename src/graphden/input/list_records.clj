@@ -142,21 +142,44 @@
       (assoc (recover-chain (mapv :owner-id fragments) target descriptor names records) :field descriptor :records records))))
 
 
+(defn- use-records
+  [origins records]
+  (let [builders (set (map :builder-id origins))
+        inputs (into #{} (map #(:id (migration/input-type-record {:id %}))) builders)
+        owners (set (map :owner-id origins))
+        links (set (map :binding-id origins))
+        first-origin (first origins)
+        members? #(or (contains? inputs (:fn-id %)) (contains? builders (:fn-id %)))
+        slots (into #{} (keep #(when (and (= :fn-slot (:kind %)) (members? %)) (:slot-id %))) records)]
+    (filterv (fn [{:keys [kind id fn-id scope-path target-path] :as row}]
+               (case kind
+                 :fn (or (contains? builders id) (contains? inputs id))
+                 :slot (contains? slots id)
+                 :fn-slot (members? row)
+                 :input-binding (or (contains? links id) (contains? builders fn-id) (contains? inputs fn-id)
+                                    (and (contains? owners fn-id)
+                                         (or (= (:binding-id first-origin) (first scope-path))
+                                             (and (empty? scope-path) (= target-path [(:target-id first-origin)])))))
+                 false))
+             records)))
+
+
 (defn authored-records
   "Select the declarations and binding rows written by the current
    contribution. Ancestor builders can belong to another source module."
   [{:keys [fragments records]}]
-  (let [{:keys [binding-id builder-id]} (peek fragments)
-        input-id (:id (migration/input-type-record {:id builder-id}))
-        slots (into #{} (keep #(when (and (= :fn-slot (:kind %)) (= input-id (:fn-id %))) (:slot-id %))) records)]
-    (filterv (fn [{:keys [kind id fn-id]}]
-               (case kind
-                 :fn (or (= builder-id id) (= input-id id))
-                 :slot (contains? slots id)
-                 :fn-slot (= input-id fn-id)
-                 :input-binding (or (= binding-id id) (= builder-id fn-id))
-                 false))
-             records)))
+  (use-records [(peek fragments)] records))
+
+
+(defn recover-use
+  "Read one use from the combined records of validated v2 modules. Owners
+   are the contributing declarations in verified parent order. Extra writes
+   at this use, including an unrelated overlay on its tail, must fail the
+   complete chain comparison. Sibling uses retain independent bindings."
+  [owners target-id field name->id records]
+  (when-not (and (vector? owners) (seq owners)) (reject! :invalid-list-chain))
+  (let [origins (mapv #(builder/origin % target-id) owners)]
+    (recover-chain owners target-id field name->id (use-records origins records))))
 
 
 (defn locate-contributions

@@ -29,8 +29,8 @@
 
 
 (defn- legacy-origin
-  [{:keys [identity legacy blockers kind status]} path snapshot]
-  (when-not (and (= :composed kind) (= :blocked status) (uuid? identity)
+  [{owner-id :identity :keys [legacy blockers kind status]} path snapshot]
+  (when-not (and (= :composed kind) (= :blocked status) (uuid? owner-id)
                  (= [[path :ref-scope-required]] (mapv (juxt :source-path :code) blockers))
                  (every? #(and (= :binding (:kind %)) (empty? (:policy %))) (:arguments legacy)))
     (reject! :unsupported-scope-source))
@@ -44,12 +44,12 @@
                               :ref (and (qualified-keyword? payload)
                                         (= (:ref-fn-id binding) (ids/fn-id (namespace payload) (keyword (name payload)))))
                               false)
-        owner (only (filter #(and (= :fn (:kind %)) (= identity (:id %))) (:records legacy)) :missing-owner-declaration)
-        existing (filter #(= identity (:fn-id %)) (vals (:bindings snapshot)))]
-    (when-not (and expected-expression (= identity (:fn-id binding) (get-in arg [:origin :fn-id]))
+        owner (only (filter #(and (= :fn (:kind %)) (= owner-id (:id %))) (:records legacy)) :missing-owner-declaration)
+        existing (filter #(= owner-id (:fn-id %)) (vals (:bindings snapshot)))]
+    (when-not (and expected-expression (= owner-id (:fn-id binding) (get-in arg [:origin :fn-id]))
                    (= (:slot-id binding) (get-in arg [:origin :slot-id]))
-                   (= (:id binding) (ids/binding-id identity (:slot-id binding)))
-                   (= (:parent-ids owner) (get-in snapshot [:fns identity :parent-ids]))
+                   (= (:id binding) (ids/binding-id owner-id (:slot-id binding)))
+                   (= (:parent-ids owner) (get-in snapshot [:fns owner-id :parent-ids]))
                    (not (contains? (:bindings snapshot) id))
                    (migration/same-edn? (into {} (map (juxt :id meaning)) (remove #(= id (:id %)) bindings))
                                         (into {} (map (fn [row] [(:id row) (meaning (migration/legacy-binding row))]))
@@ -116,9 +116,9 @@
 
 
 (defn- preserves-occupancy?
-  [prior current [[owner use] _ :as address] binding]
+  [prior current [[owner use-path] _ :as address] binding]
   (let [facts [:binding-id :origin-fn-id :expression]
-        child (conj use (:id binding))]
+        child (conj use-path (:id binding))]
     (and (every? (fn [[key old]]
                    (migration/same-edn? (select-keys old facts) (select-keys (get current key) facts))) prior)
          (every? (fn [[[_ path :as scope] _ :as key]]

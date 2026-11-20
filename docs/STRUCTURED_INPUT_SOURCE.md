@@ -100,10 +100,20 @@ the public input surface displays the constructor's field under that name.
 The verifier rejects that substitution. Repeated uses of the same target
 slot also require a separate migration rule.
 
-Run the cross-stage regression with `bb scripts/structured_input_scope_test.clj`
-on an assembled checkout. For separate branches, pass the effective-input
-analyzer checkout as the sole argument. The test uses its analyzer and type
-solver with the current source reader, parser and migration code.
+The offline `graphden.input.source-snapshot/package-index` accepts original
+forms and the prepared package including visible dependencies. Pass the index,
+owner UUID, and frozen base-function registry entries to
+`source-snapshot/verify-binding`. It omits the one candidate binding from
+a private baseline, verifies reachable declarations through the v2 reader and
+uses their field IDs as implementation argument paths. The stage 4 signature
+engine and directional checker run before and after adding the scoped row.
+Only single-parent closures with supported primitive declarations currently
+supply this proof. A declaration gap identifies the dependency UUID and source
+blocker codes. Public source files and source-plan counts require a separate
+scoped writer.
+
+Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-test
+--focus graphden.input.source-snapshot-test`.
 
 A base argument's documenting `:value` annotation remains a free input;
 conversion does not create a new binding or runtime default. Existing

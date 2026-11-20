@@ -8,6 +8,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
     [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
@@ -161,7 +162,7 @@
 
 
 (defn- check-type-provenance!
-  [named-ids {:keys [source contract owner configurations bindings]}]
+  [named-ids type-rows {:keys [source contract owner configurations bindings]}]
   (let [primitives (ids/primitive-fn-ids)
         type-ids (merge primitives named-ids)
         return (:return-type source)]
@@ -171,20 +172,25 @@
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? primitives return)
-                            (= (get primitives return) (:return-type-fn-id owner))))
+                            (= (get primitives return) (:return-type-fn-id owner)))
+                       (rich/list-return? (:return-type-fn-id owner) return))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))
                                            (every? #{:type :required :description} (keys declaration))))
-                                  (or (descriptor/stored-source-type? type type-id) (and (uuid? type-id) (= type-id (get named-ids type))))))
+                                  (or (descriptor/stored-source-type? type type-id)
+                                      (and (uuid? type-id) (= type-id (get named-ids type)))
+                                      (rich/callable-field? type-rows type-id type))))
                            (:fields contract)))
       (reject! :rich-type-source-required (:id owner)))))
 
 
 (defn- verified-context
   [package entries]
-  (let [dictionaries (dictionary-evidence package entries)]
-    (doseq [entry (vals entries)] (check-type-provenance! (:alias-ids dictionaries) entry))
+  (let [dictionaries (dictionary-evidence package entries)
+        type-rows (->> (vals entries) (mapcat :declaration-records)
+                       (filter #(= :fn (:kind %))) (group-by :id))]
+    (doseq [entry (vals entries)] (check-type-provenance! (:alias-ids dictionaries) type-rows entry))
     (snapshot entries (:markers package) dictionaries)))
 
 

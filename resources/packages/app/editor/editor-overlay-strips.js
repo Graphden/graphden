@@ -84,9 +84,11 @@ function appendStructuredInputStrip(overlay, fnId) {
   button.className = 'arg-type-chip arg-type-chip-readonly';
   button.textContent = 'Remaining inputs';
   strip.appendChild(button);
+  const isCurrent = () => window.gdStructuredInputFor?.(fnId) === input;
   attachInlineExpand(button, null, fnId + '/structured-input', {
     inputDescriptor: input,
-    isCurrent: () => window.gdStructuredInputFor?.(fnId) === input,
+    structuredBind: {fnId, isCurrent},
+    isCurrent,
   });
 }
 

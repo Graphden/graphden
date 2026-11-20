@@ -128,6 +128,11 @@ card's **Remaining inputs** popover. A public primitive supplies only its
 verified shipped type identity. Incomplete analysis or unresolved runtime
 type obligations produce an unavailable status.
 
+An authorized offline fixture adds `bind-path` only to selectable own leaves.
+The **Bind** action sends that path and the literal through preview and apply,
+then reloads the subtree so the new binding disappears from the remaining
+fields. The editor retains the proposed value when the server refuses it.
+
 ## Preview and bind one leaf
 
 An offline fixture can call `graphden.crud.structured-input-bind/preview`

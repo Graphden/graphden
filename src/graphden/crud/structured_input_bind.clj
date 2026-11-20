@@ -77,10 +77,8 @@
   [graph path]
   (let [view (structured/project-analysis graph)
         wire (reduce (fn [node name] (some #(when (= name (:name %)) %) (:fields node))) view path)
-        route (get-in graph [:public-input :routes path])]
-    (when-not (and (= :available (:status view)) wire (not (contains? wire :fields))
-                   (= :input-field (:kind route)) (:whole-bindable? route)
-                   (empty? (get-in route [:address 0 1])))
+        route (structured/free-leaf-route (get-in graph [:public-input :routes]) path)]
+    (when-not (and (= :available (:status view)) wire (not (contains? wire :fields)) route)
       (reject! :input/leaf-unavailable "This input field is unavailable for binding"))
     route))
 

@@ -131,7 +131,7 @@ function openInlineEditPopover(opts) {
   const save = document.createElement('button');
   save.type = 'button';
   save.className = 'arg-value-edit-btn';
-  save.textContent = 'Save';
+  save.textContent = opts.saveLabel || 'Save';
   // A CHOOSER stage (bind literal | bind fn-ref) commits nothing — a
   // Save button there was inert and read as "something is missing"
   // (tutorial finding). `noSave` renders Cancel only.
@@ -549,6 +549,59 @@ async function responseError(r) {
   return extractResponseError(r, {
     authExpired: 'Sign in to save this value.',
     fallback: 'Save failed (HTTP ' + r.status + ').',
+  });
+}
+
+function openStructuredBindPopover(anchorEl, {fnId, isCurrent}, path, type) {
+  const label = path.join('.');
+  const valueKind = dereferenceType(type) === 'text' ? 'text' : 'any';
+  const request = async (endpoint, body) => {
+    const response = await authFetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (response.status === 401) throw new Error(await responseError(response));
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.ok) {
+      throw new Error(result?.error || 'Structured input request failed (HTTP ' + response.status + ').');
+    }
+    return result;
+  };
+  openInlineEditPopover({
+    anchorEl,
+    ariaLabel: 'Bind ' + label,
+    saveLabel: 'Bind',
+    makeControl(host) {
+      const control = document.createElement('input');
+      control.type = 'text';
+      control.className = 'arg-value-edit-input';
+      control.setAttribute('aria-label', 'Value for ' + label);
+      host.appendChild(control);
+      return control;
+    },
+    async doSave(control) {
+      const targetError = {ok: false, error: 'Refresh the selected function to bind this input.'};
+      if (!isCurrent()) return targetError;
+      const previewEndpoint = API.api_structured_input_preview;
+      const applyEndpoint = API.api_structured_input_apply;
+      if (!previewEndpoint || !applyEndpoint) return {ok: false, error: 'Structured input editing is unavailable.'};
+      if (valueKind !== 'text' && !control.value.trim()) return {ok: false, error: 'Enter a value.'};
+      const {value, error} = readFieldValue(control, valueKind);
+      if (error) return {ok: false, error};
+      const command = {action: 'bind', 'fn-id': fnId, path, value};
+      control.readOnly = true;
+      try {
+        const preview = await request(previewEndpoint, command);
+        if (!control.isConnected || !isCurrent()) return targetError;
+        const basis = preview['expected-state'];
+        if (!basis) return {ok: false, error: 'The input preview could not be verified.'};
+        return await request(applyEndpoint, {...command, 'expected-state': basis});
+      } finally {
+        control.readOnly = false;
+      }
+    },
+    onSaved: loadGraphData,
   });
 }
 

@@ -2,7 +2,8 @@
   "Frozen stage-4 signatures for ordinary operands of a verified list builder."
   (:require
     [graphden.input.list-records :as records]
-    [graphden.input.migration :as migration]))
+    [graphden.input.migration :as migration]
+    [graphden.packages.records.ids :as ids]))
 
 
 (defn- reject!
@@ -43,8 +44,19 @@
            fields (mapv (partial generated-field slots items type) members)
            owner (some #(when (= builder-id (:id %)) %) declarations)
            args (into {} (map (juxt :name :type)) fields)]
-       {:owner owner :input-type-id (:input-type-fn-id owner)
+       {:owner owner :list-fragment (first (:fragments recovered)) :input-type-id (:input-type-fn-id owner)
         :contract {:type args :fields fields} :declaration-records declarations
         :bindings (filterv #(and (= builder-id (:fn-id %)) (= :input-binding (:kind %))) records)
         :list-implementation {:base-fn-id builder-id :root-entry {:fn-id builder-id :args args :return type :effects #{} :taint-propagate? true}
                               :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}}))))
+
+
+(defn inline-operand?
+  "Match an authored inline use to an operand of the regenerated row set.
+   The recovered fragment's vector positions came from stored fn-slot rows."
+  [{:keys [binding-id owner-id target-id builder-id items]} edge position child-id]
+  (let [item (get items position)]
+    (and (uuid? child-id) (nat-int? position) (= position (:position item)) (= :ref (:kind item))
+         (= owner-id (:fn-id edge)) (= [target-id] (:target-path edge))
+         (= builder-id (:ref-fn-id edge)) (= binding-id (:id edge))
+         (= child-id (:fn-id item)) (= (:id item) (ids/binding-list-item-id binding-id position)))))

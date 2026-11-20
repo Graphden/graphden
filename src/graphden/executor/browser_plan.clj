@@ -25,7 +25,9 @@
   2048)
 
 
-(def ^:private max-call-depth 128)
+(def max-call-depth
+  "Maximum statically traversed function depth in a browser plan."
+  128)
 
 
 (defn- reject!
@@ -99,6 +101,13 @@
    user vectors/maps. Only string/keyword map keys and safe integers are allowed."
   [v]
   (encode* v 0 (volatile! max-value-nodes) false))
+
+
+(defn literal-encoder
+  "Create a tagged encoder with one shared value-node budget for a whole plan."
+  []
+  (let [remaining (volatile! max-value-nodes)]
+    (fn [value] (encode* value 0 remaining false))))
 
 
 (defn encode-result

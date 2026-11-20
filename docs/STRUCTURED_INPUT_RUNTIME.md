@@ -155,15 +155,19 @@ normalize its slot/ref/sequence/HOF inputs into the same IR, finish closures and
 consumption obligations, and remove the parallel lowering paths before runtime
 migration can be considered complete.
 
-## Later browser parity
+## Closed browser plans
 
-The browser interpreter already has `Thunk`, `LazySequence`, Map-based
-primitives and an invocation-local frame cache in
-`resources/packages/app/ui-preview/browser-runtime.js`. A later record view
-should use those conventions: Map-compatible `get`/`has`/`keys`/`entries`,
-deferred values and identity-based frame/cell caching. A plain object Proxy
-would miss the existing `instanceof Map` paths. This is a design note only;
-no browser runtime or wire ABI change is implemented here.
+`graphden.input.browser/export-closed` lowers the same checked IR as the JVM
+compiler into browser format 2. Each stable field address gets one invocation
+memo entry. A projection reads that same entry, and each record field carries
+a deferred expression. The browser uses its existing Map semantics for
+presence, lookup, iteration and encoding.
+
+The offline exporter takes a fully authorized frozen source closure and checks
+the visibility of each lowered target and base implementation again. It emits
+only known pure browser primitives, shares browser codec limits, and refuses
+free fields and outstanding runtime obligations. The production browser
+exporter still uses format 1.
 
 ## Verification
 

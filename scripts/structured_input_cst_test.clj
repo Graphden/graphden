@@ -534,6 +534,8 @@
                   " :label :type [:union ; rich input\r\n :text :null]} {:as :other} \"a  b\"]}}]}")
         target (migrate-child text)
         child (peek (:fns (edn/read-string target)))]
+    (is (= :unsupported-reader-discard
+           (reason #(migrate-child (str/replace text ":text :null" ":text #_:discarded :null")))))
     (is (= {:label {:type [:union :text :null] :required false} :other {:type :any :required false}} (:input child)))
     (is (= [[:project [:label]] [:project [:other]] [:value "a  b"]] (get-in child [:bind :xs 1 :items])))
     (doseq [comment ["; uses caller\r\n" "; rich input\r\n"]]

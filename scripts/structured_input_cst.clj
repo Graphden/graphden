@@ -326,6 +326,16 @@
     {:op :list-builder :definition (:name source) :path [:args field] :original original :form form}))
 
 
+(defn- position-type-edit
+  [source starts loc]
+  ;; Semantic type data moves to the owner declaration. Only keyword leaves
+  ;; and grouping delimiters may be dropped at the occurrence.
+  (doseq [child (tree-seq #(= :vector (z/tag %)) children loc)]
+    (when-not (or (= :vector (z/tag child)) (and (= :token (z/tag child)) (keyword? (z/sexpr child))))
+      (refuse :unsupported-positional-type-syntax {})))
+  (node-edit source starts loc #(str/join (re-seq #";[^\r\n]*|[\s,]+" %))))
+
+
 (defn- position-item-edit
   [source starts node]
   (let [span (node-edit source starts node identity)
@@ -334,8 +344,7 @@
         edits (cond-> [(node-edit source starts (key-loc node :as) (constantly ":project"))
                        (node-edit source starts field #(str "[" % "]"))]
                 type (conj (node-edit source starts type (constantly ""))
-                           (node-edit source starts (z/right type)
-                                      #(str/join (re-seq #";[^\r\n]*|[\s,]+" %)))))
+                           (position-type-edit source starts (z/right type))))
         local (mapv #(-> % (update :start - (:start span)) (update :end - (:start span))) (sort-by :start edits))
         inner (patched-text (:before span) local)]
     (assoc span :after (str "[" (subs inner 1 (dec (count inner))) "]"))))

@@ -9,6 +9,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
     [graphden.input.source-context :as source-context]
+    [graphden.input.source-named-types :as named-types]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
@@ -68,7 +69,7 @@
 
 
 (defn- closure
-  [package roots]
+  [package roots resolve-named]
   (loop [pending (vec roots) entries {}]
     (if-let [id (peek pending)]
       (if (contains? entries id)
@@ -82,7 +83,7 @@
                              :fn-id id :blockers (mapv :code (:blockers entry))})))
           (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2)))
             (reject! :unsupported-scope-declaration id))
-          (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]))
+          (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]) resolve-named)
                                 (vals (:list-builders v2)))
                 declared (assoc v2 :owner owner)
                 added (conj generated declared)
@@ -110,37 +111,14 @@
           {} (into [] (comp (mapcat #(get-in % [:contract :fields])) (remove (comp keyword? :type))) (vals entries))))
 
 
-(defn- dictionary-evidence
-  "Capture a named homogeneous map only when the original, prepared identity,
-   parsed fn row and primitive key/value body all agree."
-  [package entries]
-  (let [lookup (memoize (partial plan-entry package))]
-    (reduce
-      (fn [evidence {:keys [type type-id]}]
-        (if (and (keyword? type) (= type-id (get-in package [:prepared :name->id type]))
-                 (get-in package [:declarations type-id :map]))
-          (let [{:keys [verification v2]} (lookup type-id)
-                {:keys [key value]} (get-in v2 [:source :map])
-                body [:map key value]
-                [row & more] (:declaration-records v2)]
-            (when-not (and (= :authored-source-equivalent verification)
-                           (every? types/primitive? [key value]) (= body (:constraint row))
-                           (= :fn (:kind row)) (= type-id (:id row)) (empty? more))
-              (reject! :named-dictionary-evidence-required type-id))
-            (-> evidence (assoc-in [:aliases type] body) (assoc-in [:alias-ids type] type-id)
-                (assoc-in [:fns type-id] row)))
-          evidence))
-      {:aliases {} :alias-ids {} :fns {}} (mapcat #(get-in % [:contract :fields]) (vals entries)))))
-
-
 (defn- snapshot
-  [entries markers dictionaries]
+  [entries markers named]
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
         (reduce merge-record {} (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries)))
         inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))]
     (context/build-context
-      (assoc dictionaries
-             :fns (merge (:fns dictionaries) fns) :fields (or fields {}) :bindings (or bindings {})
+      (assoc named
+             :fns (merge (:fns named) fns) :fields (or fields {}) :bindings (or bindings {})
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
              :type-bodies inputs
              :source-return-types (into {} (keep (fn [[id {:keys [owner list-implementation]}]]
@@ -178,23 +156,23 @@
     (when-not (every? #(exact-projection-pin? type-ids contract bindings %) (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
-                       (and (contains? primitives return)
-                            (= (get primitives return) (:return-type-fn-id owner))))
+                       (and (contains? type-ids return)
+                            (= (get type-ids return) (:return-type-fn-id owner))))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))
                                            (every? #{:type :required :description} (keys declaration))))
-                                  (or (descriptor/stored-source-type? type type-id) (and (uuid? type-id) (= type-id (get named-ids type))))))
+                                  (or (descriptor/stored-source-type? type type-id named-ids) (and (uuid? type-id) (= type-id (get named-ids type))))))
                            (:fields contract)))
       (reject! :rich-type-source-required (:id owner)))))
 
 
 (defn- verified-context
-  [package entries]
-  (let [dictionaries (dictionary-evidence package entries)]
+  [package entries resolve-named]
+  (let [named (named-types/evidence entries resolve-named)]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
-      (check-type-provenance! (:alias-ids dictionaries) entry))
-    (snapshot entries (:markers package) dictionaries)))
+      (check-type-provenance! (:alias-ids named) entry))
+    (snapshot entries (:markers package) named)))
 
 
 (defn- implementation
@@ -208,7 +186,7 @@
     (when-not (and (= base (:fn-id entry)) (= (get-in declaration [:source :name]) (:name entry))
                    (= (:namespace declaration) (:namespace entry))
                    (= (set (:effects (:source declaration))) (:effects entry))
-                   (= args (:args entry)) (= return (:return entry)))
+                   (= args (:args entry)) (= (types/resolve-alias return) (:return entry)))
       (reject! :implementation-signature-required base))
     ;; Custom rules may consult signatures outside parent/ref edges. A closed
     ;; rule registry is a separate prerequisite for running them offline.
@@ -225,7 +203,7 @@
     (fn []
       {:implementations (into {} (map (fn [[id entry]]
                                         [id (or (:list-implementation entry) (implementation ctx entries roots id))])) entries)
-       :check-expression check/check-input-binding
+       :check-expression (named-types/checked-expression ctx check/check-input-binding)
        :infer-signature check/infer-input-signature})))
 
 
@@ -236,8 +214,9 @@
    signature view and are rejected here. Include any ref introduced by an overlay in
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
-  (let [entries (closure package function-ids)
-        ctx (verified-context package entries)]
+  (let [resolve-named (named-types/lookup package (partial plan-entry package))
+        entries (closure package function-ids resolve-named)
+        ctx (verified-context package entries resolve-named)]
     {:context ctx :options (implementation-options ctx entries roots)}))
 
 
@@ -279,14 +258,15 @@
    visible even when all field and binding identities are established."
   [package owner roots]
   (try
-    (let [entries (closure package [owner])
+    (let [resolve-named (named-types/lookup package (partial plan-entry package))
+          entries (closure package [owner] resolve-named)
           bindings (mapcat :bindings (vals entries))
           _ (when-not (some #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %))) bindings) (reject! :missing-source-projection owner))
-          ctx (verified-context package entries)
+          ctx (verified-context package entries resolve-named)
           options (try (implementation-options ctx entries roots)
                        (catch clojure.lang.ExceptionInfo error
                          (if (#{:implementation-signature-required :rule-signature-view-required} (:code (ex-data error)))
-                           {:check-expression check/check-input-binding
+                           {:check-expression (named-types/checked-expression ctx check/check-input-binding)
                             :gap (select-keys (ex-data error) [:code :fn-id])}
                            (throw error))))
           graph (analysis/analyze-effective-input ctx owner (dissoc options :gap))

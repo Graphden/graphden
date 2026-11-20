@@ -99,9 +99,10 @@
 (defn stored-source-type?
   "A frozen field declaration may retain generic collection shapes erased
    to a primitive by storage. Its leaves and actual FK must be accounted for."
-  [type field-type-id]
-  (and (format/collection-type? #(or (contains? primitive-ids %) (types/type-var? %)) type)
-       (= field-type-id (records/resolve-type-ref type {}))))
+  ([type field-type-id] (stored-source-type? type field-type-id {}))
+  ([type field-type-id named-ids]
+   (and (format/collection-type? #(or (contains? primitive-ids %) (types/type-var? %) (uuid? (get named-ids %))) type)
+        (= field-type-id (records/resolve-type-ref type named-ids)))))
 
 
 (defn- declared-field-node
@@ -110,7 +111,7 @@
         node (resolve-node ctx field-type-id seen)
         witnessed (get (:source-field-types ctx) [(:id field) field-type-id])]
     (if (and (some? witnessed) (not= source (:type node)) (contains? (:type-bodies ctx) type-id)
-             (= source (types/resolve-alias witnessed)) (stored-source-type? witnessed field-type-id))
+             (= source (types/resolve-alias witnessed)) (stored-source-type? witnessed field-type-id (:alias-ids ctx)))
       (cond-> {:type-id field-type-id :type source}
         (types/union-type? source) (assoc :alternatives (vec (types/union-members source))))
       node)))

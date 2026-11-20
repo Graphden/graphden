@@ -138,6 +138,16 @@ on an unrelated `:any` field. A declaration gap identifies the dependency UUID a
 blocker codes. A package can migrate each candidate independently once its
 frozen closure includes the implementation signatures it requires.
 
+For a named union, the frozen context keeps the declaration UUID in
+`:alias-ids`, the original ordered constraint in `:fns`, and the source name,
+namespace, member vector and available file path in `:type-origins`. The v2
+reader checks those members against the original and prepared declarations.
+The checker normalizes members for semantic comparisons. For example,
+`:nullable-text` admits null and text, and `:hiccup-node` also admits integers,
+floats, booleans and lists. A union with an unresolved named member requires
+further declaration evidence. A known literal must fit a union member. A
+reference whose return is too broad retains its runtime validation obligation.
+
 A scalar rename can project a direct or inherited field when the legacy
 alias slot points at the declaring field's UUID. Its input declaration keeps
 the prepared type expression, including type variables. Supported pins retain
@@ -307,12 +317,13 @@ applies the receiving base function's delay policy and shared call cache.
 
 A frozen package closure can analyze a single builder fragment containing
 literals and named references at a field of type `[:list T]`, where `T` is
-`:any`, `:bool`, `:int`, `:numeric` or `:text`. It rebuilds the generated rows,
+`:any`, `:bool`, `:int`, `:numeric`, `:text` or a verified named union over
+primitives and their collections. It rebuilds the generated rows,
 takes each argument path from its stored membership, and retains the receiving
 field's exact list type for the tail and return. The existing signature checker
 checks each operand and its referenced function. The analysis reports runtime
-obligations for dynamically typed values. Generic and named element types,
-positional projections, inline items and inherited chains need additional
+obligations for dynamically typed values. Type variables, other named element
+types, positional projections, inline items and inherited chains need additional
 signature evidence.
 
 The package dry run reports these field proofs under

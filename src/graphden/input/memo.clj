@@ -18,7 +18,7 @@
    Thus repeated named S uses share local definitions, while a new enclosing
    invocation cannot reuse a stale captured result from a shared request memo.
    Known eager literals/parameters retain value equality through projections."
-  [{:keys [ir supplied present cells]}]
+  [{:keys [ir supplied present cells scopes invocation-key]}]
   (let [result (volatile! {})]
     (letfn [(arguments
               [anchor scope]
@@ -40,6 +40,7 @@
                                                  [:read type source-key]))
                                 (= :record op)
                                 [:record (into {} (map (fn [[name child]] [name (token anchor child)])) fields)]
+                                (= :closure op) [:closure type (get cells address)]
                                 (= :invoke op)
                                 (if (inside? anchor (first address))
                                   [:computation binding-id target-id type (arguments anchor scope)]
@@ -48,4 +49,7 @@
                                 :else (ir/reject! :opaque-input-key-required {:address address}))]
                     (vswap! result assoc memo-address value)
                     value))))]
-      (into {} (map (fn [scope] [scope (arguments scope scope)])) (keys (:scopes ir))))))
+      (into {} (map (fn [scope]
+                      (let [key (arguments scope scope)]
+                        [scope (if invocation-key [invocation-key key] key)])))
+            (or scopes (keys (:scopes ir)))))))

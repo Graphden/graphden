@@ -82,6 +82,18 @@
       (is (= expected (legacy {:string input}) (canonical {:value {:string input}}))))))
 
 
+(deftest prepared-package-map-invokes-the-shipped-callback-through-both-compilers
+  (let [name :_checked-map-upper-test
+        source (into [{:name name :namespace "fixture" :parent :map :args {:func :str-upper}}]
+                     (concat (declarations "packages/core/hof/fns.edn" #{:map})
+                             (declarations "packages/core/strings/fns.edn" #{:str-upper})))
+        {:keys [canonical legacy analysis]} (runtimes source (ids/fn-id "fixture" name))]
+    (is (= :checked (:status analysis)))
+    (is (= [[:string]] (mapv :parameters (vals (:closures analysis)))))
+    (doseq [[input expected] [[[] []] [["a" "" "a" "graph"] ["A" "" "A" "GRAPH"]]]]
+      (is (= expected (legacy {:coll input}) (canonical {:coll input}))))))
+
+
 (deftest prepared-web-state-requires-a-compile-time-value-lowering
   (let [source (into (declarations "packages/core/concurrency/fns.edn" #{:cell :deref})
                      (declarations "packages/web/http/fns.edn" #{:response-cache-cell :_response-cache-current}))]

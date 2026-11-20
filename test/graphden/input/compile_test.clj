@@ -8,6 +8,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
+    [graphden.input.browser :as browser]
     [graphden.input.compile :as compile]
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.runtime :as input]
@@ -88,6 +89,85 @@
   ([closure supplied extra-context]
    (executor/execute (merge (execute-context :root closure) extra-context)
                      (fixture/id :root) supplied)))
+
+
+(defn- rejection-code
+  [f]
+  (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
+
+
+(deftest graph-callable-reuses-captured-cells-and-freshens-equal-call-inputs
+  (let [events (atom [])
+        definitions {:root {:input {:callback [:fn {:item :any} :any #{}] :config :any} :return :any
+                            :bindings {[:callback] {:ref :child :id :callback-use}
+                                       [:config] {:ref :source}}}
+                     :child {:input {:item :any :config :any :computed :any} :return :any
+                             :field-origins {[:config] :root}
+                             :bindings {[:computed] {:ref :local}}}
+                     :local {:input {:item :any} :return :any :field-origins {[:item] :child}}
+                     :source {:input {} :return :any}}
+        functions {:root (fn [args _]
+                           (let [callback (runtime/resolve-arg args :callback)]
+                             (swap! events conj :ready)
+                             [(select-keys (meta callback)
+                                           [:graphden.executor/fn-id :graphden.executor/lambda-params])
+                              (mapv callback [nil false false])]))
+                   :child (fn [args _]
+                            [(runtime/resolve-arg args :config)
+                             (runtime/resolve-arg args :item)
+                             (runtime/resolve-arg args :computed)
+                             (runtime/resolve-arg args :computed)])
+                   :local (fn [args _]
+                            (let [item (runtime/resolve-arg args :item)]
+                              (swap! events conj [:callback item]) item))
+                   :source (fn [_ _] (swap! events conj :capture) false)}
+        {:keys [analysis context closure]} (compiled definitions functions)
+        [metadata values] (invoke closure)]
+    (is (= {:graphden.executor/fn-id (fixture/id :child) :graphden.executor/lambda-params [:item]} metadata))
+    (is (= [[false nil nil nil] [false false false false] [false false false false]] values))
+    (is (= [:ready :capture [:callback nil] [:callback false] [:callback false]] @events))
+    (is (= :browser-closure-compilation-required
+           (rejection-code #(browser/export-named analysis
+                                                  {:snapshot-id (:snapshot-id context)
+                                                   :allow-fn? (constantly true)
+                                                   :implementations (fixture/implementations definitions functions)}))))))
+
+
+(deftest callback-map-presence-and-lifetime-remain-explicit
+  (let [definitions {:root {:input {:callback [:fn {:item :any :flag :any} :any #{}]} :return :any
+                            :bindings {[:callback] {:ref :child}}}
+                     :child {:input {:item :any :flag :any} :optional #{[:flag]} :return :any}}
+        {:keys [closure]} (compiled definitions
+                                    {:root (fn [args _]
+                                             (let [callback (runtime/resolve-arg args :callback)]
+                                               [callback [(callback {:item nil})
+                                                          (callback {:item false :flag nil})
+                                                          (callback {:item nil :flag false})
+                                                          (rejection-code #(callback {:flag false}))
+                                                          (rejection-code #(callback {:item true :extra 1}))]]))
+                                     :child (fn [args _]
+                                              [(runtime/resolve-arg args :item)
+                                               (contains? args :flag)
+                                               (runtime/resolve-arg args :flag)])})
+        [callback results] (invoke closure)]
+    (is (= [[nil false nil] [false true nil] [nil true false]
+            :missing-required-input :unknown-callback-parameter] results))
+    (is (= :callback-outside-invocation (rejection-code #(callback {:item false}))))))
+
+
+(deftest zero-argument-callback-uses-the-legacy-variadic-call-shape
+  (let [definitions {:root {:input {:callback [:fn {} :any #{}] :config :any} :return :any
+                            :bindings {[:callback] {:ref :child} [:config] {:value nil}}}
+                     :child {:input {:config :any} :return :any :lambda-params []
+                             :field-origins {[:config] :root}}}
+        {:keys [closure]} (compiled definitions
+                                    {:root (fn [args _]
+                                             (let [callback (runtime/resolve-arg args :callback)]
+                                               [(callback) (callback false)
+                                                @(future (rejection-code callback))]))
+                                     :child (fn [args _]
+                                              [(contains? args :config) (runtime/resolve-arg args :config)])})]
+    (is (= [[true nil] [true nil] :callback-outside-invocation] (invoke closure)))))
 
 
 (deftest nested-fields-remain-lazy-through-real-base-abi

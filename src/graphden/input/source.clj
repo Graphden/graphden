@@ -150,11 +150,10 @@
                     builder (when (or (:list-append binding) (:list-closed binding))
                               (source-list/trace context (::records-of context) (::original-of context)
                                                  definition arg slot-id (:id binding)))
-                    rename (rename/origin own grouped arg body)
+                    rename (rename/origin context definition own grouped arg body)
                     ;; Separate a primitive inherited field from an erased rich
                     ;; declaration or another same-named field in the ref tree.
                     rename (when (and rename (= arg field) (= slot-id (:field-id rename))
-                                      (= target-type (get-in rename [:declaration :type]))
                                       (= (:id binding) (ids/binding-id (:id own) slot-id))
                                       (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename)))
                                          (binding-policy binding)))
@@ -423,7 +422,7 @@
   [sources context]
   (let [originals (group-by definition-key sources)
         prepared (group-by definition-key (:fn-defs context))
-        planning-context (assoc context
+        planning-context (assoc (rename/prepare-context context)
                                 ::records-of (memoize (partial parse-one context))
                                 ::original-of (fn [definition]
                                                 (let [[original & more] (get originals (definition-key definition))]

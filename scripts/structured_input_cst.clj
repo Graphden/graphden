@@ -239,7 +239,7 @@
                        %) spans)
         parts (into {} (field-chunks source raw spans))]
     (when-not (and (contains? #{#{:as} #{:as :type}} (set (keys parts))) (simple-keyword? (:as form))
-                   (or (not (contains? form :type)) (simple-keyword? (:type form))))
+                   (or (not (contains? form :type)) (format/configuration-type? (:type form))))
       (refuse :unsupported-projection {}))
     (cond-> (assoc raw :after (str "[" (:as parts) "]"))
       (:type parts) (assoc :configuration (str "{" (:type parts) "}")))))
@@ -411,11 +411,11 @@
             target (value-at loc [:args field])
             pin (:configuration (projection-leaf source starts target))]
         (when-not (and (= 1 (count input)) (simple-keyword? exposed)
-                       (map? spec) (= #{:type :required} (set (keys spec))) (simple-keyword? (:type spec))
+                       (map? spec) (= #{:type :required} (set (keys spec))) (format/projection-input-type? (:type spec))
                        (false? (:required spec)) (= (cond-> {:as exposed} pin (assoc :type (:type spec))) (z/sexpr target))
                        (or (key-loc loc :parent) (key-loc loc :parents)) (not (key-loc loc :input)))
           (refuse :invalid-projection-declaration {:definition definition}))
-        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (:type spec) " :required false}"
+        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (pr-str (:type spec)) " :required false}"
                                                                                  (str/join (map (fn [[name decl]] (str " " name " " (pr-str decl))) (:position-inputs operation))) "}"
                                                                                  (when pin (str " :configure {[" field "] " pin "}")) " :bind")))
 

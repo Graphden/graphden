@@ -21,7 +21,7 @@
   "Capture the package's resolved dependency index and reuse legacy parses."
   [{:keys [defs-by-name name->id] :as context}]
   (let [definitions (concat (vals defs-by-name) (:fn-defs context))]
-    {:context context
+    {:context (rename/prepare-context context)
      :names-by-id (group-by val (filter (comp uuid? val) name->id))
      :definition-by-id (into {} (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)
@@ -142,7 +142,7 @@
         ordered (parent-order source-environment own)
         _ (ensure-acyclic! ordered)
         input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
-                                        (let [aliases (keep (fn [[k v]] (rename/origin owner records k v)) (:args definition))
+                                        (let [aliases (keep (fn [[k v]] (rename/origin (:context source-environment) definition owner records k v)) (:args definition))
                                               anchors (positions/inputs (:id owner) records (get-in source-environment [:context :name->id]))
                                               specs (into (merge (field-specs definition) (update-vals anchors :declaration))
                                                           (map (juxt :alias :declaration)) aliases)
@@ -236,7 +236,7 @@
         grouped (when (seq projections) (group-by :kind rows))
         own (some #(when (= (ids/fn-id (:namespace normalized) (:name normalized)) (:id %)) %) (:fn grouped))]
     (doseq [[arg exposed] projections]
-      (let [origin (rename/origin own grouped arg (rename-form arg exposed))]
+      (let [origin (rename/origin context normalized own grouped arg (rename-form arg exposed))]
         (when-not (and origin (= (get-in definition [:input exposed]) (:declaration origin)))
           (reject! :rename-origin-mismatch [:bind arg]))))
     [normalized rows]))

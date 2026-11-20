@@ -222,18 +222,29 @@
             (assoc :legacy-order (vec (keys body)))))))))
 
 
-(defn configuration-type?
-  "Named types and collection shapes whose leaves resolve to named types.
-   Forms that require new inline type rows are outside this source format slice."
-  [type]
-  (or (keyword? type)
+(defn collection-type?
+  "A source leaf or a collection of supported arity with accepted leaf forms."
+  [leaf? type]
+  (or (leaf? type)
       (and (vector? type)
            (case (first type)
              :list (= 2 (count type))
              :map (= 3 (count type))
              (:tuple :union) (< 1 (count type))
              false)
-           (every? configuration-type? (rest type)))))
+           (every? (partial collection-type? leaf?) (rest type)))))
+
+
+(defn configuration-type?
+  "Type assertions use named leaves. Inline declarations require their own records."
+  [type]
+  (collection-type? keyword? type))
+
+
+(defn projection-input-type?
+  "A source-derived field may retain type variables from its parent declaration."
+  [type]
+  (collection-type? #(or (keyword? %) (simple-symbol? %)) type))
 
 
 (defn require-v2!

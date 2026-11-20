@@ -383,17 +383,41 @@
           {:keys [user name] :as ids} (seed! main)
           id (:id (sp/create-entity main :input-binding (literal ids [user name] "before")))
           expected (binding-version main id)
-          feature (vs/switch-branch main (:id (vs/create-branch! main "independent-edit")))
+          left (vs/switch-branch main (:id (vs/create-branch! main "left-edit")))
+          right (vs/switch-branch main (:id (vs/create-branch! main "right-edit")))
           start (promise)
           writes (mapv (fn [[storage value]]
                          (future @start (attempt #(input-edit/replace-binding! storage id expected {:value value}))))
-                       [[main "main"] [feature "feature"]])]
+                       [[left "left"] [right "right"]])]
       (deliver start true)
       (is (= [:ok :ok] (mapv #(deref % 15000 :timeout) writes)))
-      (is (= "main" (:value (sp/read-entity main :input-binding id))))
-      (is (= "feature" (:value (sp/read-entity feature :input-binding id))))
+      (is (= "before" (:value (sp/read-entity main :input-binding id))))
+      (is (= "left" (:value (sp/read-entity left :input-binding id))))
+      (is (= "right" (:value (sp/read-entity right :input-binding id))))
       (is (= :input/stale-version
-             (attempt #(input-edit/remove-binding! feature id (binding-version main id))))))))
+             (attempt #(input-edit/remove-binding! right id (binding-version left id))))))))
+
+
+(deftest child-edit-requires-the-live-parent-winner-test
+  (with-storage [base (base-storage)]
+    (let [main (vs/wrap-with-versioning base)
+          {:keys [user name] :as ids} (seed! main)
+          id (:id (sp/create-entity main :input-binding (literal ids [user name] "before")))
+          child (vs/switch-branch main (:id (vs/create-branch! main "child-edit")))
+          sibling (vs/switch-branch main (:id (vs/create-branch! main "sibling-edit")))
+          inherited (binding-version child id)]
+      (is (= :ok (attempt #(input-edit/replace-binding! main id inherited {:value "parent"}))))
+      (let [parent-version (binding-version main id)]
+        (is (not= inherited parent-version))
+        (is (= parent-version (binding-version child id)))
+        (is (= :input/stale-version
+               (attempt #(input-edit/replace-binding! child id inherited {:value "stale"}))))
+        (is (= :ok (attempt #(input-edit/replace-binding! sibling id parent-version {:value "sibling"}))))
+        (is (= :input/stale-version
+               (attempt #(input-edit/replace-binding! child id (binding-version sibling id) {:value "foreign"}))))
+        (is (= :ok (attempt #(input-edit/replace-binding! child id parent-version {:value "child"}))))
+        (is (= ["parent" "child" "sibling"]
+               (mapv #(:value (sp/read-entity % :input-binding id)) [main child sibling])))))))
 
 
 (deftest raw-update-and-versioned-edit-share-the-writer-order-test

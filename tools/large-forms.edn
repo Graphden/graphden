@@ -70,8 +70,6 @@
   "one unit: a `walk` letfn threading a covered-set and a rename map; the recursion IS the function. NOT to be merged with its slot-id-keyed twin below, measured: 35% shared code lines, and the largest divergence is 45 lines vs 20 at the top — they are two algorithms that agree on a traversal, not one with a swapped key. Merging would mean first making them behaviourally identical in the compiler hot path. `verify-entry-walker-covers-name-walker!` guards the half they DO share"
   "graphden.executor.compile.renames/deep-free-ext-entries*"
   "one unit: the slot-id-coverage twin — see deep-free-ext-names* for why the two stay separate"
-  "graphden.executor.compile.renames/hof-lambda-params"
-  "one unit: the lambda-arity decision walks the same rename state as its caller and cannot see it from outside"
   "graphden.layout.graph/process-expanded-fn-impl"
   "one unit: mutually recursive with process-any-fn / process-fn over one shared `state` atom"
   "graphden.layout.graph/process-any-fn"

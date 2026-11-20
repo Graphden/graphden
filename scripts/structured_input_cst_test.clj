@@ -538,8 +538,8 @@
            (reason #(migrate-child (str/replace text ":text :null" ":text #_:discarded :null")))))
     (is (= {:label {:type [:union :text :null] :required false} :other {:type :any :required false}} (:input child)))
     (is (= [[:project [:label]] [:project [:other]] [:value "a  b"]] (get-in child [:bind :xs 1 :items])))
-    (doseq [comment ["; uses caller\r\n" "; rich input\r\n"]]
-      (is (= 1 (count (re-seq (re-pattern comment) target)))))))
+    (doseq [remark ["; uses caller\r\n" "; rich input\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern remark) target)))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]

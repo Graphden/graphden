@@ -242,7 +242,12 @@
                               (:definitions replay)))
         recover #(list-records/recover-use [(:identity head-entry) (:identity tail-entry)] field (:field trace)
                                            (:name->id prepared) %)
-        bad (source/verify-module (update-in planned [:definitions 2 :proposed :input] dissoc :y) prepared)]
+        bad (source/verify-module (update-in planned [:definitions 2 :proposed :input] dissoc :y) prepared)
+        shadow [base head (assoc-in tail [:args :xs] [{:as :x}])]
+        shadow-ctx (parse/prepare-module shadow {} {})]
+    (is (= [:ambiguous-inherited-input]
+           (mapv :code (get-in (source/verify-module (source/plan-module shadow shadow-ctx) shadow-ctx)
+                               [:definitions 2 :blockers]))))
     (is (= {:supported 3 :blocked 0} (:counts replay)))
     (is (= {:x {:type :any :required false}} (get-in head-entry [:proposed :input])))
     (is (= {:y {:type :text :required false}} (get-in tail-entry [:proposed :input])))
@@ -251,6 +256,8 @@
     (is (= [[a] [a] [a b]] (mapv :scope-path rows)))
     (is (= [(ids/binding-list-item-id a 0) (ids/binding-list-item-id a 1) (ids/binding-list-item-id b 0)] (mapv :id rows)))
     (is (= (:fragments trace) (:fragments (recover all))))
+    (is (= :list-item-origin-mismatch
+           (reason #(builder/compiler-items (dissoc (first (:fragments trace)) :owner-id)))))
     (is (= :positional-list-field-mismatch
            (reason #(recover (remove (fn [r] (and (= :slot (:kind r)) (= x (:id r)))) all)))))
     (is (= :positional-list-field-mismatch (get-in bad [:definitions 2 :blockers 0 :code])))))

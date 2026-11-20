@@ -115,7 +115,7 @@
           (fn [position {:keys [id kind value fn-id source-id] :as item}]
             (when-not (and (= position (:position item)) (= id (ids/binding-list-item-id binding-id position))
                            (case kind
-                             :projection (and (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
+                             :projection (and (uuid? owner-id) (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
                              :ref (and (uuid? fn-id) (not (contains? item :value)))
                              :value (and (contains? item :value) (nil? fn-id))
                              false))
@@ -163,12 +163,12 @@
                    (false? (:value-present binding))
                    (= list-closed (when (map? source) (= :closed (get-in form [1 :tail])))))
       (reject! :unsupported-list-binding))
-    (let [fragment (parse-fragment id form name->id fn-id)
+    (let [fragment (assoc (parse-fragment id form name->id fn-id) :owner-id fn-id :target-id slot-id)
           ordered (sort-by :position item-rows)]
       (when-not (= (count (:items fragment)) (count ordered)) (reject! :list-item-count-mismatch))
       (doseq [[actual expected raw] (map vector ordered (compiler-items fragment) (if (vector? source) source (:append source)))]
         (check-item! actual expected raw))
-      (assoc fragment :owner-id fn-id :target-id slot-id))))
+      fragment)))
 
 
 (defn link-fragments

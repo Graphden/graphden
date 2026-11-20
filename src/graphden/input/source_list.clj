@@ -62,7 +62,7 @@
                                     (fn [ref] (parse/normalize-ref ref name->id (:namespace original))))
                             item))
               prepared (cond
-                         (not (some typed? (if (vector? form) form (:append form)))) form
+                         (not-any? typed? (if (vector? form) form (:append form))) form
                          (vector? form) (mapv normalize form)
                          :else (update form :append #(mapv normalize %)))
               fragment (builder/source-fragment binding items prepared (field-names name->id (:namespace original) form))

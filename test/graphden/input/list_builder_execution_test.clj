@@ -101,7 +101,7 @@
         run (execution/compile-construction trace opts)
         calls (atom 0)
         items (run {a (delay (swap! calls inc) false) :a :wrong b nil :b :wrong} {})]
-    (is (= 0 @(first items)))
+    (is (zero? @(first items)))
     (is (zero? @calls))
     (is (false? @(second items)))
     (is (= 1 @calls))
@@ -110,8 +110,6 @@
     (is (= :positional-list-field-mismatch
            (try (execution/compile-construction trace (assoc opts :lookups {})) nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
-
-
 
 
 (deftest analyzer-checks-the-positional-route-from-generated-rows

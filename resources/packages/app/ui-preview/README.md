@@ -648,5 +648,5 @@ field stays absent. A field that returns nil or false stays present. Keys
 and size are available before any field is evaluated; iteration and wire
 encoding consume values. Format 1 rejects a `record` expression.
 
-The server still emits format 1. Checked lowering and agreement between
-JVM and browser execution are separate from this runtime support.
+The offline exporter can lower a checked closed graph into format 2.
+The production server still emits format 1.

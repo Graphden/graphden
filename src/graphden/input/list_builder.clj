@@ -68,6 +68,8 @@
     (not (map? value)) [:value value]
     (= #{:value} (set (keys value))) [:value (:value value)]
     (= #{:ref} (set (keys value))) [:ref (:ref value)]
+    (:as value) (reject! :positional-list-input-required)
+    (or (:parent value) (:parents value)) (reject! :inline-list-item-origin-required)
     (some #(contains? value %) [:as :parent :parents :ref :value]) (reject! :unsupported-list-item-origin)
     :else [:value value]))
 
@@ -96,7 +98,7 @@
   [actual expected]
   (when (and (map? (:value actual)) (:as (:value actual)) (not (:literal actual)))
     (reject! :positional-list-input-required))
-  (when-not (migration/same-edn? expected (select-keys actual (keys expected)))
+  (when-not (migration/same-edn? expected actual)
     (reject! :list-item-origin-mismatch)))
 
 
@@ -120,12 +122,14 @@
    Bare vectors must have been classified as appends by the legacy parser."
   [{:keys [id fn-id slot-id list-append list-closed] :as binding} item-rows source name->id]
   (let [form (source-form source name->id)]
-    (when-not (and (= :binding (:kind binding)) (uuid? fn-id) (uuid? slot-id)
+    (when-not (and (every? #{:kind :id :fn-id :slot-id :list-append :list-closed :value-present :value :ref-fn-id
+                             :resolver-fn-id :type-override-fn-id :override-kind :required :terminal :description} (keys binding))
+                   (= :binding (:kind binding)) (uuid? fn-id) (uuid? slot-id)
                    (= id (ids/binding-id fn-id slot-id)) (true? list-append)
                    (not-any? some? (map binding [:value :ref-fn-id :resolver-fn-id :type-override-fn-id
                                                  :override-kind :required :terminal :description]))
-                   (not (:value-present binding))
-                   (= (boolean list-closed) (= :closed (get-in form [1 :tail]))))
+                   (false? (:value-present binding))
+                   (= list-closed (when (map? source) (= :closed (get-in form [1 :tail])))))
       (reject! :unsupported-list-binding))
     (let [fragment (parse-fragment id form name->id)
           ordered (sort-by :position item-rows)]

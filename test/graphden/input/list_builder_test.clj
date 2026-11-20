@@ -93,3 +93,17 @@
         fragment (builder/parse-fragment (ids/fn-id "demo" :test) form scoped)]
     (is (= [(ids/fn-id "alpha" :read) :read (ids/fn-id "alpha" :read) {:ref :read}]
            (mapv #(or (:fn-id %) (:value %)) (:items fragment))))))
+
+
+(deftest source-evidence-refuses-unmapped-columns-and-relabelled-item-rows
+  (let [[fragment] (fixture [1N nil] [])
+        rows (builder/compiler-items fragment)
+        binding {:kind :binding :id (:binding-id fragment) :fn-id (:owner-id fragment)
+                 :slot-id (:target-id fragment) :list-append true :list-closed nil :value-present false}
+        check (fn [binding rows] (builder/source-fragment binding rows [1N nil] {}))]
+    (is (= fragment (check binding rows)))
+    (is (= :unsupported-list-binding (reason #(check (assoc binding :new-policy nil) rows))))
+    (is (= :unsupported-list-binding (reason #(check (assoc binding :list-closed false) rows))))
+    (is (= :list-item-origin-mismatch (reason #(check binding (assoc-in rows [1 :new-policy] false)))))
+    (is (= :list-item-origin-mismatch (reason #(check binding (assoc-in rows [0 :value] 1)))))
+    (is (= :list-item-origin-mismatch (reason #(check binding (assoc-in rows [0 :position] 1)))))))

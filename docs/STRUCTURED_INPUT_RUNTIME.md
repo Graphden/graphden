@@ -148,10 +148,12 @@ references. Multiple reads of a callback-local field share its once-cell.
 The callback and its unforced local cells can run on the originating thread while
 the enclosing execution is active. Deferred or worker-thread invocation, nested
 graph callbacks, unproven captures and record-shaped parameter routes fail closed.
-A checked fixture using the shipped eager `core.hof/map` and
-`core.strings/str-upper` compares with the legacy package graph. The source
-snapshot adapter still requires richer type evidence before it can compile the
-same package declarations directly.
+The package adapter checks the authored callable shape against its exact
+anonymous type row, including inherited fields. It keeps a list return when the
+legacy parser confirms its sequence FK and the frozen implementation signature
+matches the source. The package regression uses the shipped eager `core.hof/map`
+and `core.strings/str-upper` in a prepared composition and compares both compiler
+paths through the regular executor.
 
 ### Dependency memo keys
 

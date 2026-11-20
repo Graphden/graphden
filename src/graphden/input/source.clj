@@ -8,6 +8,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
     [graphden.input.source-context :as source-context]
+    [graphden.input.source-list :as source-list]
     [graphden.input.source-rename :as rename]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -144,6 +145,9 @@
                     body (get-in source [:args arg])
                     target-type (or (slots/slot-type-of owner field defs-by-name)
                                     (slots/rename-source-type owner field defs-by-name))
+                    builder (when (or (:list-append binding) (:list-closed binding))
+                              (source-list/trace context (::records-of context) (::original-of context)
+                                                 definition arg slot-id (:id binding)))
                     rename (rename/origin own grouped arg body)
                     ;; Separate a primitive inherited field from an erased rich
                     ;; declaration or another same-named field in the ref tree.
@@ -165,6 +169,7 @@
                                        [:ref body]
                                        (binding-expression binding names))
                          :policy (binding-policy binding)}
+                  builder (assoc :list-builder builder)
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -228,6 +233,8 @@
       (conj (problem :ref-scope-required))
       (or (:list-append policy) (:list-closed policy))
       (conj (problem :list-builder-required))
+      (get-in entry [:list-builder :blocker])
+      (conj (problem (get-in entry [:list-builder :blocker])))
       (:resolver-fn-id policy)
       (conj (problem :resolver-binding-required))
       (contains? policy :override-kind)
@@ -393,6 +400,9 @@
         prepared (group-by definition-key (:fn-defs context))
         planning-context (assoc context
                                 ::records-of (memoize (partial parse-one context))
+                                ::original-of (fn [definition]
+                                                (let [[original & more] (get originals (definition-key definition))]
+                                                  (when-not more original)))
                                 ::ref-index (ref-index context)
                                 ::prepared prepared)
         definitions

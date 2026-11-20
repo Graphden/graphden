@@ -126,12 +126,14 @@
 
 (defn- summarize-definition
   [package definition]
-  (let [original (:source definition)]
+  (let [original (:source definition)
+        linked (count (keep #(get-in % [:list-builder :bindings]) (get-in definition [:legacy :arguments])))]
     (-> (select-keys definition [:identity :kind :status :origins :verification])
         (assoc :definition [(:namespace original) (:name original)]
                :file (:source-file original)
                :blockers (mapv #(assoc % :repository (:repository package) :package (:name package))
-                               (:blockers definition))))))
+                               (:blockers definition)))
+        (cond-> (pos? linked) (assoc :linked-list-fields linked)))))
 
 
 (defn- blocked-state

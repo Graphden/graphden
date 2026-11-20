@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.list-builder :as builder]
+    [graphden.input.source :as source]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
 
@@ -51,3 +52,17 @@
   (is (= :unsupported-list-binding (reason #(fixture {:append [] :closed? true} []))))
   (is (= :closed-list-continuation (reason #(builder/link-fragments (fixture {:append [] :closed true} [])))))
   (is (= :invalid-list-chain (reason #(let [[head] (fixture [] [])] (builder/link-fragments [head head]))))))
+
+
+(deftest source-planner-records-the-authored-chain-only
+  (let [base {:namespace "demo" :name :consume :args {:xs {:type [:list :any]}} :return-type :any}
+        head {:namespace "demo" :name :head :parent :consume :args {:xs [1]}}
+        tail {:namespace "demo" :name :tail :parent :head :args {:xs [2]}}
+        originals [base head tail]
+        ctx (parse/prepare-module originals {} {})
+        trace (fn [forms]
+                (-> (source/plan-module forms ctx) :definitions last :legacy :arguments first :list-builder))
+        linked (trace originals)]
+    (is (= [[1] [2]] (mapv #(mapv :value (:items %)) (:fragments linked))))
+    (is (= (mapv :binding-id (:fragments linked)) (mapv :id (:bindings linked))))
+    (is (= :list-source-origin-required (:blocker (trace [tail]))))))

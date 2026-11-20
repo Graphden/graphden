@@ -138,7 +138,7 @@
     (mapv (fn [[arg value]]
             (if (types/own-slot-declaration? value)
               (let [source-slot-id (get own-sources (ids/slot-id (:fn-id definition) arg))]
-                (cond-> {:source-path [:args arg] :kind :declaration :spec value}
+                (cond-> {:source-path [:args arg] :kind :declaration :spec (get-in source [:args arg])}
                   source-slot-id (assoc :source-slot-id source-slot-id)))
               (let [[owner field] (slots/resolve-slot-owner own-ref arg defs-by-name value)
                     owner-id (get name->id owner)
@@ -266,26 +266,7 @@
       (conj (problem :missing-reference-identity)))))
 
 
-(defn- inherited-blockers
-  "Conservatively block ancestor input transformations and occupied targets.
-   No attempt is made to reimplement legacy rename/capture compilation."
-  [source definition context arguments]
-  (let [ancestor-defs (vec (ancestor-definitions definition context))
-        ancestor-rows (mapcat (::records-of context) ancestor-defs)
-        occupied (into #{} (comp (filter #(and (= :binding (:kind %))
-                                               (or (:value-present %) (:ref-fn-id %)
-                                                   (:terminal %))))
-                                 (map :slot-id)) ancestor-rows)
-        transformed? (some #(and (= :slot (:kind %)) (:source-slot-id %)) ancestor-rows)]
-    (cond-> (into []
-                  (keep (fn [{:keys [origin source-path]}]
-                          (when (contains? occupied (:slot-id origin))
-                            (blocker source :inherited-occupancy-required source-path))))
-                  arguments)
-      transformed? (conj (blocker source :inherited-projection-required [:args])))))
-
-
-(defn- composed-plan
+(defn- local-arguments
   [source definition context rows]
   (let [arguments (argument-ledger context source definition rows)
         defs (:defs-by-name context)
@@ -299,11 +280,63 @@
                                  (not-any? #(or (= :declaration (:kind %))
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
-        blockers (vec (distinct
-                        (concat (when collision? [(blocker source :rename-field-collision [:args])])
-                                (source-argument-blockers source rename-fields)
-                                (mapcat #(argument-blockers source % chain) arguments)
-                                (inherited-blockers source definition context arguments))))
+        blockers (concat (when collision? [(blocker source :rename-field-collision [:args])])
+                         (source-argument-blockers source rename-fields)
+                         (mapcat #(argument-blockers source % chain) arguments))]
+    {:arguments arguments :aliases aliases :blockers blockers}))
+
+
+(defn- inherited-fields
+  "A scalar projection occupies its destination and exposes its own stable
+   alias slot. Prove each stored link against the declaring definition's
+   local source lowering before a descendant can use the alias."
+  [context ancestor]
+  (let [rows ((::records-of context) ancestor)
+        owner-id (ids/fn-id (:namespace ancestor) (:name ancestor))
+        owner (some #(when (and (= :fn (:kind %)) (= owner-id (:id %))) %) rows)
+        bindings (filter #(= :binding (:kind %)) rows)
+        links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
+                                [(:id %) (:source-slot-id %)])) rows)
+        occupied (into (set (vals links))
+                       (comp (filter #(or (:value-present %) (:ref-fn-id %) (:terminal %))) (map :slot-id)) bindings)]
+    (cond-> {:owner (:id owner) :parents (:parent-ids owner) :occupied occupied :addresses (mapv :slot-id bindings)}
+      (seq links)
+      (assoc :proven? (let [original (or ((::original-of context) ancestor) ancestor)
+                            {:keys [aliases blockers]} (local-arguments original ancestor context rows)]
+                        (and (empty? blockers) (= links (into {} (map (juxt :alias-id :field-id)) aliases))))))))
+
+
+(defn- shared-implementation?
+  [lineage parent-ids]
+  (let [owners (set (map :owner lineage))
+        roots (filter #(empty? (:parents %)) lineage)
+        addresses (mapcat :addresses lineage)]
+    (and (= 1 (count roots)) (every? uuid? owners)
+         (every? owners parent-ids) (every? owners (mapcat :parents lineage))
+         (= (count addresses) (count (set addresses))))))
+
+
+(defn- inherited-blockers
+  [source definition context arguments rows]
+  (let [parents (some #(when (= (:id %) (:fn-id definition)) (:parent-ids %)) rows)
+        lineage (ancestor-definitions definition context)
+        states (mapv (::inherited-fields context) lineage)
+        occupied (into #{} (mapcat :occupied) states)
+        transformed (filter #(contains? % :proven?) states)
+        unproven? (and (seq transformed) (or (not-every? :proven? transformed)
+                                             (not (shared-implementation? states parents))))]
+    (cond-> (into []
+                  (keep (fn [{:keys [origin source-path]}]
+                          (when (contains? occupied (:slot-id origin))
+                            (blocker source :inherited-occupancy-required source-path))))
+                  arguments)
+      unproven? (conj (blocker source :inherited-projection-required [:args])))))
+
+
+(defn- composed-plan
+  [source definition context rows]
+  (let [{:keys [arguments aliases blockers]} (local-arguments source definition context rows)
+        blockers (vec (distinct (concat blockers (inherited-blockers source definition context arguments rows))))
         declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
         declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
         binds (filter #(= :binding (:kind %)) arguments)
@@ -429,6 +462,7 @@
                                                   (when-not more original)))
                                 ::ref-index (ref-index context)
                                 ::prepared prepared)
+        planning-context (assoc planning-context ::inherited-fields (memoize (partial inherited-fields planning-context)))
         definitions
         (mapv (fn [source]
                 (let [key (definition-key source)

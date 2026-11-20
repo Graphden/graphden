@@ -165,3 +165,24 @@
     (is (= [{:value ["nil"] :sequence false} {:value ["string" "Ada"] :sequence false}]
            [null-result text-result]))
     (is (= "Value does not match the required graph input type" (:error invalid)))))
+
+
+(deftest browser-and-jvm-run-the-same-checked-callback-plan
+  (let [source {:root {:input {:func [:fn {:item :text} :text #{}] :coll [:list :text]}
+                       :return [:list :text]
+                       :bindings {[:func] {:ref :callback}
+                                  [:coll] {:value ["one" "two" "one"]}}}
+                :callback {:input {:string :text} :return :text}}
+        {:keys [analysis context]} (fixture/model source :root)
+        functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:str-upper :impl])}
+        implementations (-> (fixture/implementations source functions)
+                            (assoc-in [(fixture/id :root) :base-fn-id] (ids/fn-id "core.hof" :map))
+                            (assoc-in [(fixture/id :callback) :base-fn-id] (ids/fn-id "core.strings" :str-upper)))
+        options {:context context :snapshot-id (:snapshot-id context)
+                 :implementations implementations :allow-fn? (constantly true)}
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-closed analysis options)
+        expected (invoke {} nil)]
+    (is (= ["ONE" "TWO" "ONE"] expected))
+    (is (= [{:value (wire/encode-result expected) :sequence true}]
+           (run-browser plan [{}])))))

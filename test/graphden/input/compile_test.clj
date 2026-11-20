@@ -126,7 +126,7 @@
     (is (= {:graphden.executor/fn-id (fixture/id :child) :graphden.executor/lambda-params [:item]} metadata))
     (is (= [[false nil nil nil] [false false false false] [false false false false]] values))
     (is (= [:ready :capture [:callback nil] [:callback false] [:callback false]] @events))
-    (is (= :browser-closure-compilation-required
+    (is (= :unsupported-browser-primitive
            (rejection-code #(browser/export-named analysis
                                                   {:snapshot-id (:snapshot-id context)
                                                    :allow-fn? (constantly true)

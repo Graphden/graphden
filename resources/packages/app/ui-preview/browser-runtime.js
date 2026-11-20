@@ -441,13 +441,13 @@
       }
     }
   }
-  function structuredPresence(input, supplied, slots, tick, valueNodeLimit) {
-    routeStructured(input.fields, supplied, slots, tick, {nodes: valueNodeLimit}, true);
+  function structuredPresence(input, slots, tick, inherited) {
     const present = new Set();
+    const hasSource = (source) => present.has(source) || inherited?.has(source);
     for (const rule of input.presence) {
       tick();
       if (rule.kind === 'always' || (rule.kind === 'supplied' && slots.has(rule.id))
-          || (rule.kind === 'any-present' && rule.sources.some((source) => present.has(source)))) {
+          || (rule.kind === 'any-present' && rule.sources.some(hasSource))) {
         present.add(rule.id);
       }
     }
@@ -515,8 +515,30 @@
           checkOperationDeadline(shared);
         }
       }
-      const present = structured ? structuredPresence(structured, supplied, root.slots, tick, valueNodeLimit) : null;
-      const available = (address) => address === undefined || present?.has(address);
+      if (structured) {
+        const { slots } = root;
+        routeStructured(structured.fields, supplied, slots, tick, {nodes: valueNodeLimit}, true);
+        root.frame = id;
+        root.present = structuredPresence(structured, slots, tick);
+      }
+      let open = true;
+      const available = (address, frame) => address === undefined || frame.present?.has(address);
+      function assertLiveCallback() {
+        if (!open) throw new Error('Graph callback is outside its invocation');
+      }
+      function checkedClosure(value, parent) {
+        const invoke = (item) => {
+          assertLiveCallback();
+          const slots = new Map();
+          if (value.slots.length === 1) slots.set(value.slots[0], item);
+          const frame = {slots, names: new Map(), parent, frame: value.fn,
+            present: structuredPresence(value, slots, tick, parent.present)};
+          return call(value.fn, frame);
+        };
+        return new GraphClosure(invoke, () => {
+          throw new Error('Graph callback is outside its invocation');
+        }, valueNodeLimit);
+      }
       function closure(value, frame) {
         const captured = {slots: new Map(frame.slots), names: new Map(frame.names)};
         // Per-call lambda arguments shadow a shared reader already populated outside the closure.
@@ -547,6 +569,7 @@
         }, valueNodeLimit);
       }
       function expr(value, frame) {
+        if (frame.parent) assertLiveCallback();
         tick();
         switch (value.kind) {
           case 'literal': return decode(value.value);
@@ -565,7 +588,7 @@
             const fields = new Map();
             for (const field of value.fields) {
               tick();
-              if (!available(field.present)) continue;
+              if (!available(field.present, frame)) continue;
               if (typeof field?.expr?.kind !== 'string') throw new Error('Invalid browser input field');
               const key = mapKey(decodeValue(field.key, {nodes: 1}, 0));
               if (fields.has(key)) throw new Error('Duplicate browser input field');
@@ -574,6 +597,11 @@
             return new DeferredRecord(fields);
           }
           case 'closure': return closure(value, frame);
+          case 'checked-closure':
+            if (!structured || frame.parent || !Array.isArray(value.slots) || value.slots.length > 1) {
+              throw new Error('Invalid checked browser callback');
+            }
+            return checkedClosure(value, frame);
           case 'server': return new GraphClosure(item => {
             if (typeof serverCall !== 'function') throw new Error('Server call transport is unavailable');
             return serverCall(value.descriptor, item);
@@ -591,6 +619,13 @@
       }
       function call(fnId, incoming) {
         tick();
+        if (structured) {
+          const owner = functions.get(fnId)?.frame;
+          if (owner !== undefined && owner !== incoming.frame) {
+            if (!incoming.parent || owner !== incoming.parent.frame) throw new Error('Invalid browser input frame');
+            incoming = incoming.parent;
+          }
+        }
         let byFunction = cache.get(incoming);
         if (!byFunction) { byFunction = new Map(); cache.set(incoming, byFunction); }
         if (byFunction.has(fnId)) return byFunction.get(fnId).force();
@@ -623,7 +658,7 @@
           }
           const args = new Map();
           for (const arg of fn.args) {
-            if (available(arg.present)) {
+            if (available(arg.present, frame)) {
               args.set(arg.name, new Thunk(() => expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame)));
             }
           }
@@ -635,9 +670,13 @@
         byFunction.set(fnId, result);
         return result.force();
       }
-      const result = call(id, root);
-      checkOperationDeadline(shared);
-      return result;
+      try {
+        const result = call(id, root);
+        checkOperationDeadline(shared);
+        return result;
+      } finally {
+        open = false;
+      }
     }
     return {run};
   }

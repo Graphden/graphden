@@ -27,8 +27,8 @@
 
 
 (defn- function-plan
-  [id primitive args]
-  {:id id :primitive (str primitive) :aliases [] :env [] :args args})
+  [id primitive owner args]
+  {:id id :primitive (str primitive) :frame owner :aliases [] :env [] :args args})
 
 
 (def ^:private browser-input-types #{:any :null :bool :text :int :numeric :keyword})
@@ -45,16 +45,35 @@
     :else (ir/reject! :unsupported-browser-input-type {})))
 
 
+(defn- wire-presence
+  [{:keys [presence-program required-addresses]} address-ids]
+  {:presence (mapv (fn [{:keys [address kind sources]}]
+                     {:id (get address-ids address) :kind (name kind)
+                      :sources (mapv address-ids sources)})
+                   presence-program)
+   :required (vec (sort (map address-ids required-addresses)))})
+
+
+(defn- closure-expr
+  [{:keys [scope call-sites]} {:keys [scope-ids layouts address-ids]}]
+  (when (> (count call-sites) 1)
+    (ir/reject! :unsupported-browser-callback-arity {}))
+  (merge {:kind "checked-closure" :fn (get scope-ids scope)
+          :slots (mapv (comp address-ids :address) call-sites)}
+         (wire-presence (get layouts scope) address-ids)))
+
+
 (defn- browser-expression
-  [{:keys [op value source scope fields type]} id address-ids scope-ids encode]
+  [{:keys [op value source scope fields type]} address {:keys [address-ids scope-ids encode closures] :as wire}]
   (case op
     :literal {:kind "literal" :value (encode value)}
     :read (call-expr (get address-ids source))
     :invoke (call-expr (get scope-ids scope))
-    :supplied {:kind "supplied" :slot id :type (supplied-type! type)}
+    :closure (closure-expr (get closures address) wire)
+    :supplied {:kind "supplied" :slot (get address-ids address) :type (supplied-type! type)}
     :record {:kind "record"
-             :fields (mapv (fn [[key address]]
-                             (let [field-id (get address-ids address)]
+             :fields (mapv (fn [[key child]]
+                             (let [field-id (get address-ids child)]
                                {:key (encode key) :present field-id :expr (call-expr field-id)}))
                            fields)}))
 
@@ -85,7 +104,7 @@
                     :address (let [{:keys [op source scope fields]} (get expressions key)]
                                (case op
                                  :read (visit :address source child-depth)
-                                 :invoke (visit :scope scope child-depth)
+                                 (:invoke :closure) (visit :scope scope child-depth)
                                  :record (doseq [[_ child] fields]
                                            (visit :address child child-depth))
                                  nil))))))]
@@ -117,28 +136,40 @@
 
 
 (defn- input-plan
-  [{:keys [presence-program required-addresses parameters]} surface address-ids encode]
+  [{:keys [parameters] :as layout} surface address-ids encode]
   (let [fields (input-fields (get-in surface [:root :fields]) address-ids encode)
         slots (into [] (keep :slot) (tree-seq #(contains? % :fields) :fields {:fields fields}))]
     (when-not (and (= (set slots) (into #{} (map address-ids) parameters))
                    (= (count slots) (count parameters)))
       (ir/reject! :browser-input-route-mismatch {}))
-    {:structured {:fields fields
-                  :presence (mapv (fn [{:keys [address kind sources]}]
-                                    {:id (get address-ids address) :kind (name kind)
-                                     :sources (mapv address-ids sources)})
-                                  presence-program)
-                  :required (vec (sort (map address-ids required-addresses)))}}))
+    {:structured (assoc (wire-presence layout address-ids) :fields fields)}))
+
+
+(defn- frame-owners
+  [layouts scope-ids]
+  (into {} (mapcat (fn [[scope {:keys [scopes presence-program]}]]
+                     (let [id (get scope-ids scope)]
+                       (for [owner (concat scopes (map :address presence-program))] [owner id]))))
+        layouts))
+
+
+(defn- expression-plan
+  [{:keys [address-ids value-obligations] :as wire} owners [address expression]]
+  (let [obligation (get value-obligations address)
+        supplied? (= :supplied (:op expression))
+        expression (cond-> expression (and supplied? obligation) (assoc :type obligation))
+        emitted (browser-expression expression address wire)]
+    (function-plan (get address-ids address) const-id (get owners address)
+                   [{:name "value"
+                     :expr (validate-expression emitted (when-not supplied? obligation))}])))
 
 
 (defn- export*
   [analysis {:keys [allow-fn?] :as options} closed?]
   (when-not (fn? allow-fn?)
     (ir/reject! :browser-visibility-policy-required {}))
-  (let [{:keys [root-scope expressions scopes parameters value-obligations closures] :as plan}
+  (let [{:keys [root-scope expressions scopes parameters frame-layouts] :as plan}
         (ir/lower-checked analysis options)]
-    (when (seq closures)
-      (ir/reject! :browser-closure-compilation-required {}))
     (when (and closed? (seq parameters))
       (ir/reject! :browser-input-validation-required {}))
     (when (> (+ (count expressions) (count scopes)) browser/max-functions)
@@ -150,21 +181,14 @@
           scope-ids (plan-ids "scope-" (keys scopes))
           address-ids (plan-ids "field-" (keys expressions))
           entry (get scope-ids root-scope)
-          inputs (input-plan plan (:public-input analysis) address-ids encode)
+          inputs (input-plan (get frame-layouts root-scope) (:public-input analysis) address-ids encode)
+          owners (frame-owners frame-layouts scope-ids)
+          wire (assoc plan :address-ids address-ids :scope-ids scope-ids :encode encode :layouts frame-layouts)
           scope-plans (map (fn [[scope {:keys [base-fn-id argument-paths]}]]
-                             (function-plan (get scope-ids scope) base-fn-id
+                             (function-plan (get scope-ids scope) base-fn-id (get owners scope)
                                             (scope-arguments scope argument-paths address-ids)))
                            scopes)
-          expression-plans (map (fn [[address expression]]
-                                  (let [id (get address-ids address)
-                                        obligation (get value-obligations address)
-                                        supplied? (= :supplied (:op expression))
-                                        expression (cond-> expression (and supplied? obligation) (assoc :type obligation))
-                                        emitted (browser-expression expression id address-ids scope-ids encode)]
-                                    (function-plan id const-id
-                                                   [{:name "value"
-                                                     :expr (validate-expression emitted (when-not supplied? obligation))}])))
-                                expressions)]
+          expression-plans (map (partial expression-plan wire owners) expressions)]
       {:format 2 :primitiveAbi capabilities/browser-primitive-abi
        :entries {"root" entry}
        :inputs {entry inputs}

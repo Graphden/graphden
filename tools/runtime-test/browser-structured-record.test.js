@@ -58,4 +58,32 @@ assert.deepEqual([...view.values()], [false, null]);
 assert.deepEqual(attempts, [['single-read', 'input']]);
 assert.throws(() => view.set(key, null), /Cannot mutate/);
 assert.deepEqual(graph.decode(graph.encode(view)), new Map([[key, false], [graph.keyword('nil'), null]]));
+const structuredCallback = {
+  kind: 'checked-closure', fn: 'callback', slots: ['item'], required: ['item'],
+  presence: [{id: 'item', kind: 'supplied', sources: []}],
+};
+const scopedFn = (id, frame, primitive, bindings) => ({
+  id, frame, primitive, env: [], aliases: [],
+  args: Object.entries(bindings).map(([name, expr]) => ({name, expr})),
+});
+const callback = scopedFn('callback', 'callback', 'equal?', {
+  a: {kind: 'supplied', slot: 'item', type: 'any'},
+  b: call('outer'),
+});
+const externalValue = scopedFn('outer', 'entry', 'const', {value: literal(null)});
+function runCallback(entry) {
+  return graph.createRuntime({
+    format: 2, primitiveAbi: 1, entries: {view: 'entry'},
+    inputs: {entry: {structured: {fields: [], presence: [], required: []}}},
+    primitives: ['map', 'const', 'equal?'].map((op) => ({id: op, op})),
+    functions: [entry, externalValue, callback],
+  }).run('view');
+}
+const mapped = runCallback(scopedFn('entry', 'entry', 'map', {
+  coll: literal([null, false, null]), func: structuredCallback,
+}));
+assert.deepEqual([...mapped], [true, false, true]);
+const escaped = runCallback(scopedFn('entry', 'entry', 'const', {value: structuredCallback}));
+assert.throws(() => graph.invoke(escaped, false), /outside its invocation/);
+assert.throws(() => escaped.invoke(false), /outside its invocation/);
 console.log('PASS deferred browser record fields, presence, and version admission');

@@ -151,8 +151,7 @@ graph callbacks, unproven captures and record-shaped parameter routes fail close
 A checked fixture using the shipped eager `core.hof/map` and
 `core.strings/str-upper` compares with the legacy package graph. The source
 snapshot adapter still requires richer type evidence before it can compile the
-same package declarations directly. Browser export rejects the JVM closure
-operation.
+same package declarations directly.
 
 ### Dependency memo keys
 
@@ -193,7 +192,10 @@ only known pure browser primitives and shares browser codec limits.
 presence rules as the JVM. It accepts wire-compatible primitives and their
 unions and checks them when read. Deferred validation of a computed primitive
 field uses the same value-read boundary. Unsupported types and container
-obligations fail during export. The production browser exporter uses format 1.
+obligations fail during export. A checked callback with zero or one leaf
+parameter gets fresh local cells and reads captured cells through the
+enclosing frame. It stops accepting calls and unforced local reads when the
+enclosing browser execution returns. The production exporter uses format 1.
 
 ## Verification
 

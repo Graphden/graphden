@@ -3,7 +3,8 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.types :as records]))
+    [graphden.packages.records.types :as records]
+    [graphden.types.core :as types]))
 
 
 (deftest callable-field-requires-the-exact-anonymous-row
@@ -14,6 +15,7 @@
     (is (rich/callable-field? {id [row row]} id type))
     (is (not (rich/callable-field? {} id type)))
     (is (not (rich/callable-field? {id [row stale]} id type)))
+    (is (not (rich/callable-field? {id [row]} id (types/resolve-alias type))))
     (is (not (rich/callable-field? {id [row]} (ids/primitive-fn-id :fn) type)))))
 
 

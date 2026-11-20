@@ -15,8 +15,8 @@
 
 (defn callable-field?
   "The verified closure must contain the exact anonymous row for the field's
-   stored FK. Its type parameters may refer to the implementation's variables.
-   Nested callables and unresolved named types require additional evidence."
+   stored FK. Use the authored type form because the parser hashes its literal
+   shape. Nested callables and unresolved named types need additional evidence."
   [rows-by-id type-id type]
   (when (and (types/fn-type? type)
              (map? (types/fn-args type))

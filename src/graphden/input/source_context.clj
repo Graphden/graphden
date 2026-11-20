@@ -7,6 +7,7 @@
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.slot-resolution :as slots]
     [graphden.packages.records.types :as types]))
 
 
@@ -135,13 +136,22 @@
     :else args))
 
 
+(defn- declared-rename
+  [defs definition owner records field-name spec]
+  (when (:as spec)
+    (let [parent (or (:parent definition) (first (:parents definition)))
+          parent-type (slots/slot-type-of parent field-name defs)]
+      (rename/origin owner records field-name spec parent-type))))
+
+
 (defn- declared-input
   [source-environment own binding-origins]
   (let [{:keys [owner]} own
+        defs (get-in source-environment [:context :defs-by-name])
         ordered (parent-order source-environment own)
         _ (ensure-acyclic! ordered)
         input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
-                                        (let [aliases (keep (fn [[k v]] (rename/origin owner records k v)) (:args definition))
+                                        (let [aliases (keep (fn [[k v]] (declared-rename defs definition owner records k v)) (:args definition))
                                               specs (into (field-specs definition) (map (juxt :alias :declaration)) aliases)
                                               sources (into {} (map (juxt :alias-id :field-id)) aliases)]
                                           (fields records (:id owner) specs [:input] sources))))
@@ -224,7 +234,7 @@
         grouped (when (seq projections) (group-by :kind rows))
         own (some #(when (= (ids/fn-id (:namespace normalized) (:name normalized)) (:id %)) %) (:fn grouped))]
     (doseq [[arg exposed] projections]
-      (let [origin (rename/origin own grouped arg (rename-form arg exposed))]
+      (let [origin (declared-rename (:defs-by-name context) normalized own grouped arg (rename-form arg exposed))]
         (when-not (and origin (= (get-in definition [:input exposed]) (:declaration origin)))
           (reject! :rename-origin-mismatch [:bind arg]))))
     [normalized rows]))

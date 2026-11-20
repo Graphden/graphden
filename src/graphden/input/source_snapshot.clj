@@ -8,7 +8,11 @@
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
+    [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
+
+
+(def ^:private primitives (ids/primitive-fn-ids))
 
 
 (defn- reject!
@@ -90,14 +94,14 @@
 
 
 (defn- snapshot
-  [entries markers]
+  [entries markers return-bodies]
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
         (reduce merge-record {} (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries)))
         inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))]
     (context/build-context
       {:fns fns :fields (or fields {}) :bindings (or bindings {})
        :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
-       :type-bodies inputs :aliases {} :markers markers})))
+       :type-bodies (merge return-bodies inputs) :aliases {} :markers markers})))
 
 
 (defn- root-id
@@ -121,16 +125,43 @@
          (= type (:type target) (:type source)))))
 
 
+(defn- named-return-id
+  [package {:keys [source owner]}]
+  (when-let [declared (:return-type source)]
+    (when-not (contains? primitives declared)
+      (let [id (:return-type-fn-id owner)
+            resolved (get-in package [:declarations (:id owner) :return-type])]
+        (when-not (and (uuid? id) (keyword? resolved)
+                       (= id (get-in package [:prepared :name->id resolved])))
+          (reject! :rich-type-source-required (:id owner)))
+        id))))
+
+
+(defn- primitive-union-body
+  "Read the original source and replayed union row behind a named return FK.
+   Restrict members to primitives so the body has no further dependencies."
+  [package id]
+  (let [{:keys [verification v2]} (plan-entry package id)
+        branches (get-in v2 [:source :union])
+        [row & others] (:declaration-records v2)]
+    (when-not (and (= :authored-source-equivalent verification) (= id (:id row))
+                   (empty? others) (vector? branches) (seq branches)
+                   (every? primitives branches)
+                   (= (into [:union] branches) (:constraint row)))
+      (reject! :rich-type-source-required id))
+    (context/call-with-types {:aliases {} :markers (:markers package)} #(types/make-union branches))))
+
+
 (defn- check-type-provenance!
-  [{:keys [source contract owner configurations bindings]}]
-  (let [primitives (ids/primitive-fn-ids)
-        return (:return-type source)]
+  [return-bodies {:keys [source contract owner configurations bindings]}]
+  (let [return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
     (when-not (and (every? #(exact-projection-pin? contract bindings %) (vals configurations))
                    (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? primitives return)
-                            (= (get primitives return) (:return-type-fn-id owner))))
+                            (= (get primitives return) (:return-type-fn-id owner)))
+                       (and (keyword? return) (contains? return-bodies (:return-type-fn-id owner))))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (keyword? declaration)
                                       (and (map? declaration)
@@ -141,13 +172,14 @@
 
 
 (defn- implementation
-  [entries roots id]
+  [entries roots return-bodies id]
   (let [base (root-id entries id)
         entry (get roots base)
         declaration (get entries base)
         fields (get-in declaration [:contract :fields])
         args (into {} (map (juxt :name :type)) fields)
-        return (:return-type (:source declaration))]
+        return (get return-bodies (get-in declaration [:owner :return-type-fn-id])
+                    (:return-type (:source declaration)))]
     (when-not (and (= base (:fn-id entry)) (= (get-in declaration [:source :name]) (:name entry))
                    (= (:namespace declaration) (:namespace entry))
                    (= (set (:effects (:source declaration))) (:effects entry))
@@ -168,10 +200,12 @@
    signature view and are rejected here. Include any ref introduced by an overlay in
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
-  (let [entries (closure package function-ids)]
-    (doseq [entry (vals entries)] (check-type-provenance! entry))
-    {:context (snapshot entries (:markers package))
-     :options {:implementations (into {} (map (fn [id] [id (implementation entries roots id)])) (keys entries))
+  (let [entries (closure package function-ids)
+        return-ids (into #{} (keep (partial named-return-id package)) (vals entries))
+        return-bodies (into {} (map (juxt identity (partial primitive-union-body package))) return-ids)]
+    (doseq [entry (vals entries)] (check-type-provenance! return-bodies entry))
+    {:context (snapshot entries (:markers package) return-bodies)
+     :options {:implementations (into {} (map (fn [id] [id (implementation entries roots return-bodies id)])) (keys entries))
                :check-expression check/check-input-binding
                :infer-signature check/infer-input-signature}}))
 

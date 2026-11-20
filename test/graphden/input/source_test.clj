@@ -659,3 +659,14 @@
                                 [(assoc child :parent :relay) :rename-projection-required]
                                 [(assoc-in child [:args :x :type] :int) :rename-projection-required]]]
       (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))
+
+
+(deftest any-rename-requires-the-original-field-type
+  (let [child {:name :forward :namespace "demo" :parent :base :args {:x {:as :value}}}
+        parent {:name :base :namespace "demo" :args {:x {:type :any}} :return-type :text}
+        entry (result (plan [parent child]) :forward)]
+    (is (= :supported (:status entry)))
+    (is (= {:value {:required false :type :any}} (get-in entry [:proposed :input])))
+    (doseq [rich [[:union :null :text] 'a]]
+      (let [variant (assoc-in parent [:args :x :type] rich)]
+        (is (contains? (codes (result (plan [variant child]) :forward)) :rename-projection-required))))))

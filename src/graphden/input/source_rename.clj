@@ -6,21 +6,22 @@
 
 
 (def ^:private scalar-types
-  (select-keys (ids/primitive-fn-ids) [:null :uuid :text :int :bool :numeric :timestamptz :bytes :keyword :float]))
+  (select-keys (ids/primitive-fn-ids) [:any :null :uuid :text :int :bool :numeric :timestamptz :bytes :keyword :float]))
 
 
 (defn origin
   "Match the emitted alias slot, its source FK and its legacy binding to
-   their deterministic identities. The old parser can erase a rich type to
-   :any; the caller also checks the parent's rich type against this slot."
-  [owner records field spec]
+   their deterministic identities and the parent's authored field type.
+   A richer declaration erased to :any cannot qualify by storage ID alone."
+  [owner records field spec parent-type]
   (when (and (= 1 (count (:parent-ids owner))) (map? spec) (contains? #{#{:as} #{:as :type}} (set (keys spec)))
              (simple-keyword? (:as spec)) (not= field (:as spec)))
     (let [exposed-name (:as spec)
           alias-id (ids/slot-id (:id owner) exposed-name)
           field-id (ids/slot-id (first (:parent-ids owner)) field)
           slot (some #(when (= alias-id (:id %)) %) (:slot records))
-          type (some (fn [[type id]] (when (= id (:type-fn-id slot)) type)) scalar-types)]
+          type (when-let [expected (get scalar-types parent-type)]
+                 (when (= expected (:type-fn-id slot)) parent-type))]
       (when (and type (or (not (contains? spec :type)) (= type (:type spec))) (= field-id (:source-slot-id slot))
                  (= (name exposed-name) (:name slot)) (false? (:required slot))
                  (some #(and (= alias-id (:slot-id %)) (= (:id owner) (:fn-id %))

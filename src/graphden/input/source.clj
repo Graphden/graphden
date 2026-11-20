@@ -144,11 +144,10 @@
                     body (get-in source [:args arg])
                     target-type (or (slots/slot-type-of owner field defs-by-name)
                                     (slots/rename-source-type owner field defs-by-name))
-                    rename (rename/origin own grouped arg body)
+                    rename (rename/origin own grouped arg body target-type)
                     ;; Separate a primitive inherited field from an erased rich
                     ;; declaration or another same-named field in the ref tree.
                     rename (when (and rename (= arg field) (= slot-id (:field-id rename))
-                                      (= target-type (get-in rename [:declaration :type]))
                                       (= (:id binding) (ids/binding-id (:id own) slot-id))
                                       (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename)))
                                          (binding-policy binding)))

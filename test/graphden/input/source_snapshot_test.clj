@@ -9,6 +9,7 @@
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
+    [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
 
 
@@ -18,20 +19,31 @@
 
 
 (defn- sources
-  [module]
-  (let [{module-ns :namespace :keys [fns]} (read-package-edn (str module "/fns.edn"))]
-    (mapv #(assoc % :namespace module-ns) fns)))
+  ([module] (sources "core" module))
+  ([package module]
+   (let [path (str "packages/" package "/" module "/fns.edn")
+         {module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource path)))]
+     (mapv #(assoc % :namespace module-ns) fns))))
 
 
 (def ^:private strings
   (filterv #(contains? #{:str-upper :_csv-escape-cell} (:name %)) (sources "strings")))
 
 
+(def ^:private nullable-returns
+  (filterv #(contains? #{:nullable-text :nullable-uuid} (:name %)) (sources "refinements")))
+
+
+(def ^:private boundary-bases
+  (filterv #(contains? #{:throwable-message :parse-uuid} (:name %)) (sources "system")))
+
+
 (def ^:private roots
   (delay
-    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              types/*type-aliases-override* (atom (into {} (map (juxt :name #(into [:union] (:union %)))) nullable-returns))]
       (let [loaded (:base-fn-defs (loader/load-packages ["core"]))]
-        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :str-trim (:name %)) (sources "strings"))
+        (doseq [{ns-id :namespace :keys [name]} (concat strings boundary-bases (filter #(= :str-trim (:name %)) (sources "strings"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
@@ -144,3 +156,47 @@
         (is (= [[owner []] [field]] (:from route)))
         (is (= address (:source route)))
         (is (= (ids/binding-id owner field) (get-in graph [:public-input :bindings (:from route) :binding-id])))))))
+
+
+(deftest any-field-forwards-with-named-primitive-union-returns
+  (let [owners (filterv #(contains? #{:_queue-error-text :_parse-fn-form-pid-parse-uuid} (:name %))
+                        (concat (sources "storage" "queue") (sources "web" "crud-parse")))
+        core (into nullable-returns boundary-bases)
+        dep (parse/prepare-module core {} {})
+        prepared (parse/prepare-module owners (:name->id dep) (:defs-by-name dep))
+        package (snapshot/package-index prepared (into core owners))]
+    (doseq [[ns-id name parent field exposed-name return scalar required?]
+            [["storage.queue" :_queue-error-text :throwable-message :ex :exception :nullable-text :text true]
+             ["web.crud" :_parse-fn-form-pid-parse-uuid :parse-uuid :string :item :nullable-uuid :uuid false]]]
+      (let [owner (ids/fn-id ns-id name)
+            base (ids/fn-id "core.system" parent)
+            target (ids/slot-id base field)
+            exposed (ids/slot-id owner exposed-name)
+            type-id (ids/fn-id "core.refinements" return)
+            {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+            graph (analysis/analyze-effective-input context owner options)
+            [route] (:projections graph)]
+        (is (= [:union :null scalar] (get-in context [:type-bodies type-id]) (get-in graph [:scopes [] :signature :return])))
+        (is (= :checked (:status graph)))
+        (is (empty? (:obligations graph)))
+        (is (= :any (:actual-type route)))
+        (is (= [[owner []] [target]] (:from route)))
+        (is (= [[owner []] [exposed]] (:source route)))
+        (is (= required? (boolean (some #{(:source route)} (:required-addresses graph)))))
+        (is (= (ids/binding-id owner target) (get-in graph [:public-input :bindings (:from route) :binding-id])))
+        (is (= :missing-original-declaration
+               (:code (failure #(snapshot/freeze-closure (update package :originals dissoc type-id) [owner] @roots)))))
+        (is (= :implementation-signature-required
+               (:code (failure #(snapshot/freeze-closure package [owner] (assoc-in @roots [base :return] :any))))))))))
+
+
+(deftest named-return-refuses-an-unproven-type-body
+  (let [base (first (filter #(= :parse-uuid (:name %)) boundary-bases))
+        alias-row (first (filter #(= :nullable-uuid (:name %)) nullable-returns))
+        owner (ids/fn-id (:namespace base) (:name base))
+        type-id (ids/fn-id (:namespace alias-row) (:name alias-row))
+        declarations [base (assoc alias-row :union [:null [:list :uuid]])]
+        package (snapshot/package-index (parse/prepare-module declarations {} {}) declarations)
+        error (failure #(snapshot/freeze-closure package [owner] @roots))]
+    (is (= :rich-type-source-required (:code error)))
+    (is (= type-id (:fn-id error)))))

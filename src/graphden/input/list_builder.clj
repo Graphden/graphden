@@ -12,7 +12,12 @@
   (throw (ex-info "Cannot lower list construction" {:type :input/list-builder :code code})))
 
 
-(defn- item
+(defn- fragment-id
+  [binding-id]
+  (ids/uuid-v5 binding-id "list-builder"))
+
+
+(defn- parse-item
   [binding-id name->id position form]
   (when-not (and (vector? form) (= 2 (count form)))
     (reject! :invalid-list-item))
@@ -34,13 +39,13 @@
   (when-not (and (uuid? binding-id) (vector? form) (= 2 (count form)) (= :list-builder (first form)))
     (reject! :invalid-list-builder))
   (let [{:keys [items tail] :as spec} (second form)
-        builder-id (ids/uuid-v5 binding-id "list-builder")]
+        builder-id (fragment-id binding-id)]
     (when-not (and (map? spec) (= #{:items :tail} (set (keys spec)))
                    (vector? items) (contains? #{:open :closed} tail))
       (reject! :invalid-list-builder))
     {:binding-id binding-id :builder-id builder-id :tail tail
      :tail-id (ids/slot-id builder-id :tail)
-     :items (into [] (map-indexed (partial item binding-id name->id)) items)}))
+     :items (into [] (map-indexed (partial parse-item binding-id name->id)) items)}))
 
 
 (defn emit-fragment
@@ -139,8 +144,10 @@
   (loop [remaining (seq fragments) path [] prior nil bindings []]
     (if-let [{:keys [owner-id target-id binding-id builder-id tail tail-id] :as current} (first remaining)]
       (do
-        (when (or (some #{binding-id} path)
-                  (and prior (not= target-id (:target-id prior))))
+        (when-not (and (uuid? owner-id) (uuid? target-id) (= binding-id (ids/binding-id owner-id target-id))
+                       (= builder-id (fragment-id binding-id)) (= tail-id (ids/slot-id builder-id :tail))
+                       (contains? #{:open :closed} tail) (not (some #{binding-id} path))
+                       (or (nil? prior) (= target-id (:target-id prior))))
           (reject! :invalid-list-chain))
         (when (= :closed (:tail prior)) (reject! :closed-list-continuation))
         (let [edge (rows/normalize {:kind :input-binding :id binding-id :fn-id owner-id

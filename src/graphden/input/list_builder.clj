@@ -67,17 +67,32 @@
     :else [:value value]))
 
 
+(defn compiler-items
+  "Build the ordered item descriptors accepted by the existing JVM sequence
+   compiler. It owns demand, delay delivery, and the call cache for refs.
+   An authored literal map containing :as stays data on that compiler path."
+  [{:keys [binding-id items]}]
+  (when-not (and (uuid? binding-id) (vector? items)) (reject! :invalid-list-builder))
+  (into []
+        (map-indexed
+          (fn [position {:keys [id kind value fn-id] :as item}]
+            (when-not (and (= position (:position item)) (= id (ids/binding-list-item-id binding-id position))
+                           (case kind
+                             :ref (and (uuid? fn-id) (not (contains? item :value)))
+                             :value (and (contains? item :value) (nil? fn-id))
+                             false))
+              (reject! :list-item-origin-mismatch))
+            {:kind :binding-list-item :id id :binding-id binding-id :position position
+             :value value :ref-fn-id fn-id :literal (when (and (map? value) (:as value)) true)}))
+        items))
+
+
 (defn- check-item!
-  [binding-id actual expected]
+  [actual expected]
   (when (and (map? (:value actual)) (:as (:value actual)) (not (:literal actual)))
     (reject! :positional-list-input-required))
-  (let [ref? (= :ref (:kind expected))]
-    (when-not (and (= :binding-list-item (:kind actual)) (= binding-id (:binding-id actual))
-                   (= (:id expected) (:id actual)) (= (:position expected) (:position actual))
-                   (nil? (:literal actual))
-                   (= (when ref? (:fn-id expected)) (:ref-fn-id actual))
-                   (migration/same-edn? (:value expected) (:value actual)))
-      (reject! :list-item-origin-mismatch))))
+  (when-not (migration/same-edn? expected (select-keys actual (keys expected)))
+    (reject! :list-item-origin-mismatch)))
 
 
 (defn source-form
@@ -110,8 +125,8 @@
     (let [fragment (parse-fragment id form name->id)
           ordered (sort-by :position item-rows)]
       (when-not (= (count (:items fragment)) (count ordered)) (reject! :list-item-count-mismatch))
-      (doseq [[actual expected] (map vector ordered (:items fragment))]
-        (check-item! id actual expected))
+      (doseq [[actual expected] (map vector ordered (compiler-items fragment))]
+        (check-item! actual expected))
       (assoc fragment :owner-id fn-id :target-id slot-id))))
 
 

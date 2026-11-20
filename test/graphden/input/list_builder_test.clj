@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.list-builder :as builder]
     [graphden.input.source :as source]
+    [graphden.input.source-list :as source-list]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
 
@@ -66,3 +67,29 @@
     (is (= [[1] [2]] (mapv #(mapv :value (:items %)) (:fragments linked))))
     (is (= (mapv :binding-id (:fragments linked)) (mapv :id (:bindings linked))))
     (is (= :list-source-origin-required (:blocker (trace [tail]))))))
+
+
+(deftest compiler-receives-ordered-refs-and-opaque-literals
+  (let [owner (ids/fn-id "demo" :consumer)
+        target (ids/fn-id "demo" :target)
+        origin (ids/binding-id owner (ids/slot-id owner :items))
+        fragment (builder/parse-fragment origin [:list-builder {:items [[:ref :target] [:value {:as :data}] [:value nil]]
+                                                                :tail :open}] {:target target})
+        [ref-row literal nil-row] (builder/compiler-items fragment)]
+    (is (= [target 0 origin] ((juxt :ref-fn-id :position :binding-id) ref-row)))
+    (is (= [{:as :data} true] ((juxt :value :literal) literal)))
+    (is (= [nil nil 2] ((juxt :value :ref-fn-id :position) nil-row)))
+    (is (= :list-item-origin-mismatch
+           (reason #(builder/compiler-items (assoc-in fragment [:items 1 :id] (:id ref-row))))))))
+
+
+(deftest ambiguous-bare-refs-use-their-authoring-namespace
+  (let [alpha {:namespace "alpha" :name :read :args {} :return-type :int}
+        beta (assoc alpha :namespace "beta")
+        names (:name->id (parse/prepare-module [alpha beta] {} {}))
+        original [:read {:value :read} {:ref :read} {:value {:ref :read}}]
+        scoped (source-list/field-names names "alpha" original)
+        form (builder/source-form original scoped)
+        fragment (builder/parse-fragment (ids/fn-id "demo" :test) form scoped)]
+    (is (= [(ids/fn-id "alpha" :read) :read (ids/fn-id "alpha" :read) {:ref :read}]
+           (mapv #(or (:fn-id %) (:value %)) (:items fragment))))))

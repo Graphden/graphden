@@ -4,7 +4,9 @@
   (:require
     [graphden.input.list-builder :as builder]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.slot-resolution :as slots]))
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.slot-resolution :as slots]
+    [graphden.packages.records.types :as types]))
 
 
 (defn- reject!
@@ -24,6 +26,17 @@
         (conj chain current)))))
 
 
+(defn field-names
+  "Resolve ambiguous bare item refs in their authoring namespace. Only direct
+   ref positions participate; literal payloads remain opaque."
+  [names module-ns source]
+  (reduce (fn [resolved item]
+            (let [ref (if (map? item) (:ref item) item)]
+              (if (and (keyword? ref) (= types/ambiguous-name (get resolved ref)))
+                (assoc resolved ref (get names (parse/normalize-ref ref names module-ns)))
+                resolved))) names (if (vector? source) source (:append source))))
+
+
 (defn- contribution
   [definition records original-for name->id target field]
   (let [rows (group-by :kind records)
@@ -37,7 +50,8 @@
       (let [original (original-for definition)
             items (filter #(= (:id binding) (:binding-id %)) (:binding-list-item rows))]
         (when-not (contains? (:args original) field) (reject! :list-source-origin-required))
-        (builder/source-fragment binding items (get-in original [:args field]) name->id)))))
+        (let [form (get-in original [:args field])]
+          (builder/source-fragment binding items form (field-names name->id (:namespace original) form)))))))
 
 
 (defn trace

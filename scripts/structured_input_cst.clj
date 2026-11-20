@@ -7,6 +7,7 @@
     [graphden.input.format :as format]
     [graphden.input.list-builder :as list-builder]
     [graphden.input.migration :as migration]
+    [graphden.input.source-list :as source-list]
     [graphden.packages.records.ids :as ids]
     [rewrite-clj.zip :as z]
     [structured-input-inventory :as inventory])
@@ -263,8 +264,9 @@
    Its enclosing definition can still have other migration blockers."
   [source field fragment name->id]
   (let [original (get-in source [:args field])
-        form (list-builder/source-form original name->id)
-        checked (list-builder/parse-fragment (:binding-id fragment) form name->id)]
+        names (source-list/field-names name->id (:namespace source) original)
+        form (list-builder/source-form original names)
+        checked (list-builder/parse-fragment (:binding-id fragment) form names)]
     (when-not (and (= (:owner-id fragment) (ids/fn-id (:namespace source) (:name source)))
                    (= (:binding-id fragment) (ids/binding-id (:owner-id fragment) (:target-id fragment)))
                    (migration/same-edn? checked (dissoc fragment :owner-id :target-id)))

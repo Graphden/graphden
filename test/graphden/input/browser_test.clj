@@ -53,9 +53,10 @@
 
 
 (defn- run-browser
-  [plan]
-  (let [result (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
-                      :in (json/generate-string {:plan plan :cases [{:entry "root" :inputs {}}]}))]
+  [plan inputs]
+  (let [cases (mapv (fn [input] {:entry "root" :inputs (update-vals input wire/encode-value)}) inputs)
+        result (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                      :in (json/generate-string {:plan plan :cases cases}))]
     (is (zero? (:exit result)) (:err result))
     (json/parse-string (:out result) true)))
 
@@ -69,7 +70,7 @@
     (is (= 2 (:format plan)))
     (is (= plan (browser/export-closed analysis options)))
     (is (= [{:value (wire/encode-value expected) :sequence false}]
-           (run-browser plan)))))
+           (run-browser plan [{}])))))
 
 
 (deftest browser-lowers-the-same-checked-nested-input-as-jvm
@@ -95,3 +96,36 @@
     (testing "unvalidated input never becomes an untyped read"
       (let [{:keys [analysis options]} (checked-model (update-in definitions [:name :bindings] dissoc [:value]))]
         (is (= :browser-input-validation-required (rejection analysis options)))))))
+
+
+(deftest browser-routes-required-reference-inputs-through-nested-groups
+  (let [source (update-in definitions [:name :bindings] dissoc [:value])
+        {:keys [analysis options]} (checked-model source)
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        args {:coll {:name {:value "Grace"}}}
+        [success missing wrong unknown bad-record]
+        (run-browser plan [args {} {:coll {:name {:value 1}}}
+                           {:coll {:name {:value "Grace" :extra nil}}} {:coll false}])]
+    (is (= "Grace" (invoke args nil)))
+    (is (= {:value (wire/encode-value "Grace") :sequence false} success))
+    (is (= "Missing graph input field" (:error missing)))
+    (is (= "Value does not match the required graph input type" (:error wrong)))
+    (is (= "Unknown graph input field" (:error unknown)))
+    (is (= "Expected a graph input record" (:error bad-record)))))
+
+
+(deftest named-browser-fields-distinguish-absence-nil-and-false
+  (let [source (-> definitions
+                   (assoc-in [:root :input :coll :flag] :any)
+                   (assoc-in [:root :optional] #{[:coll :flag]})
+                   (assoc-in [:root :bindings [:key] :value] :flag)
+                   (assoc-in [:root :bindings [:default] :value] "missing"))
+        {:keys [analysis options]} (checked-model source)
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        inputs [{} {:coll {:flag nil}} {:coll {:flag false}}]
+        expected ["missing" nil false]]
+    (is (= expected (mapv #(invoke % nil) inputs)))
+    (is (= (mapv #(hash-map :value (wire/encode-value %) :sequence false) expected)
+           (run-browser plan inputs)))))

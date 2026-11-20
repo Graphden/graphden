@@ -116,6 +116,50 @@
       (doseq [address (keys expressions)] (visit address #{})))))
 
 
+(defn- presence-dependencies
+  [expression]
+  (case (:op expression)
+    :read [(:source expression)]
+    :record (mapv second (:fields expression))
+    []))
+
+
+(defn presence-program
+  "Return field presence rules in dependency order, excluding value reads.
+   Both execution targets distinguish an absent field from a present nil."
+  [{:keys [expressions root-scope]}]
+  (let [seen (volatile! #{})
+        rules (volatile! [])]
+    (letfn [(visit
+              [address]
+              (when-not (contains? @seen address)
+                (vswap! seen conj address)
+                (let [expression (get expressions address)
+                      sources (presence-dependencies expression)
+                      kind (case (:op expression)
+                             :supplied :supplied
+                             :read :any-present
+                             :record (if (= address [root-scope []]) :always :any-present)
+                             :always)]
+                  (doseq [source sources] (visit source))
+                  (vswap! rules conj {:address address :kind kind :sources sources}))))]
+      (doseq [address (sort-by pr-str (keys expressions))] (visit address))
+      @rules)))
+
+
+(defn present-addresses
+  "Return address presence without forcing any field or reference."
+  [program supplied]
+  (reduce (fn [presence {:keys [address kind sources]}]
+            (assoc presence address
+                   (case kind
+                     :always true
+                     :supplied (contains? supplied address)
+                     :any-present (boolean (some presence sources)))))
+          {}
+          program))
+
+
 (defn lower-checked
   "Lower supported checked scopes. :implementations maps target UUIDs to an
    explicitly resolved {:base-fn-id :impl :root-entry frozen-rich-signature
@@ -147,29 +191,8 @@
         (reject! :input-route-not-lowered {:address address})))
     (references! expressions)
     {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
+     :presence-program (presence-program {:expressions expressions :root-scope root})
      :required-addresses (set (:required-addresses analysis))
      :value-obligations (value-obligations analysis expressions)
      :parameters (into #{} (keep (fn [[address expression]]
                                    (when (= :supplied (:op expression)) address))) expressions)}))
-
-
-(defn present-addresses
-  "Return declared address presence without forcing any value. An explicit
-   nil is present. An unconfigured empty record is absent outside the root."
-  [{:keys [expressions root-scope]} supplied]
-  (let [result (volatile! {})]
-    (letfn [(present?
-              [address]
-              (if-let [entry (find @result address)]
-                (val entry)
-                (let [{:keys [op source fields]} (get expressions address)
-                      found (case op
-                              :supplied (contains? supplied address)
-                              :read (present? source)
-                              :record (or (= address [root-scope []])
-                                          (boolean (some #(present? (second %)) fields)))
-                              true)]
-                  (vswap! result assoc address found)
-                  found)))]
-      (doseq [address (keys expressions)] (present? address))
-      @result)))

@@ -155,7 +155,7 @@ normalize its slot/ref/sequence/HOF inputs into the same IR, finish closures and
 consumption obligations, and remove the parallel lowering paths before runtime
 migration can be considered complete.
 
-## Closed browser plans
+## Browser plans
 
 `graphden.input.browser/export-closed` lowers the same checked IR as the JVM
 compiler into browser format 2. Each stable field address gets one invocation
@@ -165,8 +165,11 @@ presence, lookup, iteration and encoding.
 
 The offline exporter takes a fully authorized frozen source closure and checks
 the visibility of each lowered target and base implementation again. It emits
-only known pure browser primitives, shares browser codec limits, and refuses
-free fields and outstanding runtime obligations. The production browser
+only known pure browser primitives and shares browser codec limits.
+`export-named` adds a nested residual input descriptor and uses the same
+presence rules as the JVM. It accepts the wire codec's primitive leaves and
+runs their type checks when read. Complex input types and outstanding runtime
+obligations still require additional browser support. The production browser
 exporter still uses format 1.
 
 ## Verification

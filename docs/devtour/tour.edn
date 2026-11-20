@@ -786,8 +786,12 @@
     {:ns graphden.input.browser :defn export-closed
      :say "Lowers the checked input IR to browser format 2 for closed pure graphs. A field
            address keeps one lazy result per invocation, shared by every projection. Source
-           authorization precedes export. Free fields and outstanding runtime validation
-           obligations are rejected at this offline boundary."}
+           authorization precedes export."
+     :see [[:types "export-named"]]}
+    {:ns graphden.input.browser :defn export-named
+     :say "Includes checked named residual routes for primitive inputs. Browser and JVM use
+           the same order of presence rules. Each field is checked when read and absent fields
+           stay outside the record. Other runtime validation obligations still need support."}
     {:ns graphden.input.signatures :defn infer-use
      :say "Feeds canonical scoped input facts through the existing type-rule engine using explicit
            implementation argument paths. Frozen registry views preserve rule lookup isolation;

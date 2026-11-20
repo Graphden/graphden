@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~190 min
+[[file:index.org][index]] · ~191 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -209,13 +209,13 @@ The editor root endpoint reads the ordinary root HOF binding from its server-own
 :PROPERTIES:
 :CUSTOM_ID: editor/createRuntime
 :FILE: resources/packages/app/ui-preview/browser-runtime.js
-:LINE: 426
-:MINS: 8.5
+:LINE: 470
+:MINS: 9.2
 :END:
 
 Creates the bounded browser interpreter for that plan. Each entry invocation has lazy argument reads, memoized calls, and an operation limit; unsupported primitives fail. This backend supports a small part of the graph vocabulary, separate from the JVM executor. ~editor-shell-menu-graph.js~ and ~editor-fn-picker-graph.js~ connect shipped plans to real controls; native host code retains authentication, search, type verdicts, authorized actions, and focus. [[file:glossary.org::#term/authority][Authority]] is separate from backend support. An explicit [[file:glossary.org::#term/server-call][server-call]] uses a checked asynchronous boundary; it does not export the server implementation into this interpreter.
 
-- source :: [[file:../../../resources/packages/app/ui-preview/browser-runtime.js::  function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {][resources/packages/app/ui-preview/browser-runtime.js:426]]
+- source :: [[file:../../../resources/packages/app/ui-preview/browser-runtime.js::  function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {][resources/packages/app/ui-preview/browser-runtime.js:470]]
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/pickerArrange][pickerArrange]]
 - referenced from :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/export-current][export-current]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]], [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/mountCanvasBody][mountCanvasBody]], [[file:editor.org::#editor/format][format]], [[file:editor.org::#editor/mountCatalog][mountCatalog]], [[file:editor.org::#editor/openTutorialMenu][openTutorialMenu]]
 

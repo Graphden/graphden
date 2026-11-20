@@ -56,7 +56,7 @@
   (when-not (map? supplied) (ir/reject! :address-map-required {}))
   (when (some #(not (contains? (:parameters ir) %)) (keys supplied))
     (ir/reject! :unknown-supplied-address {}))
-  (let [present (ir/present-addresses ir supplied)
+  (let [present (ir/present-addresses (:presence-program ir) supplied)
         missing (filterv #(not (get present %)) (:required-addresses ir))]
     (when (seq missing) (ir/reject! :missing-required-input {:addresses missing}))
     (let [frozen (volatile! nil)

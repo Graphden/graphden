@@ -120,8 +120,10 @@
   [analysis {:keys [allow-fn?] :as options} closed?]
   (when-not (fn? allow-fn?)
     (ir/reject! :browser-visibility-policy-required {}))
-  (let [{:keys [root-scope expressions scopes parameters value-obligations] :as plan}
+  (let [{:keys [root-scope expressions scopes parameters value-obligations closures] :as plan}
         (ir/lower-checked analysis options)]
+    (when (seq closures)
+      (ir/reject! :browser-closure-compilation-required {}))
     (when (or (and closed? (seq parameters)) (seq value-obligations))
       (ir/reject! :browser-input-validation-required {}))
     (when (> (+ (count expressions) (count scopes)) browser/max-functions)

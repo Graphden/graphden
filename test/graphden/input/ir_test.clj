@@ -12,19 +12,21 @@
 
 
 (defn- structural-model
-  []
-  ;; A deliberately explicit checker seam for pure BB lowering tests. These
-  ;; assertions prove routing, not typing; compile-test uses the real checker.
-  (fixture/model definitions :root
-                 (fn [{:keys [substitution]}]
-                   {:status :checked :substitution substitution})))
+  ([] (structural-model definitions))
+  ([definitions]
+   ;; A deliberately explicit checker seam for pure BB lowering tests. These
+   ;; assertions prove routing, not typing; compile-test uses the real checker.
+   (fixture/model definitions :root
+                  (fn [{:keys [substitution]}]
+                    {:status :checked :substitution substitution}))))
 
 
 (defn- lower
-  [{:keys [analysis context]}]
-  (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
-                              :implementations (fixture/implementations definitions
-                                                                        {:root (fn [_ _]) :child (fn [_ _])})}))
+  ([model] (lower model definitions))
+  ([{:keys [analysis context]} definitions]
+   (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
+                               :implementations (fixture/implementations definitions
+                                                                         {:root (fn [_ _]) :child (fn [_ _])})})))
 
 
 (deftest checked-plan-seam-lowers-with-free-required-parameters
@@ -46,7 +48,36 @@
     (is (= :snapshot-mismatch (code (assoc-in model [:context :snapshot-id] (random-uuid)))))
     (is (= :runtime-obligations-required (code (assoc-in model [:analysis :obligations] [{:kind :value-type}]))))
     (is (= :runtime-obligations-required (code (assoc-in model [:analysis :scopes [] :obligations] [{}]))))
-    (is (= :closure-compilation-required (code (assoc-in model [:analysis :closures] {:x {}}))))))
+    (is (= :closure-plan-mismatch (code (assoc-in model [:analysis :closures] {:x {}}))))))
+
+
+(deftest checked-closure-partitions-public-inputs-from-invocation-parameters
+  (let [definitions {:root {:input {:callback [:fn {:item :any} :any #{}] :config :any} :return :any
+                            :bindings {[:callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:item :any :config :any} :return :any
+                             :field-origins {[:config] :root}}}
+        model (structural-model definitions)
+        plan (lower model definitions)
+        callback (fixture/address :root [] :root [:callback])
+        configuration (fixture/address :root [] :root [:config])
+        item (fixture/address :root [:callback-use] :child [:item])
+        capture (fixture/address :root [:callback-use] :root [:config])
+        closure (get-in plan [:closures callback])
+        code (fn [changed]
+               (try (lower changed definitions)
+                    (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    (is (= :closure (get-in plan [:expressions callback :op])))
+    (is (= [[:item] [{:name :item :address item :required? true}]]
+           ((juxt :parameters :call-sites) closure)))
+    (is (= #{configuration} (:parameters plan)))
+    (is (= #{item} (get-in plan [:frame-layouts (:scope closure) :required-addresses])))
+    (is (= configuration (get-in plan [:expressions capture :source])))
+    (is (= :callback-parameter-shape-required
+           (code (assoc-in model [:analysis :closures callback :call-sites 0 :value-path] [:nested]))))
+    (is (= :closure-capture-route-mismatch
+           (code (assoc-in model [:analysis :closures callback :captures 0 :source] item))))
+    (is (= :unsupported-closure-scope
+           (code (assoc-in model [:analysis :closures callback :external-captures] [{:target item}]))))))
 
 
 (deftest special-base-semantics-and-missing-abi-provenance-reject

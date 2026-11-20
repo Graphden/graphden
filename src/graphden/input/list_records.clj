@@ -121,3 +121,20 @@
     (when-not (migration/same-edn? (order records) (order (materialize-chain fragments field name->id)))
       (reject! :list-declaration-mismatch))
     (assoc (builder/link-fragments fragments) :fragments fragments)))
+
+
+(defn parse-direct
+  "Read a direct builder in a declared field with frozen list ancestry.
+   An inherited contribution changes the continuation address."
+  [{:keys [fn-id scope binding-id name->id list-history list-type-names]} field form]
+  (let [target (:id field)
+        path [target]
+        origin (builder/origin fn-id target)]
+    (when-not (vector? (get list-history path)) (reject! :list-history-required))
+    (when (seq (get list-history path)) (reject! :list-continuation-lowering-required))
+    (when-not (= (:binding-id origin) (binding-id scope path)) (reject! :list-binding-origin-mismatch))
+    (let [fragment (merge origin (builder/parse-fragment (:binding-id origin) form name->id))
+          descriptor (select-keys field [:type :type-id])
+          names (or list-type-names name->id)
+          records (materialize-chain [fragment] descriptor names)]
+      (assoc (recover-chain [fn-id] target descriptor names records) :field descriptor :records records))))

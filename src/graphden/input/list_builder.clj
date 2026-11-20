@@ -58,6 +58,18 @@
      :items (into [] (map-indexed (partial parse-item binding-id name->id)) items)}))
 
 
+(defn reference-expression
+  "Verify a previously lowered occurrence before using its callable as the
+   field expression. The caller may have supplied a different expression."
+  [trace form name->id]
+  (let [[fragment & others] (:fragments trace)]
+    (when-not (and fragment (empty? others)
+                   (migration/same-edn? (dissoc fragment :owner-id :target-id)
+                                        (parse-fragment (:binding-id fragment) form name->id)))
+      (reject! :list-fragment-mismatch))
+    {:kind :ref :fn-id (:builder-id fragment)}))
+
+
 (defn emit-fragment
   "Emit structured source. Every reference must resolve in the frozen index."
   [{:keys [tail items]} id->name]

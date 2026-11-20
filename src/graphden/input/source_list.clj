@@ -71,6 +71,31 @@
         (throw error)))))
 
 
+(defn direct-expression
+  "Use the authored spelling for checked first contributions. Retain only
+   reference aliases actually used by this field for the CST replay."
+  [trace source module-ns name->id]
+  (when (and (:records trace) (= 1 (count (:fragments trace))))
+    (let [names (field-names name->id module-ns source)
+          form (builder/source-form source names)
+          refs (keep (fn [[op payload]] (when (= :ref op) payload)) (get-in form [1 :items]))]
+      {:expression form :list-ref-names (select-keys names refs)})))
+
+
+(defn direct-traces
+  [arguments]
+  (into {} (keep (fn [{:keys [list-builder origin]}]
+                   (when (:records list-builder) [[(:slot-id origin)] list-builder]))) arguments))
+
+
+(defn replay-context
+  [context traces arguments type-names]
+  (assoc context
+         :list-type-names type-names
+         :name->id (into (:name->id context) (mapcat :list-ref-names) arguments)
+         :list-history (update-vals traces #(vec (butlast (:fragments %))))))
+
+
 (defn trace
   "Resolve the actual single-parent chain and ordered appends for one field.
    The retained fragment forms describe each authored contribution separately.

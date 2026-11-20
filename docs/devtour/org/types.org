@@ -41,64 +41,64 @@ Describes locally missing fields and occupancy while retaining original rich typ
 :PROPERTIES:
 :CUSTOM_ID: types/parse-expression
 :FILE: src/graphden/input/syntax.clj
-:LINE: 74
+:LINE: 78
 :MINS: 1.4
 :END:
 
 Normalizes partial record maps and explicit value/ref expressions against a supplied resolved descriptor. Literal payloads stay opaque and references remain unevaluated. The caller supplies stable binding identities and namespace-resolved reference names; this offline API is not yet connected to the production package loader.
 
-- source :: [[file:../../../src/graphden/input/syntax.clj::(defn parse-expression][src/graphden/input/syntax.clj:74]]
+- source :: [[file:../../../src/graphden/input/syntax.clj::(defn parse-expression][src/graphden/input/syntax.clj:78]]
 
 * 4. plan-module
 :PROPERTIES:
 :CUSTOM_ID: types/plan-module
 :FILE: src/graphden/input/source.clj
-:LINE: 387
+:LINE: 392
 :MINS: 3.2
 :END:
 
 Compares original source forms with a prepared legacy module to plan supported rewrites. It retains rich declarations and binding origins, while reporting unsupported list, rename, ref-scope and policy forms as explicit blockers. A completed report does not prove runtime equivalence or authorize dropping an unsupported definition.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:387]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:392]]
 - same file :: [[file:types.org::#types/verify-module][verify-module]]
 
 * 5. verify-module
 :PROPERTIES:
 :CUSTOM_ID: types/verify-module
 :FILE: src/graphden/input/source.clj
-:LINE: 526
+:LINE: 538
 :MINS: 2.4
 :END:
 
 Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:526]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:538]]
 - same file :: [[file:types.org::#types/plan-module][plan-module]]
 
 * 6. parse-module-v2
 :PROPERTIES:
 :CUSTOM_ID: types/parse-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 223
+:LINE: 237
 :MINS: 2.1
 :END:
 
 Reads an explicitly versioned source module with caller-resolved declarations and namespace contexts. It retains authored input metadata and origin ledgers, returning validated input-binding rows without registry or storage writes. Partial required fields are legal; structural validation does not prove types or graph readiness.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:223]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:237]]
 - same file :: [[file:types.org::#types/emit-module-v2][emit-module-v2]]
 
 * 7. emit-module-v2
 :PROPERTIES:
 :CUSTOM_ID: types/emit-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 270
+:LINE: 284
 :MINS: 1.5
 :END:
 
 Exports offline definitions using the same declared descriptors and identity callbacks. Re-parsing detects changed binding origins or declaration context. Rich declarations remain intact; source formatting and comments belong to the separate CST writer.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:270]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:284]]
 - same file :: [[file:types.org::#types/parse-module-v2][parse-module-v2]]
 
 * 8. require-legacy!

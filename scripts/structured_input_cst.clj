@@ -399,6 +399,17 @@
      :definition (:name source) :path source-path}))
 
 
+(defn- binding-operation
+  [source {:keys [source-path list-builder list-ref-names expression rename] :as argument}]
+  (cond
+    rename (projection-operation source argument)
+    list-builder (let [op (list-builder-operation source (second source-path) (peek (:fragments list-builder)) list-ref-names)]
+                   (when-not (migration/same-edn? (:form op) expression)
+                     (refuse :planner-ledger-mismatch {:path source-path}))
+                   op)
+    :else (argument-operation source argument)))
+
+
 (defn entry-operations
   "Bridge one SUPPORTED graphden.input.source/plan-module entry to CST operations.
    The semantic planner owns reference resolution. Ref spellings are retained;
@@ -430,7 +441,7 @@
             alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
             declarations (merge declarations alias-input)
             bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
-            operations (mapv #((if (:rename %) projection-operation argument-operation) source %) binds)
+            operations (mapv (partial binding-operation source) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
                                            (when (or (= :typed-expression op) (and (= :local-projection op) (contains? (get-in source path) :type)))
                                              [[(second path)] (select-keys (get-in source path) [:type])])))

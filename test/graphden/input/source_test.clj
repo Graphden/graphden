@@ -131,10 +131,10 @@
                       :args {:steps [3]}}]
         report (plan definitions)]
     (is (= [:value [1 2]] (get-in (result report :scalar) [:proposed :bind :x])))
-    (doseq [name [:list :renamed-list]]
-      (let [planned (result report name)]
-        (is (contains? (codes planned) :list-builder-required))
-        (is (not (contains? planned :proposed)))))))
+    (is (= [:list-builder {:items [[:value 1] [:value 2]] :tail :open}]
+           (get-in (result report :list) [:proposed :bind :items])))
+    (is (contains? (codes (result report :renamed-list)) :list-builder-required))
+    (is (not (contains? (result report :renamed-list) :proposed)))))
 
 
 (deftest unsupported-cases-aggregate-with-safe-blocker-summaries
@@ -148,8 +148,9 @@
                      {:name :anonymous :namespace "demo" :parent :sink
                       :args {:x {:parent :producer :args {}}}}]
         report (plan definitions)]
-    (is (= {:supported 2 :blocked 4} (:counts report)))
-    (is (contains? (codes (result report :append)) :list-builder-required))
+    (is (= {:supported 3 :blocked 3} (:counts report)))
+    (is (= [:list-builder {:items [[:ref :producer]] :tail :closed}]
+           (get-in (result report :append) [:proposed :bind :items])))
     (is (contains? (codes (result report :rename)) :rename-projection-required))
     (is (contains? (codes (result report :secret)) :resolver-binding-required))
     (is (= #{:inline-identity-or-source-mapping-required}

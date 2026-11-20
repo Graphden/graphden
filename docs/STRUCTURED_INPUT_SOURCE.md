@@ -59,7 +59,7 @@ recover the original anonymous-body hash and independently parse the child
 binding. The child retains its own binding UUID and target field UUID.
 An explicit legacy `{:ref P}` needs additional provenance to distinguish
 it from a bare reference. Empty explicit `:args {}`, multi-field bodies,
-annotated inline refs and inline list items also remain blocked. List builders,
+annotated inline refs and inline list items also remain blocked. List continuations,
 rename projections, referenced input scopes, assertions that require inline
 type rows and unknown binding policies have explicit blockers.
 Secret-path resolution must never become an ordinary literal value.
@@ -240,10 +240,15 @@ applies the receiving base function's delay policy and shared call cache.
 
 The package dry run reports these field proofs under
 `:verification :list-builders`. It counts edges linked to their source origins
-and field splices reparsed from checksummed modules. Whole-definition migration
-retains `:list-builder-required` until the module loader can materialize and
-recover the generated builders. Positional projections, inline item origins
-and ambiguous or missing ancestry carry additional diagnostics.
+and field splices reparsed from checksummed modules. The offline v2 module
+reader materializes the first append to an unoccupied field as a callable with
+ordinary input bindings. It reconstructs all items, the owner edge and the
+optional seal from those records and compares them with their source origins.
+The dry run counts a whole list definition under `:reparsed-definitions` only
+after parsing the actual CST bytes and repeating the legacy/v2 comparison.
+Further inherited contributions retain `:list-continuation-lowering-required`.
+Positional projections, inline items, mixed declarations and ambiguous or
+missing ancestry have separate diagnostics.
 
 ## Focused verification
 

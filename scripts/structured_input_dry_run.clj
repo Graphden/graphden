@@ -134,6 +134,13 @@
 (defn- summarize-definition
   [package verification definition]
   (let [original (:source definition)
+        eligible? (seq (get-in definition [:v2 :list-builders]))
+        migrated? (contains? (:migrated verification) (:identity definition))
+        definition (if (and eligible? (not migrated?))
+                     (-> definition (assoc :status :blocked :blockers [{:definition [(:namespace original) (:name original)]
+                                                                        :file (:source-file original) :code :list-definition-cst-replay-required}])
+                         (dissoc :verification))
+                     definition)
         verified (get-in verification [:verified (:source-file original) (:name original)])
         reconstructed (count (keep #(get-in % [:list-builder :records]) (get-in definition [:legacy :arguments])))
         linked (count (keep #(get-in % [:list-builder :bindings]) (get-in definition [:legacy :arguments])))]
@@ -142,7 +149,8 @@
                :file (:source-file original)
                :blockers (mapv #(assoc % :repository (:repository package) :package (:name package))
                                (:blockers definition)))
-        (cond-> (pos? linked) (assoc :linked-list-fields linked)
+        (cond-> migrated? (assoc :reparsed-list-definition true)
+                (pos? linked) (assoc :linked-list-fields linked)
                 (pos? reconstructed) (assoc :reconstructed-list-fields reconstructed)
                 verified (assoc :reparsed-list-fields verified)))))
 
@@ -177,11 +185,11 @@
           (blocked-state package [(problem package :duplicate-visible-definition)])
           (let [context (parse/prepare-module original names definitions)
                 planned (source/verify-module (source/plan-module original context) context)
-                verification (list-probe/verify-package (:read-source package) (:definitions planned) (:name->id context))
+                verification (list-probe/verify-package (:read-source package) (:definitions planned) context)
                 summaries (mapv #(summarize-definition package verification %) (:definitions planned))]
             {:status :prepared
              :exports (vec (distinct (concat dependencies (qualify-definitions context))))
-             :definitions summaries :counts (:counts planned)
+             :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
              :blockers (into (vec (mapcat :blockers summaries))
                              (map #(assoc % :repository (:repository package) :package (:name package))) (:blockers verification))}))
         (catch Exception error
@@ -255,7 +263,8 @@
         report {:schema-version 1
                 :mode :read-only-source-plan
                 :verification {:authored-source-equivalence {:verified-definitions verified}
-                               :list-builders {:reconstructed-fields (transduce (keep :reconstructed-list-fields) + (mapcat :definitions summaries))
+                               :list-builders {:reparsed-definitions (count (filter :reparsed-list-definition (mapcat :definitions summaries)))
+                                               :reconstructed-fields (transduce (keep :reconstructed-list-fields) + (mapcat :definitions summaries))
                                                :linked-fields (transduce (keep :linked-list-fields) + (mapcat :definitions summaries))
                                                :reparsed-fields (transduce (keep :reparsed-list-fields) + (mapcat :definitions summaries))}
                                :new-loader-equivalence false :runtime-equivalence false :history false}

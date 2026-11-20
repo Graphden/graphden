@@ -72,6 +72,7 @@
             (throw (ex-info "Unverified dependency in source closure"
                             {:type :input/source-snapshot :code :unverified-source-declaration
                              :fn-id id :blockers (mapv :code (:blockers entry))})))
+          (when (seq (:list-builders v2)) (reject! :list-builder-signature-required id))
           (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2))
                          (<= (count (:parent-ids owner)) 1))
             (reject! :unsupported-scope-declaration id))

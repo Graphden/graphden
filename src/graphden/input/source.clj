@@ -169,7 +169,7 @@
                                        [:ref body]
                                        (binding-expression binding names))
                          :policy (binding-policy binding)}
-                  builder (assoc :list-builder builder)
+                  builder (merge {:list-builder builder} (source-list/direct-expression builder body (:namespace source) name->id))
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -231,8 +231,9 @@
       (conj (problem :missing-binding-origin))
       (and (= :binding (:kind entry)) (not (contains? ancestor-ids (:owner target))))
       (conj (problem :ref-scope-required))
-      (or (:list-append policy) (:list-closed policy))
-      (conj (problem :list-builder-required))
+      (and (or (:list-append policy) (:list-closed policy)) (not= :list-builder (first expression)))
+      (conj (problem (if (< 1 (count (get-in entry [:list-builder :fragments])))
+                       :list-continuation-lowering-required :list-builder-required)))
       (get-in entry [:list-builder :record-blocker])
       (conj (problem (get-in entry [:list-builder :record-blocker])))
       (get-in entry [:list-builder :blocker])
@@ -289,7 +290,11 @@
                                                 (and (not (:rename %)) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         blockers (vec (distinct
-                        (concat (when collision? [(blocker source :rename-field-collision [:args])])
+                        (concat (when (and (some :list-builder arguments)
+                                           (some #(or (= :declaration (:kind %)) (:rename %)
+                                                      (typed-binding? (get-in source (:source-path %)))) arguments))
+                                  [(blocker source :mixed-list-declaration-required [:args])])
+                                (when collision? [(blocker source :rename-field-collision [:args])])
                                 (source-argument-blockers source rename-fields)
                                 (mapcat #(argument-blockers source % chain) arguments)
                                 (inherited-blockers source definition context arguments))))
@@ -489,12 +494,17 @@
         prepared (get-in environment [:definition-by-id definition-id])
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
+        list-traces (source-list/direct-traces (:arguments legacy))
+        list-ids (set (map (comp :binding-id first :fragments) (vals list-traces)))
+        ordinary (fn [rows] (remove #(contains? list-ids (:id %)) rows))
         legacy-context (source-context/declaration-context environment prepared records bindings)
         context-for (fn [v2]
                       (let [[lowered rows] (source-context/lower-declarations environment v2)]
-                        (source-context/declaration-context environment lowered rows
-                                                            (if (= (:name lowered) (:name source))
-                                                              bindings
+                        (if (= (:name lowered) (:name source))
+                          (source-list/replay-context
+                            (source-context/declaration-context environment lowered rows bindings)
+                            list-traces (:arguments legacy) (get-in environment [:context :name->id]))
+                          (source-context/declaration-context environment lowered rows
                                                               (inline-binding-origins environment lowered)))))
         options {:context-for context-for
                  :normalize-inline-parent
@@ -508,9 +518,11 @@
         reread (module/parse-module-v2 (read-emitted emitted) options)
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
-        legacy-meaning (assoc (authored-meaning prepared legacy-context bindings)
+        legacy-meaning (assoc (authored-meaning prepared legacy-context (ordinary bindings))
+                              :list-builders list-traces
                               :asserted-types (update-vals (field-assertions prepared (:arguments legacy)) :type))
-        v2-meaning (assoc (authored-meaning lowered v2 (mapv (partial rename/legacy-binding (:declaration-records v2)) (:bindings v2)))
+        v2-meaning (assoc (authored-meaning lowered v2 (mapv (partial rename/legacy-binding (:declaration-records v2)) (ordinary (:bindings v2))))
+                          :list-builders (or (:list-builders v2) {})
                           :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
                                                 (:configurations v2)))]
     (verify-inline-children! environment definition prepared v2)

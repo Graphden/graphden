@@ -5,6 +5,7 @@
   (:require
     [graphden.input.core :as input]
     [graphden.input.format :as format]
+    [graphden.input.list-records :as list-records]
     [graphden.input.rows :as rows]
     [graphden.input.syntax :as syntax]
     [graphden.packages.rebase :as rebase]
@@ -194,6 +195,17 @@
         (when (map? (:bind source)) (:bind source))))
 
 
+(defn- list-builders
+  [source {:keys [contract scope] :as ctx}]
+  (into (sorted-map)
+        (keep (fn [[name form]]
+                (when (and (vector? form) (= :list-builder (first form)))
+                  (let [path (:path (input/resolve-address contract scope [name]))
+                        field (some #(when (= (first path) (:id %)) %) (:fields contract))]
+                    [path (list-records/parse-direct ctx field form)]))))
+        (when (map? (:bind source)) (:bind source))))
+
+
 (defn- parse-definition
   [source module-namespace {:keys [context-for] :as options}]
   (let [definition (assoc source :namespace module-namespace)
@@ -203,20 +215,22 @@
     (if (type-only? definition)
       common
       (let [inlines (inline-definitions source module-namespace ctx options)
+            builders (list-builders source ctx)
             expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {})
-                                                (assoc ctx :inline-at inlines))
+                                                (assoc ctx :inline-at inlines :list-at builders))
             state (input/bind-input (:contract ctx) {} (:scope ctx) expression)
             configs (resolve-configurations ctx state (:configure source))
             by-path (into {} (map (juxt :target-path identity)) (vals configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
                :expression expression :binding-state state :bindings bindings :configurations configs
-               :inline-definitions inlines)))))
+               :inline-definitions inlines :list-builders builders)))))
 
 
 (defn- definition-records
   [parsed]
   (concat (:declaration-records parsed) (:bindings parsed)
+          (mapcat :records (vals (:list-builders parsed)))
           (mapcat definition-records (vals (:inline-definitions parsed)))))
 
 
@@ -263,7 +277,7 @@
     (if (contains? source :bind)
       (assoc source :bind (syntax/emit-expression (:contract ctx) (:expression parsed)
                                                   {:scope (:scope ctx) :id->name (id->name (:name->id ctx))
-                                                   :inline-at (:inline-definitions parsed)}))
+                                                   :list-at (:list-builders parsed) :inline-at (:inline-definitions parsed)}))
       source)))
 
 
@@ -278,7 +292,7 @@
   (let [module (assoc (:module parsed) :fns (mapv #(emit-definition % context-for) (:definitions parsed)))
         reparsed (parse-module-v2 module options)]
     (when-not (and (= (:records parsed) (:records reparsed))
-                   (= (mapv #(select-keys % [:configurations :inline-definitions]) (:definitions parsed))
-                      (mapv #(select-keys % [:configurations :inline-definitions]) (:definitions reparsed))))
+                   (= (mapv #(select-keys % [:configurations :inline-definitions :list-builders]) (:definitions parsed))
+                      (mapv #(select-keys % [:configurations :inline-definitions :list-builders]) (:definitions reparsed))))
       (reject! :export-origin-drift))
     module))

@@ -137,3 +137,34 @@
     (is (= :list-declaration-mismatch (reason #(recover (remove #{base} records)))))
     (is (= :list-declaration-mismatch (reason #(recover (replace {append (assoc append :scope-path [])} records)))))
     (is (= :list-declaration-mismatch (reason #(recover (replace {seal (assoc seal :value [0])} records)))))))
+
+
+(deftest direct-source-replay-compares-the-authored-chain-with-the-v2-rows
+  (let [base {:namespace "demo" :name :consume :args {:xs :sequence} :return-type :any}
+        read-fn {:namespace "demo" :name :read :args {} :return-type :int}
+        owner {:namespace "demo" :name :batch :parent :consume :args {:xs {:append [:read nil 1N] :closed true}}}
+        sources [base read-fn owner]
+        ctx (parse/prepare-module sources {} {})
+        plan (source/plan-module [owner] ctx)
+        check #(first (:definitions (source/verify-module % ctx)))
+        entry (check plan)
+        slot (ids/slot-id (ids/fn-id "demo" :consume) :xs)
+        binding (ids/binding-id (ids/fn-id "demo" :batch) slot)
+        expected (get-in entry [:legacy :arguments 0 :list-builder])
+        actual (get-in entry [:v2 :list-builders [slot]])
+        path [:definitions 0 :proposed :bind :xs]]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= expected actual))
+    (is (= (mapv #(ids/binding-list-item-id binding %) (range 3))
+           (mapv :id (get-in actual [:fragments 0 :items]))))
+    (is (= (first (:bindings actual)) (get-in entry [:v2 :bindings 0])))
+    (is (= :list-fragment-mismatch
+           (reason #(builder/reference-expression actual [:list-builder {:items [] :tail :closed}] {}))))
+    (doseq [alter [(fn [d] (assoc-in d (into path [1 :items 2]) [:value 1]))
+                   (fn [d] (assoc-in d (into path [1 :tail]) :open))
+                   (fn [d] (assoc-in d (into path [1 :items 0]) [:value :read]))
+                   (fn [d] (update-in d (into path [1 :items]) #(vec (reverse %))))
+                   (fn [d] (update-in d [:definitions 0 :proposed :bind] dissoc :xs))]]
+      (is (= [:legacy-v2-meaning-mismatch] (mapv :code (:blockers (check (alter plan)))))))
+    (is (= [:unresolved-list-item-ref]
+           (mapv :code (:blockers (check (assoc-in plan (into path [1 :items 0]) [:ref :consume]))))))))

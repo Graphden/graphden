@@ -218,7 +218,7 @@
         (is (not (str/includes? (inventory/report-text report) "PRIVATE-DEPENDENCY-DATA")))))))
 
 
-(deftest dry-run-reparses-list-fields-without-promoting-blocked-definitions
+(deftest dry-run-replays-direct-lists-and-retains-inherited-continuation-blockers
   (with-repository
     (fn [root roots]
       (package! root "lists" [] [["main" "demo"
@@ -227,9 +227,9 @@
                                    {:name :tail :parent :head :args {:xs {:append [2] :closed true}}}]]])
       (let [report (dry/dry-run roots)
             stats (get-in report [:verification :list-builders])]
-        (is (= {:linked-fields 2 :reparsed-fields 2 :reconstructed-fields 2} stats))
-        (is (= {:supported 1 :blocked 2} (:counts report)))
-        (is (= #{:list-builder-required} (codes report)))))))
+        (is (= {:linked-fields 2 :reparsed-fields 2 :reconstructed-fields 2 :reparsed-definitions 1} stats))
+        (is (= {:supported 2 :blocked 1} (:counts report)))
+        (is (= #{:list-continuation-lowering-required} (codes report)))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-dry-run-test)]

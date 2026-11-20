@@ -13,6 +13,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.source :as source]
     [graphden.input.source-named-types :as named-types]
+    [graphden.input.source-package-fixtures :as fixtures]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -283,16 +284,9 @@
     (is (some #{[[id []] [alias-id]]} (:required-addresses result)))))
 
 
-(defn- package-declarations
-  [resource names]
-  (let [{module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource resource)))]
-    (for [d fns :when (contains? names (:name d))]
-      (assoc d :namespace module-ns :source-file resource))))
-
-
 (defn- package-record-pin
   [resource record-name host-name]
-  (let [selected (package-declarations resource #{record-name host-name})
+  (let [selected (fixtures/declarations resource #{record-name host-name})
         module-ns (:namespace (first selected))
         defs (into (filterv #(= :get (:name %)) (sources "collections")) selected)
         prepared (parse/prepare-module defs {} {})
@@ -306,9 +300,9 @@
 
 
 (deftest stored-record-fields-survive-checked-base-signature
-  (let [[record] (package-declarations "packages/web/crud/fns.edn" #{:_tighten-parsed-shape})
-        [base] (package-declarations "packages/web/crud-seq/fns.edn" #{:try-apply-tighten})
-        [dictionary] (package-declarations "packages/core/refinements/fns.edn" #{:keyword-map})
+  (let [[record] (fixtures/declarations "packages/web/crud/fns.edn" #{:_tighten-parsed-shape})
+        [base] (fixtures/declarations "packages/web/crud-seq/fns.edn" #{:try-apply-tighten})
+        [dictionary] (fixtures/declarations "packages/core/refinements/fns.edn" #{:keyword-map})
         ds [record base dictionary]
         id (ids/fn-id (:namespace base) (:name base))
         type-id (ids/fn-id (:namespace record) (:name record))
@@ -316,9 +310,9 @@
         implementations (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
                                   types/*type-aliases-override* (atom {})
                                   shapes/*marker-registry-override* (atom (shapes/markers-snapshot))]
-                          (let [loaded (loader/load-packages ["core" "web"])]
+                          (let [loaded @fixtures/web-base-definitions]
                             (sync/register-type-aliases! ds)
-                            (registry/record-rich-types! id (:name base) (get-in loaded [:base-fn-defs (:name base)]))
+                            (registry/record-rich-types! id (:name base) (get loaded (:name base)))
                             (:by-id @registry/*rich-types-override*)))
         {:keys [context options]} (snapshot/freeze-closure package [id] implementations)
         graph (analysis/analyze-effective-input context id options)

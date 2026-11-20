@@ -1696,13 +1696,14 @@
      :say "The current root card opens the server's remaining input projection in the existing
            type popover. A captured projection is usable only while its root is current. Nested
            reference inputs have their own group. A writable offline fixture supplies named
-           paths for its own free leaves."
+           paths for free leaves and checked path and version facts for occupied literals."
      :see [[:editor "recordExpansionFields"] [:crud "read-input"]]}
 
-    {:file "resources/packages/app/editor/editor-edit-modes.js" :defn openStructuredBindPopover
-     :say "Binds a literal entered in the shared inline edit popover to a leaf confirmed by the
-           current subtree. The editor repeats the exact command with its preview basis and
-           reloads the graph after apply. A refused proposal keeps the draft in the popover."
+    {:file "resources/packages/app/editor/editor-edit-modes.js" :defn openStructuredInputPopover
+     :say "Uses the shared inline edit popover to bind, edit or remove a literal leaf confirmed
+           by the current subtree. Edit and removal compare the displayed version with the
+           preview. The editor repeats the exact command with its preview basis, then reloads
+           the graph. A refused proposal keeps the draft in the popover."
      :see [[:editor "appendStructuredInputStrip"] [:crud "with-plan"]]}
 
     {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection

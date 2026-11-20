@@ -417,6 +417,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
   }
   if (c.inputDescriptor) {
     appendStructuredInputFields(host, path, c);
+    appendOccupiedStructuredInputs(host, path, c);
     return;
   }
   // Human-readable description from the type-row's `description`
@@ -638,12 +639,43 @@ function appendStructuredInputFields(host, path, {inputDescriptor, ancestorTypes
       button.setAttribute('aria-label', 'Bind ' + bindPath.join('.'));
       button.addEventListener('click', event => {
         event.stopPropagation();
-        if (structuredBind.isCurrent()) openStructuredBindPopover(button, structuredBind, bindPath, type);
+        if (structuredBind.isCurrent()) openStructuredInputPopover(button, structuredBind, 'bind', {path: bindPath, type});
       });
       row.insertBefore(button, row.querySelector('.type-inline-child'));
     }
     host.appendChild(row);
   }
+}
+
+function appendOccupiedStructuredInputs(host, path, {inputDescriptor, ancestorTypes, structuredBind}) {
+  if (!structuredBind || !inputDescriptor.occupied?.length) return;
+  const group = document.createElement('div');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Bound inputs');
+  const heading = document.createElement('strong');
+  heading.textContent = 'Bound inputs';
+  group.appendChild(heading);
+  for (const field of inputDescriptor.occupied) {
+    if (!Array.isArray(field.path) || !field.path.length || !field['binding-id'] || !field['version-id'] || field.type == null) continue;
+    const label = field.path.join('.');
+    const row = buildInlineTypeRow(label, field.type, path + '/occupied/' + field['binding-id'], ancestorTypes);
+    for (const [action, verb] of [['edit', 'Edit'], ['remove', 'Remove']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'arg-type-chip';
+      button.textContent = verb;
+      button.setAttribute('aria-label', verb + ' ' + label);
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (structuredBind.isCurrent()) openStructuredInputPopover(button, structuredBind, action, {
+          path: field.path, type: field.type, bindingId: field['binding-id'], versionId: field['version-id'],
+        });
+      });
+      row.insertBefore(button, row.querySelector('.type-inline-child'));
+    }
+    group.appendChild(row);
+  }
+  host.appendChild(group);
 }
 
 // ---------- Rename fn-type arg (T4.1) --------------------------------

@@ -130,6 +130,29 @@ function boot(files) {
     'refresh failure is shown as a post-save error without claiming the write failed');
   }
 
+  console.log(' successful save restores focus when disabling submit blurs it');
+  {
+    const t = boot(EDIT);
+    const anchor = t.doc.body.appendChild(t.doc.createElement('button'));
+    anchor.getBoundingClientRect = () => ({ bottom: 10, left: 10 });
+    anchor.focus = () => { t.doc.activeElement = anchor; };
+    let focusedDuringRefresh;
+    t.ctx.openInlineEditPopover({
+      anchorEl: anchor,
+      makeControl: root => root.appendChild(t.doc.createElement('input')),
+      doSave: async () => {
+        t.doc.activeElement = t.doc.body;
+        return true;
+      },
+      onSaved: () => { focusedDuringRefresh = t.doc.activeElement; },
+    });
+    const save = t.doc.querySelector('.arg-value-edit-buttons').querySelectorAll('button')[1];
+    t.doc.activeElement = save;
+    save.click();
+    await flush();
+    assert(focusedDuringRefresh === anchor, 'focus returns to the anchor before reloading the graph');
+  }
+
   console.log(' retirement cleans passive owners once; late saves/timers cannot close or focus the next editor');
   {
     const t = boot(EDIT);

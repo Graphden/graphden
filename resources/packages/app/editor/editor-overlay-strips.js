@@ -75,18 +75,21 @@ function appendStructuredInputStrip(overlay, fnId) {
   const strip = document.createElement('div');
   strip.className = 'structured-input-strip';
   overlay.appendChild(strip);
-  if (input.status !== 'available' || !input.fields?.length) {
+  const hasOccupied = !!input.occupied?.length;
+  if (input.status !== 'available' || (!input.fields?.length && !hasOccupied)) {
     strip.textContent = input.status === 'available' ? 'No visible input fields' : 'Input fields unavailable';
     return;
   }
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'arg-type-chip arg-type-chip-readonly';
-  button.textContent = 'Remaining inputs';
+  const groupName = hasOccupied ? 'Structured inputs' : 'Remaining inputs';
+  button.textContent = groupName;
   strip.appendChild(button);
   const isCurrent = () => window.gdStructuredInputFor?.(fnId) === input;
   attachInlineExpand(button, null, fnId + '/structured-input', {
     inputDescriptor: input,
+    inputGroupName: groupName,
     structuredBind: {fnId, isCurrent},
     isCurrent,
   });

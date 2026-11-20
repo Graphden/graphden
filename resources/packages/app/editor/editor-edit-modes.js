@@ -58,7 +58,7 @@ document.addEventListener('keydown', (e) => {
   closeInlineEdit();
 });
 
-function closeInlineEdit() {
+function closeInlineEdit({restoreFocus = false} = {}) {
   stopInlineEditAnchorObservation?.();
   stopInlineEditAnchorObservation = null;
   if (inlineEditOutsideHandler) {
@@ -69,7 +69,7 @@ function closeInlineEdit() {
     const el = inlineEditEl;
     const anchor = inlineEditAnchor;
     const closed = inlineEditClosed;
-    const hadFocus = el.contains(document.activeElement);
+    const hadFocus = restoreFocus || el.contains(document.activeElement);
     inlineEditEl = null;
     inlineEditAnchor = null;
     inlineEditClosed = null;
@@ -131,6 +131,7 @@ function openInlineEditPopover(opts) {
   const save = document.createElement('button');
   save.type = 'button';
   save.className = 'arg-value-edit-btn';
+  if (opts.saveDanger) save.classList.add('arg-value-edit-btn-danger');
   save.textContent = opts.saveLabel || 'Save';
   // A CHOOSER stage (bind literal | bind fn-ref) commits nothing — a
   // Save button there was inert and read as "something is missing"
@@ -138,6 +139,7 @@ function openInlineEditPopover(opts) {
   if (opts.noSave) save.style.display = 'none';
   const doSave = async () => {
     if (opts.noSave || inlineEditEl !== el || save.disabled) return;
+    const hadFocus = el.contains(document.activeElement);
     save.disabled = true;
     cancel.disabled = true;
     errorEl.classList.remove('visible');
@@ -148,13 +150,16 @@ function openInlineEditPopover(opts) {
     // Cancel disabled with no message.
     let res;
     try {
-      res = await opts.doSave(control);
+      res = await opts.doSave(control, el);
     } catch (err) {
       res = { ok: false, error: 'Save failed: ' + (err?.message || 'network error') };
     }
     const ok = (res === true) || !!res?.ok;
     if (ok) {
-      if (inlineEditEl === el) closeInlineEdit();
+      if (inlineEditEl === el) {
+        // Disabling the focused submit button may have moved focus to body.
+        closeInlineEdit({restoreFocus: hadFocus && document.activeElement === document.body});
+      }
       if (typeof opts.onSaved === 'function') {
         try { await opts.onSaved(); }
         catch (error) {
@@ -552,8 +557,9 @@ async function responseError(r) {
   });
 }
 
-function openStructuredBindPopover(anchorEl, {fnId, isCurrent}, path, type) {
+function openStructuredInputPopover(anchorEl, {fnId, isCurrent}, action, {path, type, bindingId, versionId}) {
   const label = path.join('.');
+  const verb = {bind: 'Bind', edit: 'Edit', remove: 'Remove'}[action];
   const valueKind = dereferenceType(type) === 'text' ? 'text' : 'any';
   const request = async (endpoint, body) => {
     const response = await authFetch(endpoint, {
@@ -570,38 +576,64 @@ function openStructuredBindPopover(anchorEl, {fnId, isCurrent}, path, type) {
   };
   openInlineEditPopover({
     anchorEl,
-    ariaLabel: 'Bind ' + label,
-    saveLabel: 'Bind',
+    ariaLabel: verb + ' ' + label,
+    saveLabel: action === 'edit' ? 'Save' : verb,
+    saveDanger: action === 'remove',
     makeControl(host) {
+      if (action === 'remove') {
+        const prompt = document.createElement('p');
+        prompt.textContent = 'Remove the binding for ' + label + '?';
+        host.appendChild(prompt);
+        return null;
+      }
       const control = document.createElement('input');
       control.type = 'text';
       control.className = 'arg-value-edit-input';
-      control.setAttribute('aria-label', 'Value for ' + label);
+      control.setAttribute('aria-label', (action === 'edit' ? 'New value for ' : 'Value for ') + label);
       host.appendChild(control);
       return control;
     },
-    async doSave(control) {
-      const targetError = {ok: false, error: 'Refresh the selected function to bind this input.'};
+    async doSave(control, dialog) {
+      const targetError = {ok: false, error: 'Refresh the selected function to change this input.'};
       if (!isCurrent()) return targetError;
       const previewEndpoint = API.api_structured_input_preview;
       const applyEndpoint = API.api_structured_input_apply;
       if (!previewEndpoint || !applyEndpoint) return {ok: false, error: 'Structured input editing is unavailable.'};
-      if (valueKind !== 'text' && !control.value.trim()) return {ok: false, error: 'Enter a value.'};
-      const {value, error} = readFieldValue(control, valueKind);
-      if (error) return {ok: false, error};
-      const command = {action: 'bind', 'fn-id': fnId, path, value};
-      control.readOnly = true;
+      const command = {action, 'fn-id': fnId};
+      if (action === 'bind') command.path = path;
+      else if (bindingId && versionId) command['binding-id'] = bindingId;
+      else return targetError;
+      if (control) {
+        if (valueKind !== 'text' && !control.value.trim()) return {ok: false, error: 'Enter a value.'};
+        const {value, error} = readFieldValue(control, valueKind);
+        if (error) return {ok: false, error};
+        command.value = value;
+        control.readOnly = true;
+      }
       try {
         const preview = await request(previewEndpoint, command);
-        if (!control.isConnected || !isCurrent()) return targetError;
+        if (!dialog.isConnected || !isCurrent()) return targetError;
         const basis = preview['expected-state'];
         if (!basis) return {ok: false, error: 'The input preview could not be verified.'};
-        return await request(applyEndpoint, {...command, 'expected-state': basis});
+        if (bindingId && preview['expected-version'] !== versionId) {
+          return {ok: false, error: 'This binding changed. Refresh the selected function.'};
+        }
+        const proposal = {...command, 'expected-state': basis};
+        if (bindingId) proposal['expected-version'] = versionId;
+        return await request(applyEndpoint, proposal);
       } finally {
-        control.readOnly = false;
+        if (control) control.readOnly = false;
       }
     },
-    onSaved: loadGraphData,
+    async onSaved() {
+      const restore = document.activeElement === anchorEl;
+      await loadGraphData();
+      if (restore && document.activeElement === document.body) {
+        const path = fnId + '/structured-input';
+        returnFocusTo(document.querySelector('[data-inline-anchor="' + escAttr(path) + '"]'));
+      }
+      window.gdAnnounce?.({bind: 'Input bound', edit: 'Input binding updated', remove: 'Input binding removed'}[action]);
+    },
   });
 }
 

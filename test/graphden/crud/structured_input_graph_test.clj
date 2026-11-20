@@ -43,14 +43,14 @@
   (json/parse-string (:body response) true))
 
 
-(defn- remaining-fields
+(defn- input-view
   [app token owner]
   (let [response (router/dispatch app
                                   {:request-method :get :uri "/api/graph/entities"
                                    :query-string (str "scope=subtree&root-id=" owner)
                                    :headers {"authorization" (str "Bearer " token)}})]
     (is (= 200 (:status response)))
-    (some #(when (= (str owner) (:id %)) (get-in % [:structured-input :fields]))
+    (some #(when (= (str owner) (:id %)) (:structured-input %))
           (:fns (decode response)))))
 
 
@@ -70,11 +70,11 @@
         app (router/create-router ctx "_app-ring-response")
         create {:action "bind" :fn-id (str owner) :path ["profile" "name"] :value "original"}]
     (is (= 403 (:status (send-command app token "preview" (assoc create :offline? true)))))
-    (let [leaf (get-in (remaining-fields app token owner) [0 :fields 0])]
+    (let [leaf (get-in (input-view app token owner) [:fields 0 :fields 0])]
       (is (= "name" (:name leaf)))
       (is (not (contains? leaf :bind-path))))
     (binding [access/*offline?* true]
-      (let [fields (remaining-fields app token owner)]
+      (let [fields (:fields (input-view app token owner))]
         (is (nil? (get-in fields [0 :bind-path])))
         (is (= (:path create) (get-in fields [0 :fields 0 :bind-path]))))
       (is (= 401 (:status (send-command app nil "preview" create))))
@@ -86,15 +86,28 @@
             removal {:action "remove" :fn-id (str owner) :binding-id id}]
         (is (= 200 (:status bound)))
         (is (= "original" (:value (sp/read-entity storage :input-binding (parse-uuid id)))))
-        (is (= [] (remaining-fields app token owner)))
+        (let [view (input-view app token owner)
+              [occupied :as occupied-fields] (:occupied view)]
+          (is (= [] (:fields view)))
+          (is (= 1 (count occupied-fields)))
+          (is (= {:path (:path create) :type "text" :binding-id id}
+                 (dissoc occupied :version-id)))
+          (is (parse-uuid (:version-id occupied)))
+          (binding [access/*offline?* false]
+            (is (not (contains? (input-view app token owner) :occupied)))))
         (let [prepared (prepare! app token edit)
+              version (:expected-version prepared)
               wrong-action (merge removal (select-keys prepared [:expected-version :expected-state]))]
+          (is (= version (get-in (input-view app token owner) [:occupied 0 :version-id])))
           (is (= 409 (:status (send-command app token "apply" wrong-action))))
           (is (= 200 (:status (send-command app token "apply" prepared))))
           (is (= 409 (:status (send-command app token "apply" prepared))))
-          (is (= "revised" (:value (sp/read-entity storage :input-binding (parse-uuid id))))))
+          (is (= "revised" (:value (sp/read-entity storage :input-binding (parse-uuid id)))))
+          (is (not= version (get-in (input-view app token owner) [:occupied 0 :version-id]))))
         (let [prepared (prepare! app token removal)]
           (is (= 200 (:status (send-command app token "apply" prepared))))
           (is (nil? (sp/read-entity storage :input-binding (parse-uuid id))))
-          (is (= "name" (get-in (remaining-fields app token owner) [0 :fields 0 :name])))
+          (let [view (input-view app token owner)]
+            (is (= "name" (get-in view [:fields 0 :fields 0 :name])))
+            (is (= [] (:occupied view))))
           (is (= 409 (:status (send-command app token "apply" prepared)))))))))

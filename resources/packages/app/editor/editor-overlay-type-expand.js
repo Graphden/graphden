@@ -623,7 +623,8 @@ document.addEventListener('keydown', (e) => {
 
 function attachInlineExpand(chipEl, rich, path, ctx) {
   const c = ctx || {};
-  const expandable = c.inputDescriptor ? c.inputDescriptor.fields.length > 0 : isTypeExpandable(rich);
+  const expandable = c.inputDescriptor
+    ? !!(c.inputDescriptor.fields.length || c.inputDescriptor.occupied?.length) : isTypeExpandable(rich);
   const editable = !!c.editable && typeof c.onEdit === 'function';
   const generation = !c.inputDescriptor && typeof graphTypeGeneration === 'function' ? graphTypeGeneration() : null;
   const pending = generation != null && !graphTypesReady();
@@ -657,7 +658,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   }
 
   installInlinePositionListeners();
-  const groupName = c.inputDescriptor ? 'Remaining inputs'
+  const groupName = c.inputDescriptor ? c.inputGroupName
     : c.arg && typeKindLabel(resolveOneHop(rich)) === 'Record'
       ? (c.arg.name ? 'Fields of ' + c.arg.name : 'Record fields') : null;
   chipEl.dataset.inlineAnchor = path;

@@ -4,7 +4,6 @@
     [graphden.crud.request :as request]
     [graphden.crud.structured-input :as structured]
     [graphden.crud.structured-input-bind :as bind]
-    [graphden.input.rows :as rows]
     [graphden.input.storage :as input-storage]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
@@ -37,15 +36,14 @@
 
 (defn- own-literal
   [ctx fn-id id]
-  (let [row (some-> (get-in ctx [:bindings id]) rows/normalize)]
-    (when-not (and (= fn-id (:fn-id row)) (empty? (:scope-path row))
-                   (= "value" (:expression-kind row)) (nil? (:resolver-fn-id row)))
-      (reject! :input/leaf-unavailable "This input binding is unavailable for editing"))
-    row))
+  (or (structured/own-literal-row ctx fn-id id)
+      (reject! :input/leaf-unavailable "This input binding is unavailable for editing")))
 
 
 (defn- checked-change!
   [action ctx {:keys [fn-id binding-id value]} row]
+  (when-not (structured/editable-binding? ctx fn-id binding-id)
+    (reject! :input/leaf-unavailable "This input binding is unavailable for editing"))
   (let [without (update ctx :bindings dissoc binding-id)
         opened (structured/analyze without fn-id)
         address [[fn-id []] (:target-path row)]

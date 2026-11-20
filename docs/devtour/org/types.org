@@ -142,13 +142,13 @@ Builds an offline graph of evaluated reference uses. Each use has a binding-ID s
 :PROPERTIES:
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
-:LINE: 154
+:LINE: 156
 :MINS: 0.9
 :END:
 
 Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. Source authorization precedes export.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:154]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:156]]
 - see also :: [[file:types.org::#types/export-named][export-named]]
 - same file :: [[file:types.org::#types/export-named][export-named]]
 
@@ -156,13 +156,13 @@ Lowers the checked input IR to browser format 2 for closed pure graphs. A field 
 :PROPERTIES:
 :CUSTOM_ID: types/export-named
 :FILE: src/graphden/input/browser.clj
-:LINE: 162
+:LINE: 164
 :MINS: 0.9
 :END:
 
 Includes checked named residual routes for primitive inputs. Browser and JVM use the same order of presence rules. Each field is checked when read and absent fields stay outside the record. Other runtime validation obligations still need support.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:162]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:164]]
 - same file :: [[file:types.org::#types/export-closed][export-closed]]
 - referenced from :: [[file:types.org::#types/export-closed][export-closed]]
 

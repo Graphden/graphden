@@ -121,17 +121,37 @@ registry entries retain the existing fail-closed hidden trace behavior.
 snapshot ID. It lowers literals, identity refs, evaluated refs, callable
 producers, structural records, exact-address projections and derived input
 routes. Free leaf addresses remain invocation parameters. Whole record inputs,
-projection into an opaque producer's descendant, graph-callable closures and
-sequence builders are not supported by this slice. Container obligations are
-rejected. Supported primitive `:value-type`/`:field-read` obligations run through
-the existing validator inside the once-cell; failed reads are memoized too.
+projection into an opaque producer's descendant, sequence builders and container
+obligations require separate lowering. Supported primitive `:value-type` and
+`:field-read` obligations run through the existing validator inside the once-cell,
+which also memoizes failures.
 
-`input.frame/instantiate` allocates and freezes the complete cell table before
-any field can execute. A base implementation receives a plain map of outer
+`input.frame/instantiate` allocates and freezes the outer cell table before any
+field can execute. A base implementation receives a plain map of outer
 runtime thunks. This extra boundary is intentional: `defbase` resolves an outer
 thunk exactly once, so an Atom, Delay or marked callable returned by a reference
 is passed through unchanged. Nested structured records remain lookup views.
 Optional absence, explicit nil and false are distinct. No default is invented.
+
+### Synchronous graph callbacks
+
+A checked graph-callable binding in the root scope can reference a callback
+with direct leaf parameters and captures routed by stable address. The compiler
+uses the existing `tagged-callable` to preserve zero-argument, positional and
+named-map invocation shapes, trace frames and callable identity. Each callback
+invocation allocates its own cells. Reads of captured fields share the original
+outer cells, which remain lazy when the callable is created. Input presence and
+validation are checked separately for the callback. Its memo keys include a fresh
+invocation token so two calls with equal arguments still evaluate their own local
+references. Multiple reads of a callback-local field share its once-cell.
+
+The callback can run on the originating thread while the enclosing execution is
+active. Deferred or worker-thread invocation, nested graph callbacks, unproven
+captures and record-shaped parameter routes fail closed. The shipped eager
+`core.hof/map` can call `core.strings/str-upper` through this path. Browser export
+explicitly rejects the JVM-only closure operation.
+
+### Dependency memo keys
 
 Memo keys are built without field reads, relative to the target being memoized.
 Known eager literal/parameter values retain value equality, with their field
@@ -151,9 +171,9 @@ domains requires an explicit key representation.
 
 This is preparation for a shared canonical compiler, not completed runtime
 migration. The production legacy compiler is still the oracle. Future work must
-normalize its slot/ref/sequence/HOF inputs into the same IR, finish closures and
-consumption obligations, and remove the parallel lowering paths before runtime
-migration can be considered complete.
+normalize its slot/ref/sequence/HOF inputs into the same IR, finish deferred
+closure lifetimes and consumption obligations, and remove the parallel lowering
+paths before runtime migration can be considered complete.
 
 ## Browser plans
 

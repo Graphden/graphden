@@ -16,9 +16,9 @@
    frozen :context and explicit :implementations (see ir/lower-checked).
    This fixture API accepts leaf addresses, not public authoring names or
    arbitrary whole-record parameters. It does not bypass execute's guards.
-   Primitive field-read obligations use the existing validator. Container
-   obligations, graph-callable closures and list builders are unsupported
-   cases, not fallback to the legacy compiler."
+   Primitive field-read obligations use the existing validator. Supported
+   closures retain a synchronous invocation lifetime. Container obligations
+   and list builders require separate lowering."
   [analysis {:keys [context implementations]}]
   (let [plan (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
                                          :target-names (update-vals (:fns context) :name)
@@ -26,14 +26,14 @@
         validators (context/call-with-types
                      context
                      #(into {} (map (fn [[address type]] [address (validator/build type)]))
-                            (merge (into {} (map (fn [address]
-                                                   [address (get-in plan [:expressions address :type])]))
-                                         (:parameters plan))
+                            (merge (into {} (keep (fn [[address {:keys [op type]}]]
+                                                    (when (= :supplied op) [address type])))
+                                         (:expressions plan))
                                    (:value-obligations plan))))]
     (fn [supplied ctx]
       (let [ctx (eager/invocation-context ctx)
             frame (frame/instantiate plan validators supplied ctx)]
-        (frame/invoke-scope frame (:root-scope plan) ctx)))))
+        (frame/invoke-root frame ctx)))))
 
 
 (defn compile-named

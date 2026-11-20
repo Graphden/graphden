@@ -150,9 +150,25 @@ closed for structured binding rows.
 The offline edit and removal primitives compare the supplied version with
 the live winner on the request's branch. The semantic graph writer opens
 the transaction before the structured binding lock, winner read and write.
+Raw structured binding writes enter the same semantic writer before taking
+their binding and row locks.
 The transaction rolls back a failed edit, so its basis can be retried. Two
 edits on one branch cannot consume the same winner. Separate branches can
 each edit an inherited winner when both still resolve it.
+
+## Fixture transport
+
+The authenticated `POST /api/structured-input/preview` and
+`POST /api/structured-input/apply` routes exercise the offline commands.
+The request selects `bind`, `edit` or `remove`. Bind takes a function ID,
+field path and literal. Edit takes the function and binding IDs and a new
+literal. Remove takes the two IDs. Apply repeats the proposal and includes
+the action's `expected-state`. Edit and removal also require the version
+from their preview. A stale version or a preview for a different action
+returns `409`.
+
+Both routes require the trusted offline capability even after HTTP
+authentication. The request cannot enable that capability.
 
 ## Verification
 

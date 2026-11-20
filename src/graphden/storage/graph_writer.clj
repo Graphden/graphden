@@ -52,8 +52,8 @@
 
 
 (def ^:private semantic-entities
-  #{:fn :fn-slot :slot :binding :binding-list-item
-    :fn-version :fn-slot-version :binding-version :binding-list-item-version
+  #{:fn :fn-slot :slot :binding :binding-list-item :input-binding
+    :fn-version :fn-slot-version :binding-version :binding-list-item-version :input-binding-version
     :ns :branch :branch-merge :branch-approval
     :resource-override :resource-override-version :package-install
     :grant :role :user :org})

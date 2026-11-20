@@ -12,21 +12,18 @@
     [graphden.versioning.storage.uniqueness :as uniqueness]))
 
 
-(defn lock-bindings!
+(defn- lock-bindings!
   "Join the structured binding lock in the caller's write transaction."
   [storage]
   (uniqueness/xact-lock! (tx/datasource storage) ["structured-input-bindings"]))
 
 
-(defn with-current-binding!
-  "Run an operation with the live branch winner under the owned graph writer
-   transaction and structured binding lock. The callback receives decorated
-   storage and the validated version. Throwing rolls back its writes."
-  [storage id expected-version operation]
+(defn with-binding-writer!
+  "Run a structured binding operation on the decorated writer connection."
+  [storage operation]
   (access/assert-write! :input-binding {})
-  (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage))
-                 (uuid? id) (uuid? expected-version))
-    (throw (ex-info "Input edits require a branch and a version precondition"
+  (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage)))
+    (throw (ex-info "Input writes require a versioned branch"
                     {:type :input/version-required})))
   (tx/assert-owns-commit! storage)
   ;; The winning version supplies the owner and can differ by branch. Start
@@ -35,15 +32,26 @@
                      (lock-bindings! storage)
                      (binding [resolution/*branch-chain-cache* (atom {})
                                branch-local/*storage-caches-override* (atom {})]
-                       (resolution/call-with-fresh-memos
-                         (fn []
-                           (let [current (resolution/resolve-version (vs/unwrap storage) :input-binding id
-                                                                     (vs/current-branch-id storage))]
-                             (when-not (and (= expected-version (:id current))
-                                            (not (resolution/tombstone? current)))
-                               (throw (ex-info "Input binding changed since it was read"
-                                               {:type :input/stale-version})))
-                             (operation storage current)))))))
+                       (resolution/call-with-fresh-memos #(operation storage)))))
+
+
+(defn with-current-binding!
+  "Run an operation with the live branch winner under the owned graph writer
+   transaction and structured binding lock. The callback receives decorated
+   storage and the validated version. Throwing rolls back its writes."
+  [storage id expected-version operation]
+  (when-not (and (uuid? id) (uuid? expected-version))
+    (throw (ex-info "Input edits require a version precondition"
+                    {:type :input/version-required})))
+  (with-binding-writer! storage
+    (fn [storage]
+      (let [current (resolution/resolve-version (vs/unwrap storage) :input-binding id
+                                                (vs/current-branch-id storage))]
+        (when-not (and (= expected-version (:id current))
+                       (not (resolution/tombstone? current)))
+          (throw (ex-info "Input binding changed since it was read"
+                          {:type :input/stale-version})))
+        (operation storage current)))))
 
 
 (defn replace-binding!

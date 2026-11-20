@@ -396,6 +396,23 @@
              (attempt #(input-edit/remove-binding! feature id (binding-version main id))))))))
 
 
+(deftest raw-update-and-versioned-edit-share-the-writer-order-test
+  (with-storage [base (base-storage)]
+    (let [storage (vs/wrap-with-versioning base)
+          {:keys [user name] :as ids} (seed! storage)
+          id (:id (sp/create-entity storage :input-binding (literal ids [user name] "before")))
+          expected (binding-version storage id)
+          start (promise)
+          raw (future @start (attempt #(sp/update-entity storage :input-binding id {:value "raw"})))
+          checked (future @start (attempt #(input-edit/replace-binding! storage id expected {:value "checked"})))]
+      (deliver start true)
+      (is (= :ok (deref raw 15000 :timeout)))
+      (let [verdict (deref checked 15000 :timeout)]
+        (is (contains? #{:ok :input/stale-version} verdict))
+        (is (= (if (= :ok verdict) 3 2)
+               (count (sp/query-entities base :input-binding-version {:input-binding-id id}))))))))
+
+
 (deftest historical-membership-tombstone-test
   (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)

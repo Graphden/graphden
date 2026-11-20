@@ -8,17 +8,14 @@
     [graphden.crud.package-guard :as pkg]
     [graphden.crud.request :as request]
     [graphden.crud.structured-input :as structured]
-    [graphden.input.access :as access]
     [graphden.input.migration :as migration]
     [graphden.input.read-view :as read-view]
     [graphden.input.storage :as input-storage]
     [graphden.input.surface :as surface]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
     [graphden.util.abort-shield :as shield]
-    [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as res]))
 
@@ -55,7 +52,8 @@
                  value))
 
 
-(defn- preview-basis
+(defn preview-basis
+  "Digest a value-free branch snapshot and the proposed command."
   [storage {:keys [fns fields members bindings markers]} command]
   (let [branch (vs/current-branch-id storage)
         base (vs/unwrap storage)
@@ -74,7 +72,8 @@
     (crypto/sha256-hex (migration/stable-edn (ordered-map-keys state)))))
 
 
-(defn- visible-leaf
+(defn visible-leaf
+  "Resolve a visible, free leaf in the function's own input scope."
   [graph path]
   (let [view (structured/project-analysis graph)
         wire (reduce (fn [node name] (some #(when (= name (:name %)) %) (:fields node))) view path)
@@ -104,12 +103,18 @@
     row))
 
 
-(defn- owner-plan
-  [storage {:keys [fn-id] :as command} apply?]
+(defn writable-context
+  "Reauthorize the root and collect the sources visible on the writer connection."
+  [storage fn-id]
   (writer/assert-write-authorized! storage :fn {} fn-id)
   (when-let [reason (pkg/write-rejection storage :fn {:id fn-id})]
     (reject! :authz/forbidden reason))
-  (let [ctx (read-view/collect storage fn-id (tenancy/browser-source-policy storage))
+  (read-view/collect storage fn-id (tenancy/browser-source-policy storage)))
+
+
+(defn- owner-plan
+  [storage {:keys [fn-id] :as command} apply?]
+  (let [ctx (writable-context storage fn-id)
         basis (preview-basis storage ctx command)
         _ (when (and apply? (not= basis (:expected-state command)))
             (reject! :input/stale-preview "Refresh the structured input before binding"))
@@ -118,18 +123,26 @@
     {:basis basis :row row :owner (get-in ctx [:fns fn-id])}))
 
 
-(defn- with-plan
-  [storage {:keys [fn-id] :as command} apply? f]
-  (access/assert-write! :input-binding {})
-  (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage)))
-    (reject! :input/version-required "Structured bindings require a versioned branch"))
-  (tx/assert-owns-commit! storage)
+(defn with-input-write
+  "Run a binding preview or create under the ordinary writer and binding lock."
+  [storage f]
   (binding [vs/*enforce-require-merge?* true]
-    (writer/with-write [storage {:entity :fn :ids [fn-id]}]
-                       (input-storage/lock-bindings! storage)
-                       (binding [res/*branch-chain-cache* (atom {})
-                                 branch-local/*storage-caches-override* (atom {})]
-                         (res/call-with-fresh-memos #(f storage (owner-plan storage command apply?)))))))
+    (input-storage/with-binding-writer! storage f)))
+
+
+(defn- with-plan
+  [storage command apply? f]
+  (with-input-write storage #(f % (owner-plan % command apply?))))
+
+
+(defn publish!
+  "Publish a successful committed input mutation as a function invalidation."
+  [ctx storage owner result]
+  (try
+    (entities/publish-write! ctx storage :fn owner)
+    result
+    (catch Exception _
+      (assoc result :publication-warning "The binding committed. Refresh the editor to see it."))))
 
 
 (defn preview
@@ -154,8 +167,4 @@
                                                       (reject! :input/write-refused "The input binding was not written"))
                                          :owner owner}))
             result {:ok true :committed true :fn-id (:id owner) :binding-id (:id binding)}]
-        (try
-          (entities/publish-write! ctx storage :fn owner)
-          result
-          (catch Exception _
-            (assoc result :publication-warning "The binding committed. Refresh the editor to see it.")))))))
+        (publish! ctx storage owner result)))))

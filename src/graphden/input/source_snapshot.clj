@@ -11,6 +11,7 @@
     [graphden.input.source-context :as source-context]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
@@ -148,7 +149,7 @@
 
 
 (defn- check-type-provenance!
-  [named-ids {:keys [source contract owner configurations bindings]}]
+  [named-ids type-rows {:keys [source contract owner configurations bindings]}]
   (let [primitives (ids/primitive-fn-ids)
         type-ids (merge primitives named-ids)
         return (:return-type source)]
@@ -158,21 +159,26 @@
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
-                            (= (get type-ids return) (:return-type-fn-id owner))))
+                            (= (get type-ids return) (:return-type-fn-id owner)))
+                       (rich/list-return? (:return-type-fn-id owner) return))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))
                                            (every? #{:type :required :description} (keys declaration))))
-                                  (or (descriptor/stored-source-type? type type-id named-ids) (and (uuid? type-id) (= type-id (get named-ids type))))))
+                                  (or (descriptor/stored-source-type? type type-id named-ids)
+                                      (and (uuid? type-id) (= type-id (get named-ids type)))
+                                      (rich/callable-field? type-rows type-id type))))
                            (:fields contract)))
       (reject! :rich-type-source-required (:id owner)))))
 
 
 (defn- verified-context
   [package entries resolve-named]
-  (let [named (named-types/evidence entries resolve-named)]
+  (let [named (named-types/evidence entries resolve-named)
+        type-rows (into [] (comp (mapcat :declaration-records) (filter #(= :fn (:kind %)))) (vals entries))
+        by-type-id (group-by :id type-rows)]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
-      (check-type-provenance! (:alias-ids named) entry))
+      (check-type-provenance! (:alias-ids named) by-type-id entry))
     (snapshot entries (:markers package) named)))
 
 

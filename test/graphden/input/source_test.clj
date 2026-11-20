@@ -148,12 +148,11 @@
                      {:name :anonymous :namespace "demo" :parent :sink
                       :args {:x {:parent :producer :args {}}}}]
         report (plan definitions)]
-    (is (= {:supported 2 :blocked 4} (:counts report)))
+    (is (= {:supported 3 :blocked 3} (:counts report)))
     (is (contains? (codes (result report :append)) :list-builder-required))
     (is (contains? (codes (result report :rename)) :rename-projection-required))
     (is (contains? (codes (result report :secret)) :resolver-binding-required))
-    (is (= #{:inline-identity-or-source-mapping-required}
-           (codes (result report :anonymous))))
+    (is (= [:ref {:parent :producer :bind {}}] (get-in (result report :anonymous) [:proposed :bind :x])))
     (is (not (str/includes? (pr-str (:blockers report)) "private-payload")))))
 
 
@@ -540,7 +539,7 @@
 
 
 (deftest unsupported-inline-shapes-stay-at-their-source-field
-  (doseq [body [{:parent :producer :args {}} {:parents [:producer]} {:parent :producer :type :any}
+  (doseq [body [{:parent :producer :type :any}
                 [{:parent :producer}] {:append [{:parent :producer}]}]]
     (let [d {:name :child :namespace "demo" :parent :sink :args {:items body}}
           entry (result (plan [base producer d]) :child)]
@@ -605,9 +604,9 @@
       (let [changed (assoc-in planned [:definitions 0 :proposed :bind :x 1 :bind :x] replacement)]
         (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))
     (let [wrapper (assoc-in host [:args :x :args :x] {:ref :producer})
-          report (source/plan-module [wrapper] (prepared [base producer wrapper]))]
-      (is (= [{:code :inline-binding-origin-required :definition ["demo" :host]
-               :source-path [:args :x :args :x]}] (:blockers report))))))
+          entry (result (verified [base producer wrapper]) :host)]
+      (is (= :authored-source-equivalent (:verification entry)))
+      (is (= {:x :ref-wrapper} (get-in entry [:proposed :bind :x 1 :legacy-forms]))))))
 
 
 (deftest inline-children-preserve-inherited-occupancy-blockers
@@ -659,3 +658,24 @@
                                 [(assoc child :parent :relay) :rename-projection-required]
                                 [(assoc-in child [:args :x :type] :int) :rename-projection-required]]]
       (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))
+
+
+(deftest nested-inline-declarations-retain-order-and-all-use-sites
+  (let [host-base (assoc base :args {:x :any :y :any :z :any})
+        inner (array-map :args (array-map :y {:ref :producer} :x {:example [1 2]}) :parent :sink)
+        outer (array-map :args (array-map :z inner :y {:parent :producer :args {}} :x false)
+                         :return-type :any :parents [:sink])
+        host {:name :host :namespace "demo" :parent :sink :args {:x outer}}
+        context (prepared [host-base producer host])
+        planned (source/plan-module [host] context)
+        checked (result (source/verify-module planned context) :host)
+        root (:v2 checked)
+        nodes (rest (tree-seq :inline-definitions (comp vals :inline-definitions) root))
+        legacy-owners (remove #{(ids/fn-id "demo" :host) (ids/fn-id "demo" :sink) (ids/fn-id "demo" :producer)}
+                              (map :fn-id (:fn-defs context)))
+        edited (update-in planned [:definitions 0 :proposed :bind :x 1 :bind]
+                          #(into (array-map) (reverse %)))]
+    (is (= :authored-source-equivalent (:verification checked)))
+    (is (= 3 (count nodes)))
+    (is (= (set legacy-owners) (set (map :fn-id nodes))))
+    (is (= :blocked (:status (result (source/verify-module edited context) :host))))))

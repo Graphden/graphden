@@ -8,51 +8,120 @@
        (vector? (second form)) (= 1 (count (second form))) (simple-keyword? (first (second form)))))
 
 
-(defn inline-leaf?
-  "A single-parent computation with no authored fields, bindings or annotations."
-  [form]
-  (and (map? form) (= #{:parent} (set (keys form))) (keyword? (:parent form))))
+(def ^:private inline-metadata
+  #{:description :return-type :return-type-wide? :lambda-params :expects-effects
+    :effects :branch-local? :tags})
 
 
-(defn- scalar?
-  [x]
-  (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x)))
+(defn- inline-shape?
+  [body body-keys]
+  (and (map? body)
+       (or (and (keyword? (:parent body)) (not (contains? body :parents)))
+           (and (not (contains? body :parent)) (vector? (:parents body))
+                (seq (:parents body)) (every? keyword? (:parents body))))
+       (every? (into inline-metadata body-keys) (keys body))))
 
 
-(defn- single-field?
+(defn- fields?
   [fields]
-  (and (map? fields) (= 1 (count fields)) (simple-keyword? (ffirst fields))))
+  (and (map? fields) (every? simple-keyword? (keys fields))))
 
 
 (defn legacy-inline?
-  "Direct use-sites whose source spelling can be reconstructed from v2."
+  "Direct inline forms. The legacy parser decides the meaning of each arg."
   [body]
-  (or (inline-leaf? body)
-      (and (map? body) (= #{:parent :args} (set (keys body))) (keyword? (:parent body))
-           (single-field? (:args body))
-           (let [v (val (first (:args body)))]
-             (or (scalar? v) (and (map? v) (= #{:value} (set (keys v)))))))))
+  (and (inline-shape? body #{:parent :parents :args})
+       (or (not (contains? body :args)) (fields? (:args body)))))
+
+
+(defn- replace-inline-fields
+  "Update a field map without moving its key. A nested inline's legacy ID
+   includes the printed contents and ordering of the enclosing argument map."
+  [body from to fields]
+  (into (empty body)
+        (keep (fn [[k v]]
+                (cond
+                  (= from k) [to fields]
+                  (= :legacy-forms k) nil
+                  :else [k v])))
+        body))
+
+
+(declare inline-origin)
+
+
+(defn- original-leaf
+  [form spelling]
+  (cond
+    (and (nil? spelling) (not (coll? form))) [form]
+    (and (vector? form) (= 2 (count form)))
+    (let [[op value] form]
+      (case op
+        :value (case spelling
+                 nil [{:value value}]
+                 :bare-value (when (coll? value) [value])
+                 nil)
+        :ref (case spelling
+               nil (cond
+                     (keyword? value) [value]
+                     (map? value) (when-let [origin (inline-origin value)] [origin]))
+               :ref-wrapper (when (keyword? value) [{:ref value}])
+               nil)
+        nil))))
 
 
 (defn inline-origin
-  "Recover the original anonymous body for use-site identity. Explicit v2
-   values preserve v1 value wrappers; bare scalar values preserve their bare
-   spelling. An explicit ref here came from a bare graph name. V1 ref wrappers
-   would lose that distinction and are outside this reversible subset."
+  "Recover the legacy body from direct v2 binds. :legacy-forms records
+   spellings that explicit :value and :ref expressions would otherwise erase.
+   The prefix and position of an inline use are supplied by its parent."
   [body]
-  (cond
-    (inline-leaf? body) body
-    (and (map? body) (= #{:parent :bind} (set (keys body))) (keyword? (:parent body))
-         (single-field? (:bind body)))
-    (let [[field form] (first (:bind body))
-          leaf (fn [v] {:parent (:parent body) :args {field v}})]
-      (cond
-        (scalar? form) (leaf form)
-        (and (vector? form) (= 2 (count form)))
-        (case (first form)
-          :value (leaf {:value (second form)})
-          :ref (when (keyword? (second form)) (leaf (second form)))
-          nil)))))
+  (when (inline-shape? body #{:parent :parents :bind :legacy-forms})
+    (if-not (contains? body :bind)
+      (when-not (contains? body :legacy-forms) body)
+      (let [{:keys [bind legacy-forms]} body]
+        (when (and (fields? bind)
+                   (or (not (contains? body :legacy-forms))
+                       (and (map? legacy-forms)
+                            (every? (set (keys bind)) (keys legacy-forms))
+                            (every? #{:bare-value :ref-wrapper} (vals legacy-forms)))))
+          (let [originals (mapv (fn [[k form]]
+                                  (when-let [[original] (original-leaf form (get legacy-forms k))]
+                                    [k original]))
+                                bind)]
+            (when (every? some? originals)
+              (replace-inline-fields body :bind :args (into (empty bind) originals)))))))))
+
+
+(defn- migrated-leaf
+  [raw [op value :as expression]]
+  (case op
+    :value (cond
+             (and (map? raw) (= #{:value} (set (keys raw)))) [expression nil]
+             (coll? raw) [expression :bare-value]
+             :else [raw nil])
+    :ref (cond
+           (legacy-inline? raw) [expression nil]
+           (keyword? raw) [[:ref raw] nil]
+           (and (map? raw) (= #{:ref} (set (keys raw))) (keyword? (:ref raw)))
+           [[:ref (:ref raw)] :ref-wrapper])
+    nil))
+
+
+(defn migrate-inline
+  "Form a direct v2 body with the source argument order and spelling. The
+   caller must compare the reconstructed body and independently check its UUID."
+  [body expressions]
+  (if-not (contains? body :args)
+    body
+    (let [leaves (mapv (fn [[k raw]]
+                         (when-let [[form spelling] (migrated-leaf raw (get expressions k))]
+                           [k form spelling]))
+                       (:args body))]
+      (when (every? some? leaves)
+        (let [fields (into (empty (:args body)) (map (fn [[k form _]] [k form])) leaves)
+              spellings (into (array-map) (keep (fn [[k _ spelling]] (when spelling [k spelling]))) leaves)]
+          (cond-> (replace-inline-fields body :args :bind fields)
+            (seq spellings) (assoc :legacy-forms spellings)))))))
 
 
 (defn configuration-type?

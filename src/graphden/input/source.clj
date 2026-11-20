@@ -47,14 +47,6 @@
     source #(parse/normalize-ref % (:name->id context) (:namespace source))))
 
 
-(defn- inline-alignment-blocker
-  [source field body]
-  (let [[arg spec] (when (map? (:args body)) (first (:args body)))]
-    (if (and (:parent body) (map? (:args body)) (= 1 (count (:args body))) (map? spec) (= #{:ref} (set (keys spec))))
-      (blocker source :inline-binding-origin-required [:args field :args arg])
-      (blocker source :inline-identity-or-source-mapping-required [:args field]))))
-
-
 (defn- alignment-blockers
   "Preparation adds an empty args map and fn-id, and may extract anonymous
    computations. Only that extraction is a recognized semantic difference."
@@ -71,7 +63,7 @@
                                           body)]
                            (when-not (and (contains? args field) (contains? prepared-args field)
                                           (= expected (get prepared-args field)))
-                             (inline-alignment-blocker source field body))))
+                             (blocker source :inline-identity-or-source-mapping-required [:args field]))))
                        fields)]
     (cond-> (vec blockers)
       (not= (ids/fn-id (:namespace source) (:name source)) (:fn-id prepared))
@@ -301,33 +293,45 @@
                    (seq configuration) (assoc :configure configuration)))}))
 
 
+(declare ^:private lower-inlines)
+
+
+(defn- inline-child-plan
+  [body child context]
+  (let [source (assoc body :name (:name child) :namespace (:namespace child))
+        plan (composed-plan source child context ((::records-of context) child))]
+    (lower-inlines source child context plan)))
+
+
 (defn- lower-inline-argument
   [source prepared context {:keys [source-path expression] :as argument}]
   (let [body (get-in source source-path)]
-    (if-not (and (format/legacy-inline? body) (:args body) (= [:ref body] expression))
+    (if-not (and (format/legacy-inline? body) (contains? body :args) (= [:ref body] expression))
       argument
       (let [name (get-in prepared source-path)
-            [child & duplicates] (get (::prepared context) [(or (:namespace source) "") name])]
+            ns-id (:namespace source)
+            [child & duplicates] (or (get (::prepared context) [(or ns-id "") name])
+                                     (when-let [visible (get (:defs-by-name context)
+                                                             (keyword (or ns-id "") (clojure.core/name name)))]
+                                       [visible]))
+            problem #(assoc argument :blockers [(blocker source % source-path)])]
         (if (or (nil? child) (seq duplicates))
-          (assoc argument :blockers [(blocker source :missing-inline-declaration source-path)])
-          (let [child-source (assoc body :name name :namespace (:namespace source))
-                plan (composed-plan child-source child context ((::records-of context) child))
-                [field raw] (first (:args body))
-                [op payload] (get-in plan [:proposed :bind field])
-                bind (if (= :ref op) [:ref raw] (if (map? raw) [:value payload] raw))
-                v2 {:parent (:parent body) :bind {field bind}}]
+          (problem :missing-inline-declaration)
+          (let [{:keys [proposed arguments blockers]} (inline-child-plan body child context)
+                v2 (when (and proposed (not-any? #(contains? proposed %) [:input :configure]))
+                     (format/migrate-inline body (:bind proposed)))]
             (cond
-              (seq (:blockers plan))
+              (seq blockers)
               (assoc argument :blockers
-                     (mapv #(merge % (blocker source (:code %) (into source-path (:source-path %)))) (:blockers plan)))
-              (not (and (#{:ref :value} op) (migration/same-edn? body (format/inline-origin v2))))
-              (assoc argument :blockers [(blocker source :inline-binding-origin-required source-path)])
-              :else (assoc argument :expression [:ref v2]))))))))
+                     (mapv #(merge % (blocker source (:code %) (into source-path (:source-path %)))) blockers))
+              (not (and v2 (migration/same-edn? body (format/inline-origin v2))))
+              (problem :inline-binding-origin-required)
+              :else (assoc argument :expression [:ref v2] :inline-arguments arguments))))))))
 
 
 (defn- lower-inlines
   [source definition context plan]
-  (if-not (some #(and (:args %) (format/legacy-inline? %)) (vals (:args source)))
+  (if-not (some #(and (format/legacy-inline? %) (contains? % :args)) (vals (:args source)))
     plan
     (let [args (mapv #(lower-inline-argument source definition context %) (:arguments plan))
           blockers (into (:blockers plan) (mapcat :blockers) args)]
@@ -437,7 +441,7 @@
 
 
 (defn- legacy-inline-meaning
-  [environment source prepared {:keys [source-path origin]}]
+  [environment source prepared {:keys [source-path origin inline-arguments]}]
   (let [body (get-in source source-path)]
     (when (format/legacy-inline? body)
       (let [id (ids/fn-id (:namespace source) (get-in prepared source-path))
@@ -447,18 +451,25 @@
                           {:code :missing-inline-declaration :path source-path})))
         (let [records ((:records-of environment) child)
               bindings (filterv #(= :binding (:kind %)) records)
-              ctx (source-context/declaration-context environment child records bindings)]
-          [[(:slot-id origin)] [body (authored-meaning child ctx bindings)]])))))
+              ctx (source-context/declaration-context environment child records bindings)
+              raw-child (assoc body :namespace (:namespace source))]
+          [[(:slot-id origin)] {:origin body :meaning (authored-meaning child ctx bindings)
+                                :children (into {} (keep #(legacy-inline-meaning environment raw-child child %))
+                                                inline-arguments)}])))))
+
+
+(defn- v2-inline-meaning
+  [[path child]]
+  (let [bindings (mapv migration/legacy-binding (:bindings child))]
+    [path {:origin (format/inline-origin (:inline-body child))
+           :meaning (authored-meaning (dissoc (:source child) :bind) child bindings)
+           :children (into {} (map v2-inline-meaning) (:inline-definitions child))}]))
 
 
 (defn- verify-inline-children!
   [environment {:keys [source legacy]} prepared v2]
   (let [expected (into {} (keep #(legacy-inline-meaning environment source prepared %)) (:arguments legacy))
-        actual (into {} (map (fn [[path child]]
-                               (let [bindings (mapv migration/legacy-binding (:bindings child))]
-                                 [path [(format/inline-origin (:inline-body child))
-                                        (authored-meaning (dissoc (:source child) :bind) child bindings)]])))
-                     (:inline-definitions v2))]
+        actual (into {} (map v2-inline-meaning) (:inline-definitions v2))]
     (when-not (migration/same-edn? expected actual)
       (throw (ex-info "Inline source identities or declarations changed"
                       {:type :input/source-verification :code :inline-declaration-mismatch})))))

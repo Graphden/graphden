@@ -326,6 +326,18 @@
     (is (not (str/includes? target "_anon-")))))
 
 
+(deftest nested-inline-cst-preserves-wrapped-references-and-bare-collections
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :y :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:args {:y {:args {:x {:ref ; keep the ref\r\n :demo.main/producer}"
+                  " :y {:foo ; keep the data\r\n \"a\r\nb\"}} :parent :sink} :x nil} :parents [:sink]}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":x [:ref ; keep the ref\r\n :demo.main/producer]"))
+    (is (str/includes? target ":y [:value {:foo ; keep the data\r\n \"a\r\nb\"}]"))
+    (is (str/includes? target ":legacy-forms {:x :ref-wrapper, :y :bare-value} :bind"))
+    (is (not (str/includes? target "_anon-")))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))

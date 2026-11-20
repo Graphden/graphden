@@ -47,22 +47,26 @@ assertion or a list, map, tuple or union assertion with named leaves.
 The verifier compares the rich form as well as its storage ID, since
 different collection types can share that ID.
 
-A direct anonymous binding whose entire body is `{:parent P}` becomes
-`[:ref {:parent P}]`. The reader uses the original namespace, host name,
-field and normalized parent spelling to reproduce the legacy child UUID.
-The exported source retains the authored parent spelling. Verification
-compares the child's declaration rows and the owner's reference to that child.
-A direct child may also bind one field. Its bare scalars stay bare,
-a bare graph reference `P` becomes `[:ref P]`, and a literal wrapper
-`{:value x}` becomes `[:value x]`. These spellings let a fresh reader
-recover the original anonymous-body hash and independently parse the child
-binding. The child retains its own binding UUID and target field UUID.
-An explicit legacy `{:ref P}` needs additional provenance to distinguish
-it from a bare reference. Empty explicit `:args {}`, multi-field bodies,
-annotated inline refs and inline list items also remain blocked. List builders,
-rename projections, referenced input scopes, assertions that require inline
-type rows and unknown binding policies have explicit blockers.
-Secret-path resolution must never become an ordinary literal value.
+A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
+The reader uses the original namespace, host name, field and normalized
+reference spellings to reproduce each legacy child UUID. The host name of
+a nested child is the UUID-derived synthetic name of its enclosing child.
+The CST edit preserves the authored reference spelling and argument order.
+
+Children can bind multiple fields and contain direct inline descendants.
+A bare scalar stays bare, a bare reference `P` becomes `[:ref P]`, and a
+value wrapper `{:value x}` becomes `[:value x]`. The child declaration's
+`:legacy-forms` map records the field keys whose original spelling needs
+extra information to recover the legacy hash. `:ref-wrapper` preserves
+`{:ref P}`, and `:bare-value` preserves a bare collection treated as a
+whole value by the legacy loader. The reader keeps absent arguments
+distinct from `:bind {}`. It derives and verifies the rows and binding
+origins recursively for every child.
+
+Inline annotations on the enclosing binding and inline list items still
+have explicit blockers. List builders, rename projections, referenced
+input scopes, assertions that require inline type rows and unknown binding
+policies can also prevent conversion. Secret paths keep resolver semantics.
 
 `graphden.input.source/verify-module` checks each supported plan entry against
 the same prepared package context. The offline adapter lowers the actual

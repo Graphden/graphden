@@ -165,13 +165,15 @@
 (defn- normalize-inline-origin
   [body origin module-namespace normalize-ref]
   (let [resolve-ref #(normalize-ref module-namespace %)
-        [_ form] (first (:bind body))
-        parent (resolve-ref (:parent origin))]
-    (when-not (keyword? parent) (reject! :unresolved-inline-parent))
-    (when (and (keyword? form) (resolve-ref form))
-      (reject! :inline-binding-origin-mismatch))
-    (when (and (vector? form) (= :ref (first form)) (not (keyword? (resolve-ref (second form)))))
-      (reject! :unresolved-inline-reference))
+        parents (or (:parents origin) [(:parent origin)])]
+    (when-not (every? #(keyword? (resolve-ref %)) parents)
+      (reject! :unresolved-inline-parent))
+    (doseq [form (vals (:bind body))]
+      (when (and (keyword? form) (resolve-ref form))
+        (reject! :inline-binding-origin-mismatch))
+      (when (and (vector? form) (= :ref (first form)) (keyword? (second form))
+                 (not (keyword? (resolve-ref (second form)))))
+        (reject! :unresolved-inline-reference)))
     (rebase/rewrite-references origin #(or (resolve-ref %) %))))
 
 
@@ -239,7 +241,7 @@
   (when-not (ifn? context-for) (reject! :context-provider-required))
   (let [definitions (mapv #(parse-definition % (:namespace module) options) (:fns module))
         records (unique-records (mapcat definition-records definitions))
-        owners (mapcat (fn [d] (cons (:fn-id d) (map :fn-id (vals (:inline-definitions d))))) definitions)]
+        owners (map :fn-id (mapcat #(tree-seq :inline-definitions (comp vals :inline-definitions) %) definitions))]
     (when-not (= (count owners) (count (set owners))) (reject! :duplicate-definition))
     (rows/state (filter #(= :input-binding (:kind %)) records))
     {:input-format 2 :module (dissoc module :fns) :definitions definitions :records records}))

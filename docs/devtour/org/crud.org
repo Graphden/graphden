@@ -50,13 +50,13 @@ Resolves the requested branch by UUID or name before writing. The resulting bran
 :PROPERTIES:
 :CUSTOM_ID: crud/read-input
 :FILE: src/graphden/crud/structured_input.clj
-:LINE: 106
-:MINS: 1.7
+:LINE: 176
+:MINS: 2.2
 :END:
 
 Reads the selected v2 declaration and its reachable owners under one decorated branch snapshot and source policy. Bounded owner batches feed the existing analyzer. The graph subtree attaches only a viewer-safe projection to its root row.
 
-- source :: [[file:../../../src/graphden/crud/structured_input.clj::(defn read-input][src/graphden/crud/structured_input.clj:106]]
+- source :: [[file:../../../src/graphden/crud/structured_input.clj::(defn read-input][src/graphden/crud/structured_input.clj:176]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]], [[file:editor.org::#editor/appendStructuredInputStrip][appendStructuredInputStrip]]
 - referenced from :: [[file:crud.org::#crud/with-plan][with-plan]], [[file:editor.org::#editor/appendStructuredInputStrip][appendStructuredInputStrip]]
 
@@ -72,7 +72,7 @@ Preview and bind use the same decorated branch writer. It locks structured bindi
 
 - source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:131]]
 - see also :: [[file:crud.org::#crud/read-input][read-input]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
-- referenced from :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/dispatch][dispatch]], [[file:editor.org::#editor/openStructuredBindPopover][openStructuredBindPopover]]
+- referenced from :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/dispatch][dispatch]], [[file:editor.org::#editor/openStructuredInputPopover][openStructuredInputPopover]]
 
 * 6. with-current-binding!
 :PROPERTIES:

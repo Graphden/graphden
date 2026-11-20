@@ -133,6 +133,13 @@ The **Bind** action sends that path and the literal through preview and apply,
 then reloads the subtree so the new binding disappears from the remaining
 fields. The editor retains the proposed value when the server refuses it.
 
+The same fixture can list its own occupied literal leaves in **Structured
+inputs**. Each entry carries the checked path, type, binding ID and current
+branch version. Concealed types and hidden address prefixes suppress the
+entire entry. Stored literals stay on the server. **Edit** accepts a new
+value and **Remove** opens a confirmation. Both compare the displayed
+version with their own preview before applying.
+
 ## Preview and bind one leaf
 
 An offline fixture can call `graphden.crud.structured-input-bind/preview`

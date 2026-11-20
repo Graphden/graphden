@@ -199,7 +199,7 @@
                      (reject! :unsupported-closure-scope {:address address}))
                    (when-not (and (= callable-type (:callable-type reference))
                                   (types/fn-type? type) (types/fn-type? callable-type)
-                                  (not (some #(types/type-any? types/type-var? %) [type callable-type]))
+                                  (not-any? #(types/type-any? types/type-var? %) [type callable-type])
                                   (types/subtype? callable-type type))
                      (reject! :unproved-closure-contract {:address address}))
                    (doseq [{:keys [from source role via] :as capture} captures]

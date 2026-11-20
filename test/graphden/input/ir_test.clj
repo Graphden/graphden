@@ -5,14 +5,14 @@
     [graphden.input.ir :as ir]))
 
 
-(def definitions
+(def ^:private base-definitions
   {:root {:input {:user {:name :text :unused :text} :result :text}
           :return :text :bindings {[:user :name] {:value "Ada"} [:result] {:ref :child :id :use}}}
    :child {:input {:x :text} :return :text}})
 
 
 (defn- structural-model
-  ([] (structural-model definitions))
+  ([] (structural-model base-definitions))
   ([definitions]
    ;; A deliberately explicit checker seam for pure BB lowering tests. These
    ;; assertions prove routing, not typing; compile-test uses the real checker.
@@ -22,7 +22,7 @@
 
 
 (defn- lower
-  ([model] (lower model definitions))
+  ([model] (lower model base-definitions))
   ([{:keys [analysis context]} definitions]
    (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
                                :implementations (fixture/implementations definitions
@@ -105,7 +105,7 @@
 
 (deftest special-base-semantics-and-missing-abi-provenance-reject
   (let [{:keys [analysis context]} (structural-model)
-        impls (fixture/implementations definitions {:root (fn [_ _]) :child (fn [_ _])})
+        impls (fixture/implementations base-definitions {:root (fn [_ _]) :child (fn [_ _])})
         target (fixture/id :child)
         code (fn [impls]
                (try (ir/lower-checked analysis {:snapshot-id (:snapshot-id context) :implementations impls})

@@ -692,7 +692,7 @@
    The Kaocha runner completes each layer before starting the next. A parse
    failure removes hints altogether; the unchanged full suite still runs."
   [changed kind]
-  (when changed
+  (when (seq changed)
     (try
       (let [{:keys [by-path package-consumers package-fn-consumers package-impl-consumers
                     all-test-source-consumers all-core-source-consumers]

@@ -5,7 +5,17 @@
     [ci-priority-core :as priority]
     [clojure.edn :as edn]
     [clojure.string :as str]
-    [clojure.test :refer [deftest is run-tests]]))
+    [clojure.test :refer [deftest is run-tests use-fixtures]]))
+
+
+(use-fixtures :once
+  (fn [run]
+    ;; These tests inspect one immutable checkout. Temporary repository fixtures
+    ;; execute in separate BB processes and build their own uncached graphs.
+    ;; Keep the snapshot local to this suite; later load-file suites see fresh files.
+    (let [build-graph @#'priority/namespace-graph
+          snapshot (delay (build-graph))]
+      (with-redefs-fn {#'priority/namespace-graph #(deref snapshot)} run))))
 
 
 (deftest exact-frontend-hints-never-filter-browser-suite

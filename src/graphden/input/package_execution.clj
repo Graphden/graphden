@@ -5,18 +5,13 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
     [graphden.input.ir :as ir]
-    [graphden.input.source-snapshot :as snapshot]))
+    [graphden.input.source-snapshot :as snapshot]
+    [graphden.input.staged-module :as staged]))
 
 
-(defn compile-package
-  "Freeze and check a package closure, then lower its named residual inputs.
-   package comes from source-snapshot/package-index. roots are frozen rich
-   entries by base UUID; implementations are explicit base UUID -> function.
-   Both must originate in the same prepared package runtime. Returns evidence
-   and an ordinary executor closure, without publishing either globally."
-  [package root roots implementations]
-  (let [{:keys [context options]} (snapshot/freeze-closure package [root] roots)
-        implementations (update-vals
+(defn- compile-frozen
+  [{:keys [context options]} root implementations]
+  (let [implementations (update-vals
                           (:implementations options)
                           (fn [{:keys [base-fn-id] :as entry}]
                             (let [impl (get implementations base-fn-id)]
@@ -26,3 +21,35 @@
         checked (analysis/analyze-effective-input context root options)]
     {:context context :analysis checked
      :invoke (compile/compile-named checked {:context context :implementations implementations})}))
+
+
+(defn compile-package
+  "Freeze and check a package closure, then lower its named residual inputs.
+   package comes from source-snapshot/package-index. roots are frozen rich
+   entries by base UUID; implementations are explicit base UUID -> function.
+   Both must originate in the same prepared package runtime. Returns evidence
+   and an ordinary executor closure, without publishing either globally."
+  [package root roots implementations]
+  (compile-frozen (snapshot/freeze-closure package [root] roots) root implementations))
+
+
+(defn compile-staged-module
+  "Offline replay of one staged module against original package preparation.
+   Supply the trusted legacy module and package index, the staged bytes and
+   their expected receipt SHA-256, and the caller's visible executable UUIDs.
+   Only a root from the staged module can be compiled here. Dependencies
+   outside the module still come from the caller's visible prepared package.
+   No registration, package loading, or storage changes occur."
+  [package root roots implementations {:keys [legacy-module bytes sha256 visible-fn-ids]}]
+  (when-not (and (set? visible-fn-ids) (contains? visible-fn-ids root))
+    (ir/reject! :staged-function-not-visible {}))
+  (let [module (staged/read-pinned bytes sha256)
+        package (snapshot/with-staged-module package legacy-module module)]
+    (when-not (contains? (:staged-proposals package) root)
+      (ir/reject! :staged-root-required {}))
+    (let [frozen (snapshot/freeze-closure package [root] roots)
+          executable (keys (get-in frozen [:options :implementations]))]
+      (when-not (every? visible-fn-ids executable)
+        (ir/reject! :staged-function-not-visible {}))
+      (assoc (compile-frozen frozen root implementations)
+             :staged-source {:sha256 sha256 :namespace (:namespace module)}))))

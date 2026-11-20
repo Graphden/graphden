@@ -404,6 +404,21 @@ definition ledger before publishing the directory. The staging receipt lists
 the verified output checksums and blocked modules. The source checkout
 remains intact.
 
+`graphden.input.package-execution/compile-staged-module` can replay one staged
+file offline. Supply the file's bytes and the expected checksum from its
+trusted staging receipt, the original legacy module and prepared package
+index, frozen implementation signatures and implementations, and the
+caller's visible executable UUIDs. The reader checks SHA-256 over the exact
+bytes before decoding one UTF-8 EDN form. All definitions must preserve their
+authored source meaning and declaration identities. The requested root must
+belong to the staged module. Its compiled closure checks executable visibility
+and uses the same staged forms in the checked JVM path.
+
+This still depends on legacy preparation and explicit package visibility.
+Production activation requires resolving packages, imports and visibility
+from version-2 source and selecting its compiler in the loader. Import,
+storage migration and registration are separate operations.
+
 ## Focused verification
 
 ```sh

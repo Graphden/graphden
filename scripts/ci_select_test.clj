@@ -79,6 +79,18 @@
       (is (not-any? #{"commitlint"} (names-in [:pre :priority :test :post-test]))))))
 
 
+(deftest markdownlint-runs-once-in-the-affected-wave
+  (doseq [changed [nil #{"docs/example.md"} #{".markdownlint-cli2.jsonc"}]]
+    (let [selected (:run (ci-select/partition-checks real-registry {:changed changed}))
+          batches (ci-select/canonical-batches real-registry selected)
+          occurrences (for [[wave checks] batches
+                            check (mapcat identity checks)
+                            :when (= "markdownlint" (:name check))]
+                        [wave (:bb check)])]
+      (is (= [[:affected "markdownlint"]] occurrences))))
+  (is (not (contains? (run-names #{"src/graphden/input/core.clj"}) "markdownlint"))))
+
+
 (deftest public-contract-guard-runs-before-the-full-suites
   (let [selected (run-names #{"resources/packages/registry/marketplace/fns.edn"})
         batches (ci-select/canonical-batches real-registry real-registry)

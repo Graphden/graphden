@@ -63,16 +63,22 @@ bb() {
       case "$2" in
         gate-plan)
           echo gate-plan >> "$TEST_DIR/priority.calls"
+          [ "$5" = "$(git rev-parse HEAD)" ] || return 1
+          [ "$6" = "$LOG_DIR/_train-$WTQ_REPORT_TS.ci-expected.edn" ] || return 1
           printf '%s\n' "${TEST_PRIORITY_INTEGRATION:-}" > "$4.integration"
           printf '%s\n' "${TEST_PRIORITY_BROWSER:-}" > "$4.browser"
-          printf '%s\n' '{:unit [] :integration []}' > "$4.kaocha.edn" ;;
+          printf '%s\n' '{:unit [] :integration []}' > "$4.kaocha.edn"
+          printf '%064x\n' 1 ;;
         *) echo "unexpected priority selector $2" >&2; return 1 ;;
       esac ;;
     scripts/ci_fast_cli.clj) echo 'gate bypassed admitted preflight' >&2; return 1 ;;
     scripts/ci_gate.clj)
       echo "$2" >> "$TEST_LOG"
       if [ "$2" = verify ]; then [ "${FAIL_VERIFY:-0}" != 1 ]; fi ;;
-    ci) echo ci >> "$TEST_LOG"; [ "${FAIL_CI:-0}" != 1 ] ;;
+    ci)
+      [ "$GRAPHDEN_CI_PRIORITY_DIGEST" = "$(printf '%064x' 1)" ] || return 1
+      echo ci >> "$TEST_LOG"
+      [ "${FAIL_CI:-0}" != 1 ] ;;
     test-e2e)
       if [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ]; then echo e2e-early >> "$TEST_LOG"
       elif [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then echo e2e-rest >> "$TEST_LOG"

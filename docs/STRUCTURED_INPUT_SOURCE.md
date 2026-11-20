@@ -342,6 +342,13 @@ checksum-bound patch. Comments, line endings and untouched literal bytes
 stay in the original source representation. Files with blocked entries can
 still be inventoried and diagnosed by the dry-run.
 
+Pass `--artifact PATH` to the dry-run CLI to save these module patches into
+a new EDN artifact. Each patch carries its source and target checksums,
+replacement text and reversible edits. Use an artifact path outside the
+source repos. The artifact contains authored literals and stays private.
+Standard output still contains only the sanitized dry-run report.
+The artifact can be partial while definitions are blocked.
+
 ## Focused verification
 
 ```sh

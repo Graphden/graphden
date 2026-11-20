@@ -12,6 +12,7 @@
     [graphden.packages.records.slot-resolution :as slots]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]
+    [structured-input-cst :as cst]
     [structured-input-inventory :as inventory]
     [structured-input-list-probe :as list-probe])
   (:import
@@ -165,8 +166,23 @@
                       (:source-definitions package))})
 
 
+(defn- module-patches
+  [{:keys [repository read-source source-modules]} entries context]
+  (let [by-file (group-by #(get-in % [:source :source-file]) entries)]
+    (mapv (fn [{:keys [path]}]
+            (let [identity {:repository repository :path path}]
+              (try
+                (let [verify #(:definitions (source/verify-module {:definitions %} context))
+                      patch (cst/plan-verified-module (read-source path) (get by-file path) verify)]
+                  (assoc identity :status :verified :patch patch))
+                (catch clojure.lang.ExceptionInfo error
+                  (assoc identity :status :blocked
+                         :reason (or (:reason (ex-data error)) (:code (ex-data error)) :unverified-module))))))
+          source-modules)))
+
+
 (defn- prepare-package
-  [package states]
+  [package states emit?]
   (let [dependencies (visible-definitions package states)
         original (:source-definitions package)
         names (parse/name->id-index {} dependencies)
@@ -187,11 +203,13 @@
                 planned (source/verify-module (source/plan-module original context) context)
                 verification (list-probe/verify-package (:read-source package) (:definitions planned) context)
                 summaries (mapv #(summarize-definition package verification %) (:definitions planned))]
-            {:status :prepared
-             :exports (vec (distinct (concat dependencies (qualify-definitions context))))
-             :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
-             :blockers (into (vec (mapcat :blockers summaries))
-                             (map #(assoc % :repository (:repository package) :package (:name package))) (:blockers verification))}))
+            (cond-> {:status :prepared
+                     :exports (vec (distinct (concat dependencies (qualify-definitions context))))
+                     :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
+                     :blockers (into (vec (mapcat :blockers summaries))
+                                     (map #(assoc % :repository (:repository package) :package (:name package)))
+                                     (:blockers verification))}
+              emit? (assoc :module-patches (module-patches package (:definitions planned) context)))))
         (catch Exception error
           (blocked-state package (preparation-errors package all-names error)))))))
 
@@ -208,15 +226,15 @@
 
 
 (defn- package-state
-  [package states]
+  [package states emit?]
   (let [failed (filter #(not= :prepared (get-in states [% :status])) (:dependencies package))]
     (if (seq failed)
       (blocked-state package [(assoc (problem package :blocked-package-dependency) :dependencies (vec failed))])
-      (prepare-package package states))))
+      (prepare-package package states emit?))))
 
 
 (defn- plan-packages
-  [packages]
+  [packages emit?]
   (let [by-name (group-by :name packages)
         indexed (into (sorted-map) (map (juxt :name identity)) packages)
         initial (into {} (keep (fn [[name package]]
@@ -228,7 +246,7 @@
         (let [ready (filter (fn [[_ package]] (every? #(contains? states %) (:dependencies package))) remaining)]
           (if (seq ready)
             (recur (apply dissoc remaining (map first ready))
-                   (reduce (fn [acc [name package]] (assoc acc name (package-state package acc))) states ready))
+                   (reduce (fn [acc [name package]] (assoc acc name (package-state package acc emit?))) states ready))
             (merge states
                    (into {} (map (fn [[name package]]
                                    [name (blocked-state package
@@ -277,6 +295,20 @@
     (assoc report :report-sha256 (sha256 (String/.getBytes (inventory/report-text report) "UTF-8")))))
 
 
+(defn- replay-corpus
+  [repositories expected-manifest emit?]
+  (let [manifest (inventory/inventory repositories)]
+    (when (and expected-manifest (not= expected-manifest manifest))
+      (throw (ex-info "Inventory differs from pinned manifest" {:code :manifest-mismatch})))
+    (let [packages (read-packages repositories manifest)
+          states (plan-packages packages emit?)
+          after (inventory/inventory repositories)]
+      (when-not (= manifest after)
+        (throw (ex-info "Inventory changed during planning" {:code :source-drift})))
+      {:report (summary manifest packages states)
+       :modules (into [] (mapcat :module-patches) (vals states))})))
+
+
 (defn dry-run
   "Inventory explicit roots, verify retained source bytes, plan only within
    declared package dependency closures, then re-inventory before returning.
@@ -284,40 +316,60 @@
    The returned report contains no source forms, literals or proposed bodies."
   ([repositories] (dry-run repositories nil))
   ([repositories expected-manifest]
-   (let [manifest (inventory/inventory repositories)]
-     (when (and expected-manifest (not= expected-manifest manifest))
-       (throw (ex-info "Inventory differs from pinned manifest" {:code :manifest-mismatch})))
-     (let [packages (read-packages repositories manifest)
-           states (plan-packages packages)
-           after (inventory/inventory repositories)]
-       (when-not (= manifest after)
-         (throw (ex-info "Inventory changed during planning" {:code :source-drift})))
-       (summary manifest packages states)))))
+   (:report (replay-corpus repositories expected-manifest false))))
+
+
+(defn migration-artifact
+  "Produce privately held rewritten source text and sanitized evidence.
+   Only fully verified modules carry replacement text; source files stay intact.
+   Partial artifacts are for review until the whole corpus and loader pass."
+  [repositories expected-manifest]
+  (assoc (replay-corpus repositories expected-manifest true) :artifact-format 1))
+
+
+(defn- write-artifact!
+  [file artifact]
+  (let [destination (fs/absolutize file)
+        temp (fs/create-temp-file {:dir (fs/parent destination) :prefix ".input-migration-"})]
+    (try
+      (spit (str temp) (inventory/report-text artifact) :encoding "UTF-8")
+      (Files/move temp destination (make-array java.nio.file.CopyOption 0))
+      (finally
+        (fs/delete-if-exists temp)))))
 
 
 (defn cli-options
-  "Only explicit repository roots and an optional frozen inventory path."
+  "Explicit repository roots, an optional inventory and a new artifact path."
   [arguments]
-  (loop [args arguments repositories [] manifest nil]
+  (loop [args arguments repositories [] manifest nil artifact nil]
     (if (empty? args)
-      {:repositories (inventory/cli-repositories repositories) :manifest manifest}
+      (cond-> {:repositories (inventory/cli-repositories repositories) :manifest manifest}
+        artifact (assoc :artifact artifact))
       (case (first args)
         "--repo" (let [[_ label root & more] args]
                    (when-not (and label root)
                      (throw (ex-info "Expected --repo LABEL PATH" {:code :invalid-arguments})))
-                   (recur more (into repositories ["--repo" label root]) manifest))
+                   (recur more (into repositories ["--repo" label root]) manifest artifact))
         "--manifest" (let [[_ path & more] args]
                        (when (or manifest (nil? path) (str/starts-with? path "--"))
                          (throw (ex-info "Expected one --manifest PATH" {:code :invalid-arguments})))
-                       (recur more repositories path))
+                       (recur more repositories path artifact))
+        "--artifact" (let [[_ path & more] args]
+                       (when (or artifact (nil? path) (str/starts-with? path "--"))
+                         (throw (ex-info "Expected one --artifact PATH" {:code :invalid-arguments})))
+                       (recur more repositories manifest path))
         (throw (ex-info "Unknown argument" {:code :invalid-arguments}))))))
 
 
 (when (= *file* (System/getProperty "babashka.file"))
   (try
-    (let [{:keys [repositories manifest]} (cli-options *command-line-args*)
+    (let [{:keys [repositories manifest artifact]} (cli-options *command-line-args*)
           pinned (when manifest (inventory/read-edn manifest (slurp manifest)))]
-      (print (inventory/report-text (dry-run repositories pinned))))
+      (if artifact
+        (let [result (migration-artifact repositories pinned)]
+          (write-artifact! artifact result)
+          (print (inventory/report-text (:report result))))
+        (print (inventory/report-text (dry-run repositories pinned)))))
     (catch Exception error
       (binding [*out* *err*]
         (prn {:code (or (:code (ex-data error)) :dry-run-failed)

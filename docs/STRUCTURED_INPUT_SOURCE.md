@@ -332,6 +332,16 @@ Legacy `:required true` on an item retains
 `:positional-list-annotation-required` because the old parser does not
 make that owner input mandatory.
 
+## Complete source module patch
+
+`structured-input-cst/plan-verified-module` inserts or updates
+`:input-format 2` when every definition in the original file has an authored
+proof. It replays the splice, reads the rewritten EDN, and checks every
+rewritten definition against the same frozen context before returning a
+checksum-bound patch. Comments, line endings and untouched literal bytes
+stay in the original source representation. Files with blocked entries can
+still be inventoried and diagnosed by the dry-run.
+
 ## Focused verification
 
 ```sh

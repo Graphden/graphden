@@ -594,5 +594,26 @@
     (is (not (str/includes? target "_anon-")))))
 
 
+(deftest whole-module-patch-requires-complete-authored-replay
+  (doseq [header ["" ":input-format 1 "]]
+    (let [text (str "; comment before module\r\n{" header ":namespace \"demo.main\" :fns ["
+                    "{:name :base :args {:x {:type :text}} :return-type :text}\r\n"
+                    "{:name :child :parent :base :args {:x ; literal comment\r\n"
+                    "\"first\r\nsecond\"}}]}\r\n")
+          definitions (mapv #(assoc % :namespace "demo.main") (:fns (edn/read-string text)))
+          ctx (parse/prepare-module definitions {} {})
+          verify (fn [entries] (:definitions (source/verify-module {:definitions entries} ctx)))
+          entries (verify (:definitions (source/plan-module definitions ctx)))
+          patch (cst/plan-verified-module text entries verify)
+          target (:target-text patch)]
+      (is (= 2 (:input-format (edn/read-string target))))
+      (is (str/includes? target "; literal comment\r\n[:value \"first\r\nsecond\"]"))
+      (is (= {:status :already-applied :text target} (cst/apply-text patch target)))
+      (is (= :whole-module-proof-required
+             (reason #(cst/plan-verified-module text (pop entries) verify))))
+      (is (= :whole-module-proof-required
+             (reason #(cst/plan-verified-module text entries (constantly []))))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

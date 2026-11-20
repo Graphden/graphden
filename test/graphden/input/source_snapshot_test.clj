@@ -194,6 +194,10 @@
     (is (= (ids/binding-id owner field) (:binding-id route)))
     (is (= [[owner []] [(ids/slot-id owner :outcome)]] (:source route)))
     (is (= [:map :keyword :any] (:actual-type route)))
+    (let [duplicates (conj ds (assoc-in (second ds) [:map :value] :bool))
+          ambiguous (snapshot/package-index (parse/prepare-module duplicates {} {}) duplicates)]
+      (is (= #{:non-value-binding-required :binding-metadata-required :rename-projection-required}
+             (set (get-in (snapshot/projection-readiness ambiguous owner @roots) [:diagnostics 0 :blockers])))))
     (is (= :missing-original-declaration
            (-> (snapshot/projection-readiness (update package :originals dissoc dictionary) owner @roots)
                :diagnostics first :code)))))

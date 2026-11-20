@@ -716,6 +716,7 @@
                    (assoc record :type {:id :missing-type})
                    (assoc record :type {:id 'b})]]
       (is (contains? (codes (replay [lookup shape other child])) :rename-projection-required)))
+    (is (contains? (codes (replay [lookup record (assoc record :type {:id :int}) child])) :rename-projection-required))
     (let [different (assoc-in child [:args :coll :type] :right/shape)
           masked (assoc record :type {:id :text})
           secret-base (assoc-in lookup [:args :coll :type] '[:union :null [:map a [:secret :text]]])

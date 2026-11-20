@@ -15,15 +15,17 @@
 
 
 (defn- visible-aliases
-  [{:keys [defs-by-name name->id]}]
-  (into {} (keep (fn [[ref d]]
-                   ;; Variants normalize their alternatives at declaration time.
-                   ;; Only retain bodies that can be frozen before expansion.
-                   (when (and (not (types/primitive? ref)) (some d [:type :list :map :union :refine]))
-                     (let [id (ids/fn-id (:namespace d) (:name d))]
-                       (when (= id (get name->id ref) (:fn-id d id))
-                         (when-let [body (type-declaration/type-row-alias-body d)] [ref body]))))))
-        defs-by-name))
+  [{:keys [defs-by-name name->id fn-defs ::ambiguous-type-ids]}]
+  (let [occurrences (frequencies (map :fn-id fn-defs))]
+    (into {} (keep (fn [[ref d]]
+                     ;; Variants normalize their alternatives at declaration time.
+                     ;; Only retain bodies that can be frozen before expansion.
+                     (when (and (not (types/primitive? ref)) (some d [:type :list :map :union :refine]))
+                       (let [id (ids/fn-id (:namespace d) (:name d))]
+                         (when (and (= id (get name->id ref) (:fn-id d id)) (< (get occurrences id 0) 2)
+                                    (not (contains? ambiguous-type-ids id)))
+                           (when-let [body (type-declaration/type-row-alias-body d)] [ref body]))))))
+          defs-by-name)))
 
 
 (defn- known-type?

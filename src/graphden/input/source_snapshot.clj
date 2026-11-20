@@ -6,6 +6,7 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
+    [graphden.input.source-rename :as rename]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
@@ -30,10 +31,12 @@
    Call in the marker policy scope of preparation. Duplicate originals are
    ambiguous. Unreachable source need not be lowered."
   [prepared originals]
-  {:prepared prepared
-   :markers (shapes/markers-snapshot)
-   :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
-   :originals (group-by definition-id originals)})
+  (let [by-id (group-by definition-id originals)
+        ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
+    {:prepared (assoc prepared ::rename/ambiguous-type-ids ambiguous)
+     :markers (shapes/markers-snapshot)
+     :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
+     :originals by-id}))
 
 
 (defn- plan-entry

@@ -1,15 +1,13 @@
 (ns graphden.input.source-union-test
   (:require
-    [clojure.edn :as edn]
-    [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.list-builder :as list-builder]
+    [graphden.input.source-package-fixtures :as fixtures]
     [graphden.input.source-snapshot :as snapshot]
-    [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.sync :as sync]
@@ -17,16 +15,10 @@
     [graphden.types.core.shapes :as shapes]))
 
 
-(defn- declarations
-  [file names]
-  (let [{:keys [fns] module-ns :namespace} (edn/read-string (slurp (io/resource file)))]
-    (for [d fns :when (contains? names (:name d))] (assoc d :namespace module-ns :source-file file))))
-
-
 (def ^:private originals
-  (vec (concat (declarations "packages/core/refinements/fns.edn" #{:nullable-text :keyword-or-text})
-               (declarations "packages/core/strings/fns.edn" #{:str-contains?})
-               (declarations "packages/web/html/fns.edn" #{:hiccup-node :hiccup :render-hiccup}))))
+  (vec (concat (fixtures/declarations "packages/core/refinements/fns.edn" #{:nullable-text :keyword-or-text})
+               (fixtures/declarations "packages/core/strings/fns.edn" #{:str-contains?})
+               (fixtures/declarations "packages/web/html/fns.edn" #{:hiccup-node :hiccup :render-hiccup}))))
 
 
 (def ^:private roots
@@ -34,7 +26,7 @@
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
               types/*type-aliases-override* (atom {})
               shapes/*marker-registry-override* (atom (shapes/markers-snapshot))]
-      (let [loaded (:base-fn-defs (loader/load-packages ["core" "web"]))]
+      (let [loaded @fixtures/web-base-definitions]
         (sync/register-type-aliases! originals)
         (doseq [{:keys [name] module-ns :namespace} originals :when (get loaded name)]
           (registry/record-rich-types! (ids/fn-id module-ns name) name (get loaded name)))

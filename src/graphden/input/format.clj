@@ -50,20 +50,51 @@
 (declare inline-origin configuration-type?)
 
 
+(defn inline-binding-body
+  "Extract a supported legacy direct declaration. The enclosing field's type
+   pin belongs to the binding and was excluded from the legacy child hash."
+  [form]
+  (when (and (map? form) (or (contains? form :parent) (contains? form :parents)))
+    (let [body (dissoc form :type)]
+      (when (and (legacy-inline? body)
+                 (or (not (contains? form :type)) (configuration-type? (:type form))))
+        body))))
+
+
+(defn- inline-type-position?
+  [spelling]
+  (and (vector? spelling) (= 2 (count spelling)) (= :inline-type (first spelling))
+       (nat-int? (second spelling))))
+
+
+(defn- add-inline-type
+  [form spelling type]
+  (when (inline-type-position? spelling)
+    (when-let [body (inline-origin form)]
+      (let [entries (vec body)
+            index (second spelling)]
+        (when (<= index (count entries))
+          (apply array-map (mapcat identity (into (conj (subvec entries 0 index) [:type type])
+                                                  (subvec entries index)))))))))
+
+
 (defn- typed-origin
   [form spelling type]
-  (when (and (vector? form) (= 2 (count form)) (contains? #{nil :type-first} spelling))
-    (let [[op value] form
-          key (case op
-                :value :value
-                :ref (when (keyword? value) :ref)
-                :project (when (local-projection? form) :as)
-                nil)
-          value (if (= key :as) (first value) value)]
-      (when key
-        [(if (= :type-first spelling)
-           (array-map :type type key value)
-           (array-map key value :type type))]))))
+  (when (and (vector? form) (= 2 (count form)))
+    (let [[op value] form]
+      (if (and (= :ref op) (map? value))
+        (when-let [original (add-inline-type value spelling type)] [original])
+        (when (contains? #{nil :type-first} spelling)
+          (let [key (case op
+                      :value :value
+                      :ref (when (keyword? value) :ref)
+                      :project (when (local-projection? form) :as)
+                      nil)
+                value (if (= key :as) (first value) value)]
+            (when key
+              [(if (= :type-first spelling)
+                 (array-map :type type key value)
+                 (array-map key value :type type))])))))))
 
 
 (defn- original-leaf
@@ -130,7 +161,8 @@
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
                             (every? (set (keys bind)) (keys legacy-forms))
-                            (every? #{:bare-value :ref-wrapper :type-first} (vals legacy-forms)))))
+                            (every? #(or (#{:bare-value :ref-wrapper :type-first} %) (inline-type-position? %))
+                                    (vals legacy-forms)))))
           (let [originals (mapv (fn [[k form]]
                                   (when-let [[original] (original-leaf form (get legacy-forms k)
                                                                        (get-in configure [[k] :type]))]
@@ -140,13 +172,20 @@
               (restore-inline-order body (replace-inline-fields body :bind :args (into (empty bind) originals))))))))))
 
 
-(defn- migrated-leaf
-  [raw [op _ :as expression] assertion]
-  (if assertion
+(defn- migrated-asserted-leaf
+  [raw [op _ :as expression]]
+  (if (and (= :ref op) (inline-binding-body raw))
+    [expression [:inline-type (count (take-while #(not= :type %) (keys raw)))]]
     (when-let [key (case op :value :value :ref :ref :project :as nil)]
       (when (and (map? raw) (= #{:type key} (set (keys raw))))
         [(if (= op :ref) [:ref (:ref raw)] expression)
-         (when (= :type (ffirst raw)) :type-first)]))
+         (when (= :type (ffirst raw)) :type-first)]))))
+
+
+(defn- migrated-leaf
+  [raw [op _ :as expression] assertion]
+  (if assertion
+    (migrated-asserted-leaf raw expression)
     (case op
       :value (cond
                (and (map? raw) (= #{:value} (set (keys raw)))) [expression nil]

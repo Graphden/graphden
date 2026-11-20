@@ -363,6 +363,22 @@
     (is (not (str/includes? target "_anon-")))))
 
 
+(deftest outer-inline-type-pins-move-to-the-enclosing-configurations
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:type ; outer pin\r\n :keyword :args {:x {:parent :producer"
+                  " :type ; inner pin\r\n :text :args {}}} :parent :sink}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))
+        outer (get-in child [:bind :x 1])
+        inner (get-in outer [:bind :x 1])]
+    (is (= {[:x] {:type :keyword}} (:configure child)))
+    (is (= {[:x] {:type :text}} (:configure outer)))
+    (is (= {:parent :producer :bind {}} inner))
+    (is (str/includes? target ":type ; outer pin\r\n :keyword"))
+    (is (str/includes? target ":type ; inner pin\r\n :text"))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))

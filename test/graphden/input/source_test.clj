@@ -539,7 +539,7 @@
 
 
 (deftest unsupported-inline-shapes-stay-at-their-source-field
-  (doseq [body [{:parent :producer :type :any}
+  (doseq [body [{:parent :producer :tag :unsupported}
                 [{:parent :producer}] {:append [{:parent :producer}]}]]
     (let [d {:name :child :namespace "demo" :parent :sink :args {:items body}}
           entry (result (plan [base producer d]) :child)]
@@ -729,3 +729,21 @@
     (is (= :authored-source-equivalent (get-in (source/verify-module planned context)
                                                [:definitions 0 :verification])))
     (is (= :blocked (get-in (source/verify-module dropped context) [:definitions 0 :status])))))
+
+
+(deftest an-inline-type-pin-belongs-to-its-enclosing-binding
+  (let [inner (array-map :parent :producer :type :text :args {})
+        outer (array-map :type :keyword :args {:x inner} :parent :sink)
+        host {:name :host :namespace "demo" :parent :sink :args {:x outer}}
+        entry (result (verified [base producer host]) :host)
+        outer-v2 (first (vals (get-in entry [:v2 :inline-definitions])))
+        inner-v2 (first (vals (:inline-definitions outer-v2)))
+        unpinned (update-in host [:args :x] dissoc :type)
+        unpinned-plan (result (verified [base producer unpinned]) :host)
+        unpinned-outer (first (vals (get-in unpinned-plan [:v2 :inline-definitions])))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:x [:inline-type 1]} (get-in entry [:proposed :bind :x 1 :legacy-forms])))
+    (is (= {:parent :producer :bind {}} (:inline-body inner-v2)))
+    (is (= (:fn-id outer-v2) (:fn-id unpinned-outer)))
+    (is (= (ids/primitive-fn-id :keyword) (get-in entry [:v2 :bindings 0 :type-override-fn-id])))
+    (is (= (ids/primitive-fn-id :text) (get-in outer-v2 [:bindings 0 :type-override-fn-id])))))

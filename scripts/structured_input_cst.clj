@@ -118,9 +118,9 @@
   (cond
     (not (vector? form)) nil
     (= :project (first form)) (projection-leaf source starts loc)
-    configured? (typed-leaf source starts loc)
     (and (= :ref (first form)) (map? (second form)))
     (inline-edit source starts loc (second form) path)
+    configured? (typed-leaf source starts loc)
     (= spelling :bare-value) (leaf-edit source starts loc :wrap-value path)
     (or (= spelling :ref-wrapper) (= :value (first form)))
     (leaf-edit source starts loc :map-expression-to-vector path)
@@ -148,17 +148,29 @@
           (keep second fields))))
 
 
+(defn- inline-type-edit
+  [source starts loc]
+  (when-let [key (key-loc loc :type)]
+    (let [start (:start (node-edit source starts key identity))
+          end (:end (node-edit source starts (z/right key) identity))
+          before (subs source start end)]
+      {:start start :end end :before before :after ""
+       :configuration (str "{" before "}")})))
+
+
 (defn- inline-edit
   [source starts loc body path]
   (let [span (node-edit source starts loc identity)
-        original (inventory/read-edn path (:before span))]
-    (when-not (and (format/legacy-inline? original)
-                   (migration/same-edn? original (format/inline-origin body)))
+        original (format/inline-binding-body (inventory/read-edn path (:before span)))
+        type-edit (inline-type-edit source starts loc)]
+    (when-not (and original (migration/same-edn? original (format/inline-origin body)))
       (refuse :unsupported-inline-declaration {:path path}))
     (let [edits (when (contains? original :args) (inline-field-edits source starts loc body path))
+          edits (cond-> edits type-edit (conj type-edit))
           local (into [] (map #(-> % (update :start - (:start span)) (update :end - (:start span))))
                       (sort-by :start edits))]
-      (assoc span :after (str "[:ref " (patched-text (:before span) local) "]")))))
+      (cond-> (assoc span :after (str "[:ref " (patched-text (:before span) local) "]"))
+        type-edit (assoc :configuration (:configuration type-edit))))))
 
 
 (defn- leaf-edit
@@ -351,11 +363,12 @@
   [source {:keys [source-path kind expression policy]}]
   (let [[operator payload] expression
         raw (get-in source source-path)
-        inline? (and (= :ref operator) (format/legacy-inline? raw)
-                     (migration/same-edn? raw (format/inline-origin payload)))
+        inline? (and (= :ref operator)
+                     (when-let [body (format/inline-binding-body raw)]
+                       (migration/same-edn? body (format/inline-origin payload))))
         wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))
-        typed? (and wrapper? (= #{operator :type} (set (keys raw)))
-                    (or (keyword? (:type raw)) (vector? (:type raw)))
+        typed? (and (or inline? (and wrapper? (= #{operator :type} (set (keys raw)))))
+                    (format/configuration-type? (:type raw))
                     (= #{:type-override-fn-id} (set (keys policy))) (uuid? (:type-override-fn-id policy)))]
     (when-not (and (= :binding kind) (or typed? (empty? policy))
                    (vector? source-path) (= 2 (count source-path)) (= :args (first source-path))
@@ -411,7 +424,8 @@
             bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
             operations (mapv #((if (:rename %) projection-operation argument-operation) source %) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
-                                           (when (or (= :typed-expression op) (and (= :local-projection op) (contains? (get-in source path) :type)))
+                                           (when (or (= :typed-expression op)
+                                                     (and (#{:local-projection :inline-ref} op) (contains? (get-in source path) :type)))
                                              [[(second path)] (select-keys (get-in source path) [:type])])))
                                 operations)]
         (when-not (and (or (not has-args?) (map? (:args source)))

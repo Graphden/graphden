@@ -63,14 +63,16 @@
 
 (deftest authenticated-fixture-routes-roundtrip-test
   (let [storage (:storage golden/*bootstrap*)
+        owner (binding [access/*offline?* true] (seed-owner! storage))
         token (str (random-uuid))
         ctx (exec/create-context {:storage storage :auth-provider (auth/single-token-provider token)})
         _ (runtime/rebuild! ctx)
         app (router/create-router ctx "_app-ring-response")
-        owner (binding [access/*offline?* true] (seed-owner! storage))
         create {:action "bind" :fn-id (str owner) :path ["profile" "name"] :value "original"}]
     (is (= 403 (:status (send-command app token "preview" (assoc create :offline? true)))))
-    (is (nil? (get-in (remaining-fields app token owner) [0 :fields 0 :bind-path])))
+    (let [leaf (get-in (remaining-fields app token owner) [0 :fields 0])]
+      (is (= "name" (:name leaf)))
+      (is (not (contains? leaf :bind-path))))
     (binding [access/*offline?* true]
       (let [fields (remaining-fields app token owner)]
         (is (nil? (get-in fields [0 :bind-path])))

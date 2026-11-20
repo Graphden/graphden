@@ -4,6 +4,7 @@
   (:require
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
+    [graphden.input.source-rename :as rename]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -52,7 +53,7 @@
                    (= (:parent-ids owner) (get-in snapshot [:fns owner-id :parent-ids]))
                    (not (contains? (:bindings snapshot) id))
                    (migration/same-edn? (into {} (map (juxt :id meaning)) (remove #(= id (:id %)) bindings))
-                                        (into {} (map (fn [row] [(:id row) (meaning (migration/legacy-binding row))]))
+                                        (into {} (map (fn [row] [(:id row) (meaning (rename/legacy-binding (vals (:fields snapshot)) row))]))
                                               existing)))
       (reject! :source-snapshot-mismatch))
     [arg binding bindings]))

@@ -136,6 +136,8 @@
            (select-keys (get configuration path) [:type-override-fn-id])
            (case (:kind expression)
              :value {:expression-kind "value" :value-present true :value (:value expression)}
+             :projection {:expression-kind "projection" :value-present false
+                          :projection-scope-path (second (:scope expression)) :projection-path (:path expression)}
              :ref {:expression-kind "ref" :value-present false :ref-fn-id (:fn-id expression)}
              (reject! :unsupported-binding-expression)))))
 
@@ -260,7 +262,7 @@
       (reject! :export-context-drift))
     (if (contains? source :bind)
       (assoc source :bind (syntax/emit-expression (:contract ctx) (:expression parsed)
-                                                  {:id->name (id->name (:name->id ctx))
+                                                  {:scope (:scope ctx) :id->name (id->name (:name->id ctx))
                                                    :inline-at (:inline-definitions parsed)}))
       source)))
 

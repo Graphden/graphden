@@ -634,3 +634,28 @@
         changed (assoc-in planned [:definitions 0 :proposed :bind :x 1 :bind :x] 1N)]
     (is (= :supported (get-in (source/verify-module planned ctx) [:definitions 0 :status])))
     (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))
+
+
+(deftest rename-origin-must-match-one-direct-parent-field
+  (let [sink {:namespace "demo" :name :sink :args {:x {:type :text} :taken {:type :text}} :return-type :text}
+        relay {:namespace "demo" :name :relay :parent :sink}
+        child {:namespace "demo" :name :child :parent :sink :args {:x {:as :exposed}}}
+        definitions [sink relay child]
+        context (prepared definitions)
+        planned (source/plan-module [child] context)
+        foreign (-> planned
+                    (assoc-in [:definitions 0 :proposed :input] {:other {:type :text :required false}})
+                    (assoc-in [:definitions 0 :proposed :bind :x] [:project [:other]]))
+        replay (source/verify-module planned context)
+        row (first (get-in replay [:definitions 0 :v2 :bindings]))
+        alias-id (ids/slot-id (ids/fn-id "demo" :child) :exposed)
+        destination (ids/slot-id (ids/fn-id "demo" :sink) :x)]
+    (is (= :authored-source-equivalent (get-in replay [:definitions 0 :verification])))
+    (is (= [alias-id] (:projection-path row)))
+    (is (= [destination] (:target-path row)))
+    (is (= (ids/binding-id (ids/fn-id "demo" :child) destination) (:id row)))
+    (is (= :blocked (get-in (source/verify-module foreign context) [:definitions 0 :status])))
+    (doseq [[variant expected] [[(assoc-in child [:args :x :as] :taken) :rename-field-collision]
+                                [(assoc child :parent :relay) :rename-projection-required]
+                                [(assoc-in child [:args :x :type] :text) :rename-projection-required]]]
+      (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))

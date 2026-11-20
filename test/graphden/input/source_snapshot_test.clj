@@ -31,7 +31,8 @@
   (delay
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded (:base-fn-defs (loader/load-packages ["core"]))]
-        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(contains? #{:deref :cell} (:name %)) (sources "concurrency")))]
+        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :str-trim (:name %)) (sources "strings"))
+                                                        (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
 
@@ -111,3 +112,29 @@
     (is (= [owner [binding-id]] (:to edge)))
     (is (= #uuid "bd46df2a-1484-5826-887c-c5657179f5df" binding-id (:binding-id edge)))
     (is (true? (get-in graph [:coverage :signatures])))))
+
+
+(deftest package-renames-keep-projection-identity-and-required-input-test
+  (let [core (concat (sources "concurrency") (sources "strings"))
+        web (edn/read-string (slurp (io/resource "packages/web/crud-parse/fns.edn")))
+        declarations (into (vec core) (map #(assoc % :namespace (:namespace web))) (:fns web))
+        selected (filterv #(contains? #{:sleep :str-trim :_retry-pause :_interval-sleep :_parse-fn-form-pid-trim-item}
+                                      (:name %)) declarations)
+        package (snapshot/package-index (parse/prepare-module selected {} {}) selected)]
+    (doseq [[owner-name owner-ns base-name base-ns field-name alias-name]
+            [[:_retry-pause "core.concurrency" :sleep "core.concurrency" :ms :delay-ms]
+             [:_interval-sleep "core.concurrency" :sleep "core.concurrency" :ms :every-ms]
+             [:_parse-fn-form-pid-trim-item "web.crud" :str-trim "core.strings" :string :item]]]
+      (let [owner (ids/fn-id owner-ns owner-name)
+            field (ids/slot-id (ids/fn-id base-ns base-name) field-name)
+            alias-id (ids/slot-id owner alias-name)
+            {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+            graph (analysis/analyze-effective-input context owner options)
+            [route] (:projections graph)
+            address [[owner []] [alias-id]]]
+        (is (= :checked (:status graph)))
+        (is (empty? (:obligations graph)))
+        (is (= [address] (:required-addresses graph)))
+        (is (= [[owner []] [field]] (:from route)))
+        (is (= address (:source route)))
+        (is (= (ids/binding-id owner field) (get-in graph [:public-input :bindings (:from route) :binding-id])))))))

@@ -375,5 +375,40 @@
                             (request {:op :rename-bind :definition :child :path [:args]}))))))
 
 
+(deftest inherited-primitive-rename-preserves-comments-and-projection
+  (let [text "{:namespace \"demo.main\" :fns [{:name :sink :args {:x {:type :text} :extra {:type :text}} :return-type :text} {:name :alias :parent :sink :args {:x { ; old slot\r\n :as ; new slot\r\n :label ; kept\r\n} :extra {:value \"keep  bytes\"}}}]}"
+        target (migrate-child text)
+        rewritten (peek (:fns (edn/read-string target)))]
+    (is (= {:label {:type :text :required false}} (:input rewritten)))
+    (is (= {:x [:project [:label]] :extra [:value "keep  bytes"]} (:bind rewritten)))
+    (doseq [expected-comment ["; old slot\r\n" "; new slot\r\n" "; kept\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern expected-comment) target)))))))
+
+
+(deftest original-concurrency-module-replays-renames-and-stable-binding-ids
+  (let [text (slurp "resources/packages/core/concurrency/fns.edn")
+        {module-ns :namespace :keys [fns]} (edn/read-string text)
+        children #{:_retry-pause :_interval-sleep}
+        named (into [] (comp (filter #(contains? (conj children :sleep) (:name %)))
+                             (map #(assoc % :namespace module-ns))) fns)
+        ctx (parse/prepare-module named {} {})
+        planned (source/plan-module (filterv #(contains? children (:name %)) named) ctx)
+        patch (cst/plan text {:namespace module-ns :operations (vec (mapcat cst/entry-operations (:definitions planned)))})
+        target (:text (cst/apply-text patch text))
+        rewritten (into {} (map (juxt :name #(assoc % :namespace module-ns))) (:fns (edn/read-string target)))
+        replay (source/verify-module (update planned :definitions
+                                             #(mapv (fn [entry] (assoc entry :proposed (get rewritten (get-in entry [:source :name])))) %))
+                                     ctx)]
+    (is (= {:status :already-applied :text target} (cst/apply-text patch target)))
+    (is (= {:supported 2 :blocked 0} (:counts replay)))
+    (doseq [entry (:definitions replay)]
+      (let [[row] (get-in entry [:v2 :bindings])
+            [arg] (get-in entry [:legacy :arguments])]
+        (is (= :authored-source-equivalent (:verification entry)))
+        (is (= (get-in arg [:origin :binding-id]) (:id row)))
+        (is (= [(get-in arg [:origin :slot-id])] (:target-path row)))
+        (is (= [(get-in arg [:rename :alias-id])] (:projection-path row)))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

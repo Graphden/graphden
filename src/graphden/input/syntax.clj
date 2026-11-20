@@ -3,7 +3,8 @@
    The caller supplies a frozen reference index and binding identity function.
    Literal contents are opaque; parsing never loads or executes a graph."
   (:require
-    [graphden.input.core :as input]))
+    [graphden.input.core :as input]
+    [graphden.input.format :as format]))
 
 
 (defn- reject!
@@ -36,12 +37,18 @@
 
 
 (defn- parse-leaf
-  [path form {:keys [name->id binding-id scope inline-at]}]
+  [path form {:keys [name->id binding-id scope inline-at root-contract]}]
   (when-not (and (vector? form) (= 2 (count form)))
     (reject! :explicit-expression-required path))
   (let [[operator payload] form
         expression (case operator
                      :value {:kind :value :value payload}
+                     :project (do
+                                (when-not (and (= 1 (count path)) (format/local-projection? form))
+                                  (reject! :unsupported-projection path))
+                                (let [source (input/resolve-address root-contract scope payload)]
+                                  (when (= path (:path source)) (reject! :projection-cycle path))
+                                  (assoc (select-keys source [:scope :path]) :kind :projection)))
                      :ref (if-let [id (if (map? payload)
                                         (let [child (get inline-at path)]
                                           (when-not (= payload (:inline-body child))
@@ -74,7 +81,8 @@
   [contract scope form {:keys [name->id binding-id] :as context}]
   (when-not (and (some? scope) (map? name->id) (ifn? binding-id))
     (reject! :invalid-context []))
-  (parse-node (input/input-contract contract) [] form (assoc context :scope scope)))
+  (let [root (input/input-contract contract)]
+    (parse-node root [] form (assoc context :scope scope :root-contract root))))
 
 
 (declare ^:private emit-node)
@@ -102,6 +110,11 @@
     :value (if (contains? expression :value)
              [:value (:value expression)]
              (reject! :missing-value path))
+    :projection (let [[id] (:path expression)
+                      field (some #(when (= id (:id %)) %) (get-in context [:root-contract :fields]))]
+                  (when-not (and field (= [id] (:path expression)) (= (:scope expression) (:scope context)))
+                    (reject! :unsupported-expression path))
+                  [:project [(:name field)]])
     :ref (if-let [child (get (:inline-at context) path)]
            (if (= (:fn-id child) (:fn-id expression))
              [:ref (:inline-body child)]
@@ -119,4 +132,5 @@
   [contract expression {:keys [id->name] :as context}]
   (when-not (map? id->name)
     (reject! :invalid-context []))
-  (emit-node (input/input-contract contract) [] expression context))
+  (let [root (input/input-contract contract)]
+    (emit-node root [] expression (assoc context :root-contract root))))

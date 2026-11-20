@@ -41,77 +41,77 @@ Describes locally missing fields and occupancy while retaining original rich typ
 :PROPERTIES:
 :CUSTOM_ID: types/parse-expression
 :FILE: src/graphden/input/syntax.clj
-:LINE: 67
-:MINS: 1.3
+:LINE: 74
+:MINS: 1.4
 :END:
 
 Normalizes partial record maps and explicit value/ref expressions against a supplied resolved descriptor. Literal payloads stay opaque and references remain unevaluated. The caller supplies stable binding identities and namespace-resolved reference names; this offline API is not yet connected to the production package loader.
 
-- source :: [[file:../../../src/graphden/input/syntax.clj::(defn parse-expression][src/graphden/input/syntax.clj:67]]
+- source :: [[file:../../../src/graphden/input/syntax.clj::(defn parse-expression][src/graphden/input/syntax.clj:74]]
 
 * 4. plan-module
 :PROPERTIES:
 :CUSTOM_ID: types/plan-module
 :FILE: src/graphden/input/source.clj
-:LINE: 347
+:LINE: 370
 :MINS: 3.0
 :END:
 
 Compares original source forms with a prepared legacy module to plan supported rewrites. It retains rich declarations and binding origins, while reporting unsupported list, rename, ref-scope and policy forms as explicit blockers. A completed report does not prove runtime equivalence or authorize dropping an unsupported definition.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:347]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:370]]
 - same file :: [[file:types.org::#types/verify-module][verify-module]]
 
 * 5. verify-module
 :PROPERTIES:
 :CUSTOM_ID: types/verify-module
 :FILE: src/graphden/input/source.clj
-:LINE: 485
+:LINE: 508
 :MINS: 2.4
 :END:
 
 Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:485]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:508]]
 - same file :: [[file:types.org::#types/plan-module][plan-module]]
 
 * 6. parse-module-v2
 :PROPERTIES:
 :CUSTOM_ID: types/parse-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 221
+:LINE: 223
 :MINS: 2.1
 :END:
 
 Reads an explicitly versioned source module with caller-resolved declarations and namespace contexts. It retains authored input metadata and origin ledgers, returning validated input-binding rows without registry or storage writes. Partial required fields are legal; structural validation does not prove types or graph readiness.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:221]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:223]]
 - same file :: [[file:types.org::#types/emit-module-v2][emit-module-v2]]
 
 * 7. emit-module-v2
 :PROPERTIES:
 :CUSTOM_ID: types/emit-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 268
+:LINE: 270
 :MINS: 1.5
 :END:
 
 Exports offline definitions using the same declared descriptors and identity callbacks. Re-parsing detects changed binding origins or declaration context. Rich declarations remain intact; source formatting and comments belong to the separate CST writer.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:268]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:270]]
 - same file :: [[file:types.org::#types/parse-module-v2][parse-module-v2]]
 
 * 8. require-legacy!
 :PROPERTIES:
 :CUSTOM_ID: types/require-legacy!
 :FILE: src/graphden/input/format.clj
-:LINE: 73
+:LINE: 79
 :MINS: 1.7
 :END:
 
 Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
 
-- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:73]]
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:79]]
 
 * 9. resolve-contract
 :PROPERTIES:

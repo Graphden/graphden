@@ -7,6 +7,8 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.compile :as compile]
+    [graphden.input.compiler-fixture :as fixture]
     [graphden.input.package-execution :as execution]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -31,28 +33,28 @@
 
 
 (defn- runtimes
-  [source root]
-  (let [prepared (parse/prepare-module source {} {})
-        records (group-by :kind (parse/parse-prepared-module prepared))
-        graph {:fns (:fn records) :slots (:slot records) :fn-slots (:fn-slot records)
-               :bindings (:binding records) :list-items (:binding-list-item records)}
-        base-declarations (filter #(contains? @loaded (:name %)) source)
-        _ (doseq [{:keys [name] module-ns :namespace} base-declarations]
-            (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded name)))
-        roots (:by-id @registry/*rich-types-override*)
-        implementations (into {} (map (fn [{:keys [name] module-ns :namespace}]
-                                        [(ids/fn-id module-ns name) (:impl (get @loaded name))])) base-declarations)
-        canonical (execution/compile-package (snapshot/package-index prepared source)
-                                             root roots implementations)
-        legacy (eager/compile-all (assoc (lookups/build-lookups graph)
-                                         :base-fns (registry/compute-base-fns-map @loaded)))
-        invoke (fn [compiled args]
-                 (executor/execute {:compiled-registry (atom compiled)
-                                    :graph-cache (atom graph) :base-fns {}}
-                                   root args))]
-    {:analysis (:analysis canonical)
-     :canonical #(invoke {root (:invoke canonical)} %)
-     :legacy #(invoke legacy %)}))
+  ([source root] (runtimes source root execution/compile-package))
+  ([source root compile-canonical]
+   (let [prepared (parse/prepare-module source {} {})
+         records (group-by :kind (parse/parse-prepared-module prepared))
+         graph {:fns (:fn records) :slots (:slot records) :fn-slots (:fn-slot records)
+                :bindings (:binding records) :list-items (:binding-list-item records)}
+         base-declarations (filter #(contains? @loaded (:name %)) source)
+         _ (doseq [{:keys [name] module-ns :namespace} base-declarations]
+             (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded name)))
+         roots (:by-id @registry/*rich-types-override*)
+         implementations (into {} (map (fn [{:keys [name] module-ns :namespace}]
+                                         [(ids/fn-id module-ns name) (:impl (get @loaded name))])) base-declarations)
+         canonical (compile-canonical (snapshot/package-index prepared source) root roots implementations)
+         legacy (eager/compile-all (assoc (lookups/build-lookups graph)
+                                          :base-fns (registry/compute-base-fns-map @loaded)))
+         invoke (fn [compiled args]
+                  (executor/execute {:compiled-registry (atom compiled)
+                                     :graph-cache (atom graph) :base-fns {}}
+                                    root args))]
+     {:analysis (:analysis canonical)
+      :canonical #(invoke {root (:invoke canonical)} %)
+      :legacy #(invoke legacy %)})))
 
 
 (defn- rejection-code
@@ -82,16 +84,38 @@
       (is (= expected (legacy {:string input}) (canonical {:value {:string input}}))))))
 
 
-(deftest prepared-package-map-invokes-the-shipped-callback-through-both-compilers
-  (let [name :_checked-map-upper-test
-        source (into [{:name name :namespace "fixture" :parent :map :args {:func :str-upper}}]
-                     (concat (declarations "packages/core/hof/fns.edn" #{:map})
-                             (declarations "packages/core/strings/fns.edn" #{:str-upper})))
-        {:keys [canonical legacy analysis]} (runtimes source (ids/fn-id "fixture" name))]
+(defn- map-source
+  []
+  (into [{:name :_checked-map-upper-test :namespace "fixture" :parent :map :args {:func :str-upper}}]
+        (concat (declarations "packages/core/hof/fns.edn" #{:map})
+                (declarations "packages/core/strings/fns.edn" #{:str-upper}))))
+
+
+(defn- checked-map-fixture
+  [_package _root _roots implementations]
+  (let [definitions {:root {:input {:func [:fn {:item :text} :text #{}] :coll [:list :text]}
+                            :return [:list :text] :bindings {[:func] {:ref :callback}}}
+                     :callback {:input {:string :text} :return :text}}
+        {:keys [analysis context]} (fixture/model definitions :root)
+        functions {:root (get implementations (ids/fn-id "core.hof" :map))
+                   :callback (get implementations (ids/fn-id "core.strings" :str-upper))}]
+    {:analysis analysis
+     :invoke (compile/compile-named analysis {:context context
+                                              :implementations (fixture/implementations definitions functions)})}))
+
+
+(deftest checked-map-fixture-matches-the-legacy-package-execution
+  (let [root (ids/fn-id "fixture" :_checked-map-upper-test)
+        {:keys [canonical legacy analysis]} (runtimes (map-source) root checked-map-fixture)]
     (is (= :checked (:status analysis)))
     (is (= [[:string]] (mapv :parameters (vals (:closures analysis)))))
     (doseq [[input expected] [[[] []] [["a" "" "a" "graph"] ["A" "" "A" "GRAPH"]]]]
       (is (= expected (legacy {:coll input}) (canonical {:coll input}))))))
+
+
+(deftest prepared-map-requires-rich-callable-source-evidence
+  (is (= :rich-type-source-required
+         (rejection-code #(runtimes (map-source) (ids/fn-id "fixture" :_checked-map-upper-test))))))
 
 
 (deftest prepared-web-state-requires-a-compile-time-value-lowering

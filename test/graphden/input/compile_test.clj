@@ -170,6 +170,22 @@
     (is (= [[true nil] [true nil] :callback-outside-invocation] (invoke closure)))))
 
 
+(deftest unopened-callback-local-cell-cannot-run-after-the-root-returns
+  (let [runs (atom 0)
+        definitions {:root {:input {:callback [:fn {:item :any} :any #{}]} :return :any
+                            :bindings {[:callback] {:ref :child}}}
+                     :child {:input {:item :any :payload {:late :int}} :return :any
+                             :bindings {[:payload :late] {:ref :local}}}
+                     :local {:input {} :return :int}}
+        {:keys [closure]} (compiled definitions
+                                    {:root (fn [args _] ((runtime/resolve-arg args :callback) true))
+                                     :child (fn [args _] (runtime/resolve-arg args :payload))
+                                     :local (fn [_ _] (swap! runs inc))})
+        payload (invoke closure)]
+    (is (= :callback-outside-invocation (rejection-code #(:late payload))))
+    (is (zero? @runs))))
+
+
 (deftest nested-fields-remain-lazy-through-real-base-abi
   (let [reads (atom [])
         definitions {:root {:input {:user {:name :text :unused :text}} :return :any

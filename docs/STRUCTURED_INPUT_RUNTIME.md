@@ -145,11 +145,14 @@ validation are checked separately for the callback. Its memo keys include a fres
 invocation token so two calls with equal arguments still evaluate their own local
 references. Multiple reads of a callback-local field share its once-cell.
 
-The callback can run on the originating thread while the enclosing execution is
-active. Deferred or worker-thread invocation, nested graph callbacks, unproven
-captures and record-shaped parameter routes fail closed. The shipped eager
-`core.hof/map` can call `core.strings/str-upper` through this path. Browser export
-explicitly rejects the JVM-only closure operation.
+The callback and its unforced local cells can run on the originating thread while
+the enclosing execution is active. Deferred or worker-thread invocation, nested
+graph callbacks, unproven captures and record-shaped parameter routes fail closed.
+A checked fixture using the shipped eager `core.hof/map` and
+`core.strings/str-upper` compares with the legacy package graph. The source
+snapshot adapter still requires richer type evidence before it can compile the
+same package declarations directly. Browser export rejects the JVM closure
+operation.
 
 ### Dependency memo keys
 

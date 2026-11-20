@@ -63,6 +63,7 @@
         item (fixture/address :root [:callback-use] :child [:item])
         capture (fixture/address :root [:callback-use] :root [:config])
         closure (get-in plan [:closures callback])
+        read-check {:address callback :kind :value-type :trigger :field-read :expected-type (:type closure)}
         code (fn [changed]
                (try (lower changed definitions)
                     (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
@@ -78,6 +79,11 @@
            (code (assoc-in model [:analysis :closures callback :captures 0 :source] item))))
     (is (= :unsupported-closure-scope
            (code (assoc-in model [:analysis :closures callback :external-captures] [{:target item}]))))
+    (is (= {} (:value-obligations (lower (assoc-in model [:analysis :obligations] [read-check]) definitions))))
+    (is (= :runtime-obligations-required
+           (code (assoc-in model [:analysis :obligations] [(assoc read-check :expected-type :any)]))))
+    (is (= :unproved-closure-contract
+           (code (assoc-in model [:analysis :closures callback :callable-type] [:fn {} :bool #{}]))))
     (is (= :cross-frame-expression
            (code (assoc-in model [:analysis :scopes [] :bindings configuration]
                            {:reference {:mode :projection :source item}}))))))

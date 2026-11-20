@@ -44,17 +44,21 @@
                    (when (contains? args name) [address (get args name)]))) call-sites))
 
 
+(defn- check-callback-lifetime!
+  [{:keys [thread open?]} scope]
+  (when-not (and @open? (identical? thread (Thread/currentThread)))
+    (ir/reject! :callback-outside-invocation {:scope scope})))
+
+
 (defn- lexical-callable
   [frame address target-id ctx]
-  (let [{:keys [scope parameters] :as plan} (get-in frame [:ir :closures address])
-        {:keys [thread open?]} (:lifetime frame)]
+  (let [{:keys [scope parameters] :as plan} (get-in frame [:ir :closures address])]
     (eager/tagged-callable
       target-id parameters
       (fn [args]
         ;; Synchronous HOFs reuse their executor boundary and the captured
         ;; outer cells. A deferred invocation needs a separate lifetime proof.
-        (when-not (and @open? (identical? thread (Thread/currentThread)))
-          (ir/reject! :callback-outside-invocation {:scope scope}))
+        (check-callback-lifetime! (:lifetime frame) scope)
         (executor/check-cancel!)
         (let [supplied (callback-supplies plan args)
               local (instantiate-frame (:ir frame) (:validators frame) scope supplied frame ctx)]
@@ -90,11 +94,13 @@
         missing (filterv #(not (get present %)) required-addresses)]
     (when (seq missing) (ir/reject! :missing-required-input {:addresses missing}))
     (let [frozen (volatile! nil)
-          cells (into (:cells parent {}) (map (fn [{:keys [address]}]
-                                                [address (input/field-cell
-                                                           #(let [value (resolve-expression @frozen address ctx)]
-                                                              (if-let [check (get validators address)] (check value) value)))]))
-                      presence-program)
+          cell (fn [{:keys [address]}]
+                 (let [read-value (fn []
+                                    (when parent (check-callback-lifetime! (:lifetime parent) scope))
+                                    (let [value (resolve-expression @frozen address ctx)]
+                                      (if-let [check (get validators address)] (check value) value)))]
+                   [address (input/field-cell read-value)]))
+          cells (into (:cells parent {}) (map cell) presence-program)
           frame {:ir ir :validators validators :supplied (into (:supplied parent {}) supplied)
                  :present present :cells cells :scopes scopes :invocation-key (when parent (Object.))
                  :lifetime (if parent (:lifetime parent)

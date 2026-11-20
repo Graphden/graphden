@@ -195,6 +195,53 @@
       common)))
 
 
+(defn has-reference-use?
+  "An external input needs a reference that survives removal of the candidate
+   binding. Check actual references from the owner and its inherited rows."
+  [prepared definition]
+  (let [env (environment prepared)
+        own (scope-entry definition ((:records-of env) definition))]
+    (boolean
+      (some (fn [{:keys [records]}]
+              (some :ref-fn-id (concat (:binding records) (:binding-list-item records))))
+            (parent-order env own)))))
+
+
+(defn- certified-lineage
+  [{:keys [records-of definition-by-id] :as env} fn-id]
+  (if-let [definition (definition-by-id fn-id)]
+    (parent-order env (scope-entry definition (records-of definition)))
+    (reject! :missing-reference-declaration [])))
+
+
+(defn- check-descendants!
+  [env {:keys [edges field-owner public-path row]}]
+  (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id]}] (partition 2 1 edges)]
+    (let [scope (certified-lineage env (:target-fn-id prior))
+          origin (some #(when (= origin-fn-id (get-in % [:owner :id])) %) scope)
+          link (some #(when (= binding-id (:id %)) %) (get-in origin [:records :binding]))]
+      (when-not (and (= (:ref-fn-id link) target-fn-id) (= [(:slot-id link)] (second from)))
+        (reject! :reference-use-drift public-path))))
+  (let [scope (certified-lineage env (:target-fn-id (peek edges)))
+        origin (some #(when (= field-owner (get-in % [:owner :id])) %) scope)]
+    (when-not (some #(= (:target-path row) [(:slot-id %)]) (get-in origin [:records :fn-slot]))
+      (reject! :reference-field-drift public-path))))
+
+
+(defn scoped-reference-context
+  "Check inherited root links, descendant references and the leaf membership
+   against the current prepared package's declaration and binding rows."
+  [env definition records args]
+  (let [certificates (keep :scope-certificate args)]
+    (when (seq certificates)
+      (let [own (scope-entry definition records)
+            lineage (rest (parent-order env own))
+            links (into {} (comp (mapcat #(get-in % [:records :binding])) (filter :ref-fn-id) (map (juxt :id identity))) lineage)]
+        (run! (partial check-descendants! env) certificates)
+        {:scoped-inputs (into {} (map (juxt :public-path identity)) certificates)
+         :inherited-scoped-refs links}))))
+
+
 (defn own-field-declaration?
   "The composed field declaration forms currently supported by the source migrator."
   [spec]

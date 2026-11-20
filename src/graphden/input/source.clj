@@ -562,7 +562,10 @@
 (defn- v2-authored-meaning
   [definition parsed]
   (let [traces (or (:list-builders parsed) {})
-        bindings (mapv (partial rename/legacy-binding (:declaration-records parsed))
+        certified (set (map :row (vals (:scoped-inputs parsed))))
+        bindings (mapv #(if (contains? certified %)
+                          (migration/legacy-binding (assoc % :scope-path []))
+                          (rename/legacy-binding (:declaration-records parsed) %))
                        (ordinary-bindings (:bindings parsed) traces))]
     (assoc (authored-meaning definition parsed bindings)
            :list-builders traces
@@ -650,8 +653,9 @@
             id (ids/fn-id (:namespace lowered) (:name lowered))
             args (get index id)
             origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
-        (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
-                                    (source-list/verified-traces args) args type-names)))))
+        (merge (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
+                                           (source-list/verified-traces args) args type-names)
+               (source-context/scoped-reference-context environment lowered rows args))))))
 
 
 (defn- verify-definition

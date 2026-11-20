@@ -34,6 +34,20 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))
 
 
+(deftest scoped-input-keys-retain-argument-comments-and-literal-bytes
+  (let [raw "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:left :reader, :deep ;; free reader input\r\n  \"x\\n y\"}}]}"
+        operations [{:op :rename-bind :definition :host :path [:args]}
+                    {:op :wrap-ref :definition :host :path [:args :left]}
+                    {:op :scope-key :definition :host :path [:args :deep] :public-path [:left :deep]}
+                    {:op :wrap-value :definition :host :path [:args :deep]}]
+        plan (cst/plan raw {:namespace "demo.main" :operations operations})
+        edited (:text (cst/apply-text plan raw))]
+    (is (str/includes? edited "[:left :deep] ;; free reader input\r\n  [:value \"x\\n y\"]"))
+    (is (= :already-applied (:status (cst/apply-text plan edited))))
+    (is (= :invalid-scoped-path (reason #(cst/plan raw {:namespace "demo.main"
+                                                        :operations [(assoc (nth operations 2) :public-path [:left :wrong])]}))))))
+
+
 (deftest rename-preserves-declaration-style-test
   (let [source "; module\n{:namespace \"demo.main\", :fns\n [{:name :base\n   :args ; owned declaration comment\n   {:x {:type :any :value {:args 9 :input 2}}}}]} ; end\n"
         patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}))

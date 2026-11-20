@@ -5,6 +5,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
+    [graphden.input.source :as source]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -67,6 +68,53 @@
     (is (= "checked" (get-in certificate [:row :value])))))
 
 
+(deftest certified-reference-input-is-written-and-read-by-its-public-path
+  (let [package (fixture "checked")
+        entry (snapshot/migrate-binding package host-id @roots)
+        field (ids/slot-id (ids/fn-id "core.strings" :str-upper) :string)
+        link (ids/binding-id host-id (ids/slot-id (ids/fn-id "core.strings" :_csv-escape-cell) :value))
+        path [:value :string]
+        row (some #(when (= [link] (:scope-path %)) %) (get-in entry [:v2 :bindings]))
+        reread (fn [change] (first (:definitions (source/verify-module {:definitions [(change entry)]} (:prepared package)))))]
+    (is (= :authored-source-equivalent (:verification entry)) (pr-str (:blockers entry)))
+    (is (= [:value "checked"] (get-in entry [:proposed :bind path])))
+    (is (= (ids/binding-id host-id field) (:id row)))
+    (is (= [field] (:target-path row)))
+    (is (= :blocked (:status (reread #(assoc-in % [:proposed :bind path] [:value nil])))))
+    (is (= :blocked (:status (reread #(assoc-in % [:proposed :bind :value] [:value "other"])))))))
+
+
+(deftest scoped-path-crosses-two-references-and-an-inherited-declaration
+  (let [wrapper {:namespace "fixture" :name :upper :parent :str-upper}
+        inner {:namespace "fixture" :name :inner :parent :_csv-escape-cell :args {:value :upper}}
+        outer {:namespace "fixture" :name :outer :parent :_csv-escape-cell :args {:value :inner}}
+        host {:namespace "fixture" :name :host :parent :outer :args {:string "  checked "}}
+        ds (into strings [wrapper inner outer host])
+        pkg (snapshot/package-index (parse/prepare-module ds {} {}) ds)
+        owner (ids/fn-id "fixture" :host)
+        slot (ids/slot-id (ids/fn-id "core.strings" :str-upper) :string)
+        source-slot (ids/slot-id (ids/fn-id "core.strings" :_csv-escape-cell) :value)
+        uses (mapv #(ids/binding-id (ids/fn-id "fixture" %) source-slot) [:outer :inner])
+        rewritten (snapshot/migrate-binding pkg owner @roots)
+        [row] (get-in rewritten [:v2 :bindings])
+        path [:value :value :string]]
+    (is (= :authored-source-equivalent (:verification rewritten)) (pr-str (:blockers rewritten)))
+    (is (= [:value "  checked "] (get-in rewritten [:proposed :bind path])))
+    (is (= uses (:scope-path row)))
+    (let [stale (assoc-in rewritten [:legacy :arguments 0 :scope-certificate :edges 1 :from] [[owner []] [source-slot]])]
+      (is (= :blocked (get-in (source/verify-module {:definitions [stale]} (:prepared pkg))
+                              [:definitions 0 :status]))))
+    (let [other (assoc-in inner [:args :value] :str-upper)
+          changed (parse/prepare-module (into strings [wrapper other outer host]) {} {})
+          blocked (get-in (source/verify-module {:definitions [rewritten]} changed) [:definitions 0 :status])]
+      (is (= :blocked blocked)))
+    (is (= [slot] (:target-path row)))
+    (is (= (ids/binding-id owner slot) (:id row)))
+    (is (= :blocked
+           (get-in (source/verify-module {:definitions [(assoc-in rewritten [:proposed :parent] :inner)]}
+                                         (:prepared pkg)) [:definitions 0 :status])))))
+
+
 (deftest absent-or-incompatible-package-evidence-is-rejected-test
   (let [package (fixture "checked")
         reader (ids/fn-id "core.strings" :str-upper)]
@@ -84,14 +132,14 @@
 
 
 (deftest core-prometheus-formatting-source-test
-  (testing "An existing core source blocker receives an explicit closure diagnostic"
+  (testing "The proposed scoped binding cannot supply its own reference occurrence"
     (let [originals (into [] (mapcat sources) (:modules (read-package-edn "package.edn")))
           prepared (binding [shapes/*marker-registry-override* (atom (shapes/markers-snapshot))]
                      (parse/prepare-module originals {} {}))
           id (ids/fn-id "core.system" :_prom-seg)
           rejected (failure #(snapshot/verify-binding (snapshot/package-index prepared originals) id @roots))]
-      (is (= :configuration-evidence-required (:code rejected)))
-      (is (= (ids/fn-id "core.system" :_prom-k-lower) (:fn-id rejected))))))
+      (is (= :missing-reference-use (:code rejected)))
+      (is (= id (:fn-id rejected))))))
 
 
 (deftest existing-web-reference-keeps-its-core-field-identity-test

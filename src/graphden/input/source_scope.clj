@@ -84,25 +84,42 @@
     (only candidates :nonunique-reference-input)))
 
 
+(defn- checked-edge
+  [graph snapshot owner prefix]
+  (let [to [owner prefix]
+        {address :from target :target-fn-id id :binding-id :as edge}
+        (only (filter #(= to (:to %)) (:dependencies graph)) :missing-reference-use)
+        [parent [field :as path]] address
+        bound (get-in graph [:public-input :bindings address])
+        row (get-in snapshot [:bindings id])
+        contract (get-in graph [:public-input :scope-contracts parent])
+        name (:name (only (filter #(= field (:id %)) (:fields contract)) :missing-reference-use))]
+    (when-not (and (= :value (:mode edge)) (= [owner (pop prefix)] parent)
+                   (= id (peek prefix) (:binding-id bound) (:id row))
+                   (= "ref" (:expression-kind row)) (= (:fn-id row) (:origin-fn-id bound))
+                   (empty? (:scope-path row)) (= path [field] (:target-path row))
+                   (= id (ids/binding-id (:fn-id row) field))
+                   (uuid? target) (= target (:ref-fn-id row) (get-in bound [:expression :fn-id])))
+      (reject! :unsupported-reference-use))
+    {:from address :binding-id id :target-fn-id target :origin-fn-id (:fn-id row) :name name}))
+
+
 (defn- public-route
-  [graph arg binding bindings]
+  [graph snapshot arg binding]
   (let [owner (:fn-id binding)
         slot (:slot-id binding)
-        [[_ use-path :as scope] _ :as address] (occurrence graph slot)
-        edge (only (filter #(= scope (:to %)) (:dependencies graph)) :missing-reference-use)
+        [[_ use-path] _ :as address] (occurrence graph slot)
         [names route] (only (filter #(= address (:address (val %))) (get-in graph [:public-input :routes]))
                             :unavailable-reference-input)
-        link (some #(when (= (:id %) (:binding-id edge)) %) bindings)]
-    (when-not (and (= 1 (count use-path)) (= :value (:mode edge))
-                   (= use-path [(:id link)]) (= owner (:fn-id link)) (uuid? (:ref-fn-id link))
-                   (= [[owner []] [(:slot-id link)]] (:from edge))
-                   (= (:ref-fn-id link) (:target-fn-id edge))
-                   (= slot (ids/slot-id (:target-fn-id edge) (get-in arg [:target :field])))
+        edges (mapv #(checked-edge graph snapshot owner (subvec use-path 0 %)) (range 1 (inc (count use-path))))
+        field (get-in arg [:target :field])
+        declaring (only (filter #(= slot (ids/slot-id % field)) (get-in graph [:scopes use-path :declaration-order]))
+                        :reference-field-origin-mismatch)]
+    (when-not (and (seq edges) (= field (peek (:source-path arg))) (= names (conj (mapv :name edges) field))
                    (= :input-field (:kind route)) (:whole-bindable? route) (= slot (:origin-field-id route))
-                   (= (last names) (get-in arg [:target :field]))
                    (migration/same-edn? (get-in arg [:target :type]) (:completion-type route)))
       (reject! :unsupported-reference-use))
-    [names address]))
+    [names address edges declaring]))
 
 
 (defn- scoped-row
@@ -131,8 +148,8 @@
 
 (defn verify-binding
   "Verify one previously blocked value/reference binding through a unique,
-   direct, value-producing ref owned by the authored function. The frozen
-   snapshot contains all its other bindings. analyze takes [snapshot fn-id]
+   ordered path of value-producing references. The frozen snapshot contains
+   all other owner bindings and inherited uses. analyze takes [snapshot fn-id]
    and returns the stage-4 analyze-effective-input result.
 
    Replay the overlay against a fresh snapshot, checking its binding identity,
@@ -140,10 +157,10 @@
    is local to this proved source occurrence. No general flattening is valid.
    This certificate is private and does not change the source plan's status."
   [plan-entry source-path snapshot analyze]
-  (let [[arg binding bindings] (legacy-origin plan-entry source-path snapshot)
+  (let [[arg binding _] (legacy-origin plan-entry source-path snapshot)
         owner (:fn-id binding)
         before (checked-graph analyze snapshot owner)
-        [public-path address] (public-route before arg binding bindings)
+        [public-path address edges declaring] (public-route before snapshot arg binding)
         row (scoped-row binding address)
         updated (-> snapshot (assoc :snapshot-id (random-uuid)) (assoc-in [:bindings (:id row)] row))
         after (checked-graph analyze updated owner)
@@ -159,4 +176,5 @@
                    (preserves-occupancy? prior current address binding)
                    (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))
       (reject! :scope-replay-mismatch))
-    {:snapshot-id (:snapshot-id snapshot) :source-path source-path :public-path public-path :address address :row row}))
+    {:snapshot-id (:snapshot-id snapshot) :source-path source-path :public-path public-path :address address
+     :edges edges :field-owner declaring :owner-parents (get-in snapshot [:fns owner :parent-ids]) :row row}))

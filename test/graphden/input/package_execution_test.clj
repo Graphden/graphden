@@ -71,6 +71,17 @@
     (is (= :unknown-input-field (rejection-code #(canonical {:string "hidden"}))))))
 
 
+(deftest prepared-package-reference-routes-named-inputs-through-both-compilers
+  (let [name :_csv-upper-test
+        source (conj (declarations "packages/core/strings/fns.edn" #{:_csv-escape-cell :str-upper})
+                     {:name name :namespace "fixture" :parent :_csv-escape-cell
+                      :args {:value :str-upper}})
+        {:keys [canonical legacy analysis]} (runtimes source (ids/fn-id "fixture" name))]
+    (is (= :input-field (get-in analysis [:public-input :routes [:value :string] :kind])))
+    (doseq [[input expected] [["graph" "GRAPH"] ["graph,input" "\"GRAPH,INPUT\""]]]
+      (is (= expected (legacy {:string input}) (canonical {:value {:string input}}))))))
+
+
 (deftest prepared-web-state-requires-a-compile-time-value-lowering
   (let [source (into (declarations "packages/core/concurrency/fns.edn" #{:cell :deref})
                      (declarations "packages/web/http/fns.edn" #{:response-cache-cell :_response-cache-current}))]

@@ -45,7 +45,7 @@
       (when-not (report/stable-candidate? initial (resume/checkout-candidate))
         (throw (ex-info "Candidate changed while preparing priority hints" {})))
       (spit path payload :encoding "UTF-8")
-      {:digest (sha256 (.getBytes payload "UTF-8")) :plan plan})))
+      {:digest (sha256 (String/.getBytes payload "UTF-8")) :plan plan})))
 
 
 (defn- read-plan

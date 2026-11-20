@@ -1760,12 +1760,15 @@ gate_suites() {
   ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
     || { echo "FAIL: cannot calculate required CI checks"; return 1; }
 
+  local priority_prefix="$GRAPHDEN_RESUME_OUT.priority"
+  (cd "$wt" && bb scripts/ci_priority.clj gate-plan "$base_sha" "$priority_prefix" "$ci_sha") \
+    || { echo "FAIL: cannot prepare candidate ordering hints"; return 1; }
   if [ "$NEED_INTEGRATION" = 1 ]; then
-    PRIORITY_INTEGRATION="$(cd "$wt" && bb scripts/ci_priority.clj integration "$base_sha")" \
+    PRIORITY_INTEGRATION="$(cat "$priority_prefix.integration")" \
       || { echo "FAIL: cannot select related integration tests"; return 1; }
   fi
   if [ "$NEED_E2E" = 1 ]; then
-    PRIORITY_BROWSER="$(cd "$wt" && bb scripts/ci_priority.clj browser "$base_sha")" \
+    PRIORITY_BROWSER="$(cat "$priority_prefix.browser")" \
       || { echo "FAIL: cannot select related browser tests"; return 1; }
   fi
   [ "$NEED_INTEGRATION" = 1 ] || MANUAL_INTEGRATION=""
@@ -1825,7 +1828,7 @@ gate_suites() {
   fi
   # Quick mandatory CI checks run first inside the one current candidate gate.
   local GRAPHDEN_CI_SINCE="$base_sha" GRAPHDEN_CI_PRIORITY_HINTS
-  GRAPHDEN_CI_PRIORITY_HINTS="$(cd "$wt" && bb scripts/ci_priority.clj kaocha-hints "$base_sha")" \
+  GRAPHDEN_CI_PRIORITY_HINTS="$(cat "$priority_prefix.kaocha.edn")" \
     || { echo "FAIL: cannot prepare suite ordering hints"; return 1; }
   export GRAPHDEN_CI_SINCE GRAPHDEN_CI_PRIORITY_HINTS
   echo "  stage order: ${ordered[*]}"

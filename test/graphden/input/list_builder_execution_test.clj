@@ -4,11 +4,16 @@
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.input.analysis :as analysis]
+    [graphden.input.context :as context]
+    [graphden.input.descriptor :as descriptor]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as execution]
+    [graphden.input.list-records :as list-records]
     [graphden.input.source :as source]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse]))
+    [graphden.packages.records.parse :as parse]
+    [graphden.types.check :as check]))
 
 
 (deftest builder-ref-demand-and-call-cache-match-sequence-compilation
@@ -105,3 +110,34 @@
     (is (= :positional-list-field-mismatch
            (try (execution/compile-construction trace (assoc opts :lookups {})) nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
+
+
+
+
+(deftest analyzer-checks-the-positional-route-from-generated-rows
+  (let [defs [{:namespace "fixture" :name :base :args {:xs :sequence} :return-type :any}
+              {:namespace "fixture" :name :child :parent :base :args {:xs [{:as :word :type :text}]}}]
+        prepared (parse/prepare-module defs {} {})
+        replay (source/verify-module (source/plan-module defs prepared) prepared)
+        child (peek (:definitions replay))
+        trace (first (vals (get-in child [:v2 :list-builders])))
+        {:keys [owner-id binding-id builder-id]} (first (:fragments trace))
+        rows (group-by :kind (distinct (concat (mapcat #(get-in % [:v2 :declaration-records]) (:definitions replay))
+                                               (list-records/authored-records trace))))
+        index (fn [kind] (into {} (map (juxt :id identity)) (get rows kind)))
+        ctx (context/build-context {:fns (index :fn) :fields (index :slot) :bindings (index :input-binding)
+                                    :members (group-by :fn-id (:fn-slot rows))})
+        return (descriptor/resolve-descriptor ctx (get-in ctx [:fns builder-id :return-type-fn-id]))
+        ctx (assoc-in ctx [:signatures builder-id :return] (:type return))
+        analyze #(analysis/analyze-effective-input % owner-id {:check-expression check/check-input-binding})
+        graph (analyze ctx)
+        item-address [[owner-id [binding-id]] [(ids/slot-id builder-id :item-0)]]
+        source-address [[owner-id []] [(ids/slot-id owner-id :word)]]
+        item-id (ids/binding-list-item-id binding-id 0)]
+    (is (= :authored-source-equivalent (:verification child)))
+    (is (= [{:from item-address :source source-address :actual-type :text :required? false}] (:projections graph)))
+    (is (= :checked (get-in graph [:proofs item-address :status])))
+    (is (empty? (:required-addresses graph)))
+    (is (false? (get-in graph [:coverage :signatures])))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (analyze (assoc-in ctx [:bindings item-id :projection-path] [(ids/slot-id builder-id :word)]))))))

@@ -835,40 +835,21 @@
 
 
 (defn- seq-item-builder
-  "Compile one `binding-list-item` row into a `(fn [fa ctx])`
-   producing the item's runtime value. Four shapes:
-     - `{:value {:as :name} :literal nil}` — positional free-arg
-       substitution (`:route :args :items [{:as :path} ...]`);
-       reads via `force-value` so a delay in `free-args` gets
-       forced before the consumer sees it.
-     - `:value` present — literal value.
-     - `:ref-fn-id` — invoke pre-compiled child callable.
-     - everything nil — literal `nil`.
-
-   `owner-fn-id` is the fn-id whose seq binding contains this item.
-   The positional `{:as :name}` resolves to that owner's OWN rename
-   slot (parser creates one per rename); the reader indexes `fa`
-   by that rename slot's id — pure slot-id, no name fallback."
+  "Compile one binding-list-item into a function of free args and call context.
+   Positional items read the contributing owner's slot on demand. Generated
+   projections also supply its UUID, which must match that owner's membership.
+   Both accept the named free arg when the UUID is absent. Other rows supply
+   a literal (including nil) or invoke their precompiled child callable."
   [item child-callables lookups owner-fn-id]
   (cond
-    (:projection-slot-id item)
-    (let [sid (:projection-slot-id item)
-          field (some-> (get-in lookups [:slot-map sid :name]) keyword)]
-      (when-not (and field (= sid (get-in lookups [:slot-by-fn-name [(:projection-owner-id item) field] :id])))
+    (or (:projection-slot-id item)
+        (and (map? (:value item)) (:as (:value item)) (not (:literal item))))
+    (let [projected (:projection-slot-id item)
+          owner (if projected (:projection-owner-id item) owner-fn-id)
+          k (if projected (some-> (get-in lookups [:slot-map projected :name]) keyword) (keyword (:as (:value item))))
+          sid (get-in lookups [:slot-by-fn-name [owner k] :id])]
+      (when (and projected (not= projected sid))
         (throw (ex-info "Unresolved positional list input" {:type :input/list-builder :code :positional-list-field-mismatch})))
-      (fn [fa _ctx]
-        (force-value (if (contains? fa sid) (get fa sid) (get fa field)))))
-
-    (and (map? (:value item))
-         (:as (:value item))
-         (not (:literal item)))
-    (let [k (keyword (:as (:value item)))
-          ;; Phase 4 — rename-aware slot-id from owner's own rename
-          ;; slot for this `:as` name. Falls back to name fallback
-          ;; below when the rename slot doesn't exist (some seq
-          ;; binding shapes don't produce slot rows via parser).
-          sid (some-> (get (:slot-by-fn-name lookups) [owner-fn-id k])
-                      :id)]
       (if sid
         (fn [fa _ctx]
           (let [v (get fa sid ::miss)]

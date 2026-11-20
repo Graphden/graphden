@@ -6,10 +6,28 @@
     [graphden.packages.records.types :as types]))
 
 
+(defn occurrence-policy
+  [spec]
+  (select-keys spec [:description :required]))
+
+
+(defn expression
+  [field item]
+  (let [policy (occurrence-policy item)]
+    (cond-> [:project [field]] (seq policy) (conj policy))))
+
+
+(defn valid-policy?
+  [policy]
+  (and (map? policy) (every? #{:description :required} (keys policy))
+       (or (not (contains? policy :description)) (string? (:description policy)))
+       (or (not (contains? policy :required)) (false? (:required policy)))))
+
+
 (defn marker?
   [spec]
   (and (map? spec) (simple-keyword? (:as spec))
-       (every? #{:as :type} (keys spec))
+       (every? #{:as :type :description :required} (keys spec)) (valid-policy? (occurrence-policy spec))
        (or (not (contains? spec :type)) (format/configuration-type? (:type spec)))))
 
 

@@ -263,6 +263,26 @@
     (is (= :positional-list-field-mismatch (get-in bad [:definitions 2 :blockers 0 :code])))))
 
 
+(deftest occurrence-policy-is-stored-on-the-projected-item
+  (let [base {:namespace "fixture" :name :consumer :args {:xs :sequence} :return-type :any}
+        marker {:as :word :type :text :required false :description "describes the occurrence"}
+        child {:namespace "fixture" :name :child :parent :consumer :args {:xs [marker {:as :word :type :text}]}}
+        defs [base child]
+        prepared (parse/prepare-module defs {} {})
+        planned (source/plan-module defs prepared)
+        entry (peek (:definitions (source/verify-module planned prepared)))
+        trace (first (vals (get-in entry [:v2 :list-builders])))
+        rows-by-id (into {} (map (juxt :id identity)) (filter #(= "projection" (:expression-kind %)) (:records trace)))
+        rows (mapv (comp rows-by-id :id) (get-in trace [:fragments 0 :items]))
+        policy {:description "describes the occurrence" :required false}
+        altered (assoc-in planned [:definitions 1 :proposed :bind :xs 1 :items 0 2 :description] "changed")]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:word {:type :text :required false}} (get-in entry [:proposed :input])))
+    (is (= [[:project [:word] policy] [:project [:word]]] (get-in entry [:proposed :bind :xs 1 :items])))
+    (is (= [policy {}] (mapv #(select-keys % [:description :required]) rows)))
+    (is (= :blocked (get-in (source/verify-module altered prepared) [:definitions 1 :status])))))
+
+
 (deftest positional-marker-annotations-are-not-interpreted-as-input-requirements
   (let [base {:namespace "fixture" :name :consumer :args {:xs :sequence} :return-type :any}
         child {:namespace "fixture" :name :child :parent :consumer

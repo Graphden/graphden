@@ -4,6 +4,7 @@
   (:require
     [graphden.input.core :as input]
     [graphden.input.list-builder :as builder]
+    [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]
@@ -34,13 +35,14 @@
 
 
 (defn- operand-rows
-  [input-id {:keys [owner-id builder-id]} use-path element-id {:keys [id position kind fn-id value source-id]}]
+  [input-id {:keys [owner-id builder-id]} use-path element-id {:keys [id position kind fn-id value source-id] :as item}]
   (let [[field membership] (field-rows input-id builder-id (str "item-" position) position element-id (not= :projection kind))
         binding (rows/normalize
                   (merge {:kind :input-binding :id id :fn-id builder-id :scope-path [] :target-path [(:id field)]}
                          (case kind
-                           :projection {:fn-id owner-id :scope-path use-path :expression-kind "projection" :value-present false
-                                        :projection-scope-path [] :projection-path [source-id]}
+                           :projection (merge {:fn-id owner-id :scope-path use-path :expression-kind "projection" :value-present false
+                                               :projection-scope-path [] :projection-path [source-id]}
+                                              (positions/occurrence-policy item))
                            :value {:expression-kind "value" :value-present true :value value}
                            :ref {:expression-kind "ref" :value-present false :ref-fn-id fn-id}
                            (reject! :invalid-list-item))))]
@@ -71,7 +73,8 @@
         item {:id (:id row) :position (:position membership)}]
     (case (:expression-kind row)
       "value" (assoc item :kind :value :value (:value row))
-      "projection" (assoc item :kind :projection :source-id (first (:projection-path row)))
+      "projection" (merge (assoc item :kind :projection :source-id (first (:projection-path row)))
+                          (positions/occurrence-policy row))
       "ref" (assoc item :kind :ref :fn-id (:ref-fn-id row))
       (reject! :missing-list-operand))))
 

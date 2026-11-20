@@ -114,7 +114,7 @@
 
 (deftest analyzer-checks-the-positional-route-from-generated-rows
   (let [defs [{:namespace "fixture" :name :base :args {:xs :sequence} :return-type :any}
-              {:namespace "fixture" :name :child :parent :base :args {:xs [{:as :word :type :text}]}}]
+              {:namespace "fixture" :name :child :parent :base :args {:xs [{:as :word :type :text :description "Operand note" :required false}]}}]
         prepared (parse/prepare-module defs {} {})
         replay (source/verify-module (source/plan-module defs prepared) prepared)
         child (peek (:definitions replay))
@@ -135,6 +135,8 @@
     (is (= :authored-source-equivalent (:verification child)))
     (is (= [{:from item-address :source source-address :actual-type :text :required? false}] (:projections graph)))
     (is (= :checked (get-in graph [:proofs item-address :status])))
+    (is (= "Operand note" (:description (descriptor/node-at (get-in graph [:scopes [binding-id] :configured-contract]) (second item-address)))))
+    (is (nil? (:description (descriptor/node-at (get-in graph [:scopes [] :configured-contract]) (second source-address)))))
     (is (empty? (:required-addresses graph)))
     (is (false? (get-in graph [:coverage :signatures])))
     (is (thrown? clojure.lang.ExceptionInfo

@@ -30,14 +30,17 @@
 
 (defn- parse-item
   [binding-id name->id owner position form]
-  (when-not (and (vector? form) (= 2 (count form)))
+  (when-not (and (vector? form)
+                 (or (= 2 (count form))
+                     (and (= 3 (count form)) (= :project (first form))
+                          (positions/valid-policy? (peek form)) (seq (peek form)))))
     (reject! :invalid-list-item))
   (let [[op payload] form
         id (ids/binding-list-item-id binding-id position)]
     (case op
       :value {:id id :position position :kind :value :value payload}
       :project (if (and (uuid? owner) (vector? payload) (= 1 (count payload)) (simple-keyword? (first payload)))
-                 {:id id :position position :kind :projection :source-id (ids/slot-id owner (first payload))}
+                 (merge {:id id :position position :kind :projection :source-id (ids/slot-id owner (first payload))} (get form 2))
                  (reject! :positional-list-field-mismatch))
       :ref (let [ref-id (get name->id payload)]
              (when-not (and (keyword? payload) (uuid? ref-id))
@@ -81,10 +84,10 @@
   ([{:keys [tail items]} id->name field-names]
    [:list-builder
     {:tail tail
-     :items (mapv (fn [{:keys [kind value fn-id source-id]}]
+     :items (mapv (fn [{:keys [kind value fn-id source-id] :as item}]
                     (case kind
                       :ref [:ref (or (get id->name fn-id) (reject! :unresolved-list-item-ref))]
-                      :projection [:project [(or (get field-names source-id) (reject! :positional-list-field-mismatch))]]
+                      :projection (positions/expression (or (get field-names source-id) (reject! :positional-list-field-mismatch)) item)
                       :value [:value value]
                       (reject! :invalid-list-item)))
                   items)}]))
@@ -97,7 +100,7 @@
     (not (map? value)) [:value value]
     (= #{:value} (set (keys value))) [:value (:value value)]
     (= #{:ref} (set (keys value))) [:ref (:ref value)]
-    (positions/marker? value) [:project [(:as value)]]
+    (positions/marker? value) (positions/expression (:as value) value)
     (:as value) (reject! :positional-list-annotation-required)
     (or (:parent value) (:parents value)) (reject! :inline-list-item-origin-required)
     (some #(contains? value %) [:as :parent :parents :ref :value]) (reject! :unsupported-list-item-origin)
@@ -115,7 +118,7 @@
           (fn [position {:keys [id kind value fn-id source-id] :as item}]
             (when-not (and (= position (:position item)) (= id (ids/binding-list-item-id binding-id position))
                            (case kind
-                             :projection (and (uuid? owner-id) (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
+                             :projection (and (positions/valid-policy? (positions/occurrence-policy item)) (uuid? owner-id) (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
                              :ref (and (uuid? fn-id) (not (contains? item :value)))
                              :value (and (contains? item :value) (nil? fn-id))
                              false))

@@ -265,7 +265,7 @@ own new callable and input rows. An append following a closed tail fails.
 `graphden.input.list-records/recover-use` reconstructs one verified chain
 from the combined module rows and rejects unexpected writes into that use.
 Independent field declarations, assertions and a supported scalar rename can
-coexist with list contributions. Annotated positional projections, inline items and
+coexist with list contributions. Unsupported item annotations, inline items and
 ambiguous or missing ancestry have separate diagnostics.
 
 An item `{:as :label}` declares an optional owner input and becomes
@@ -277,10 +277,16 @@ Fields use their original membership positions. Repeated reads use separate
 item UUIDs. The JVM resolves the original owner slot before reading it at the
 consumer's demand point.
 
-Legacy items with `:description` or `:required` retain
-`:positional-list-annotation-required`. The original parser stores those
-keys on the item's raw value while creating an optional owner slot with an
-empty description. Promoting those keys onto that slot changes its contract.
+An occurrence with its own documentation or an explicit optional flag can
+carry that policy as the last projection argument, for example
+`[:project [:label] {:description "Display label" :required false}]`.
+The same item UUID stores the description and required flag on its scoped
+projection row. Other occurrences can read the same owner field with a
+different description. The owner field keeps its original optional contract.
+Legacy `:required true` on an item retains
+`:positional-list-annotation-required` because the old parser does not
+make that owner input mandatory.
+
 
 ## Focused verification
 

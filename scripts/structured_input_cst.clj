@@ -339,15 +339,19 @@
 (defn- position-item-edit
   [source starts node]
   (let [span (node-edit source starts node identity)
-        field (value-at node [:as])
-        type (key-loc node :type)
-        edits (cond-> [(node-edit source starts (key-loc node :as) (constantly ":project"))
-                       (node-edit source starts field #(str "[" % "]"))]
-                type (conj (node-edit source starts type (constantly ""))
-                           (position-type-edit source starts (z/right type))))
-        local (mapv #(-> % (update :start - (:start span)) (update :end - (:start span))) (sort-by :start edits))
-        inner (patched-text (:before span) local)]
-    (assoc span :after (str "[" (subs inner 1 (dec (count inner))) "]"))))
+        spans (mapv (fn [[k v]]
+                      (let [key-name (z/sexpr k)
+                            key-span (node-edit source starts k (case key-name :as (constantly ":project") :type (constantly "") identity))
+                            value (case key-name
+                                    :as (node-edit source starts v #(str "[" % "]"))
+                                    :type (position-type-edit source starts v)
+                                    (node-edit source starts v identity))]
+                        {:field key-name :start (:start key-span) :end (:end value)
+                         :text (str (:after key-span) (subs source (:end key-span) (:start value)) (:after value))}))
+                    (partition 2 (children node)))
+        groups (group-by (comp boolean #{:description :required} first) (field-chunks source span spans))
+        text (fn [policy?] (str/join (map second (get groups policy?))))]
+    (assoc span :after (str "[" (text false) (when (get groups true) (str " {" (text true) "}")) "]"))))
 
 
 (defn- list-builder-edit

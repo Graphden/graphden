@@ -542,5 +542,18 @@
       (is (= 1 (count (re-seq (re-pattern remark) target)))))))
 
 
+(deftest positional-occurrence-policy-preserves-the-original-literal-and-comments
+  (let [description "\"line 1\\n; stays in the string\""
+        text (str "{:namespace \"demo.main\" :fns [{:name :collect :args {:xs :sequence} :return-type :any}\r\n"
+                  "{:name :child :parent :collect :args {:xs [{:description " description " ; item note\r\n"
+                  " :as :value :required ; explicit on the item\r\n false :type :text}]}}]}")
+        result (migrate-child text)
+        child (peek (:fns (edn/read-string result)))]
+    (is (= {:value {:type :text :required false}} (:input child)))
+    (is (= [:project [:value] {:description (edn/read-string description) :required false}] (get-in child [:bind :xs 1 :items 0])))
+    (doseq [snippet [description "; item note\r\n" "; explicit on the item\r\n"]]
+      (is (str/includes? result snippet)))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

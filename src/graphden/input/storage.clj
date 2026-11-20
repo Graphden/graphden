@@ -6,6 +6,7 @@
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
+    [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as resolution]
     [graphden.versioning.storage.uniqueness :as uniqueness]))
@@ -17,30 +18,43 @@
   (uniqueness/xact-lock! (tx/datasource storage) ["structured-input-bindings"]))
 
 
-(defn- change!
+(defn with-current-binding!
+  "Run an operation with the live branch winner under the owned graph writer
+   transaction and structured binding lock. The callback receives decorated
+   storage and the validated version. Throwing rolls back its writes."
   [storage id expected-version operation]
   (access/assert-write! :input-binding {})
-  (when-not (and (vs/versioned-storage? storage) (uuid? expected-version))
+  (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage))
+                 (uuid? id) (uuid? expected-version))
     (throw (ex-info "Input edits require a branch and a version precondition"
                     {:type :input/version-required})))
-  (writer/with-write [storage {:entity :input-binding :ids [id]}]
-                     (let [base (vs/unwrap storage)
-                           _ (uniqueness/xact-lock! (tx/datasource base) ["structured-input-bindings"])
-                           current (resolution/resolve-version base :input-binding id (vs/current-branch-id storage))]
-                       (when-not (and (= expected-version (:id current))
-                                      (not (resolution/tombstone? current)))
-                         (throw (ex-info "Input binding changed since it was read"
-                                         {:type :input/stale-version})))
-                       (operation storage))))
+  (tx/assert-owns-commit! storage)
+  ;; The winning version supplies the owner and can differ by branch. Start
+  ;; with the global semantic admission; a pre-lock owner read cannot narrow it.
+  (writer/with-write [storage :graph]
+                     (lock-bindings! storage)
+                     (binding [resolution/*branch-chain-cache* (atom {})
+                               branch-local/*storage-caches-override* (atom {})]
+                       (resolution/call-with-fresh-memos
+                         (fn []
+                           (let [current (resolution/resolve-version (vs/unwrap storage) :input-binding id
+                                                                     (vs/current-branch-id storage))]
+                             (when-not (and (= expected-version (:id current))
+                                            (not (resolution/tombstone? current)))
+                               (throw (ex-info "Input binding changed since it was read"
+                                               {:type :input/stale-version})))
+                             (operation storage current)))))))
 
 
 (defn replace-binding!
   [storage id expected-version patch]
-  (change! storage id expected-version #(sp/update-entity % :input-binding id patch)))
+  (with-current-binding! storage id expected-version
+    (fn [storage _] (sp/update-entity storage :input-binding id patch))))
 
 
 (defn remove-binding!
   [storage id expected-version]
-  (change! storage id expected-version
-           #(binding [vs/*tombstone-delete?* true]
-              (sp/delete-entity % :input-binding id))))
+  (with-current-binding! storage id expected-version
+    (fn [storage _]
+      (binding [vs/*tombstone-delete?* true]
+        (sp/delete-entity storage :input-binding id)))))

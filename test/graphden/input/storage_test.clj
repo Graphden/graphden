@@ -22,6 +22,7 @@
     [graphden.storage.postgres.source-revision :as revision]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
     [graphden.versioning.identity-repair :as identity-repair]
     [graphden.versioning.storage.core :as vs]
@@ -322,20 +323,77 @@
       (is (= (migration/fingerprint source) (migration/fingerprint (offline/snapshot base)))))))
 
 
+(defn- binding-version
+  [storage id]
+  (:id (resolution/resolve-version (vs/unwrap storage) :input-binding id (vs/current-branch-id storage))))
+
+
 (deftest edit-and-remove-require-the-current-version-test
   (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [user name] :as ids} (seed! v)
           row (sp/create-entity v :input-binding (literal ids [user name] "before"))
-          version #(-> (resolution/resolve-version base :input-binding (:id row) (vs/current-branch-id v)) :id)
-          old-version (version)]
+          old-version (binding-version v (:id row))]
       (input-edit/replace-binding! v (:id row) old-version {:value "after"})
       (is (= :input/stale-version
              (attempt #(input-edit/replace-binding! v (:id row) old-version {:value "lost"}))))
       (is (= "after" (:value (sp/read-entity v :input-binding (:id row)))))
       (is (= :input/stale-version (attempt #(input-edit/remove-binding! v (:id row) old-version))))
-      (input-edit/remove-binding! v (:id row) (version))
+      (input-edit/remove-binding! v (:id row) (binding-version v (:id row)))
       (is (nil? (sp/read-entity v :input-binding (:id row)))))))
+
+
+(deftest failed-versioned-edit-rolls-back-and-allows-replay-test
+  (with-storage [base (base-storage)]
+    (let [storage (vs/wrap-with-versioning base)
+          {:keys [user name] :as ids} (seed! storage)
+          id (:id (sp/create-entity storage :input-binding (literal ids [user name] "before")))
+          expected (binding-version storage id)
+          abort-edit (fn [guarded current]
+                       (is (= expected (:id current)))
+                       (is (:owned? tx/*transaction-context*))
+                       (is (identical? (tx/datasource guarded) (:connection tx/*transaction-context*)))
+                       (sp/update-entity guarded :input-binding id {:value "rolled back"})
+                       (throw (ex-info "rollback" {:type :test/rollback})))]
+      (is (= :test/rollback (attempt #(input-edit/with-current-binding! storage id expected abort-edit))))
+      (is (= expected (binding-version storage id)))
+      (is (= "before" (:value (sp/read-entity storage :input-binding id))))
+      (is (= 1 (count (sp/query-entities base :input-binding-version {:input-binding-id id}))))
+      (is (= "after" (:value (input-edit/replace-binding! storage id expected {:value "after"})))))))
+
+
+(deftest competing-replace-and-remove-share-one-current-version-test
+  (with-storage [base (base-storage)]
+    (let [storage (vs/wrap-with-versioning base)
+          {:keys [user name] :as ids} (seed! storage)
+          id (:id (sp/create-entity storage :input-binding (literal ids [user name] "before")))
+          expected (binding-version storage id)
+          start (promise)
+          replacement (future @start (attempt #(input-edit/replace-binding! storage id expected {:value "after"})))
+          removal (future @start (attempt #(input-edit/remove-binding! storage id expected)))]
+      (deliver start true)
+      (is (= #{:ok :input/stale-version} (set [(deref replacement 15000 :timeout) (deref removal 15000 :timeout)])))
+      (is (= 2 (count (sp/query-entities base :input-binding-version {:input-binding-id id}))))
+      (is (contains? #{nil "after"} (:value (sp/read-entity storage :input-binding id)))))))
+
+
+(deftest competing-branch-edits-use-their-own-winner-test
+  (with-storage [base (base-storage)]
+    (let [main (vs/wrap-with-versioning base)
+          {:keys [user name] :as ids} (seed! main)
+          id (:id (sp/create-entity main :input-binding (literal ids [user name] "before")))
+          expected (binding-version main id)
+          feature (vs/switch-branch main (:id (vs/create-branch! main "independent-edit")))
+          start (promise)
+          writes (mapv (fn [[storage value]]
+                         (future @start (attempt #(input-edit/replace-binding! storage id expected {:value value}))))
+                       [[main "main"] [feature "feature"]])]
+      (deliver start true)
+      (is (= [:ok :ok] (mapv #(deref % 15000 :timeout) writes)))
+      (is (= "main" (:value (sp/read-entity main :input-binding id))))
+      (is (= "feature" (:value (sp/read-entity feature :input-binding id))))
+      (is (= :input/stale-version
+             (attempt #(input-edit/remove-binding! feature id (binding-version main id))))))))
 
 
 (deftest historical-membership-tombstone-test

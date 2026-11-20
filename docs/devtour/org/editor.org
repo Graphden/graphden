@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~190 min
+[[file:index.org][index]] · ~191 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -372,8 +372,22 @@ Captures immutable authorized type facts before running one selected formatter o
 
 - source :: [[file:../../../resources/packages/app/editor/editor-canvas-type-structure-graph.js::  function format(raw, flat, constraint = false) {][resources/packages/app/editor/editor-canvas-type-structure-graph.js:156]]
 - see also :: [[file:editor.org::#editor/mountCanvasBody][mountCanvasBody]], [[file:editor.org::#editor/createRuntime][createRuntime]]
+- referenced from :: [[file:editor.org::#editor/recordExpansionFields][recordExpansionFields]]
 
-* 28. projection
+* 28. recordExpansionFields
+:PROPERTIES:
+:CUSTOM_ID: editor/recordExpansionFields
+:FILE: resources/packages/app/editor/editor-type-expand-render.js
+:LINE: 60
+:MINS: 1.4
+:END:
+
+The argument type popover reads names and field types from the resolved record shape. When the authorized graph subtree carries the complete declaration, its slot order and optional flags supply the row labels. An inferred shape can still expand without this metadata. Field chips reuse the graph's passive labels and identify their nested panels for keyboard users. The structured descriptor is the source of field identity for writes.
+
+- source :: [[file:../../../resources/packages/app/editor/editor-type-expand-render.js::function recordExpansionFields(rich, shape, typeId) {][resources/packages/app/editor/editor-type-expand-render.js:60]]
+- see also :: [[file:editor.org::#editor/format][format]], [[file:types.org::#types/resolve-contract][resolve-contract]]
+
+* 29. projection
 :PROPERTIES:
 :CUSTOM_ID: editor/projection~2
 :FILE: resources/packages/app/editor/editor-canvas-bindings-graph.js
@@ -386,7 +400,7 @@ Projects authorized source labels, finite seal facts and flag-form copy into a p
 - source :: [[file:../../../resources/packages/app/editor/editor-canvas-bindings-graph.js::  function projection(surface, facts) {][resources/packages/app/editor/editor-canvas-bindings-graph.js:14]]
 - see also :: [[file:editor.org::#editor/mountCanvasBody][mountCanvasBody]]
 
-* 29. mountCatalog
+* 30. mountCatalog
 :PROPERTIES:
 :CUSTOM_ID: editor/mountCatalog
 :FILE: resources/packages/app/editor/editor-tour-catalog-graph.js
@@ -400,7 +414,7 @@ Runs the selected root HOF's tutorial catalogue callback over browser-local disp
 - see also :: [[file:editor.org::#editor/openTutorialMenu][openTutorialMenu]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/openTutorialMenu][openTutorialMenu]]
 
-* 30. openTutorialMenu
+* 31. openTutorialMenu
 :PROPERTIES:
 :CUSTOM_ID: editor/openTutorialMenu
 :FILE: resources/packages/app/editor/editor-tour-picker.js
@@ -414,7 +428,7 @@ Owns the tutorial catalogue's local reading history, requirement checks, stable 
 - see also :: [[file:editor.org::#editor/mountCatalog][mountCatalog]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/mountCatalog][mountCatalog]]
 
-* 31. enterArgValueEditMode
+* 32. enterArgValueEditMode
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -428,7 +442,7 @@ Asks ~/api/value-form~ for a widget appropriate to the [[file:glossary.org::#ter
 - see also :: [[file:crud.org::#crud/resolve-form][resolve-form]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 - same file :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
-* 32. writeBindingFields
+* 33. writeBindingFields
 :PROPERTIES:
 :CUSTOM_ID: editor/writeBindingFields
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -443,7 +457,7 @@ Follow a user saving a literal input: this writer targets its function and slot,
 - same file :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
-* 33. gdEnterDiffMode
+* 34. gdEnterDiffMode
 :PROPERTIES:
 :CUSTOM_ID: editor/gdEnterDiffMode
 :FILE: resources/packages/app/editor/editor-diff-mode.js
@@ -457,7 +471,7 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 - see also :: [[file:editor.org::#editor/mountDiffItem][mountDiffItem]], [[file:editor.org::#editor/selectDiffLens][selectDiffLens]]
 - referenced from :: [[file:editor.org::#editor/mountDiffItem][mountDiffItem]], [[file:editor.org::#editor/selectDiffLens][selectDiffLens]]
 
-* 34. submitExecution
+* 35. submitExecution
 :PROPERTIES:
 :CUSTOM_ID: editor/submitExecution
 :FILE: resources/packages/app/editor/editor-execute.js
@@ -471,7 +485,7 @@ The selected card's Run button delegates to the existing Inspector Run owner; it
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]]
 - referenced from :: [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]]
 
-* 35. aggregatePathTrace
+* 36. aggregatePathTrace
 :PROPERTIES:
 :CUSTOM_ID: editor/aggregatePathTrace
 :FILE: resources/packages/app/editor/editor-path-view.js
@@ -485,7 +499,7 @@ Groups a trace's invocations by function UUID, keeping call counts, cache hits a
 - see also :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:executor.org::#executor/record-effect!][record-effect!]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]]
 
-* 36. gdApplyThemePayload
+* 37. gdApplyThemePayload
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyThemePayload
 :FILE: resources/packages/app/editor/editor-prefs.js
@@ -499,7 +513,7 @@ Applies a validated theme payload as inline CSS custom properties on the body. T
 - see also :: [[file:editor.org::#editor/evaluate][evaluate]]
 - referenced from :: [[file:editor.org::#editor/evaluate][evaluate]]
 
-* 37. evaluate
+* 38. evaluate
 :PROPERTIES:
 :CUSTOM_ID: editor/evaluate
 :FILE: src/graphden/editor/theme.clj
@@ -513,7 +527,7 @@ Evaluates a selected personal theme graph in the request's existing organisation
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 - referenced from :: [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 
-* 38. paint
+* 39. paint
 :PROPERTIES:
 :CUSTOM_ID: editor/paint
 :FILE: resources/packages/app/editor/editor-inspector-graph.js
@@ -526,7 +540,7 @@ The ordinary app.ui-inspector initial/update/view graphs own the header, kind cl
 - source :: [[file:../../../resources/packages/app/editor/editor-inspector-graph.js::  function paint(view) {][resources/packages/app/editor/editor-inspector-graph.js:107]]
 - same file :: [[file:editor.org::#editor/compareView][compareView]]
 
-* 39. compareView
+* 40. compareView
 :PROPERTIES:
 :CUSTOM_ID: editor/compareView
 :FILE: resources/packages/app/editor/editor-inspector-graph.js
@@ -539,7 +553,7 @@ The same Inspector view role projects read-only compare head and entry surfaces 
 - source :: [[file:../../../resources/packages/app/editor/editor-inspector-graph.js::  function compareView(surface, diff) {][resources/packages/app/editor/editor-inspector-graph.js:32]]
 - same file :: [[file:editor.org::#editor/paint][paint]]
 
-* 40. requestHost
+* 41. requestHost
 :PROPERTIES:
 :CUSTOM_ID: editor/requestHost
 :FILE: resources/packages/app/editor/editor-inspector.js
@@ -551,7 +565,7 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 
 - source :: [[file:../../../resources/packages/app/editor/editor-inspector.js::  function requestHost(id, retry) {][resources/packages/app/editor/editor-inspector.js:51]]
 
-* 41. definitions
+* 42. definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
@@ -564,7 +578,7 @@ Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tuto
 - source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:169]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
-* 42. selected-definitions
+* 43. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
@@ -577,7 +591,7 @@ The retained legacy selective-copy compatibility path keeps only the chosen comp
 - source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:270]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
-* 43. apply!
+* 44. apply!
 :PROPERTIES:
 :CUSTOM_ID: editor/apply!
 :FILE: src/graphden/editor/component_creation.clj
@@ -590,7 +604,7 @@ Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holdi
 - source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:258]]
 - see also :: [[file:versioning.org::#versioning/call-with-write][call-with-write]]
 
-* 44. collect-closure
+* 45. collect-closure
 :PROPERTIES:
 :CUSTOM_ID: editor/collect-closure
 :FILE: src/graphden/executor/browser_source.clj
@@ -602,7 +616,7 @@ Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable
 
 - source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:362]]
 
-* 45. export-resolved
+* 46. export-resolved
 :PROPERTIES:
 :CUSTOM_ID: editor/export-resolved
 :FILE: src/graphden/editor/components.clj
@@ -614,7 +628,7 @@ A protected ordinary resolver finds editor in the current principal/org/branch's
 
 - source :: [[file:../../../src/graphden/editor/components.clj::(defn export-resolved][src/graphden/editor/components.clj:222]]
 
-* 46. ensure-current!
+* 47. ensure-current!
 :PROPERTIES:
 :CUSTOM_ID: editor/ensure-current!
 :FILE: src/graphden/graph/personal_home.clj
@@ -626,7 +640,7 @@ Explicit profile infrastructure setup follows the configured personal namespace 
 
 - source :: [[file:../../../src/graphden/graph/personal_home.clj::(defn ensure-current!][src/graphden/graph/personal_home.clj:11]]
 
-* 47. apply-proposal!
+* 48. apply-proposal!
 :PROPERTIES:
 :CUSTOM_ID: editor/apply-proposal!
 :FILE: src/graphden/editor/config_activation.clj
@@ -638,7 +652,7 @@ Rebuilds the exact scoped preview and source expectations before writes. Small o
 
 - source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:390]]
 
-* 48. cleanup-preview!
+* 49. cleanup-preview!
 :PROPERTIES:
 :CUSTOM_ID: editor/cleanup-preview!
 :FILE: src/graphden/editor/config_receipts.clj
@@ -651,7 +665,7 @@ Read-only proposal for a new visible deletion decision on intentionally edited t
 - source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn cleanup-preview!][src/graphden/editor/config_receipts.clj:275]]
 - same file :: [[file:editor.org::#editor/reconcile-undo!][reconcile-undo!]]
 
-* 49. reconcile-undo!
+* 50. reconcile-undo!
 :PROPERTIES:
 :CUSTOM_ID: editor/reconcile-undo!
 :FILE: src/graphden/editor/config_receipts.clj
@@ -664,7 +678,7 @@ After a lost UNDO response, confirms only exact restored source and absence in t
 - source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn reconcile-undo!][src/graphden/editor/config_receipts.clj:188]]
 - same file :: [[file:editor.org::#editor/cleanup-preview!][cleanup-preview!]]
 
-* 50. gdTourRestoreUIComponentPreferences
+* 51. gdTourRestoreUIComponentPreferences
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRestoreUIComponentPreferences
 :FILE: resources/packages/app/editor/editor-tour-ui-components.js
@@ -676,7 +690,7 @@ Restores Appearance preferences before deleting the lesson's exact selected grap
 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:261]]
 
-* 51. gdApplyKeymap
+* 52. gdApplyKeymap
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyKeymap
 :FILE: resources/packages/app/editor/editor-shortcuts.js
@@ -688,7 +702,7 @@ Applies user key overrides by stable shortcut ID. The registry keeps defaults fo
 
 - source :: [[file:../../../resources/packages/app/editor/editor-shortcuts.js::function gdApplyKeymap(bindings) {][resources/packages/app/editor/editor-shortcuts.js:81]]
 
-* 52. authFetch
+* 53. authFetch
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
@@ -701,7 +715,7 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 - source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:114]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
 
-* 53. _tourTick
+* 54. _tourTick
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
@@ -714,7 +728,7 @@ Evaluates the current interactive lesson step against editor state. Lesson data 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:322]]
 - referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
 
-* 54. gdTourBeginBranchCreation
+* 55. gdTourBeginBranchCreation
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourBeginBranchCreation
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
@@ -729,7 +743,7 @@ Records a proposed branch UUID, its actual base branch UUID, and the current sig
 - same file :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]]
 - referenced from :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
 
-* 55. gdTourRecordPackageInstall
+* 56. gdTourRecordPackageInstall
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordPackageInstall
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
@@ -743,7 +757,7 @@ Records a successful lesson installation using the returned pin, branch, package
 - see also :: [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 - same file :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 
-* 56. gdTourRecordAppCreation
+* 57. gdTourRecordAppCreation
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordAppCreation
 :FILE: resources/packages/app/editor/editor-tour-app-receipts.js
@@ -756,7 +770,7 @@ An Apps form is an ordinary server mutation, not a tutorial-only endpoint. Befor
 - source :: [[file:../../../resources/packages/app/editor/editor-tour-app-receipts.js::async function gdTourRecordAppCreation(ticket, xhr) {][resources/packages/app/editor/editor-tour-app-receipts.js:38]]
 - see also :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]], [[file:editor.org::#editor/authFetch][authFetch]]
 
-* 57. _tourStartPositioning
+* 58. _tourStartPositioning
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourStartPositioning
 :FILE: resources/packages/app/editor/editor-tour-spot.js

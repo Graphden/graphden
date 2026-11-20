@@ -33,12 +33,15 @@ const inlineHostsByPath = new Map();
 function collapseInlineHost(path, host = inlineHostsByPath.get(path)) {
   expandedTypePaths.delete(path);
   const anchor = document.querySelector('[data-inline-anchor="' + escAttr(path) + '"]');
+  const restoreFocus = host?.contains(document.activeElement);
   if (anchor) {
     anchor.setAttribute('aria-expanded', 'false');
+    anchor.removeAttribute('aria-controls');
     const mark = anchor.querySelector('.canvas-type-structure-control-mark');
     if (mark) mark.textContent = '▸';
   }
   if (host) retireInlineHost(host);
+  if (restoreFocus) returnFocusTo(anchor);
 }
 function hideAllInlineHosts() {
   for (const path of [...expandedTypePaths]) collapseInlineHost(path);
@@ -536,6 +539,7 @@ function ensureInlineHost(path) {
   if (!host) {
     host = document.createElement('div');
     host.className = 'type-inline-host';
+    host.id = inlineTypePanelId(path);
     host.dataset.path = path;
     document.body.appendChild(host);
     inlineHostsByPath.set(path, host);
@@ -652,6 +656,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   }
 
   installInlinePositionListeners();
+  const recordArg = c.arg && typeKindLabel(resolveOneHop(rich)) === 'Record';
   chipEl.dataset.inlineAnchor = path;
   chipEl.classList.add('type-chip-expandable');
   const mark = window.gdAppendTypeControlMark(chipEl, expandedTypePaths.has(path) ? '▾' : '▸');
@@ -664,33 +669,44 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   chipEl.setAttribute('tabindex', pending ? '-1' : '0');
   chipEl.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
 
+  const show = () => {
+    const host = ensureInlineHost(path);
+    if (recordArg) {
+      host.tabIndex = -1;
+      host.setAttribute('role', 'group');
+      host.setAttribute('aria-label', c.arg.name ? 'Fields of ' + c.arg.name : 'Record fields');
+    } else {
+      host.removeAttribute('tabindex');
+      host.removeAttribute('role');
+      host.removeAttribute('aria-label');
+    }
+    chipEl.setAttribute('aria-controls', host.id);
+    renderInlineExpansionInto(host, rich, path, c);
+    positionInlineHost(host, chipEl);
+    return host;
+  };
+
   // If the path is already expanded (e.g. user toggled it on, then
   // navigated / rebuilt overlays), re-render and re-anchor the host.
   if (expandedTypePaths.has(path) && actionReady()) {
-    const host = ensureInlineHost(path);
-    renderInlineExpansionInto(host, rich, path, c);
-    positionInlineHost(host, chipEl);
+    show();
   }
 
   chipEl.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!actionReady()) return;
-    const willOpen = !expandedTypePaths.has(path);
-    if (willOpen) expandedTypePaths.add(path);
-    else expandedTypePaths.delete(path);
-    chipEl.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-    mark.textContent = willOpen ? '▾' : '▸';
-    if (willOpen) {
+    if (expandedTypePaths.has(path)) {
+      collapseInlineHost(path);
+    } else {
+      expandedTypePaths.add(path);
+      chipEl.setAttribute('aria-expanded', 'true');
+      mark.textContent = '▾';
       // Mutually exclusive with the mismatch-explainer: the inline
       // panel hosts its own copy of "Resolved via", so showing both
       // simultaneously duplicates the same provenance chain.
       if (typeof hideMismatchExplainer === 'function') hideMismatchExplainer();
-      const host = ensureInlineHost(path);
-      renderInlineExpansionInto(host, rich, path, c);
-      positionInlineHost(host, chipEl);
-    } else {
-      const host = inlineHostsByPath.get(path);
-      if (host) retireInlineHost(host);
+      const host = show();
+      if (recordArg && e.detail === 0) focusSafely(host);
     }
   });
   // Keyboard activation for the button-role chip.

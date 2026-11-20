@@ -50,6 +50,27 @@ function isTypeExpandable(rich) {
   return false;
 }
 
+// IDs connect native disclosure controls to their clipped panel bodies.
+function inlineTypePanelId(path) {
+  return 'inline-type-' + encodeURIComponent(path);
+}
+
+// Use only the scoped snapshot's record membership. An inferred record may
+// have no matching declaration, so retain all the resolved fields in that case.
+function recordExpansionFields(rich, shape, typeId) {
+  const type = lookups?.fnMap?.get(typeId);
+  if (type?.role === 'record' && (!type.name || rich === type.name)) {
+    const members = lookups.fnSlotsByFn?.get(typeId) || [];
+    const fields = members.map(member => lookups.slotMap?.get(member['slot-id']));
+    const names = new Set(fields.map(field => field?.name));
+    if (names.size === fields.length && names.size === Object.keys(shape).length
+        && fields.every(field => field && Object.hasOwn(shape, field.name))) {
+      return fields.map(field => ({name: field.name, type: shape[field.name], declaration: field}));
+    }
+  }
+  return Object.entries(shape).map(([name, type]) => ({name, type}));
+}
+
 // Render one mini-chip wrapped in a row that may carry a left
 // affordance (field-name / tag) plus a recursive child slot. Returns
 // the row element.
@@ -103,9 +124,12 @@ function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
   if (expandable) {
     chip.classList.add('type-inline-chip-expandable');
     chip.setAttribute('role', 'button');
-    chip.setAttribute('aria-label', nativeTitle);
+    const fieldLabel = editContext?.fieldLabel;
+    chip.setAttribute('aria-label', fieldLabel ? fieldLabel + ' — ' + nativeTitle : nativeTitle);
     chip.setAttribute('tabindex', '0');
     chip.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
+    slot.id = inlineTypePanelId(path);
+    chip.setAttribute('aria-controls', slot.id);
     chip.style.cursor = 'pointer';
     // For a named child type (e.g. `ring-request-shape`), thread the
     // name through so the recursive panel can show that type's
@@ -584,10 +608,14 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       return;
     }
   }
-  if (typeof effective === 'object' && effective !== null) {
-    Object.entries(effective).forEach(([k, v]) => {
-      host.appendChild(buildInlineTypeRow(k, v, path + '/f/' + k, c.ancestorTypes, childEdit([k])));
-    });
+  if (typeKindLabel(effective) === 'Record') {
+    const typeId = c.arg ? argRecordTypeId(c.arg) : c.recordTypeId;
+    for (const field of recordExpansionFields(rich, effective, typeId)) {
+      const {name, type, declaration} = field;
+      const label = declaration && !declaration.required ? name + ' (optional)' : name;
+      host.appendChild(buildInlineTypeRow(label, type, path + '/f/' + encodeURIComponent(name), c.ancestorTypes,
+        {...childEdit([name]), fieldLabel: label, recordTypeId: declaration?.['type-fn-id']}));
+    }
   }
 }
 

@@ -969,6 +969,16 @@
    :parent :post
    :args {:path "/inheritance/apply" :handler :_inheritance-apply-handler}}
 
+  {:name :api-structured-input-preview
+   :description "POST /api/structured-input/preview — preview one fixture-gated input command."
+   :parent :post
+   :args {:path "/structured-input/preview" :handler :_structured-input-preview-handler}}
+
+  {:name :api-structured-input-apply
+   :description "POST /api/structured-input/apply — apply one previewed fixture-gated input command."
+   :parent :post
+   :args {:path "/structured-input/apply" :handler :_structured-input-apply-handler}}
+
   {:name :partial-inheritance-intent
    :description "GET /partials/inheritance-intent — graph-native decisions for a JSON command query parameter."
    :parent :get-auth-required
@@ -980,6 +990,8 @@
    :args {:items ["/api"
                   :api-inheritance-preview
                   :api-inheritance-apply
+                  :api-structured-input-preview
+                  :api-structured-input-apply
                   :api-assets-save
                   :api-assets-revert
                   :api-assets-baseline

@@ -33,7 +33,7 @@
 
 
 (defn- browser-expression
-  [expression address-ids scope-ids encode]
+  [expression address-ids scope-ids present encode]
   (case (:op expression)
     :literal {:kind "literal" :value (encode (:value expression))}
     :read (call-expr (get address-ids (:source expression)))
@@ -42,7 +42,7 @@
              :fields (mapv (fn [[key address]]
                              {:key (encode key)
                               :expr (call-expr (get address-ids address))})
-                           (:fields expression))}))
+                           (filter (comp present second) (:fields expression)))}))
 
 
 (defn- check-depth!
@@ -77,6 +77,15 @@
         (sort-by pr-str identifiers)))
 
 
+(defn- scope-arguments
+  [scope paths present address-ids]
+  (into {} (keep (fn [[name path]]
+                   (let [address [scope path]]
+                     (when (get present address)
+                       [name (call-expr (get address-ids address))]))))
+        paths))
+
+
 (defn export-closed
   "Emit a format-2 browser plan for the checked closed subset. The supplied
    frozen snapshot and implementations are trusted host data. The caller
@@ -86,13 +95,17 @@
   [analysis {:keys [allow-fn?] :as options}]
   (when-not (fn? allow-fn?)
     (ir/reject! :browser-visibility-policy-required {}))
-  (let [{:keys [root-scope expressions scopes parameters value-obligations]} (ir/lower-checked analysis options)]
+  (let [{:keys [root-scope expressions scopes parameters value-obligations required-addresses] :as plan}
+        (ir/lower-checked analysis options)]
     (when (or (seq parameters) (seq value-obligations))
       (ir/reject! :browser-input-validation-required {}))
     (when (> (+ (count expressions) (count scopes)) browser/max-functions)
       (ir/reject! :browser-function-limit {}))
     (check-depth! expressions scopes root-scope)
-    (let [primitives (into #{{:id (str const-id) :op "const"}}
+    (let [present (ir/present-addresses plan {})
+          _ (when (some #(not (get present %)) required-addresses)
+              (ir/reject! :missing-required-input {}))
+          primitives (into #{{:id (str const-id) :op "const"}}
                            (map #(scope-primitive! allow-fn? %)) (vals scopes))
           encode (browser/literal-encoder)
           scope-ids (plan-ids "scope-" (keys scopes))
@@ -100,12 +113,11 @@
           entry (get scope-ids root-scope)
           scope-plans (map (fn [[scope {:keys [base-fn-id argument-paths]}]]
                              (function-plan (get scope-ids scope) base-fn-id
-                                            (update-vals argument-paths
-                                                         #(call-expr (get address-ids [scope %])))))
+                                            (scope-arguments scope argument-paths present address-ids)))
                            scopes)
           expression-plans (map (fn [[address expression]]
                                   (function-plan (get address-ids address) const-id
-                                                 {:value (browser-expression expression address-ids scope-ids encode)}))
+                                                 {:value (browser-expression expression address-ids scope-ids present encode)}))
                                 expressions)]
       {:format 2 :primitiveAbi capabilities/browser-primitive-abi
        :entries {"root" entry}

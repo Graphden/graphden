@@ -151,3 +151,25 @@
      :value-obligations (value-obligations analysis expressions)
      :parameters (into #{} (keep (fn [[address expression]]
                                    (when (= :supplied (:op expression)) address))) expressions)}))
+
+
+(defn present-addresses
+  "Return declared address presence without forcing any value. An explicit
+   nil is present. An unconfigured empty record is absent outside the root."
+  [{:keys [expressions root-scope]} supplied]
+  (let [result (volatile! {})]
+    (letfn [(present?
+              [address]
+              (if-let [entry (find @result address)]
+                (val entry)
+                (let [{:keys [op source fields]} (get expressions address)
+                      found (case op
+                              :supplied (contains? supplied address)
+                              :read (present? source)
+                              :record (or (= address [root-scope []])
+                                          (boolean (some #(present? (second %)) fields)))
+                              true)]
+                  (vswap! result assoc address found)
+                  found)))]
+      (doseq [address (keys expressions)] (present? address))
+      @result)))

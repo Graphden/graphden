@@ -52,19 +52,37 @@
        (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))
 
 
-(deftest browser-lowers-the-same-checked-nested-input-as-jvm
-  (let [{:keys [analysis options]} (checked-model definitions)
-        invoke (jvm/compile-checked analysis options)
-        expected (invoke {} nil)
-        plan (browser/export-closed analysis options)
-        result (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+(defn- run-browser
+  [plan]
+  (let [result (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
                       :in (json/generate-string {:plan plan :cases [{:entry "root" :inputs {}}]}))]
-    (is (= "Ada" expected))
+    (is (zero? (:exit result)) (:err result))
+    (json/parse-string (:out result) true)))
+
+
+(defn- agrees-with-browser
+  [source expected]
+  (let [{:keys [analysis options]} (checked-model source)
+        invoke (jvm/compile-checked analysis options)
+        plan (browser/export-closed analysis options)]
+    (is (= expected (invoke {} nil)))
     (is (= 2 (:format plan)))
     (is (= plan (browser/export-closed analysis options)))
-    (is (zero? (:exit result)) (:err result))
     (is (= [{:value (wire/encode-value expected) :sequence false}]
-           (json/parse-string (:out result) true)))))
+           (run-browser plan)))))
+
+
+(deftest browser-lowers-the-same-checked-nested-input-as-jvm
+  (agrees-with-browser definitions "Ada"))
+
+
+(deftest browser-omits-unconfigured-empty-record-fields
+  (agrees-with-browser (-> definitions
+                           (assoc-in [:root :input :coll :empty] {})
+                           (assoc-in [:root :optional] #{[:coll :empty]})
+                           (assoc-in [:root :bindings [:key] :value] :empty)
+                           (assoc-in [:root :bindings [:default] :value] "missing"))
+                       "missing"))
 
 
 (deftest export-refuses-unproved-browser-execution

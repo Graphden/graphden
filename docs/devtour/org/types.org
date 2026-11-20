@@ -141,13 +141,13 @@ Builds an offline graph of evaluated reference uses. Each use has a binding-ID s
 :PROPERTIES:
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
-:LINE: 80
-:MINS: 2.9
+:LINE: 89
+:MINS: 3.1
 :END:
 
 Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. Source authorization precedes export. Free fields and outstanding runtime validation obligations are rejected at this offline boundary.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:80]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:89]]
 
 * 12. infer-use
 :PROPERTIES:

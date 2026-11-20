@@ -10,26 +10,6 @@
     [graphden.input.runtime :as input]))
 
 
-(defn- presence
-  [expressions supplied root]
-  (let [result (volatile! {})]
-    (letfn [(present?
-              [address]
-              (if-let [entry (find @result address)]
-                (val entry)
-                (let [{:keys [op source fields]} (get expressions address)
-                      found (case op
-                              :supplied (contains? supplied address)
-                              :read (present? source)
-                              :record (or (= address [root []])
-                                          (boolean (some #(present? (second %)) fields)))
-                              true)]
-                  (vswap! result assoc address found)
-                  found)))]
-      (doseq [address (keys expressions)] (present? address))
-      @result)))
-
-
 (defn- legacy-arguments
   [frame scope paths]
   ;; The outer plain map is essential: defbase resolves each OUTER thunk
@@ -76,7 +56,7 @@
   (when-not (map? supplied) (ir/reject! :address-map-required {}))
   (when (some #(not (contains? (:parameters ir) %)) (keys supplied))
     (ir/reject! :unknown-supplied-address {}))
-  (let [present (presence (:expressions ir) supplied (:root-scope ir))
+  (let [present (ir/present-addresses ir supplied)
         missing (filterv #(not (get present %)) (:required-addresses ir))]
     (when (seq missing) (ir/reject! :missing-required-input {:addresses missing}))
     (let [frozen (volatile! nil)

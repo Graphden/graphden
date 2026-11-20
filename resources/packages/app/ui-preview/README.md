@@ -648,5 +648,8 @@ field stays absent. A field that returns nil or false stays present. Keys
 and size are available before any field is evaluated; iteration and wire
 encoding consume values. Format 1 rejects a `record` expression.
 
-The offline exporter can lower a checked closed graph into format 2.
-The production server still emits format 1.
+The offline exporter lowers checked graphs into format 2. A named input is
+routed through the emitted residual field tree. Nested records use keyword
+keys. A presence rule is evaluated without reading values, and primitive
+type checks run when a supplied field is read. The production exporter uses
+format 1.

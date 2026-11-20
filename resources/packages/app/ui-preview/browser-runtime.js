@@ -423,6 +423,50 @@
     operationBudgets.set(token, state);
     return token;
   }
+  function routeStructured(fields, supplied, slots, tick, remaining, root) {
+    const record = root
+      ? supplied && typeof supplied === 'object' && !Array.isArray(supplied) && !(supplied instanceof Map)
+      : supplied instanceof Map;
+    if (!record) throw new Error('Expected a graph input record');
+    const byKey = new Map(fields.map((field) => [root ? field.name : decode(field.key), field]));
+    const entries = root ? Object.entries(supplied) : supplied;
+    for (const [key, value] of entries) {
+      tick();
+      const field = byKey.get(key);
+      if (!field) throw new Error('Unknown graph input field');
+      if (field.fields) routeStructured(field.fields, value, slots, tick, remaining, false);
+      else {
+        encodeValue(value, remaining, 0);
+        slots.set(field.slot, value);
+      }
+    }
+  }
+  function structuredPresence(input, supplied, slots, tick, valueNodeLimit) {
+    routeStructured(input.fields, supplied, slots, tick, {nodes: valueNodeLimit}, true);
+    const present = new Set();
+    for (const rule of input.presence) {
+      tick();
+      if (rule.kind === 'always' || (rule.kind === 'supplied' && slots.has(rule.id))
+          || (rule.kind === 'any-present' && rule.sources.some((source) => present.has(source)))) {
+        present.add(rule.id);
+      }
+    }
+    for (const id of input.required) if (!present.has(id)) throw new Error('Missing graph input field');
+    return present;
+  }
+  function checkedInput(value, type) {
+    switch (type) {
+      case 'any': return value;
+      case 'null': if (value === null) return value; break;
+      case 'bool': if (typeof value === 'boolean') return value; break;
+      case 'text': if (typeof value === 'string') return value; break;
+      case 'int':
+      case 'numeric': if (Number.isSafeInteger(value)) return value; break;
+      case 'keyword': if (value instanceof Keyword) return value; break;
+      default: break;
+    }
+    throw new Error('Value does not match the required graph input type');
+  }
   function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {
     if ((plan.format !== 1 && plan.format !== 2) || plan.primitiveAbi !== 1) {
       throw new Error('Unsupported browser graph format');
@@ -443,12 +487,15 @@
       const id = plan.entries[entry] || entry;
       const input = plan.inputs[id];
       if (!input || !functions.has(id)) throw new Error('Unknown browser graph entry');
-      const accepted = new Set(input.accepted);
-      for (const name of Object.keys(supplied)) if (!accepted.has(name)) throw new Error('Unknown graph argument: ' + name);
-      for (const name of input.required) if (!Object.hasOwn(supplied, name)) throw new Error('Missing graph argument: ' + name);
       const root = {slots: new Map(), names: new Map()};
-      for (const [name, value] of Object.entries(supplied)) { encode(value, valueNodeLimit); root.names.set(name, value); }
-      for (const {name, slots} of input.destinations) if (Object.hasOwn(supplied, name)) for (const slot of slots) root.slots.set(slot, supplied[name]);
+      const structured = plan.format === 2 ? input.structured : null;
+      if (!structured) {
+        const accepted = new Set(input.accepted);
+        for (const name of Object.keys(supplied)) if (!accepted.has(name)) throw new Error('Unknown graph argument: ' + name);
+        for (const name of input.required) if (!Object.hasOwn(supplied, name)) throw new Error('Missing graph argument: ' + name);
+        for (const [name, value] of Object.entries(supplied)) { encode(value, valueNodeLimit); root.names.set(name, value); }
+        for (const {name, slots} of input.destinations) if (Object.hasOwn(supplied, name)) for (const slot of slots) root.slots.set(slot, supplied[name]);
+      }
       checkOperationDeadline(shared);
       let remaining = operationLimit;
       const cache = new WeakMap();
@@ -462,6 +509,8 @@
           checkOperationDeadline(shared);
         }
       }
+      const present = structured ? structuredPresence(structured, supplied, root.slots, tick, valueNodeLimit) : null;
+      const available = (address) => address === undefined || present?.has(address);
       function closure(value, frame) {
         const captured = {slots: new Map(frame.slots), names: new Map(frame.names)};
         // Per-call lambda arguments shadow a shared reader already populated outside the closure.
@@ -495,6 +544,9 @@
         tick();
         switch (value.kind) {
           case 'literal': return decode(value.value);
+          case 'supplied':
+            if (!structured) throw new Error('Unsupported browser expression');
+            return checkedInput(frame.slots.get(value.slot), value.type);
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
           case 'record': {
@@ -504,6 +556,7 @@
             const fields = new Map();
             for (const field of value.fields) {
               tick();
+              if (!available(field.present)) continue;
               if (typeof field?.expr?.kind !== 'string') throw new Error('Invalid browser input field');
               const key = mapKey(decodeValue(field.key, {nodes: 1}, 0));
               if (fields.has(key)) throw new Error('Duplicate browser input field');
@@ -559,8 +612,12 @@
             frame.names.set(binding.name, value);
             for (const slot of binding.routes || []) frame.slots.set(slot, value);
           }
-          const args = new Map(fn.args.map((arg) => [arg.name, new Thunk(() =>
-            expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame))]));
+          const args = new Map();
+          for (const arg of fn.args) {
+            if (available(arg.present)) {
+              args.set(arg.name, new Thunk(() => expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame)));
+            }
+          }
           const operation = primitives.get(fn.primitive);
           if (!operation) throw new Error('Missing browser primitive: ' + fn.primitive);
           try { return operation((name) => args.has(name) ? args.get(name).force() : null, tick); }

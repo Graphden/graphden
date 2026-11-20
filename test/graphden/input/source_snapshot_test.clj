@@ -118,13 +118,19 @@
   (let [core (concat (sources "concurrency") (sources "strings"))
         web (edn/read-string (slurp (io/resource "packages/web/crud-parse/fns.edn")))
         declarations (into (vec core) (map #(assoc % :namespace (:namespace web))) (:fns web))
+        ;; Pinning the SAME primitive is authored policy and must survive
+        ;; as a configuration on the projection destination.
+        pinned {:namespace "fixture" :name :pinned-sleep :parent :sleep
+                :args {:ms {:as :wait :type :int}}}
         selected (filterv #(contains? #{:sleep :str-trim :_retry-pause :_interval-sleep :_parse-fn-form-pid-trim-item}
                                       (:name %)) declarations)
+        selected (conj selected pinned)
         package (snapshot/package-index (parse/prepare-module selected {} {}) selected)]
     (doseq [[owner-name owner-ns base-name base-ns field-name alias-name]
             [[:_retry-pause "core.concurrency" :sleep "core.concurrency" :ms :delay-ms]
              [:_interval-sleep "core.concurrency" :sleep "core.concurrency" :ms :every-ms]
-             [:_parse-fn-form-pid-trim-item "web.crud" :str-trim "core.strings" :string :item]]]
+             [:_parse-fn-form-pid-trim-item "web.crud" :str-trim "core.strings" :string :item]
+             [:pinned-sleep "fixture" :sleep "core.concurrency" :ms :wait]]]
       (let [owner (ids/fn-id owner-ns owner-name)
             field (ids/slot-id (ids/fn-id base-ns base-name) field-name)
             alias-id (ids/slot-id owner alias-name)

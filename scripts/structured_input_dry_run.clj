@@ -170,13 +170,13 @@
   [{:keys [repository read-source source-modules]} entries context]
   (let [by-file (group-by #(get-in % [:source :source-file]) entries)]
     (mapv (fn [{:keys [path]}]
-            (let [identity {:repository repository :path path}]
+            (let [location {:repository repository :path path}]
               (try
                 (let [verify #(:definitions (source/verify-module {:definitions %} context))
                       patch (cst/plan-verified-module (read-source path) (get by-file path) verify)]
-                  (assoc identity :status :verified :patch patch))
+                  (assoc location :status :verified :patch patch))
                 (catch clojure.lang.ExceptionInfo error
-                  (assoc identity :status :blocked
+                  (assoc location :status :blocked
                          :reason (or (:reason (ex-data error)) (:code (ex-data error)) :unverified-module))))))
           source-modules)))
 

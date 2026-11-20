@@ -278,19 +278,19 @@
     (fn [root _]
       (package! root "example" [] [["main" "example" [identity-fn]]])
       (fs/with-temp-dir [destination {:prefix "structured-source-artifact-"}]
-        (let [file (fs/path destination "migration.edn")
-              run #(process/shell {:out :string :err :string :continue true}
-                                  "bb" "--classpath" "src:scripts"
-                                  "scripts/structured_input_dry_run.clj" "--repo" "fixture" (str root)
-                                  "--artifact" (str file))
-              {:keys [exit out]} (run)
-              payload (slurp (str file))]
-          (is (zero? exit))
-          (is (= 1 (:artifact-format (edn/read-string payload))))
-          (is (= {:supported 1 :blocked 0} (:counts (edn/read-string out))))
-          (is (= 2 (:exit (run))))
-          (is (= payload (slurp (str file))))
-          (is (= [file] (fs/list-dir destination))))))))
+                        (let [file (fs/path destination "migration.edn")
+                              run #(process/shell {:out :string :err :string :continue true}
+                                                  "bb" "--classpath" "src:scripts"
+                                                  "scripts/structured_input_dry_run.clj" "--repo" "fixture" (str root)
+                                                  "--artifact" (str file))
+                              {:keys [exit out]} (run)
+                              payload (slurp (str file))]
+                          (is (zero? exit))
+                          (is (= 1 (:artifact-format (edn/read-string payload))))
+                          (is (= {:supported 1 :blocked 0} (:counts (edn/read-string out))))
+                          (is (= 2 (:exit (run))))
+                          (is (= payload (slurp (str file))))
+                          (is (= [file] (fs/list-dir destination))))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-dry-run-test)]

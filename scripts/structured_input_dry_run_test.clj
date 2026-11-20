@@ -9,7 +9,8 @@
     [graphden.types.core.shapes :as shapes]
     [structured-input-cst :as cst]
     [structured-input-dry-run :as dry]
-    [structured-input-inventory :as inventory]))
+    [structured-input-inventory :as inventory]
+    [structured-input-stage :as stage]))
 
 
 (defn- git!
@@ -291,6 +292,32 @@
                           (is (= 2 (:exit (run))))
                           (is (= payload (slurp (str file))))
                           (is (= [file] (fs/list-dir destination))))))))
+
+
+(deftest verified-artifact-is-staged-without-touching-source
+  (with-repository
+    (fn [root roots]
+      (package! root "example" [] [["main" "example" [identity-fn]]])
+      (fs/with-temp-dir [destination {:prefix "structured-stage-test-"}]
+                        (let [module-path "resources/packages/example/main/fns.edn"
+                              artifact (dry/migration-artifact roots nil)
+                              source (fs/path root module-path)
+                              original (slurp (str source))
+                              output (fs/path destination "verified")
+                              rejected (fs/path destination "rejected")
+                              receipt (stage/stage! artifact "fixture" root output)
+                              staged (edn/read-string (slurp (str (fs/path output module-path))))]
+                          (is (= 2 (:input-format staged)))
+                          (is (= [{:name :id :input {:x :any} :return-type :any}] (:fns staged)))
+                          (is (= [module-path] (mapv :path (:staged receipt))))
+                          (is (= original (slurp (str source))))
+                          (is (thrown? clojure.lang.ExceptionInfo (stage/stage! artifact "fixture" root output)))
+                          (is (thrown? clojure.lang.ExceptionInfo
+                                (stage/stage! (assoc-in artifact [:modules 0 :path] "../fixture/fns.edn")
+                                              "fixture" root rejected)))
+                          (spit (str source) (str original " ;; drift"))
+                          (is (thrown? clojure.lang.ExceptionInfo (stage/stage! artifact "fixture" root rejected)))
+                          (is (not (fs/exists? rejected))))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-dry-run-test)]

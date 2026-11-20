@@ -381,6 +381,18 @@ source repos. The artifact contains authored literals and stays private.
 Standard output still contains only the sanitized dry-run report.
 The artifact can be partial while definitions are blocked.
 
+Materialize the verified replacements for one repository in a new directory:
+
+```sh
+bb --classpath src:scripts scripts/structured_input_stage.clj \
+  /path/migration.edn core /path/core-checkout /path/staged-core
+```
+
+The command checks the original bytes, the version-2 module header and the
+definition ledger before publishing the directory. The staging receipt lists
+the verified output checksums and blocked modules. The source checkout
+remains intact.
+
 ## Focused verification
 
 ```sh

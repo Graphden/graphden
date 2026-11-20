@@ -74,17 +74,20 @@
   (assoc v2 :owner (some #(when (and (= :fn (:kind %)) (= fn-id (:id %))) %) declaration-records)))
 
 
-(defn- direct-inline-entry
+(defn- inline-entry
   "The verified parent's round trip compared the child's original body, use-site
-   UUID and authored rows. Admit a leaf only through its matching local edge."
-  [package {:keys [fn-id bindings inline-definitions]}]
-  (let [[[path child] & more] (seq inline-definitions)
+   UUID and authored rows. Match its local field or stored list position."
+  [package {:keys [fn-id inline-definitions]} edges fragments [path child]]
+  (let [[field position] path
         id (:fn-id child)
         entry (owned-declaration child)
-        edge (some #(when (and (= path (:target-path %)) (empty? (:scope-path %))) %) bindings)]
-    (when-not (and (empty? more) (= 1 (count path)) (uuid? id)
-                   (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge)) (= id (:ref-fn-id edge))
-                   (= (ids/binding-id fn-id (first path)) (:id edge))
+        edge (get edges [field])]
+    (when-not (and (uuid? id) (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge))
+                   (= (ids/binding-id fn-id field) (:id edge))
+                   (case (count path)
+                     1 (and (= 1 (count inline-definitions)) (= id (:ref-fn-id edge)))
+                     2 (list-signature/inline-operand? (get fragments (:ref-fn-id edge)) edge position id)
+                     false)
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
                    (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
                    (= 1 (count (get-in entry [:owner :parent-ids])))
@@ -92,6 +95,13 @@
       (reject! :unsupported-scope-declaration fn-id))
     (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
     entry))
+
+
+(defn- inline-entries
+  [package {:keys [bindings inline-definitions] :as v2} generated]
+  (let [edges (into {} (comp (filter #(empty? (:scope-path %))) (map (juxt :target-path identity))) bindings)
+        fragments (into {} (map (juxt (comp :id :owner) :list-fragment)) generated)]
+    (mapv (partial inline-entry package v2 edges fragments) inline-definitions)))
 
 
 (defn- closure-entries
@@ -105,7 +115,7 @@
     (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]) resolve-named)
                           (vals (:list-builders v2)))]
       (cond-> (conj generated (owned-declaration v2))
-        (seq (:inline-definitions v2)) (conj (direct-inline-entry package v2))))))
+        (seq (:inline-definitions v2)) (into (inline-entries package v2 generated))))))
 
 
 (defn- add-closure-entry

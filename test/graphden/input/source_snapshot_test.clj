@@ -199,6 +199,38 @@
            (:code (failure #(snapshot/freeze-closure (update package :originals dissoc base) [host-id] @roots)))))))
 
 
+(deftest inline-list-leaves-preserve-original-operand-positions
+  (let [body {:parent :str-upper :args {:string "same"}}
+        host {:name :sample :namespace "fixture" :parent :str :args {:parts [body body]}}
+        sources (conj (filterv #(#{:str-upper :str} (:name %)) (sources "strings")) host)
+        prepared (parse/prepare-module sources {} {})
+        definition (some #(when (= :sample (:name %)) %) (:fn-defs prepared))
+        children (mapv (:name->id prepared) (get-in definition [:args :parts]))
+        owner (:fn-id definition)
+        field (ids/slot-id (ids/fn-id "core.strings" :str) :parts)
+        {:keys [binding-id builder-id]} (list-builder/origin owner field)
+        {:keys [context options]} (snapshot/freeze-closure (snapshot/package-index prepared sources) [owner] @roots)
+        link (get-in context [:bindings binding-id])
+        ctx (assoc prepared :fn-defs [definition])
+        entry (first (:definitions (source/verify-module (source/plan-module [host] ctx) ctx)))
+        fragment (get-in entry [:v2 :list-builders [field] :fragments 0])
+        checked (analysis/analyze-effective-input context owner options)]
+    (is (= 2 (count (set children))))
+    (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
+    (is (= builder-id (:ref-fn-id link)))
+    (is (false? (list-signature/inline-operand? fragment (assoc link :id owner) 0 (first children))))
+    (is (false? (list-signature/inline-operand? (update fragment :items #(vec (reverse %))) link 0 (second children))))
+    (doseq [[position child] (map-indexed vector children)]
+      (let [operand (ids/binding-list-item-id binding-id position)
+            row (get-in context [:bindings operand])]
+        (is (uuid? child))
+        (is (list-signature/inline-operand? fragment link position child))
+        (is (false? (list-signature/inline-operand? fragment link (- 1 position) child)))
+        (is (= [builder-id child] ((juxt :fn-id :ref-fn-id) row)))
+        (is (= [(ids/slot-id builder-id (str "item-" position))] (:target-path row)))
+        (is (= :text (get-in checked [:scopes [binding-id operand] :signature :return])))))))
+
+
 (deftest absent-or-incompatible-package-evidence-is-rejected-test
   (let [package (fixture "checked")
         reader (ids/fn-id "core.strings" :str-upper)]

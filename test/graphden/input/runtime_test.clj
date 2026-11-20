@@ -10,6 +10,7 @@
     (java.util.concurrent
       Callable
       CountDownLatch
+      ExecutorService
       Executors
       Future
       TimeUnit)))
@@ -56,7 +57,7 @@
     (is (contains? record :a))
     (is (not (contains? record :unknown)))
     (is (= [:a :b] (vec (keys record))))
-    (is (= #{:a :b} (set (.keySet ^java.util.Map record))))
+    (is (= #{:a :b} (set (java.util.Map/.keySet record))))
     (is (= :a (key (find record :a))))
     (is (= :a (key (first (seq record)))))
     (is (= 2 (count (first (seq record)))))
@@ -94,8 +95,8 @@
   (let [reads (atom {})
         original (input/record-view {:a (counted-cell reads :a 1)
                                      :b (throwing-cell reads :b)})
-        with-meta (with-meta original {:source :test})
-        replaced (assoc with-meta :b 2)
+        annotated (with-meta original {:source :test})
+        replaced (assoc annotated :b 2)
         removed (dissoc original :b)]
     (is (empty? @reads))
     (is (= {:source :test} (meta replaced)))
@@ -105,7 +106,7 @@
     (is (= 1 (:a replaced) (:a removed) (:a original)))
     (is (= {:a 1} @reads))
     (is (= {} (empty original)))
-    (is (= {:source :test} (meta (empty with-meta))))
+    (is (= {:source :test} (meta (empty annotated))))
     (is (= {:a 1 :b 2 :c 3} (conj replaced [:c 3])))
     (is (= {:a 1} @reads))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unselected" (:b original)))))
@@ -119,7 +120,7 @@
     (is (vector? entry))
     (is (empty? @reads))
     (is (= [:a 1] entry))
-    (is (= 1 (val entry) (nth entry 1) (.getValue ^java.util.Map$Entry entry)))
+    (is (= 1 (val entry) (nth entry 1) (java.util.Map$Entry/.getValue entry)))
     (is (= 1 (first (vals record))))
     (is (= {:a 1} (select-keys record [:a])))
     (is (= [:a 1] (reduce-kv (fn [_ key value] (reduced [key value])) nil record)))
@@ -134,10 +135,10 @@
         java-map (HashMap. value)]
     (is (= value record))
     (is (= record value))
-    (is (.equals record java-map))
-    (is (.equals java-map record))
+    (is (Object/.equals record java-map))
+    (is (Object/.equals java-map record))
     (is (= (hash value) (hash record)))
-    (is (= (.hashCode value) (.hashCode record)))
+    (is (= (Object/.hashCode value) (Object/.hashCode record)))
     (is (= value (into {} record)))
     (is (= (set value) (set (seq record))))
     (is (= :found (get {record :found} value)))
@@ -165,8 +166,8 @@
         independent (input/record-view {:field (throwing-cell reads :other)})
         token (input/cache-token record)
         cache (HashMap.)]
-    (.put cache token :cached)
-    (is (= :cached (.get cache (input/cache-token same-origin))))
+    (HashMap/.put cache token :cached)
+    (is (= :cached (HashMap/.get cache (input/cache-token same-origin))))
     (is (= token (input/cache-token (with-meta record {:other :metadata}))))
     (is (= (hash token) (hash (input/cache-token same-origin))))
     (is (not= token (input/cache-token independent)))
@@ -176,8 +177,8 @@
     (is (thrown? clojure.lang.ExceptionInfo (input/cache-token {:ordinary :map}))))
   (testing "ordinary value-equal arguments retain their existing cache semantics"
     (let [cache (HashMap.)]
-      (.put cache [{:x 1}] :cached)
-      (is (= :cached (.get cache [(into {} [[:x 1]])]))))))
+      (HashMap/.put cache [{:x 1}] :cached)
+      (is (= :cached (HashMap/.get cache [(into {} [[:x 1]])]))))))
 
 
 (deftest two-projections-share-one-producer-cell
@@ -230,14 +231,14 @@
         record (input/record-view {:value (input/field-cell #(swap! reads inc))})]
     (try
       (let [workers (mapv (fn [_]
-                            (.submit pool ^Callable
-                                     (fn []
-                                       (.await start 5 TimeUnit/SECONDS)
-                                       (:value record))))
+                            (ExecutorService/.submit pool ^Callable
+                                                     (fn []
+                                                       (CountDownLatch/.await start 5 TimeUnit/SECONDS)
+                                                       (:value record))))
                           (range 4))]
-        (.countDown start)
-        (is (= [1 1 1 1] (mapv #(.get ^Future % 5 TimeUnit/SECONDS) workers)))
+        (CountDownLatch/.countDown start)
+        (is (= [1 1 1 1] (mapv #(Future/.get % 5 TimeUnit/SECONDS) workers)))
         (is (= 1 @reads)))
       (finally
-        (.shutdownNow pool)
-        (.awaitTermination pool 5 TimeUnit/SECONDS)))))
+        (ExecutorService/.shutdownNow pool)
+        (ExecutorService/.awaitTermination pool 5 TimeUnit/SECONDS)))))

@@ -8,7 +8,7 @@
 
 (defn id
   [value]
-  (java.util.UUID/nameUUIDFromBytes (.getBytes (pr-str value) "UTF-8")))
+  (java.util.UUID/nameUUIDFromBytes (String/.getBytes (pr-str value) java.nio.charset.StandardCharsets/UTF_8)))
 
 
 (defn field-path

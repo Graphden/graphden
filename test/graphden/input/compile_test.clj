@@ -76,7 +76,7 @@
                                                      (when-let [target (:ref expression)]
                                                        [(fixture/id target) (build target)])))
                                           (concat (vals (get-in definitions [owner :bindings]))
-                                                  (map #(hash-map :ref %) (get extra-refs owner))))
+                                                  (for [target (get extra-refs owner)] {:ref target})))
                            closure (eager/compile-fn id lookup children)]
                        (swap! registry assoc id closure)
                        closure))))]
@@ -220,7 +220,7 @@
       (is (= ["1" "1"] (invoke closure)))
       (is (= ["1" "1"] (invoke closure))))
     (is (= 1 @calls))
-    (is (= #{(fixture/id :child)} (set (map first (.keySet cache)))))
+    (is (= #{(fixture/id :child)} (set (map first (java.util.Map/.keySet cache)))))
     (is (= ["2" "3"] (invoke closure {} (eager/defer-handler-call-cache {}))))
     (binding [eager/*always-fresh-fn-ids* (atom #{(fixture/id :child)})]
       (is (= ["4" "5"] (invoke closure))))))

@@ -22,27 +22,27 @@
 
 (defn- declarations
   [resource names]
-  (let [{:keys [namespace fns]} (edn/read-string (slurp (io/resource resource)))]
+  (let [{:keys [fns] module-ns :namespace} (edn/read-string (slurp (io/resource resource)))]
     (into [] (comp (filter #(contains? names (:name %)))
-                   (map #(assoc % :namespace namespace))) fns)))
+                   (map #(assoc % :namespace module-ns))) fns)))
 
 
 (def ^:private loaded (delay (:base-fn-defs (loader/load-packages ["core"]))))
 
 
 (defn- runtimes
-  [declarations root]
-  (let [prepared (parse/prepare-module declarations {} {})
+  [source root]
+  (let [prepared (parse/prepare-module source {} {})
         records (group-by :kind (parse/parse-prepared-module prepared))
         graph {:fns (:fn records) :slots (:slot records) :fn-slots (:fn-slot records)
                :bindings (:binding records) :list-items (:binding-list-item records)}
-        bases (filter #(contains? @loaded (:name %)) declarations)
-        _ (doseq [{:keys [name namespace]} bases]
-            (registry/record-rich-types! (ids/fn-id namespace name) name (get @loaded name)))
+        base-declarations (filter #(contains? @loaded (:name %)) source)
+        _ (doseq [{:keys [name] module-ns :namespace} base-declarations]
+            (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded name)))
         roots (:by-id @registry/*rich-types-override*)
-        implementations (into {} (map (fn [{:keys [namespace name]}]
-                                        [(ids/fn-id namespace name) (:impl (get @loaded name))])) bases)
-        canonical (execution/compile-package (snapshot/package-index prepared declarations)
+        implementations (into {} (map (fn [{:keys [name] module-ns :namespace}]
+                                        [(ids/fn-id module-ns name) (:impl (get @loaded name))])) base-declarations)
+        canonical (execution/compile-package (snapshot/package-index prepared source)
                                              root roots implementations)
         legacy (eager/compile-all (assoc (lookups/build-lookups graph)
                                          :base-fns (registry/compute-base-fns-map @loaded)))

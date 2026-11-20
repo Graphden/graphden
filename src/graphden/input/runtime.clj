@@ -129,7 +129,7 @@
 
     (seq [] (entry-seq cells))
 
-    (iterator [] (.iterator ^Iterable (or (entry-seq cells) [])))
+    (iterator [] (Iterable/.iterator (or (entry-seq cells) [])))
 
     (kvreduce
       [f init]
@@ -160,7 +160,7 @@
   [record]
   (when-not (record-view? record)
     (throw (ex-info "Cache token requires a record view" {:type :input/record-view-required})))
-  (.fieldCells ^RecordState record))
+  (graphden.input.runtime.RecordState/.fieldCells record))
 
 
 (defn diagnostic-summary

@@ -21,9 +21,9 @@
         f (frame {[a [:x]] {:op :invoke :binding-id :local :target-id :producer :type :text :scope source-a}
                   [b [:x]] {:op :invoke :binding-id :local :target-id :producer :type :text :scope source-b}}
                  {a {:x [:x]} b {:x [:x]} source-a {} source-b {}})
-        keys (memo/scope-keys f)]
-    (is (= (get keys a) (get keys b)))
-    (is (number? (hash keys)))
+        scope-keys (memo/scope-keys f)]
+    (is (= (get scope-keys a) (get scope-keys b)))
+    (is (number? (hash scope-keys)))
     (is (not-any? realized? (vals (:cells f))))))
 
 
@@ -52,9 +52,9 @@
                   [ca [:x]] {:op :read :source [a [:source]] :type :text}
                   [cb [:x]] {:op :read :source [b [:source]] :type :text}}
                  {a {:x [:result]} b {:x [:result]} ca {:x [:x]} cb {:x [:x]} sa {} sb {}})
-        keys (memo/scope-keys f)]
-    (is (= (get keys a) (get keys b)))
-    (is (not= (get keys ca) (get keys cb)))
+        scope-keys (memo/scope-keys f)]
+    (is (= (get scope-keys a) (get scope-keys b)))
+    (is (not= (get scope-keys ca) (get scope-keys cb)))
     (is (not-any? realized? (vals (:cells f))))))
 
 
@@ -64,5 +64,5 @@
                   [a [:x]] {:op :read :source [root [:source]] :type :text}
                   [b [:x]] {:op :supplied :type :text}}
                  {root {:source [:source]} a {:x [:x]} b {:x [:x]}})
-        keys (memo/scope-keys (assoc-in f [:supplied [b [:x]]] "same"))]
-    (is (= (get keys a) (get keys b)))))
+        scope-keys (memo/scope-keys (assoc-in f [:supplied [b [:x]]] "same"))]
+    (is (= (get scope-keys a) (get scope-keys b)))))

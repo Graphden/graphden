@@ -56,7 +56,7 @@
         code (fn [impls]
                (try (ir/lower-checked analysis {:snapshot-id (:snapshot-id context) :implementations impls})
                     (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
-    (is (= :resolved-implementation-required (code (update-in impls [target] dissoc :root-entry))))
+    (is (= :resolved-implementation-required (code (update impls target dissoc :root-entry))))
     (is (= :implementation-abi-mismatch (code (assoc-in impls [target :argument-paths] {}))))
     (is (= :compile-time-value-compilation-required
            (code (assoc-in impls [target :root-entry :compile-time-value?] true))))

@@ -66,3 +66,20 @@
                  {root {:source [:source]} a {:x [:x]} b {:x [:x]}})
         scope-keys (memo/scope-keys (assoc-in f [:supplied [b [:x]]] "same"))]
     (is (= (get scope-keys a) (get scope-keys b)))))
+
+
+(deftest callback-memo-identity-is-fresh-and-does-not-force-captures
+  (let [root [:root []] callback [:root [:callback]]
+        closure [root [:func]] item [callback [:item]]
+        f (frame {closure {:op :closure :scope callback :type :fn}
+                  item {:op :supplied :type :any}}
+                 {root {:func [:func]} callback {:item [:item]}})
+        outer (assoc f :scopes [root])
+        inner (assoc f :scopes [callback] :supplied {item false} :invocation-key (Object.))
+        outer-key (memo/scope-keys outer)
+        inner-key (memo/scope-keys inner)]
+    (is (= {root {:func [:closure :fn (get-in f [:cells closure])]}} outer-key))
+    (is (= #{callback} (set (keys inner-key))))
+    (is (= inner-key (memo/scope-keys inner)))
+    (is (not= inner-key (memo/scope-keys (assoc inner :invocation-key (Object.)))))
+    (is (not-any? realized? (vals (:cells f))))))

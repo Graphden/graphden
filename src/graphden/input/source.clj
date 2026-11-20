@@ -150,7 +150,8 @@
                     rename (when (and rename (= arg field) (= slot-id (:field-id rename))
                                       (= target-type (get-in rename [:declaration :type]))
                                       (= (:id binding) (ids/binding-id (:id own) slot-id))
-                                      (empty? (binding-policy binding)))
+                                      (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename)))
+                                         (binding-policy binding)))
                              rename)
                     inline-id (when (and (format/legacy-inline? body) (keyword? value))
                                 (ids/fn-id (:namespace source) value))]
@@ -172,6 +173,14 @@
   [value]
   (and (map? value) (format/configuration-type? (:type value))
        (contains? #{#{:type :ref} #{:type :value}} (set (keys value)))))
+
+
+(defn- field-assertions
+  [definition arguments]
+  (into {} (keep (fn [{:keys [rename source-path]}]
+                   (let [spec (get-in definition source-path)]
+                     (when (or (:pin-id rename) (typed-binding? spec))
+                       [[(second source-path)] (select-keys spec [:type])])))) arguments))
 
 
 (defn- source-argument-blockers
@@ -203,7 +212,7 @@
   [source entry ancestor-ids]
   (let [{:keys [source-path origin expression policy target]} entry
         problem #(blocker source % source-path)
-        typed? (typed-binding? (get-in source source-path))
+        typed? (or (get-in entry [:rename :pin-id]) (typed-binding? (get-in source source-path)))
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
     ;; binding rows can address free inputs in an arbitrary referenced graph.
@@ -267,7 +276,8 @@
         collision? (when-let [exposed (:alias (first aliases))]
                      (some #(contains? (:args %) exposed) (cons definition (ancestor-definitions definition context))))
         rename-fields (when (and (not collision?) (= 1 (count aliases))
-                                 (not-any? #(or (= :declaration (:kind %)) (seq (:policy %))) arguments))
+                                 (not-any? #(or (= :declaration (:kind %))
+                                                (and (not (:rename %)) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         blockers (vec (distinct
                         (concat (when collision? [(blocker source :rename-field-collision [:args])])
@@ -277,9 +287,7 @@
         declarations (into (array-map) (filter (comp types/own-slot-declaration? val)) (:args source))
         declarations (into declarations (map (juxt :alias :declaration)) aliases)
         binds (filter #(= :binding (:kind %)) arguments)
-        configuration (into {} (keep (fn [[field spec]]
-                                       (when (typed-binding? spec) [[field] (select-keys spec [:type])])))
-                            (:args source))
+        configuration (field-assertions source arguments)
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
                               [(second source-path) expression])) binds)]
@@ -489,9 +497,7 @@
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
         legacy-meaning (assoc (authored-meaning prepared legacy-context bindings)
-                              :asserted-types (into {} (keep (fn [[field spec]]
-                                                               (when (typed-binding? spec) [[field] (:type spec)])))
-                                                    (when (= :composed (:kind definition)) (:args prepared))))
+                              :asserted-types (update-vals (field-assertions prepared (:arguments legacy)) :type))
         v2-meaning (assoc (authored-meaning lowered v2 (mapv (partial rename/legacy-binding (:declaration-records v2)) (:bindings v2)))
                           :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
                                                 (:configurations v2)))]

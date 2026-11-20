@@ -105,6 +105,7 @@
 
 
 (declare ^:private leaf-edit)
+(declare ^:private projection-leaf)
 (declare ^:private patched-text)
 
 
@@ -137,16 +138,7 @@
     :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
     (:wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value)
     (inline-edit source starts leaf op path)
-    :local-projection
-    (let [[operator exposed & more] (when (= :map (z/tag leaf)) (children leaf))]
-      (when-not (and operator exposed (empty? more) (= :as (z/sexpr operator)) (simple-keyword? (z/sexpr exposed)))
-        (refuse :unsupported-projection {:path path}))
-      (let [span (node-edit source starts leaf identity)
-            op (node-edit source starts operator identity)
-            field (node-edit source starts exposed identity)]
-        (assoc span :after (str "[" (subs source (inc (:start span)) (:start op))
-                                ":project" (subs source (:end op) (:start field)) "[" (:before field) "]"
-                                (subs source (:end field) (dec (:end span))) "]"))))
+    :local-projection (projection-leaf source starts leaf)
     :wrap-ref
     (do
       (when-not (keyword? (z/sexpr leaf))
@@ -187,6 +179,27 @@
     (mapv (fn [span from to]
             [(:field span) (str (subs source from (:start span)) (:text span) (subs source (:end span) to))])
           spans (cons (inc (:start map-span)) cuts) (conj cuts (dec (:end map-span))))))
+
+
+(defn- projection-leaf
+  [source starts leaf]
+  (when-not (= :map (z/tag leaf)) (refuse :unsupported-projection {}))
+  (let [raw (node-edit source starts leaf identity)
+        form (z/sexpr leaf)
+        spans (field-spans source starts leaf
+                           (fn [key v]
+                             (node-edit source starts v (if (= :as key) #(str "[" % "]") identity))))
+        ;; Every span starts at its actual key token. Keep comments and
+        ;; delimiters between that token and the original alias spelling.
+        spans (mapv #(if (= :as (:field %))
+                       (update % :text (fn [text] (str ":project" (subs text (count ":as")))))
+                       %) spans)
+        parts (into {} (field-chunks source raw spans))]
+    (when-not (and (contains? #{#{:as} #{:as :type}} (set (keys parts))) (simple-keyword? (:as form))
+                   (or (not (contains? form :type)) (simple-keyword? (:type form))))
+      (refuse :unsupported-projection {}))
+    (cond-> (assoc raw :after (str "[" (:as parts) "]"))
+      (:type parts) (assoc :configuration (str "{" (:type parts) "}")))))
 
 
 (defn- typed-leaf
@@ -261,13 +274,16 @@
       :declare-projection-input
       (let [input (:input operation)
             [exposed spec] (first input)
-            target (value-at loc [:args (:field operation)])]
+            field (:field operation)
+            target (value-at loc [:args field])
+            pin (:configuration (projection-leaf source starts target))]
         (when-not (and (= 1 (count input)) (simple-keyword? exposed)
                        (map? spec) (= #{:type :required} (set (keys spec))) (simple-keyword? (:type spec))
-                       (false? (:required spec)) (= {:as exposed} (z/sexpr target))
+                       (false? (:required spec)) (= (cond-> {:as exposed} pin (assoc :type (:type spec))) (z/sexpr target))
                        (or (key-loc loc :parent) (key-loc loc :parents)) (not (key-loc loc :input)))
           (refuse :invalid-projection-declaration {:definition definition}))
-        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (:type spec) " :required false}} :bind")))
+        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (:type spec) " :required false}}"
+                                                                                 (when pin (str " :configure {[" field "] " pin "}")) " :bind")))
 
       :rename-bind
       (do
@@ -291,9 +307,9 @@
 
 (defn- projection-operation
   [source {:keys [source-path origin expression rename policy]}]
-  (let [{exposed :alias :keys [alias-id field-id]} rename]
-    (when-not (and (simple-keyword? exposed) (= {:as exposed} (get-in source source-path))
-                   (= [:project [exposed]] expression) (empty? policy)
+  (let [{exposed :alias :keys [alias-id field-id pin-id declaration]} rename]
+    (when-not (and (simple-keyword? exposed) (= (cond-> {:as exposed} pin-id (assoc :type (:type declaration))) (get-in source source-path))
+                   (= [:project [exposed]] expression) (= (cond-> {} pin-id (assoc :type-override-fn-id pin-id)) policy)
                    (uuid? alias-id) (= field-id (:slot-id origin)) (uuid? field-id))
       (refuse :planner-ledger-mismatch {:path source-path}))
     {:op :local-projection :definition (:name source) :path source-path}))
@@ -365,7 +381,7 @@
             bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
             operations (mapv #((if (:rename %) projection-operation argument-operation) source %) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
-                                           (when (= :typed-expression op)
+                                           (when (or (= :typed-expression op) (and (= :local-projection op) (contains? (get-in source path) :type)))
                                              [[(second path)] (select-keys (get-in source path) [:type])])))
                                 operations)]
         (when-not (and (or (not has-args?) (map? (:args source)))
@@ -381,7 +397,7 @@
         (cond
           (seq alias-entries)
           (do
-            (when-not (and (= 1 (count alias-entries)) (empty? fields) (empty? configuration))
+            (when-not (and (= 1 (count alias-entries)) (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
               (refuse :unsupported-projection-mix {}))
             (into [{:op :declare-projection-input :definition (:name source) :path [:args]
                     :input alias-input :field (second (:source-path (first alias-entries)))}] operations))

@@ -657,5 +657,5 @@
     (is (= :blocked (get-in (source/verify-module foreign context) [:definitions 0 :status])))
     (doseq [[variant expected] [[(assoc-in child [:args :x :as] :taken) :rename-field-collision]
                                 [(assoc child :parent :relay) :rename-projection-required]
-                                [(assoc-in child [:args :x :type] :text) :rename-projection-required]]]
+                                [(assoc-in child [:args :x :type] :int) :rename-projection-required]]]
       (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))

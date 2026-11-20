@@ -109,13 +109,25 @@
       id)))
 
 
+(defn- exact-projection-pin?
+  [contract bindings {:keys [target-path type type-override-fn-id]}]
+  (let [row (some #(when (= target-path (:target-path %)) %) bindings)
+        field-by-id (into {} (map (juxt :id identity)) (:fields contract))
+        target (get field-by-id (first target-path))
+        source (get field-by-id (first (:projection-path row)))]
+    (and (= "projection" (:expression-kind row)) (= [] (:scope-path row) (:projection-scope-path row))
+         (= [(:id target)] target-path) (= [(:id source)] (:projection-path row))
+         (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row) (:type-id target) (:type-id source))
+         (= type (:type target) (:type source)))))
+
+
 (defn- check-type-provenance!
-  [{:keys [source contract owner configurations]}]
+  [{:keys [source contract owner configurations bindings]}]
   (let [primitives (ids/primitive-fn-ids)
         return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
-    (when-not (and (empty? configurations)
+    (when-not (and (every? #(exact-projection-pin? contract bindings %) (vals configurations))
                    (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? primitives return)
                             (= (get primitives return) (:return-type-fn-id owner))))

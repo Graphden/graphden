@@ -14,19 +14,20 @@
    their deterministic identities. The old parser can erase a rich type to
    :any; the caller also checks the parent's rich type against this slot."
   [owner records field spec]
-  (when (and (= 1 (count (:parent-ids owner))) (map? spec) (= #{:as} (set (keys spec)))
+  (when (and (= 1 (count (:parent-ids owner))) (map? spec) (contains? #{#{:as} #{:as :type}} (set (keys spec)))
              (simple-keyword? (:as spec)) (not= field (:as spec)))
     (let [exposed-name (:as spec)
           alias-id (ids/slot-id (:id owner) exposed-name)
           field-id (ids/slot-id (first (:parent-ids owner)) field)
           slot (some #(when (= alias-id (:id %)) %) (:slot records))
           type (some (fn [[type id]] (when (= id (:type-fn-id slot)) type)) scalar-types)]
-      (when (and type (= field-id (:source-slot-id slot))
+      (when (and type (or (not (contains? spec :type)) (= type (:type spec))) (= field-id (:source-slot-id slot))
                  (= (name exposed-name) (:name slot)) (false? (:required slot))
                  (some #(and (= alias-id (:slot-id %)) (= (:id owner) (:fn-id %))
                              (= (ids/fn-slot-id (:id owner) alias-id) (:id %))) (:fn-slot records)))
-        {:alias exposed-name :alias-id alias-id :field-id field-id
-         :declaration {:type type :required false}}))))
+        (cond-> {:alias exposed-name :alias-id alias-id :field-id field-id
+                 :declaration {:type type :required false}}
+          (contains? spec :type) (assoc :pin-id (:type-fn-id slot)))))))
 
 
 (defn legacy-binding

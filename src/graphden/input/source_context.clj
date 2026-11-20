@@ -206,6 +206,8 @@
   [{:keys [context]} definition]
   (let [projections (into {} (keep (fn [[arg form]] (when (format/local-projection? form) [arg (first (second form))])))
                           (when (map? (:bind definition)) (:bind definition)))
+        rename-form (fn [arg exposed]
+                      (merge {:as exposed} (get-in definition [:configure [arg]])))
         source (dissoc definition :input :bind :configure)
         source (if (contains? definition :input)
                  (let [declaration (:input definition)]
@@ -214,7 +216,7 @@
                                       (every? own-field-declaration? (vals declaration))))
                      (reject! :unsupported-input-declaration [:input]))
                    (assoc source :args (into (apply dissoc declaration (vals projections))
-                                             (map (fn [[arg exposed]] [arg {:as exposed}])) projections)))
+                                             (map (fn [[arg exposed]] [arg (rename-form arg exposed)])) projections)))
                  source)
         normalized (rebase/rewrite-references
                      source #(parse/normalize-ref % (:name->id context) (:namespace source)))
@@ -222,7 +224,7 @@
         grouped (when (seq projections) (group-by :kind rows))
         own (some #(when (= (ids/fn-id (:namespace normalized) (:name normalized)) (:id %)) %) (:fn grouped))]
     (doseq [[arg exposed] projections]
-      (let [origin (rename/origin own grouped arg {:as exposed})]
+      (let [origin (rename/origin own grouped arg (rename-form arg exposed))]
         (when-not (and origin (= (get-in definition [:input exposed]) (:declaration origin)))
           (reject! :rename-origin-mismatch [:bind arg]))))
     [normalized rows]))

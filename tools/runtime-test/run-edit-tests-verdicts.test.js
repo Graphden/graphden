@@ -175,6 +175,18 @@ console.log(' browser phases partition the full file roster');
   'unknown early file fails before silently narrowing the gate', unknown.out);
 }
 
+console.log(' the prepared browser order retains the entire local roster');
+{
+  const tests = {'edit-a.test.js': ['pass'], 'edit-b.test.js': ['pass'], 'edit-c.test.js': ['pass']};
+  const ordered = runSuite(tests, {GRAPHDEN_E2E_PREPARED_ORDER: 'edit-c.test.js\nedit-c.test.js'});
+  const headers = [...ordered.out.matchAll(/^─── (edit-\S+\.test\.js) ───$/gm)].map((match) => match[1]);
+  assert(ordered.code === 0 && headers.join(' ') === 'edit-c.test.js edit-a.test.js edit-b.test.js',
+    'prepared prefix leads the complete roster without duplication', ordered.out);
+  const unknown = runSuite(tests, {GRAPHDEN_E2E_PREPARED_ORDER: 'edit-unknown.test.js'});
+  assert(unknown.code !== 0 && /prioritized browser list is not the complete suite/.test(unknown.out),
+    'an unknown prepared entry fails before running any files', unknown.out);
+}
+
 console.log(' a failed attempt that dirties the graph stops retries and leaves the rest pending');
 {
   const r = runSuite({

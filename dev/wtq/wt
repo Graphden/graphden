@@ -1600,6 +1600,7 @@ run_gate_stage() {
                 step "$wave related browser files"
                 ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
                     E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" \
+                    GRAPHDEN_E2E_PREPARED_ORDER="${PRIORITY_BROWSER:-}" \
                     GRAPHDEN_E2E_ONLY_FILES="$wave_browser" bb test-e2e ) \
                   || { echo "FAIL: $wave related browser"; return 1; }
               fi ;;
@@ -1632,7 +1633,8 @@ run_gate_stage() {
       # Retry-passes are credited with diagnostics; hard failures still stop
       # at the failed file and preserve earlier browser checkpoints.
       ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
-          GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" GRAPHDEN_E2E_EXCLUDE_FILES="${PRIORITY_BROWSER:-}" \
+          GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" GRAPHDEN_E2E_PREPARED_ORDER="${PRIORITY_BROWSER:-}" \
+          GRAPHDEN_E2E_EXCLUDE_FILES="${PRIORITY_BROWSER:-}" \
           bb test-e2e ) || { echo "FAIL: e2e"; return 1; } ;;
     visual)
       step "bb test-visual"

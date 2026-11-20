@@ -79,11 +79,18 @@ if [ -z "$FILES" ]; then
   echo "no edit-*.test.js files found" >&2
   exit 2
 fi
-if [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
+if [ "${GRAPHDEN_E2E_PREPARED_ORDER+x}" = x ] || [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
   # The planner returns a permutation of this exact glob, with explicitly
   # related files first. A planner error must fail the run, not omit tests.
   ORIGINAL_FILES="$FILES"
-  FILES="$(cd ../.. && bb scripts/ci_priority.clj browser-order "$GRAPHDEN_E2E_PRIORITY_BASE")" || exit 2
+  if [ "${GRAPHDEN_E2E_PREPARED_ORDER+x}" = x ]; then
+    # The immutable gate already planned related files, including its manual
+    # choices. Append the local roster in the browser planner's lexical order.
+    FILES="$(awk 'NF && !seen[$0]++' <(printf '%s\n' "$GRAPHDEN_E2E_PREPARED_ORDER") \
+      <(printf '%s\n' "$ORIGINAL_FILES" | LC_ALL=C sort))" || exit 2
+  else
+    FILES="$(cd ../.. && bb scripts/ci_priority.clj browser-order "$GRAPHDEN_E2E_PRIORITY_BASE")" || exit 2
+  fi
   [ -n "$FILES" ] || { echo "empty prioritized browser list" >&2; exit 2; }
   if [ "$(printf '%s\n' "$FILES" | sort)" != "$(printf '%s\n' "$ORIGINAL_FILES" | sort)" ]; then
     echo "prioritized browser list is not the complete suite" >&2

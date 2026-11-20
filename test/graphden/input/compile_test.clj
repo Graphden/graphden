@@ -194,6 +194,14 @@
     (is (zero? @reads))))
 
 
+(deftest trace-rendering-keeps-a-fully-realized-map-result
+  (let [value (doall (map inc [1 2 3]))
+        captured (eager/render-captured-value value)]
+    (is (identical? value (:value captured)))
+    (is (= [2 3 4] (:value captured)))
+    (is (not (:value-truncated? captured)))))
+
+
 (deftest existing-secret-and-missing-type-trace-policy-stays-fail-closed
   (let [secret [:secret :text]
         definitions {:root {:input {:x secret} :return secret :bindings {[:x] {:ref :child}}}

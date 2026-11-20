@@ -221,6 +221,30 @@ is evaluated. Legacy arguments and literal maps may still use those names.
 Preflight snapshots package metadata and every module's parsed source per load
 call; processing consumes that same snapshot without rereading source files.
 
+## List contribution migration
+
+The offline field migrator accepts a sequence append from original source and
+its prepared binding and item rows. It can emit this constructor expression:
+
+```edn
+[:list-builder {:items [[:ref :app/load-row] [:value :status] [:value nil]]
+                :tail :open}]
+```
+
+Items retain their original binding UUID and position-derived item UUID. Each
+single-parent contribution gets a separate builder and optional tail field.
+A descendant append binds its builder to the previous tail's use-site address.
+A closed contribution binds an empty vector to its own tail. Repeated refs keep
+their target UUIDs and run through the existing sequence item compiler, which
+applies the receiving base function's delay policy and shared call cache.
+
+The package dry run reports these field proofs under
+`:verification :list-builders`. It counts edges linked to their source origins
+and field splices reparsed from checksummed modules. Whole-definition migration
+retains `:list-builder-required` until the module loader can materialize and
+recover the generated builders. Positional projections, inline item origins
+and ambiguous or missing ancestry carry additional diagnostics.
+
 ## Focused verification
 
 ```sh

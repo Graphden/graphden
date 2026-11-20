@@ -44,7 +44,7 @@
              "^src/graphden/(?:input/|packages/records|packages/rebase|types/)"
              "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  {:name "structured-input-dry-run-selftest" :bb "structured-input-dry-run-test" :timeout 30000 :group :infra :stage :affected
-  :relevant ["^scripts/structured_input_(?:dry_run(?:_test)?|inventory)\\.clj$"
+  :relevant ["^scripts/structured_input_(?:dry_run(?:_test)?|list_probe|cst|inventory)\\.clj$"
              "^src/graphden/(?:input/|packages/records|packages/rebase|types/)"
              "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  {:name "structured-input-module-selftest" :bb "structured-input-module-test" :timeout 30000 :group :infra :stage :affected

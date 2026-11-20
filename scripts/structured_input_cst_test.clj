@@ -555,5 +555,15 @@
       (is (str/includes? result snippet)))))
 
 
+(deftest generic-projection-retains-the-authored-pin-and-variable-declaration
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :collect :args {:xs {:type [:list a]}} :return-type :any}\r\n"
+                  "{:name :child :parent :collect :args {:xs {:as ; alias\r\n :items}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (str/includes? target "; alias\r\n"))
+    (is (= {:items {:type '[:list a] :required false}} (:input child)))
+    (is (= {:xs [:project [:items]]} (:bind child)))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

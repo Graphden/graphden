@@ -148,10 +148,10 @@
                      {:name :anonymous :namespace "demo" :parent :sink
                       :args {:x {:parent :producer :args {}}}}]
         report (plan definitions)]
-    (is (= {:supported 4 :blocked 2} (:counts report)))
+    (is (= {:supported 5 :blocked 1} (:counts report)))
     (is (= [:list-builder {:items [[:ref :producer]] :tail :closed}]
            (get-in (result report :append) [:proposed :bind :items])))
-    (is (contains? (codes (result report :rename)) :rename-projection-required))
+    (is (= {:x [:project [:renamed]]} (get-in (result report :rename) [:proposed :bind])))
     (is (contains? (codes (result report :secret)) :resolver-binding-required))
     (is (= [:ref {:parent :producer :bind {}}] (get-in (result report :anonymous) [:proposed :bind :x])))
     (is (not (str/includes? (pr-str (:blockers report)) "private-payload")))))
@@ -636,7 +636,7 @@
     (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))
 
 
-(deftest rename-origin-must-match-one-direct-parent-field
+(deftest rename-origin-must-match-the-declaring-ancestor-field
   (let [sink {:namespace "demo" :name :sink :args {:x {:type :text} :taken {:type :text}} :return-type :text}
         relay {:namespace "demo" :name :relay :parent :sink}
         child {:namespace "demo" :name :child :parent :sink :args {:x {:as :exposed}}}
@@ -655,10 +655,35 @@
     (is (= [destination] (:target-path row)))
     (is (= (ids/binding-id (ids/fn-id "demo" :child) destination) (:id row)))
     (is (= :blocked (get-in (source/verify-module foreign context) [:definitions 0 :status])))
+    (let [through-relay [sink relay (assoc child :parent :relay)]
+          ctx (prepared through-relay)
+          deeper (result (source/verify-module (source/plan-module through-relay ctx) ctx) :child)]
+      (is (= :authored-source-equivalent (:verification deeper)))
+      (is (= row (first (get-in deeper [:v2 :bindings])))))
     (doseq [[variant expected] [[(assoc-in child [:args :x :as] :taken) :rename-field-collision]
-                                [(assoc child :parent :relay) :rename-projection-required]
                                 [(assoc-in child [:args :x :type] :int) :rename-projection-required]]]
       (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))
+
+
+(deftest generic-rename-keeps-the-source-type-variable-and-its-original-slot-identities
+  (let [rich '[:union :null [:map a :any] [:list :any]]
+        base {:name :lookup :namespace "fixture" :args {:coll {:type rich}} :return-type :any}
+        child {:name :renamed :namespace "fixture" :parent :lookup :args {:coll {:as :input}}}
+        ds [base child]
+        ctx (prepared ds)
+        planned (source/plan-module [child] ctx)
+        replay #(first (:definitions (source/verify-module % ctx)))
+        entry (replay planned)
+        row (first (get-in entry [:v2 :bindings]))
+        owner (:identity entry)
+        target (ids/slot-id (ids/fn-id "fixture" :lookup) :coll)
+        alias-id (ids/slot-id owner :input)
+        changed (assoc-in planned [:definitions 0 :proposed :input :input :type] '[:union :null [:map b :any] [:list :any]])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:type rich :required false} (get-in entry [:proposed :input :input])))
+    (is (= (ids/binding-id owner target) (:id row)))
+    (is (= [[target] [alias-id]] ((juxt :target-path :projection-path) row)))
+    (is (= :blocked (:status (replay changed))))))
 
 
 (deftest nested-inline-declarations-retain-order-and-all-use-sites

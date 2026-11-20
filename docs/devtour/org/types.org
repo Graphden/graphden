@@ -137,19 +137,19 @@ Resolves an authored input declaration inside a frozen type snapshot. Stable fie
 Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope; scoped overlays must fit its target's unoccupied fields. Identity refs do not import target inputs, and callable producers expose constructor inputs. Required addresses and typed projections expose their source inputs. Metadata narrows contracts; value cycles reject. Callable plans separate invocation parameters and captures by origin. Deferred field/container obligations remain explicit. Stored-value resolvers consume their own literal argument without capturing ambient caller fields; execution remains inactive.
 
 - source :: [[file:../../../src/graphden/input/analysis.clj::(defn analyze-effective-input][src/graphden/input/analysis.clj:144]]
-- referenced from :: [[file:crud.org::#crud/read-input][read-input]]
+- referenced from :: [[file:crud.org::#crud/read-input][read-input]], [[file:crud.org::#crud/with-plan][with-plan]]
 
 * 11. export-closed
 :PROPERTIES:
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
-:LINE: 165
+:LINE: 173
 :MINS: 0.9
 :END:
 
 Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. Source authorization precedes export.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:165]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:173]]
 - see also :: [[file:types.org::#types/export-named][export-named]]
 - same file :: [[file:types.org::#types/export-named][export-named]]
 
@@ -157,13 +157,13 @@ Lowers the checked input IR to browser format 2 for closed pure graphs. A field 
 :PROPERTIES:
 :CUSTOM_ID: types/export-named
 :FILE: src/graphden/input/browser.clj
-:LINE: 173
+:LINE: 181
 :MINS: 0.9
 :END:
 
 Includes checked named residual routes for primitive inputs. Browser and JVM use the same order of presence rules and validate supported supplied or computed fields when read. Absent fields stay outside the record. Container obligations still need a browser consumer proof.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:173]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:181]]
 - same file :: [[file:types.org::#types/export-closed][export-closed]]
 - referenced from :: [[file:types.org::#types/export-closed][export-closed]]
 

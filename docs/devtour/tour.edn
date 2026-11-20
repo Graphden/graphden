@@ -935,6 +935,11 @@
            branch snapshot and source policy. Bounded owner batches feed the existing analyzer.
            The graph subtree attaches only a viewer-safe projection to its root row."
      :see [[:types "analyze-effective-input"] [:editor "appendStructuredInputStrip"]]}
+    {:ns graphden.crud.structured-input-bind :defn with-plan
+     :say "Preview and bind use the same decorated branch writer. It locks structured bindings
+           before capturing a fresh authorized closure. The apply command compares the winning
+           version basis, checks the proposed literal with the analyzer and inserts one row."
+     :see [[:crud "read-input"] [:types "analyze-effective-input"]]}
     {:ns graphden.crud.entities :defn create-entity
      :say "Creates one row through the generic write API. It checks the caller's
            [capability](#term/auth), validates the proposed change with `write-rej`, writes through

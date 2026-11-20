@@ -128,6 +128,23 @@ card's **Remaining inputs** popover. A public primitive supplies only its
 verified shipped type identity. Incomplete analysis or unresolved runtime
 type obligations produce an unavailable status.
 
+## Preview and bind one leaf
+
+An offline fixture can call `graphden.crud.structured-input-bind/preview`
+with a function ID, an ordered path of field names and an explicit literal.
+`bind!` accepts the same proposal and the preview's `expected-state`. The
+proposal creates one binding at a free field in the root declaration.
+Preview and bind both reauthorize the current branch and rederive the field
+address under the semantic writer and structured binding locks. The basis
+covers the caller, branch, live closure versions, structural identities and
+the proposed literal. Existing binding values stay outside the basis.
+
+The command checks the graph with the proposed binding before insertion.
+A fresh authorization failure, stale preview or incompatible binding
+refuses the write. Explicit `nil` and `false` survive the storage round trip.
+The offline capability still gates this command and the generic API remains
+closed for structured binding rows.
+
 ## Verification
 
 `graphden.input.storage-test` uses PostgreSQL and the ordinary schema/versioning

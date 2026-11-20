@@ -73,10 +73,10 @@ may read the map directly and keep their existing byte/depth budgets.
 
 `diagnostic-summary` returns only kind and field count. Diagnostics must use
 this instead of printing or serializing a deferred record. In particular,
-`compile-eager/render-captured-value` admits only bounded eager data before
-calling the streaming JSON size counter. Deferred values receive the existing
-truncated-value marker. This also prevents capture from realizing an ordinary
-lazy sequence. Optional tracing must not execute an otherwise unused field.
+`compile-eager/render-captured-value` admits bounded eager data and fully
+realized Clojure sequences before calling the streaming JSON size counter.
+Capture checks each known sequence segment before reading it. Deferred values
+receive the existing truncated-value marker without being realized.
 
 Escaping results also need an explicit policy: consume server/JSON output
 while its execution/snapshot context is valid. Do not capture every dynamic

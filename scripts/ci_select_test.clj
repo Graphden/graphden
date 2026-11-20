@@ -218,6 +218,14 @@
     (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
 
 
+(deftest stale-browser-runtime-assets-fail-in-the-first-wave
+  (let [selected (:run (ci-select/partition-checks
+                         real-registry {:changed #{"resources/packages/app/ui-preview/browser-runtime.js"}}))
+        batches (ci-select/canonical-batches real-registry selected)]
+    (is (some #{"builtin-runtime-fingerprint"} (map :name (mapcat identity (:affected batches)))))
+    (is (some #{"builtin-plans-sync"} (map :name (mapcat identity (:priority batches)))))))
+
+
 (deftest source-codec-instrumentation-runs-before-broad-suites
   (let [paths ["src/graphden/executor/source_recipe_jdbc_rows.clj"
                "src/graphden/executor/source_recipe_values.clj"

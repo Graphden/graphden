@@ -145,7 +145,7 @@
 
 
 (defn- source-fingerprint
-  [definitions theme-template]
+  [definitions theme-template runtime-source]
   ;; Function objects are loader metadata, not source. Include the complete
   ;; declarative definitions plus the shipped backend ABI implementation.
   (binding [*print-length* nil *print-level* nil *print-meta* false
@@ -155,7 +155,7 @@
                               {:definitions (mapv #(dissoc % :impl :return-type-rule :slot-types-rule :nav-types-rule)
                                                   definitions)
                                :theme-template theme-template
-                               :runtime (slurp (io/resource "packages/app/ui-preview/browser-runtime.js"))})))))
+                               :runtime runtime-source})))))
 
 
 (defn- check-source!
@@ -197,6 +197,7 @@
             runtime/*per-org-aliases-override* (atom {})]
     (let [definitions (source-definitions)
           prepared (:fn-defs (records-parse/prepare-module definitions {} {}))
+          runtime-source (slurp (io/resource "packages/app/ui-preview/browser-runtime.js"))
           theme-template (edn/read-string
                            (slurp (io/resource "packages/app/ui-theme-template/fns.edn")))
           package-ids (into #{} (map :fn-id) prepared)
@@ -211,7 +212,9 @@
                     types/package-alias-body (fn [n] (get aliases n))]
         (let [{:keys [snapshot storage]} (source-graph definitions)
               policy (check-source! definitions snapshot storage)]
-          {:format 1 :primitiveAbi 1 :sourceFingerprint (source-fingerprint definitions theme-template)
+          {:format 1 :primitiveAbi 1
+           :sourceFingerprint (source-fingerprint definitions theme-template runtime-source)
+           :runtimeSha256 (ids/digest-hex "SHA-256" runtime-source)
            ;; JSON cannot preserve keyword references versus string values.
            ;; The UI replaces only the explicit per-definition namespace token.
            :themeTemplate {:rootName "theme"

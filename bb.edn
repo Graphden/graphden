@@ -445,6 +445,10 @@
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}
 
+  builtin-runtime-check
+  {:doc "Detect stale builtin browser runtime fingerprints before JVM checks."
+   :task (p/shell "node" "tools/ui_preview/check_builtin_runtime.cjs")}
+
   builtin-plans-check
   {:doc "Verify checked-in browser plans against package graphs and the browser-plan exporter before broad tests."
    :task (clojure "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check")}

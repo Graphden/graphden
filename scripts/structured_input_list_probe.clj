@@ -11,19 +11,20 @@
 
 (defn- candidates
   [name->id {:keys [source legacy]}]
-  (keep (fn [{:keys [source-path list-builder]}]
+  (keep (fn [{:keys [source-path list-builder list-inline-items]}]
           (when-let [fragment (peek (:fragments list-builder))]
-            [(cst/list-builder-operation source (second source-path) fragment name->id) fragment]))
+            [(cst/list-builder-operation source (second source-path) fragment name->id list-inline-items)
+             fragment list-inline-items]))
         (:arguments legacy)))
 
 
 (defn- check-field!
-  [by-name module-ns name->id migrated [operation fragment]]
+  [by-name module-ns name->id migrated [operation fragment inline-items]]
   (let [name (:definition operation)
         path (cond-> (:path operation) (contains? migrated name) (assoc 0 :bind))
         form (get-in (get by-name name) path)
         names (source-list/field-names name->id module-ns (:original operation))
-        result (builder/parse-fragment (:binding-id fragment) form names (:owner-id fragment))]
+        result (builder/parse-fragment (:binding-id fragment) form names (:owner-id fragment) inline-items)]
     (when-not (migration/same-edn? (dissoc fragment :owner-id :target-id) result)
       (throw (ex-info "List item identity changed" {:code :list-item-origin-mismatch})))))
 

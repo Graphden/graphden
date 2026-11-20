@@ -232,5 +232,20 @@
         (is (empty? (codes report)))))))
 
 
+(deftest batch-replay-keeps-inline-and-ordinary-list-identities-in-one-file
+  (with-repository
+    (fn [root roots]
+      (package! root "lists" [] [["main" "demo"
+                                  [{:name :consume :args {:xs {:type [:list :int]}} :return-type :int}
+                                   {:name :number :args {:n {:type :int}} :return-type :int}
+                                   {:name :head :parent :consume :args {:xs [1]}}
+                                   {:name :tail :parent :head
+                                    :args {:xs {:append [{:parent :number :args {:n 2}}]}}}]]])
+      (let [report (dry/dry-run roots)]
+        (is (= {:supported 4 :blocked 0} (:counts report)))
+        (is (= 2 (get-in report [:verification :list-builders :reparsed-definitions])))
+        (is (empty? (codes report)))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-dry-run-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

@@ -5,6 +5,9 @@
   (:require
     [clojure.string :as str]
     [graphden.input.format :as format]
+    [graphden.input.list-builder :as list-builder]
+    [graphden.input.migration :as migration]
+    [graphden.packages.records.ids :as ids]
     [rewrite-clj.zip :as z]
     [structured-input-inventory :as inventory])
   (:import
@@ -255,6 +258,51 @@
                  (when (seq configs) (str " :configure {" (str/join " " configs) "}")))}))
 
 
+(defn list-builder-operation
+  "Build a checksum-bound edit for a single independently verified list field.
+   Its enclosing definition can still have other migration blockers."
+  [source field fragment name->id]
+  (let [original (get-in source [:args field])
+        form (list-builder/source-form original name->id)
+        checked (list-builder/parse-fragment (:binding-id fragment) form name->id)]
+    (when-not (and (= (:owner-id fragment) (ids/fn-id (:namespace source) (:name source)))
+                   (= (:binding-id fragment) (ids/binding-id (:owner-id fragment) (:target-id fragment)))
+                   (migration/same-edn? checked (dissoc fragment :owner-id :target-id)))
+      (refuse :list-fragment-drift {}))
+    {:op :list-builder :definition (:name source) :path [:args field] :original original :form form}))
+
+
+(defn- list-builder-edit
+  [source starts loc {:keys [original form path]}]
+  (let [span (node-edit source starts loc identity)
+        bare? (vector? original)
+        vector-loc (if bare? loc (value-at loc [:append]))
+        item-nodes (children vector-loc)
+        expressions (get-in form [1 :items])]
+    (when-not (and (= :vector (z/tag vector-loc))
+                   (migration/same-edn? original (inventory/read-edn "<list>" (:before span)))
+                   (= (count expressions) (count item-nodes)))
+      (refuse :list-fragment-drift {:path path}))
+    (let [items (mapv (fn [node [operator]]
+                        (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))
+                              op (if wrapped? :map-expression-to-vector (if (= :ref operator) :wrap-ref :wrap-value))]
+                          (leaf-edit source starts node op path))) item-nodes expressions)
+          closed-key (when-not bare? (key-loc loc :closed))
+          edits (cond-> items
+                  (not bare?) (conj (node-edit source starts (key-loc loc :append) (constantly ":items")))
+                  closed-key (conj (node-edit source starts closed-key (constantly ":tail"))
+                                   (node-edit source starts (z/right closed-key) (constantly (str (get-in form [1 :tail]))))))
+          local (mapv #(-> % (update :start - (:start span)) (update :end - (:start span))) (sort-by :start edits))
+          inner (patched-text (:before span) local)
+          spec (cond bare? (str "{:tail :open :items " inner "}")
+                     closed-key inner
+                     :else (str (subs inner 0 (dec (count inner))) " :tail :open}"))
+          after (str "[:list-builder " spec "]")]
+      (when-not (migration/same-edn? form (inventory/read-edn "<generated-list>" after))
+        (refuse :list-fragment-drift {:path path}))
+      (assoc span :after after))))
+
+
 (defn- operation-edit
   [source starts definitions {:keys [op definition path] :as operation}]
   (when-not (and (keyword? definition) (vector? path) (seq path))
@@ -262,6 +310,7 @@
   (let [loc (or (get definitions definition)
                 (refuse :missing-definition {:definition definition}))]
     (case op
+      :list-builder (list-builder-edit source starts (argument-loc loc path) operation)
       :rename-input
       (do
         (when (some #(key-loc loc %)

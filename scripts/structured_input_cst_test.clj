@@ -420,5 +420,24 @@
         (is (= [(get-in arg [:rename :alias-id])] (:projection-path row)))))))
 
 
+(deftest list-contributions-preserve-item-bytes-and-ref-spelling
+  (doseq [wrap [(fn [xs] xs) #(str "{:append ; appending\r\n " % "}") #(str "{:closed ; seal\r\n true :append " % "}")]]
+    (let [items "[:read ; first\r\n {:value ; literal\r\n \"a\r\nb\"} nil false 1N]"
+          text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:xs {:type [:list :any]}} :return-type :any}"
+                    "{:name :read :args {} :return-type :int} {:name :child :parent :sink :args {:xs " (wrap items) "}}]}")
+          definitions (mapv #(assoc % :namespace "demo.main") (:fns (edn/read-string text)))
+          ctx (parse/prepare-module definitions {} {})
+          entry (peek (:definitions (source/plan-module definitions ctx)))
+          fragment (-> entry :legacy :arguments first :list-builder :fragments peek)
+          op (cst/list-builder-operation (peek definitions) :xs fragment (:name->id ctx))
+          patch (cst/plan text (request {:op :rename-bind :definition :child :path [:args]} op))
+          after (:text (cst/apply-text patch text))]
+      (is (= :already-applied (:status (cst/apply-text patch after))))
+      (is (= (:form op) (get-in (edn/read-string after) [:fns 2 :bind :xs])))
+      (is (str/includes? after "[[:ref :read] ; first\r\n [:value ; literal\r\n \"a\r\nb\"] [:value nil] [:value false] [:value 1N]]"))
+      (is (= :list-fragment-drift
+             (reason #(cst/list-builder-operation (assoc (peek definitions) :name :other) :xs fragment (:name->id ctx))))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

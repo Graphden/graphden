@@ -80,28 +80,36 @@
       (reject! :list-item-origin-mismatch))))
 
 
+(defn source-form
+  "Convert a legacy append's authored items to explicit expressions. The
+   caller must establish that a bare vector was parsed as a list binding."
+  [source name->id]
+  (let [bare? (vector? source)
+        items (if bare? source (:append source))]
+    (when-not (and (vector? items)
+                   (or bare? (and (map? source) (every? #{:append :closed} (keys source))
+                                  (or (not (contains? source :closed)) (boolean? (:closed source))))))
+      (reject! :unsupported-list-binding))
+    [:list-builder {:items (mapv (partial source-item name->id) items)
+                    :tail (if (:closed source) :closed :open)}]))
+
+
 (defn source-fragment
   "Compare an original source append with its actual prepared binding and
    item rows. The caller resolves references in the definition's namespace.
    Bare vectors must have been classified as appends by the legacy parser."
   [{:keys [id fn-id slot-id list-append list-closed] :as binding} item-rows source name->id]
-  (let [bare? (vector? source)
-        items (if bare? source (:append source))
-        closed? (and (map? source) (:closed source))]
+  (let [form (source-form source name->id)]
     (when-not (and (= :binding (:kind binding)) (uuid? fn-id) (uuid? slot-id)
                    (= id (ids/binding-id fn-id slot-id)) (true? list-append)
                    (not-any? some? (map binding [:value :ref-fn-id :resolver-fn-id :type-override-fn-id
                                                  :override-kind :required :terminal :description]))
-                   (not (:value-present binding)) (vector? items)
-                   (or bare? (and (map? source) (every? #{:append :closed} (keys source))
-                                  (or (not (contains? source :closed)) (boolean? closed?))))
-                   (= (boolean list-closed) (boolean closed?)))
+                   (not (:value-present binding))
+                   (= (boolean list-closed) (= :closed (get-in form [1 :tail]))))
       (reject! :unsupported-list-binding))
-    (let [form [:list-builder {:items (mapv (partial source-item name->id) items)
-                               :tail (if closed? :closed :open)}]
-          fragment (parse-fragment id form name->id)
+    (let [fragment (parse-fragment id form name->id)
           ordered (sort-by :position item-rows)]
-      (when-not (= (count items) (count ordered)) (reject! :list-item-count-mismatch))
+      (when-not (= (count (:items fragment)) (count ordered)) (reject! :list-item-count-mismatch))
       (doseq [[actual expected] (map vector ordered (:items fragment))]
         (check-item! id actual expected))
       (assoc fragment :owner-id fn-id :target-id slot-id))))

@@ -170,8 +170,7 @@
 (deftest browser-and-jvm-run-the-same-checked-callback-plan
   (let [source {:root {:input {:func [:fn {:item :text} :text #{}] :coll [:list :text]}
                        :return [:list :text]
-                       :bindings {[:func] {:ref :callback}
-                                  [:coll] {:value ["one" "two" "one"]}}}
+                       :bindings {[:func] {:ref :callback}}}
                 :callback {:input {:string :text} :return :text}}
         {:keys [analysis context]} (fixture/model source :root)
         functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:str-upper :impl])}
@@ -181,8 +180,25 @@
         options {:context context :snapshot-id (:snapshot-id context)
                  :implementations implementations :allow-fn? (constantly true)}
         invoke (jvm/compile-named analysis options)
-        plan (browser/export-closed analysis options)
-        expected (invoke {} nil)]
+        plan (browser/export-named analysis options)
+        args {:coll ["one" "two" "one"]}
+        expected (invoke args nil)
+        [result bad-member] (run-browser plan [args {:coll ["one" 2]}])]
     (is (= ["ONE" "TWO" "ONE"] expected))
-    (is (= [{:value (wire/encode-result expected) :sequence true}]
-           (run-browser plan [{}])))))
+    (is (= {:value (wire/encode-result expected) :sequence true} result))
+    (is (= "Value does not match the required graph input type" (:error bad-member)))))
+
+
+(deftest named-browser-map-input-is-an-opaque-value
+  (let [source (-> definitions
+                   (assoc-in [:root :input :coll] [:map :keyword :any])
+                   (update-in [:root :bindings] select-keys [[:key] [:default]]))
+        {:keys [analysis options]} (checked-model source)
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        expected {:ref "data" :value false}
+        args {:coll {:name expected}}
+        [result invalid] (run-browser plan [args {:coll {"name" expected}}])]
+    (is (= expected (invoke args nil)))
+    (is (= {:value (wire/encode-value expected) :sequence false} result))
+    (is (= "Value does not match the required graph input type" (:error invalid)))))

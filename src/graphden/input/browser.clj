@@ -42,6 +42,9 @@
          (seq (types/union-members type))
          (every? browser-input-types (types/union-members type)))
     {:anyOf (mapv name (types/union-members type))}
+    (types/list-type? type) {:listOf (supplied-type! (types/list-elem type))}
+    (types/map-type? type) {:mapOf [(supplied-type! (types/map-key type))
+                                    (supplied-type! (types/map-val type))]}
     :else (ir/reject! :unsupported-browser-input-type {})))
 
 

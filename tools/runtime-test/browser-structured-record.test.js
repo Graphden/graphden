@@ -71,18 +71,31 @@ const callback = scopedFn('callback', 'callback', 'equal?', {
   b: call('outer'),
 });
 const externalValue = scopedFn('outer', 'entry', 'const', {value: literal(null)});
-function runCallback(entry) {
+function runCallback(entry, supplied = {}) {
   return graph.createRuntime({
     format: 2, primitiveAbi: 1, entries: {view: 'entry'},
-    inputs: {entry: {structured: {fields: [], presence: [], required: []}}},
+    inputs: {entry: {structured: {
+      fields: [{name: 'items', slot: 'items'}],
+      presence: [{id: 'items', kind: 'supplied', sources: []}],
+      required: [],
+    }}},
     primitives: ['map', 'const', 'equal?'].map((op) => ({id: op, op})),
     functions: [entry, externalValue, callback],
-  }).run('view');
+  }).run('view', supplied);
 }
-const mapped = runCallback(scopedFn('entry', 'entry', 'map', {
-  coll: literal([null, false, null]), func: structuredCallback,
-}));
+const namedMap = scopedFn('entry', 'entry', 'map', {
+  coll: {kind: 'supplied', slot: 'items', type: {listOf: {anyOf: ['null', 'bool']}}},
+  func: structuredCallback,
+});
+const mapped = runCallback(namedMap, {items: [null, false, null]});
 assert.deepEqual([...mapped], [true, false, true]);
+assert.throws(() => runCallback(namedMap, {items: [7]}), /does not match/);
+const opaqueMap = scopedFn('entry', 'entry', 'const', {
+  value: {kind: 'supplied', slot: 'items', type: {mapOf: ['keyword', 'any']}},
+});
+const dictionary = new Map([[graph.keyword('ref'), 'data'], [graph.keyword('value'), false]]);
+assert.equal(runCallback(opaqueMap, {items: dictionary}), dictionary);
+assert.throws(() => runCallback(opaqueMap, {items: new Map([['ref', 'data']])}), /does not match/);
 const escaped = runCallback(scopedFn('entry', 'entry', 'const', {value: structuredCallback}));
 assert.throws(() => graph.invoke(escaped, false), /outside its invocation/);
 assert.throws(() => escaped.invoke(false), /outside its invocation/);

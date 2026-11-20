@@ -466,11 +466,28 @@
       default: return false;
     }
   }
-  function checkedInput(value, type) {
-    const matches = typeof type === 'string'
-      ? matchesPrimitiveInput(value, type)
-      : Array.isArray(type?.anyOf) && type.anyOf.some((candidate) => matchesPrimitiveInput(value, candidate));
-    if (!matches) throw new Error('Value does not match the required graph input type');
+  function matchesInput(value, type, tick) {
+    if (typeof type === 'string') return matchesPrimitiveInput(value, type);
+    if (Array.isArray(type?.anyOf)) return type.anyOf.some((candidate) => matchesPrimitiveInput(value, candidate));
+    if (type?.listOf && (Array.isArray(value) || value instanceof LazySequence)) {
+      for (const item of value) {
+        tick();
+        if (!matchesInput(item, type.listOf, tick)) return false;
+      }
+      return true;
+    }
+    if (Array.isArray(type?.mapOf) && value instanceof Map) {
+      const [keyType, valueType] = type.mapOf;
+      for (const [key, item] of value) {
+        tick();
+        if (!matchesInput(key, keyType, tick) || !matchesInput(item, valueType, tick)) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+  function checkedInput(value, type, tick) {
+    if (!matchesInput(value, type, tick)) throw new Error('Value does not match the required graph input type');
     return value;
   }
   function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {
@@ -575,10 +592,10 @@
           case 'literal': return decode(value.value);
           case 'supplied':
             if (!structured) throw new Error('Unsupported browser expression');
-            return checkedInput(frame.slots.get(value.slot), value.type);
+            return checkedInput(frame.slots.get(value.slot), value.type, tick);
           case 'validate':
             if (!structured) throw new Error('Unsupported browser expression');
-            return checkedInput(expr(value.expr, frame), value.type);
+            return checkedInput(expr(value.expr, frame), value.type, tick);
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
           case 'record': {

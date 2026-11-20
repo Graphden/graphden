@@ -667,9 +667,9 @@
 
 (deftest generic-rename-keeps-the-source-type-variable-and-its-original-slot-identities
   (let [rich '[:union :null [:map a :any] [:list :any]]
-        base {:name :lookup :namespace "fixture" :args {:coll {:type rich}} :return-type :any}
+        lookup {:name :lookup :namespace "fixture" :args {:coll {:type rich}} :return-type :any}
         child {:name :renamed :namespace "fixture" :parent :lookup :args {:coll {:as :input}}}
-        ds [base child]
+        ds [lookup child]
         ctx (prepared ds)
         planned (source/plan-module [child] ctx)
         replay #(first (:definitions (source/verify-module % ctx)))

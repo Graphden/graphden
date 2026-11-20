@@ -4,7 +4,8 @@
     [graphden.input.context :as context]
     [graphden.input.core :as input]
     [graphden.input.descriptor :as descriptor]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
 (defn- fixture
@@ -93,3 +94,24 @@
     (is (true? (right-required (assoc context :field-default-required? true))))
     (is (false? (right-required (-> context (assoc :field-default-required? true)
                                     (assoc-in [:fields right-field :required] nil)))))))
+
+
+(deftest source-generic-types-belong-to-one-field-with-the-erased-storage-id
+  (let [root (random-uuid)
+        [generic unrelated] (repeatedly 2 random-uuid)
+        any-id (ids/primitive-fn-id :any)
+        type '[:union :null [:map a :any] [:list :any]]
+        ctx (context/build-context
+              {:type-bodies {root {:input type :opaque :any}}
+               :source-field-types {[generic any-id] type}
+               :fields {generic {:id generic :type-fn-id any-id :name "input"}
+                        unrelated {:id unrelated :type-fn-id any-id :name "opaque"}}
+               :members {root [{:slot-id generic :position 0} {:slot-id unrelated :position 1}]}})
+        fields (:fields (descriptor/resolve-descriptor ctx root))]
+    (is (= [(types/resolve-alias type) :any] (mapv :type fields)))
+    (is (= [any-id any-id] (mapv :type-id fields)))
+    (is (thrown? clojure.lang.ExceptionInfo (descriptor/resolve-descriptor (dissoc ctx :source-field-types) root)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (descriptor/resolve-descriptor (assoc-in ctx [:source-field-types [generic any-id]] '[:union :null [:list b]]) root)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (descriptor/resolve-descriptor (assoc-in ctx [:fields generic :type-fn-id] (ids/primitive-fn-id :int)) root)))))

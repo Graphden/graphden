@@ -31,7 +31,9 @@
   (delay
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded (:base-fn-defs (loader/load-packages ["core"]))]
-        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :str-trim (:name %)) (sources "strings"))
+        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
+                                                        (filter #(= :get (:name %)) (sources "collections"))
+                                                        (filter #(#{:str-trim :re-find?} (:name %)) (sources "strings"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
@@ -88,9 +90,8 @@
                      (parse/prepare-module originals {} {}))
           id (ids/fn-id "core.system" :_prom-seg)
           rejected (failure #(snapshot/verify-binding (snapshot/package-index prepared originals) id @roots))]
-      (is (= :unverified-source-declaration (:code rejected)))
-      (is (= [:rename-projection-required :non-value-binding-required] (:blockers rejected)))
-      (is (= #uuid "ccaba282-736e-5623-8b50-1186bac7948c" (:fn-id rejected))))))
+      (is (= :configuration-evidence-required (:code rejected)))
+      (is (= (ids/fn-id "core.system" :_prom-k-lower) (:fn-id rejected))))))
 
 
 (deftest existing-web-reference-keeps-its-core-field-identity-test
@@ -144,3 +145,64 @@
         (is (= [[owner []] [field]] (:from route)))
         (is (= address (:source route)))
         (is (= (ids/binding-id owner field) (get-in graph [:public-input :bindings (:from route) :binding-id])))))))
+
+
+(deftest checked-primitive-rename-reports-signature-coverage
+  (let [defs (filterv #(#{:sleep :_retry-pause} (:name %)) (sources "concurrency"))
+        id (ids/fn-id "core.concurrency" :_retry-pause)
+        result (snapshot/projection-readiness (snapshot/package-index (parse/prepare-module defs {} {}) defs) id @roots)]
+    (is (= :checked (:status result)))
+    (is (true? (get-in result [:coverage :signatures])))
+    (is (= :checked (get-in result [:projections 0 :proof :status])))
+    (is (empty? (:obligations result)))))
+
+
+(deftest actual-generic-get-rename-has-a-typed-route-and-explicit-rule-coverage
+  (let [selected (into (filterv #(= :get (:name %)) (sources "collections"))
+                       (filter #(= :_prom-stack (:name %))) (sources "system"))
+        id (ids/fn-id "core.system" :_prom-stack)
+        field (ids/slot-id (ids/fn-id "core.collections" :get) :coll)
+        alias-id (ids/slot-id id :input)
+        package (snapshot/package-index (parse/prepare-module selected {} {}) selected)
+        result (snapshot/projection-readiness package id @roots)
+        [route] (:projections result)]
+    (is (= :incomplete (:status result)))
+    (is (= :rule-signature-view-required (-> result :diagnostics last :code)))
+    (is (false? (get-in result [:coverage :signatures])))
+    (is (= (ids/binding-id id field) (:binding-id route)))
+    (is (= [[id []] [field]] (:from route)))
+    (is (= [[id []] [alias-id]] (:source route)))
+    (is (= :union (first (:actual-type route))))
+    (is (= :deferred (get-in route [:proof :status])))
+    (is (seq (:obligations result)))
+    (is (some #{[[id []] [alias-id]]} (:required-addresses result)))))
+
+
+(deftest nested-uses-retain-two-scopes-and-one-original-rename
+  (let [core (into (filterv #(#{:str-trim :re-find?} (:name %)) (sources "strings"))
+                   (filter #(= :equal? (:name %))) (sources "logic"))
+        web (edn/read-string (slurp (io/resource "packages/web/crud-parse/fns.edn")))
+        renamed (-> (some #(when (= :_parse-fn-form-pid-trim-item (:name %)) %) (:fns web))
+                    (assoc :namespace (:namespace web)))
+        target (keyword (:namespace web) (name (:name renamed)))
+        host {:namespace "fixture" :name :matches :parent :equal? :args {:a target :b target}}
+        ds (conj core renamed host)
+        owner (ids/fn-id "fixture" :matches)
+        origin (ids/fn-id (:namespace web) (:name renamed))
+        field (ids/slot-id (ids/fn-id "core.strings" :str-trim) :string)
+        alias-id (ids/slot-id origin :item)
+        uses (mapv #(ids/binding-id owner (ids/slot-id (ids/fn-id "core.logic" :equal?) %)) [:a :b])
+        result (snapshot/projection-readiness (snapshot/package-index (parse/prepare-module ds {} {}) ds) owner @roots)
+        routes (:projections result)
+        colliding (assoc host :parent :re-find? :args {:string target :pattern target})
+        bad (conj core renamed colliding)
+        refused (snapshot/projection-readiness (snapshot/package-index (parse/prepare-module bad {} {}) bad) owner @roots)]
+    (is (= :blocked (:status refused)))
+    (is (= [:ref-scope-required] (get-in refused [:diagnostics 0 :blockers])))
+    (is (= :checked (:status result)) (pr-str (:diagnostics result)))
+    (is (= 2 (count routes)))
+    (is (= #{origin} (set (map :origin-fn-id routes))))
+    (is (= #{(ids/binding-id origin field)} (set (map :binding-id routes))))
+    (is (= (set (for [use uses] [[owner [use]] [field]])) (set (map :from routes))))
+    (is (= (set (for [use uses] [[owner [use]] [alias-id]])) (set (map :source routes))))
+    (is (every? #(= :checked (get-in % [:proof :status])) routes))))

@@ -10,8 +10,8 @@
 
 
 (defn- compatible-pin?
-  [target alias]
-  (or (= target alias) (= :any target) (types/type-var? target)))
+  [target alias-type]
+  (or (= target alias-type) (= :any target) (types/type-var? target)))
 
 
 (defn origin

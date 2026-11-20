@@ -120,10 +120,25 @@ owner UUID, and frozen base-function registry entries to
 a private baseline, verifies reachable declarations through the v2 reader and
 uses their field IDs as implementation argument paths. The stage 4 signature
 engine and directional checker run before and after adding the scoped row.
-Only single-parent closures with supported primitive declarations currently
-supply this proof. A declaration gap identifies the dependency UUID and source
+Single-parent closures can also retain a source-declared type variable or a
+collection of primitive and variable types when the exact field UUID and its
+storage type agree. This preserves a rich field whose storage FK also occurs
+on an unrelated `:any` field. A declaration gap identifies the dependency UUID and source
 blocker codes. Public source files and source-plan counts require a separate
 scoped writer.
+
+A scalar rename can project a direct or inherited field when the legacy
+alias slot points at the declaring field's UUID. Its input declaration keeps
+the prepared type expression, including type variables. Supported pins retain
+the original binding UUID and a separate `:configure` assertion. Ambiguous
+names, conflicting pins and occupied ancestor fields remain diagnostics.
+
+`source-snapshot/projection-readiness` returns the analyzer's scoped routes,
+binding UUIDs, directional proofs, runtime obligations and signature coverage.
+Missing implementation evidence or a custom rule's missing signature view
+produces an incomplete result with a diagnostic. For example, a rename of
+`core.collections/get`'s generic collection input can have a verified route
+and a deferred field-read obligation while its return rule needs that view.
 
 Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-test
 --focus graphden.input.source-snapshot-test`.
@@ -155,8 +170,8 @@ and change an old single-operator map to a vector expression. Independently owne
 composed fields move to `:input` while inherited bindings move to `:bind`.
 Same-line trailing comments follow their values, standalone comments precede
 the next field, and declaration ordering retains original slot positions.
-Fields forwarding an inherited or referenced slot require a projection and
-remain blocked. Other entry moves fail explicitly. Literal contents are
+Verified inherited renames emit an explicit projection. A field in a referenced
+graph requires a proven use-site address. Other entry moves fail explicitly. Literal contents are
 kept verbatim.
 
 For example, `{:x {:ref :query :type :text}}` becomes

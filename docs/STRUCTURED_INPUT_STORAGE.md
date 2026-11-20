@@ -145,6 +145,15 @@ refuses the write. Explicit `nil` and `false` survive the storage round trip.
 The offline capability still gates this command and the generic API remains
 closed for structured binding rows.
 
+## Versioned edit and removal
+
+The offline edit and removal primitives compare the supplied version with
+the live winner on the request's branch. The semantic graph writer opens
+the transaction before the structured binding lock, winner read and write.
+The transaction rolls back a failed edit, so its basis can be retried. Two
+edits on one branch cannot consume the same winner. Separate branches can
+each edit an inherited winner when both still resolve it.
+
 ## Verification
 
 `graphden.input.storage-test` uses PostgreSQL and the ordinary schema/versioning

@@ -7,7 +7,7 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~63 min
+[[file:index.org][index]] · ~65 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -72,8 +72,22 @@ Preview and bind use the same decorated branch writer. It locks structured bindi
 
 - source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:121]]
 - see also :: [[file:crud.org::#crud/read-input][read-input]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
+- referenced from :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]]
 
-* 6. create-entity
+* 6. with-current-binding!
+:PROPERTIES:
+:CUSTOM_ID: crud/with-current-binding!
+:FILE: src/graphden/input/storage.clj
+:LINE: 21
+:MINS: 2.3
+:END:
+
+Opens the semantic graph writer transaction before acquiring the structured binding lock. Resolves the winner for this branch with fresh memos and checks the expected version. A failure rolls back the entire callback and leaves that basis reusable.
+
+- source :: [[file:../../../src/graphden/input/storage.clj::(defn with-current-binding!][src/graphden/input/storage.clj:21]]
+- see also :: [[file:crud.org::#crud/with-plan][with-plan]]
+
+* 7. create-entity
 :PROPERTIES:
 :CUSTOM_ID: crud/create-entity
 :FILE: src/graphden/crud/entities.clj
@@ -87,7 +101,7 @@ Creates one row through the generic write API. It checks the caller's [[file:glo
 - same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
-* 7. write-rej
+* 8. write-rej
 :PROPERTIES:
 :CUSTOM_ID: crud/write-rej
 :FILE: src/graphden/crud/validation.clj
@@ -100,7 +114,7 @@ Checks whether a proposed mutation must be rejected before storage is changed. C
 - source :: [[file:../../../src/graphden/crud/validation.clj::(defn write-rej][src/graphden/crud/validation.clj:878]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
-* 8. apply-create-record-type-body
+* 9. apply-create-record-type-body
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-record-type-body
 :FILE: src/graphden/crud/entities/record_type.clj
@@ -113,7 +127,7 @@ Creates the function row, [[file:glossary.org::#term/slot][slot]] rows, and func
 - source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:439]]
 - same file :: [[file:crud.org::#crud/apply-create-rollback][apply-create-rollback]]
 
-* 9. apply-create-rollback
+* 10. apply-create-rollback
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-rollback
 :FILE: src/graphden/crud/entities/record_type.clj
@@ -126,7 +140,7 @@ On failure, traverses the creation journal backward and attempts to delete each 
 - source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-rollback][src/graphden/crud/entities/record_type.clj:118]]
 - same file :: [[file:crud.org::#crud/apply-create-record-type-body][apply-create-record-type-body]]
 
-* 10. apply-create-core
+* 11. apply-create-core
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
@@ -140,7 +154,7 @@ Repeats structural validation under the semantic writer guard, then creates the 
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
-* 11. type-check-fn-after-mutation!
+* 12. type-check-fn-after-mutation!
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
@@ -154,7 +168,7 @@ Reconstructs and checks the changed function, updating branch-specific diagnosti
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
-* 12. notify-after-write!
+* 13. notify-after-write!
 :PROPERTIES:
 :CUSTOM_ID: crud/notify-after-write!
 :FILE: src/graphden/crud/entities/invalidation.clj
@@ -167,7 +181,7 @@ Invalidates affected caches after a stored change and emits a PostgreSQL notific
 - source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:226]]
 - referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
-* 13. resolve-fn
+* 14. resolve-fn
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-fn
 :FILE: src/graphden/crud/fn_execution/lookup.clj
@@ -179,7 +193,7 @@ Resolves the function ID or name from an execution request into the stored funct
 
 - source :: [[file:../../../src/graphden/crud/fn_execution/lookup.clj::(defn resolve-fn][src/graphden/crud/fn_execution/lookup.clj:111]]
 
-* 14. public-free-entries
+* 15. public-free-entries
 :PROPERTIES:
 :CUSTOM_ID: crud/public-free-entries
 :FILE: src/graphden/executor/compile/surface.clj
@@ -192,7 +206,7 @@ Computes public [[file:glossary.org::#term/free-argument][free arguments]] for e
 - source :: [[file:../../../src/graphden/executor/compile/surface.clj::(defn public-free-entries][src/graphden/executor/compile/surface.clj:85]]
 - referenced from :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]
 
-* 15. apply-execute
+* 16. apply-execute
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-execute
 :FILE: src/graphden/crud/fn_execution.clj
@@ -205,7 +219,7 @@ Coordinates ~/api/execute~: resolves the function, version, and [[file:glossary.
 - source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:140]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:editor.org::#editor/evaluate][evaluate]]
 
-* 16. create-pending-with-args!
+* 17. create-pending-with-args!
 :PROPERTIES:
 :CUSTOM_ID: crud/create-pending-with-args!
 :FILE: src/graphden/crud/fn_execution/persist.clj
@@ -218,7 +232,7 @@ Writes a pending execution row together with its argument and argument-item rows
 - source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn create-pending-with-args!][src/graphden/crud/fn_execution/persist.clj:340]]
 - same file :: [[file:crud.org::#crud/write-finished!][write-finished!]]
 
-* 17. write-finished!
+* 18. write-finished!
 :PROPERTIES:
 :CUSTOM_ID: crud/write-finished!
 :FILE: src/graphden/crud/fn_execution/persist.clj
@@ -231,7 +245,7 @@ Stores a completed future's result, error, or cancellation on the execution row.
 - source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn write-finished!][src/graphden/crud/fn_execution/persist.clj:585]]
 - same file :: [[file:crud.org::#crud/create-pending-with-args!][create-pending-with-args!]]
 
-* 18. render-value-repr
+* 19. render-value-repr
 :PROPERTIES:
 :CUSTOM_ID: crud/render-value-repr
 :FILE: resources/packages/app/reprs/fns.edn
@@ -244,7 +258,7 @@ Chooses a [[file:glossary.org::#term/graph-function][graph function]] that rende
 - source :: [[file:../../../resources/packages/app/reprs/fns.edn::{:name :render-value-repr][resources/packages/app/reprs/fns.edn:80]]
 - referenced from :: [[file:platform.org::#platform/sanitize-hiccup][sanitize-hiccup]]
 
-* 19. resolve-form
+* 20. resolve-form
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-form
 :FILE: resources/packages/app/forms/fns.edn
@@ -258,7 +272,7 @@ Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure f
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
-* 20. build-form
+* 21. build-form
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: resources/packages/app/forms/fns.edn
@@ -271,7 +285,7 @@ Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: record
 - source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :build-form,][resources/packages/app/forms/fns.edn:1743]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
-* 21. run-captured!
+* 22. run-captured!
 :PROPERTIES:
 :CUSTOM_ID: crud/run-captured!
 :FILE: src/graphden/crud/debug_capture.clj
@@ -283,7 +297,7 @@ Runs the next matching HTTP request with tracing when a one-shot debugger interc
 
 - source :: [[file:../../../src/graphden/crud/debug_capture.clj::(defn run-captured!][src/graphden/crud/debug_capture.clj:299]]
 
-* 22. create-secret-facts!
+* 23. create-secret-facts!
 :PROPERTIES:
 :CUSTOM_ID: crud/create-secret-facts!
 :FILE: src/graphden/crud/secrets.clj
@@ -296,7 +310,7 @@ Claims the secret path and creates its graph rows in one guarded SQL transaction
 - source :: [[file:../../../src/graphden/crud/secrets.clj::(defn create-secret-facts!][src/graphden/crud/secrets.clj:225]]
 - see also :: [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 23. run-selected-tests!
+* 24. run-selected-tests!
 :PROPERTIES:
 :CUSTOM_ID: crud/run-selected-tests!
 :FILE: src/graphden/crud/test_runs.clj
@@ -308,7 +322,7 @@ Runs functions from ~tests~ namespaces through the ordinary execution API with e
 
 - source :: [[file:../../../src/graphden/crud/test_runs.clj::(defn run-selected-tests!][src/graphden/crud/test_runs.clj:197]]
 
-* 24. schedule-affected!
+* 25. schedule-affected!
 :PROPERTIES:
 :CUSTOM_ID: crud/schedule-affected!
 :FILE: src/graphden/crud/test_autorun.clj
@@ -320,7 +334,7 @@ Finds tests affected by a write through reverse dependencies. It selects tests w
 
 - source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:181]]
 
-* 25. graph-list-env
+* 26. graph-list-env
 :PROPERTIES:
 :CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
@@ -332,7 +346,7 @@ Builds a shared lazy read environment over the graph cache. Separate projections
 
 - source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:464]]
 
-* 26. view-members
+* 27. view-members
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
 :FILE: src/graphden/crud/entities/views.clj
@@ -344,7 +358,7 @@ Evaluates graph filters for the Explorer and saved graph views. Filter dimension
 
 - source :: [[file:../../../src/graphden/crud/entities/views.clj::(defn view-members][src/graphden/crud/entities/views.clj:507]]
 
-* 27. save!
+* 28. save!
 :PROPERTIES:
 :CUSTOM_ID: crud/save!
 :FILE: src/graphden/crud/views.clj

@@ -68,10 +68,14 @@
         prepared-args (:args prepared)
         fields (distinct (concat (keys args) (keys prepared-args)))
         composed? (= :composed (definition-kind source))
+        expanded (delay (:args (first (parse/expand-inline-anons-in-module [normalized]))))
         blockers (keep (fn [field]
                          (let [form (get args field)
                                body (when composed? (format/inline-binding-body form))
-                               expected (if body (expected-inline-argument source field form body) form)]
+                               expected (cond
+                                          body (expected-inline-argument source field form body)
+                                          (and composed? (source-list/has-inline-items? form)) (get @expanded field)
+                                          :else form)]
                            (when-not (and (contains? args field) (contains? prepared-args field)
                                           (= expected (get prepared-args field)))
                              (blocker source :inline-identity-or-source-mapping-required [:args field]))))
@@ -122,6 +126,9 @@
         binding))
 
 
+(declare ^:private inline-list-item)
+
+
 (defn- argument-ledger
   "Resolve through the legacy slot walker, including rename and ref scopes.
    Keep the resulting address even when lowering that address is unsupported."
@@ -148,7 +155,8 @@
                     target-type (or (slots/slot-type-of owner field defs-by-name)
                                     (slots/rename-source-type owner field defs-by-name))
                     builder (when (or (:list-append binding) (:list-closed binding))
-                              (source-list/trace context (::records-of context) (::original-of context)
+                              (source-list/trace (assoc context :inline-list-item inline-list-item)
+                                                 (::records-of context) (::original-of context)
                                                  definition arg slot-id (:id binding)))
                     rename (rename/origin context definition own grouped arg body)
                     ;; Separate a primitive inherited field from an erased rich
@@ -174,7 +182,8 @@
                          :policy (binding-policy binding)}
                   (some :source-id (:items (peek (:fragments builder))))
                   (assoc :list-inputs (positions/authored-inputs (:id own) grouped name->id body))
-                  builder (merge {:list-builder builder} (source-list/contribution-expression builder body (:namespace source) name->id))
+                  builder (merge {:list-builder (dissoc builder :inline-items)}
+                                 (source-list/contribution-expression builder body (:namespace source) name->id))
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -233,7 +242,9 @@
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
     ;; binding rows can address free inputs in an arbitrary referenced graph.
-    (cond-> []
+    (cond-> (vec (get-in entry [:list-builder :inline-blockers]))
+      (and (source-list/has-inline-items? raw) (not (:list-builder entry)))
+      (conj (problem :inline-list-item-origin-required))
       (and inline-body (not= [:ref inline-body] expression))
       (conj (problem :inline-reference-mismatch))
       (:source-slot-id entry)
@@ -246,7 +257,7 @@
       (conj (problem :list-builder-required))
       (get-in entry [:list-builder :record-blocker])
       (conj (problem (get-in entry [:list-builder :record-blocker])))
-      (get-in entry [:list-builder :blocker])
+      (and (get-in entry [:list-builder :blocker]) (not (seq (get-in entry [:list-builder :inline-blockers]))))
       (conj (problem (get-in entry [:list-builder :blocker])))
       (:resolver-fn-id policy)
       (conj (problem :resolver-binding-required))
@@ -360,8 +371,47 @@
 (defn- inline-child-plan
   [body child context]
   (let [source (assoc body :name (:name child) :namespace (:namespace child))
+        original-for (::original-of context)
+        context (assoc context ::original-of (fn [definition]
+                                               (if (= (:fn-id child) (:fn-id definition))
+                                                 source
+                                                 (original-for definition))))
         plan (composed-plan source child context ((::records-of context) child))]
     (lower-inlines source child context plan)))
+
+
+(defn- prepared-inline-child
+  [context ns-id name]
+  (let [[child & duplicates] (or (get (::prepared context) [(or ns-id "") name])
+                                 (when (keyword? name)
+                                   (when-let [visible (get (:defs-by-name context)
+                                                           (keyword (or ns-id "") (clojure.core/name name)))]
+                                     [visible])))]
+    (when-not (seq duplicates) child)))
+
+
+(defn- inline-list-item
+  [context source [field position] raw prepared-item]
+  (let [body (format/legacy-inline? raw)
+        ref (prepared-inline-ref prepared-item)
+        ns-id (:namespace source)
+        path (cond-> [:args field] (map? (get-in source [:args field])) (conj :append) true (conj position))
+        err (fn [code problems]
+              (throw (ex-info "Unverified inline list item"
+                              {:type :input/list-builder :code code
+                               :inline-blockers (or problems [(blocker source code path)])})))]
+    (when-not (and body (keyword? ref)) (err :inline-list-item-origin-required nil))
+    (let [normalized (dissoc (normalize-source (assoc raw :namespace ns-id) context) :namespace)
+          expected (parse/inline-declaration normalized [(:name source) field position] ns-id)
+          child (prepared-inline-child context ns-id ref)]
+      (when-not (and (= (:name expected) ref) child) (err :inline-list-item-origin-mismatch nil))
+      (let [{:keys [proposed arguments blockers]} (when (contains? raw :args) (inline-child-plan raw child context))
+            v2 (if (contains? raw :args) (when proposed (format/migrate-inline raw proposed)) raw)]
+        (when (seq blockers)
+          (err :inline-list-item-declaration-required
+               (mapv #(merge % (blocker source (:code %) (into path (:source-path %)))) blockers)))
+        (when-not (and v2 (migration/same-edn? raw (format/inline-origin v2))) (err :inline-binding-origin-required nil))
+        {:ref ref :fn-id (:fn-id child) :inline-body v2 :body raw :arguments arguments}))))
 
 
 (defn- lower-inline-argument
@@ -371,12 +421,9 @@
       argument
       (let [name (prepared-inline-ref (get-in prepared source-path))
             ns-id (:namespace source)
-            [child & duplicates] (or (get (::prepared context) [(or ns-id "") name])
-                                     (when-let [visible (get (:defs-by-name context)
-                                                             (keyword (or ns-id "") (clojure.core/name name)))]
-                                       [visible]))
+            child (prepared-inline-child context ns-id name)
             problem #(assoc argument :blockers [(blocker source % source-path)])]
-        (if (or (nil? child) (seq duplicates))
+        (if (nil? child)
           (problem :missing-inline-declaration)
           (let [{:keys [proposed arguments blockers]} (inline-child-plan body child context)
                 v2 (when proposed (format/migrate-inline body proposed))]
@@ -386,7 +433,7 @@
                      (mapv #(merge % (blocker source (:code %) (into source-path (:source-path %)))) blockers))
               (not (and v2 (migration/same-edn? body (format/inline-origin v2))))
               (problem :inline-binding-origin-required)
-              :else (assoc argument :expression [:ref v2] :inline-arguments arguments))))))))
+              :else (assoc argument :expression [:ref v2] :inline-arguments arguments :inline-fn-id (:fn-id child)))))))))
 
 
 (defn- lower-inlines
@@ -498,16 +545,27 @@
    :bindings (mapv binding-meaning (sort-by :id bindings))})
 
 
+(defn- ordinary-bindings
+  [bindings traces]
+  (let [list-ids (set (map (comp :binding-id peek :fragments) (vals traces)))]
+    (remove #(contains? list-ids (:id %)) bindings)))
+
+
 (defn- legacy-authored-meaning
   [definition context bindings arguments]
-  (assoc (authored-meaning definition context bindings)
-         :asserted-types (update-vals (field-assertions definition arguments) :type)))
+  (let [traces (source-list/verified-traces arguments)]
+    (assoc (authored-meaning definition context (ordinary-bindings bindings traces))
+           :list-builders traces
+           :asserted-types (update-vals (field-assertions definition arguments) :type))))
 
 
 (defn- v2-authored-meaning
   [definition parsed]
-  (let [bindings (mapv (partial rename/legacy-binding (:declaration-records parsed)) (:bindings parsed))]
+  (let [traces (or (:list-builders parsed) {})
+        bindings (mapv (partial rename/legacy-binding (:declaration-records parsed))
+                       (ordinary-bindings (:bindings parsed) traces))]
     (assoc (authored-meaning definition parsed bindings)
+           :list-builders traces
            :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
                                  (:configurations parsed)))))
 
@@ -518,21 +576,38 @@
                    (migration/stable-edn (wire/encode-unreadable-kws form))))
 
 
+(declare ^:private legacy-inline-meanings)
+
+
 (defn- legacy-inline-meaning
-  [environment source prepared {:keys [source-path origin inline-arguments]}]
-  (when-let [body (format/inline-binding-body (get-in source source-path))]
-    (let [id (ids/fn-id (:namespace source) (prepared-inline-ref (get-in prepared source-path)))
-          child (get-in environment [:definition-by-id id])]
-      (when-not child
-        (throw (ex-info "Missing legacy inline declaration"
-                        {:code :missing-inline-declaration :path source-path})))
-      (let [records ((:records-of environment) child)
-            bindings (filterv #(= :binding (:kind %)) records)
-            ctx (source-context/declaration-context environment child records bindings)
-            raw-child (assoc body :namespace (:namespace source))]
-        [[(:slot-id origin)] {:origin body :meaning (legacy-authored-meaning child ctx bindings inline-arguments)
-                              :children (into {} (keep #(legacy-inline-meaning environment raw-child child %))
-                                              inline-arguments)}]))))
+  [environment ns-id id body arguments]
+  (let [child (get-in environment [:definition-by-id id])]
+    (when-not child
+      (throw (ex-info "Missing legacy inline declaration"
+                      {:code :missing-inline-declaration})))
+    (let [records ((:records-of environment) child)
+          bindings (filterv #(= :binding (:kind %)) records)
+          ctx (source-context/declaration-context environment child records bindings)]
+      {:origin body
+       :meaning (legacy-authored-meaning child ctx bindings arguments)
+       :children (legacy-inline-meanings environment (assoc body :namespace ns-id) child arguments)})))
+
+
+(defn- legacy-inline-argument
+  [environment source prepared {:keys [source-path origin inline-arguments list-inline-items]}]
+  (let [ns-id (:namespace source)
+        slot-id (:slot-id origin)]
+    (if-let [body (format/inline-binding-body (get-in source source-path))]
+      (let [id (ids/fn-id ns-id (prepared-inline-ref (get-in prepared source-path)))]
+        [[[slot-id] (legacy-inline-meaning environment ns-id id body inline-arguments)]])
+      (map (fn [[position {:keys [fn-id body arguments]}]]
+             [[slot-id position] (legacy-inline-meaning environment ns-id fn-id body arguments)])
+           list-inline-items))))
+
+
+(defn- legacy-inline-meanings
+  [environment source prepared arguments]
+  (into {} (mapcat (partial legacy-inline-argument environment source prepared)) arguments))
 
 
 (defn- v2-inline-meaning
@@ -544,7 +619,7 @@
 
 (defn- verify-inline-children!
   [environment {:keys [source legacy]} prepared v2]
-  (let [expected (into {} (keep #(legacy-inline-meaning environment source prepared %)) (:arguments legacy))
+  (let [expected (legacy-inline-meanings environment source prepared (:arguments legacy))
         actual (into {} (map v2-inline-meaning) (:inline-definitions v2))]
     (when-not (migration/same-edn? expected actual)
       (throw (ex-info "Inline source identities or declarations changed"
@@ -558,25 +633,35 @@
       (filterv #(= :binding (:kind %)) ((:records-of environment) child)))))
 
 
+(defn- child-arguments
+  [[_ arguments]]
+  (mapcat (fn [{:keys [inline-fn-id inline-arguments list-inline-items]}]
+            (cond-> (mapv (juxt :fn-id :arguments) (vals list-inline-items))
+              inline-fn-id (conj [inline-fn-id inline-arguments])))
+          arguments))
+
+
+(defn- verification-context
+  [environment owner-id arguments bindings]
+  (let [index (into {} (tree-seq (comp seq second) child-arguments [owner-id arguments]))
+        type-names (get-in environment [:context :name->id])]
+    (fn [v2]
+      (let [[lowered rows] (source-context/lower-declarations environment v2)
+            id (ids/fn-id (:namespace lowered) (:name lowered))
+            args (get index id)
+            origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
+        (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
+                                    (source-list/verified-traces args) args type-names)))))
+
+
 (defn- verify-definition
   [environment definition]
   (let [{definition-id :identity :keys [source proposed legacy]} definition
         prepared (get-in environment [:definition-by-id definition-id])
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
-        list-traces (source-list/verified-traces (:arguments legacy))
-        list-ids (set (map (comp :binding-id peek :fragments) (vals list-traces)))
-        ordinary (fn [rows] (remove #(contains? list-ids (:id %)) rows))
         legacy-context (source-context/declaration-context environment prepared records bindings)
-        context-for (fn [v2]
-                      (let [[lowered rows] (source-context/lower-declarations environment v2)]
-                        (if (= (:name lowered) (:name source))
-                          (source-list/replay-context
-                            (source-context/declaration-context environment lowered rows bindings)
-                            list-traces (:arguments legacy) (get-in environment [:context :name->id]))
-                          (source-context/declaration-context environment lowered rows
-                                                              (inline-binding-origins environment lowered)))))
-        options {:context-for context-for
+        options {:context-for (verification-context environment definition-id (:arguments legacy) bindings)
                  :normalize-inline-parent
                  (fn [ns-id parent]
                    (let [names (get-in environment [:context :name->id])
@@ -588,10 +673,8 @@
         reread (module/parse-module-v2 (read-emitted emitted) options)
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
-        legacy-meaning (assoc (legacy-authored-meaning prepared legacy-context (ordinary bindings) (:arguments legacy))
-                              :list-builders list-traces)
-        v2-meaning (assoc (v2-authored-meaning lowered (update v2 :bindings ordinary))
-                          :list-builders (or (:list-builders v2) {}))]
+        legacy-meaning (legacy-authored-meaning prepared legacy-context bindings (:arguments legacy))
+        v2-meaning (v2-authored-meaning lowered v2)]
     (verify-inline-children! environment definition prepared v2)
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"

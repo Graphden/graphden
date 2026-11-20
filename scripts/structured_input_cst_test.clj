@@ -565,5 +565,32 @@
     (is (= {:xs [:project [:items]]} (:bind child)))))
 
 
+(deftest inline-list-cst-keeps-comments-and-two-identical-bodies
+  (let [body "{:args {:x {:ref ; qualified\r\n :demo.main/producer}} :parent :sink}"
+        text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :items :sequence} :return-type :any}"
+                  "{:name :producer :return-type :any}"
+                  "{:name :child :parent :sink :args {:items {:closed true :append [nil ; first item\r\n "
+                  body " ; second item\r\n " body "]}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target "[:value nil] ; first item\r\n [:ref"))
+    (is (str/includes? target " ; second item\r\n [:ref"))
+    (is (str/includes? target ":x [:ref ; qualified\r\n :demo.main/producer]"))
+    (is (str/includes? target ":tail :closed"))
+    (is (not (str/includes? target "_anon-")))))
+
+
+(deftest nested-inline-list-cst-uses-the-original-append-and-item-spans
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :items :sequence} :return-type :any}"
+                  "{:name :producer :return-type :any}"
+                  "{:name :child :parent :sink :args {:items [{:parent :sink :args {:items "
+                  "{:closed false ; keep tail\r\n :append [{:value nil} {:ref ; qualified\r\n :demo.main/producer}"
+                  " {:parent :sink :args {:x 7}}]}}}]}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":tail :open ; keep tail\r\n :items"))
+    (is (str/includes? target "[:ref ; qualified\r\n :demo.main/producer]"))
+    (is (str/includes? target ":legacy-forms {:items [:list-origin [:closed :append]"))
+    (is (not (str/includes? target "_anon-")))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

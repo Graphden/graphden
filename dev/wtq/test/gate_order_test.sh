@@ -61,9 +61,12 @@ bb() {
     scripts/ci_priority.clj)
       [ "${FAIL_HINTS:-0}" != 1 ] || return 1
       case "$2" in
-        integration) printf '%s\n' "${TEST_PRIORITY_INTEGRATION:-}" ;;
-        browser) printf '%s\n' "${TEST_PRIORITY_BROWSER:-}" ;;
-        *) printf '%s\n' '{:unit [] :integration []}' ;;
+        gate-plan)
+          echo gate-plan >> "$TEST_DIR/priority.calls"
+          printf '%s\n' "${TEST_PRIORITY_INTEGRATION:-}" > "$4.integration"
+          printf '%s\n' "${TEST_PRIORITY_BROWSER:-}" > "$4.browser"
+          printf '%s\n' '{:unit [] :integration []}' > "$4.kaocha.edn" ;;
+        *) echo "unexpected priority selector $2" >&2; return 1 ;;
       esac ;;
     scripts/ci_fast_cli.clj) echo 'gate bypassed admitted preflight' >&2; return 1 ;;
     scripts/ci_gate.clj)
@@ -119,9 +122,11 @@ assert_events() {
 }
 run_case() {
   : > "$TEST_LOG"
+  : > "$TEST_DIR/priority.calls"
   built_candidate=0
   VISUAL_BROWSER_CALLS=0
   gate_suites "$TEST_DIR" 0 0 0 >/dev/null
+  [ "$(cat "$TEST_DIR/priority.calls")" = gate-plan ]
 }
 
 CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=1

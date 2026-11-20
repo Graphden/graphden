@@ -691,13 +691,13 @@
   "All reachable test namespaces, grouped by shortest require distance.
    The Kaocha runner completes each layer before starting the next. A parse
    failure removes hints altogether; the unchanged full suite still runs."
-  [changed kind]
+  [changed kind snapshot]
   (when (seq changed)
     (try
       (let [{:keys [by-path package-consumers package-fn-consumers package-impl-consumers
                     all-test-source-consumers all-core-source-consumers]
              consumers :reverse}
-            (namespace-graph)
+            @snapshot
             sources (->> changed
                          (filter #(or (str/starts-with? % "src/")
                                       (str/starts-with? % "test/")))
@@ -760,12 +760,12 @@
 
 (defn unit-layers
   [changed]
-  (when changed (mapv :names (test-layers changed :unit))))
+  (when changed (mapv :names (test-layers changed :unit (delay (namespace-graph))))))
 
 
 (defn integration-layers
   [changed]
-  (when changed (mapv :names (test-layers changed :integration))))
+  (when changed (mapv :names (test-layers changed :integration (delay (namespace-graph))))))
 
 
 (defn unit-first
@@ -785,7 +785,8 @@
    determines the wave size; the suite runners execute its exact complement."
   ([changed] (plan changed {}))
   ([changed manual]
-   (let [eligible (fn [kind]
+   (let [snapshot (delay (namespace-graph))
+         eligible (fn [kind]
                     (into #{} (keep #(focused-namespace (str %) kind))
                           (fs/glob "test" "**/*_test.clj")))
          layers (fn [kind automatic]
@@ -799,8 +800,8 @@
                                   (let [remaining (vec (remove selected layer))]
                                     (when (seq remaining) remaining)))
                                 automatic))))
-         unit-groups (layers :unit (unit-layers changed))
-         integration-groups (layers :integration (integration-layers changed))]
+         unit-groups (layers :unit (mapv :names (test-layers changed :unit snapshot)))
+         integration-groups (layers :integration (mapv :names (test-layers changed :integration snapshot)))]
      {:runtime (vec (distinct (concat (map #(str "tools/runtime-test/" %)
                                            (get manual :runtime []))
                                       (runtime-first changed))))

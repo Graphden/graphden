@@ -114,13 +114,16 @@
 (declare ^:private patched-text)
 
 
-(declare ^:private inline-edit)
+(declare ^:private inline-edit ^:private list-builder-edit)
 
 
 (defn- inline-binding-edit
   [source starts loc form spelling configured? path]
   (cond
     (not (vector? form)) nil
+    (= :list-builder (first form))
+    (let [{:keys [before]} (node-edit source starts loc identity)]
+      (list-builder-edit source starts loc {:original (inventory/read-edn path before) :form form :path path}))
     (= :project (first form)) (projection-leaf source starts loc)
     (and (= :ref (first form)) (map? (second form)))
     (inline-edit source starts loc (second form) path)
@@ -261,9 +264,6 @@
            :configuration (str "{" (:type parts) "}"))))
 
 
-(declare ^:private list-builder-edit)
-
-
 (defn- partition-composed-edit
   [source starts loc {:keys [definition path declarations position-inputs operators]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
@@ -314,16 +314,17 @@
 (defn list-builder-operation
   "Build a checksum-bound edit for a single independently verified list field.
    Its enclosing definition can still have other migration blockers."
-  [source field fragment name->id]
-  (let [original (get-in source [:args field])
-        names (source-list/field-names name->id (:namespace source) original)
-        form (list-builder/source-form original names)
-        checked (list-builder/parse-fragment (:binding-id fragment) form names (:owner-id fragment))]
-    (when-not (and (= (:owner-id fragment) (ids/fn-id (:namespace source) (:name source)))
-                   (= (:binding-id fragment) (ids/binding-id (:owner-id fragment) (:target-id fragment)))
-                   (migration/same-edn? checked (dissoc fragment :owner-id :target-id)))
-      (refuse :list-fragment-drift {}))
-    {:op :list-builder :definition (:name source) :path [:args field] :original original :form form}))
+  ([source field fragment name->id] (list-builder-operation source field fragment name->id {}))
+  ([source field fragment name->id inline-items]
+   (let [original (get-in source [:args field])
+         names (source-list/field-names name->id (:namespace source) original)
+         form (source-list/source-form original names inline-items)
+         checked (list-builder/parse-fragment (:binding-id fragment) form names (:owner-id fragment) inline-items)]
+     (when-not (and (= (:owner-id fragment) (ids/fn-id (:namespace source) (:name source)))
+                    (= (:binding-id fragment) (ids/binding-id (:owner-id fragment) (:target-id fragment)))
+                    (migration/same-edn? checked (dissoc fragment :owner-id :target-id)))
+       (refuse :list-fragment-drift {}))
+     {:op :list-builder :definition (:name source) :path [:args field] :original original :form form})))
 
 
 (defn- position-type-edit
@@ -354,6 +355,16 @@
     (assoc span :after (str "[" (text false) (when (get groups true) (str " {" (text true) "}")) "]"))))
 
 
+(defn- list-item-edit
+  [source starts path node [operator payload]]
+  (cond
+    (= :project operator) (position-item-edit source starts node)
+    (and (= :ref operator) (map? payload)) (inline-edit source starts node payload path)
+    :else (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))
+                op (if wrapped? :map-expression-to-vector (if (= :ref operator) :wrap-ref :wrap-value))]
+            (leaf-edit source starts node op path))))
+
+
 (defn- list-builder-edit
   [source starts loc {:keys [original form path]}]
   (let [span (node-edit source starts loc identity)
@@ -365,12 +376,10 @@
                    (migration/same-edn? original (inventory/read-edn "<list>" (:before span)))
                    (= (count expressions) (count item-nodes)))
       (refuse :list-fragment-drift {:path path}))
-    (let [items (mapv (fn [node [operator]]
-                        (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))
-                              op (if wrapped? :map-expression-to-vector (if (= :ref operator) :wrap-ref :wrap-value))]
-                          (if (= :project operator)
-                            (position-item-edit source starts node)
-                            (leaf-edit source starts node op path)))) item-nodes expressions)
+    (let [items (mapv (fn [position node expression]
+                        (list-item-edit source starts (cond-> path (not bare?) (conj :append) true (conj position))
+                                        node expression))
+                      (range) item-nodes expressions)
           closed-key (when-not bare? (key-loc loc :closed))
           edits (cond-> items
                   (not bare?) (conj (node-edit source starts (key-loc loc :append) (constantly ":items")))
@@ -484,10 +493,10 @@
 
 
 (defn- binding-operation
-  [source {:keys [source-path list-builder list-ref-names expression rename] :as argument}]
+  [source {:keys [source-path list-builder list-ref-names list-inline-items expression rename] :as argument}]
   (cond
     rename (projection-operation source argument)
-    list-builder (let [op (list-builder-operation source (second source-path) (peek (:fragments list-builder)) list-ref-names)]
+    list-builder (let [op (list-builder-operation source (second source-path) (peek (:fragments list-builder)) list-ref-names list-inline-items)]
                    (when-not (migration/same-edn? (:form op) expression)
                      (refuse :planner-ledger-mismatch {:path source-path}))
                    op)

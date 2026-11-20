@@ -542,7 +542,7 @@
 
 (deftest unsupported-inline-shapes-stay-at-their-source-field
   (doseq [body [{:parent :producer :tag :unsupported}
-                [{:parent :producer}] {:append [{:parent :producer}]}]]
+                [[{:parent :producer}]]]]
     (let [d {:name :child :namespace "demo" :parent :sink :args {:items body}}
           entry (result (plan [base producer d]) :child)]
       (is (= [{:code :inline-identity-or-source-mapping-required :definition ["demo" :child]
@@ -815,6 +815,41 @@
     (is (= (ids/primitive-fn-id :text) (get-in outer-v2 [:bindings 0 :type-override-fn-id])))))
 
 
+(deftest inline-list-items-retain-parent-field-and-position
+  (let [body {:parent :sink :args {:x {:ref :producer}}}
+        host {:name :host :namespace "demo" :parent :sink :args {:items [nil body body]}}
+        child {:name :child :namespace "demo" :parent :host
+               :args {:items {:append [body] :closed true}}}
+        context (prepared [base producer host child])
+        planned (source/plan-module [base producer host child] context)
+        checked (source/verify-module planned context)
+        slot (ids/slot-id (ids/fn-id "demo" :sink) :items)
+        owner (result checked :host)
+        inherited (result checked :child)
+        host-inlines (get-in owner [:v2 :inline-definitions])
+        own-child (get-in inherited [:v2 :inline-definitions [slot 0]])
+        fragments (get-in inherited [:v2 :list-builders [slot] :fragments])
+        expected-ids (mapv (fn [[name position]]
+                             (let [origin (parse/inline-declaration body [name :items position] "demo")]
+                               (ids/fn-id "demo" (:name origin))))
+                           [[:host 1] [:host 2] [:child 0]])
+        changed (update-in planned [:definitions 2 :proposed :bind :items 1 :items]
+                           #(into [[:value 0]] %))]
+    (is (= {:supported 4 :blocked 0} (:counts checked)))
+    (is (= expected-ids [(get-in host-inlines [[slot 1] :fn-id])
+                         (get-in host-inlines [[slot 2] :fn-id]) (:fn-id own-child)]))
+    (is (= expected-ids (into [] (comp (mapcat :items) (keep :fn-id)) fragments)))
+    (is (= :closed (:tail (peek fragments))))
+    (is (= :blocked (:status (result (source/verify-module changed context) :host))))))
+
+
+(deftest inline-items-in-a-legacy-literal-vector-stay-blocked
+  (let [host {:name :host :namespace "demo" :parent :sink :args {:x [{:parent :producer}]}}
+        entry (result (plan [base producer host]) :host)]
+    (is (= #{:inline-list-item-origin-required} (codes entry)))
+    (is (nil? (:proposed entry)))))
+
+
 (deftest descendants-bind-an-inherited-alias-using-the-declaring-slot
   (let [renamed {:namespace "demo" :name :renamed :parent :sink :args {:x {:as :public-x}}}
         left {:namespace "demo" :name :left :parent :renamed}
@@ -840,3 +875,23 @@
     (is (= :authored-source-equivalent (:verification entry)))
     (is (= {:type :types/shape} (get-in entry [:legacy :arguments 0 :spec])))
     (is (= {:type :types/shape} (get-in entry [:proposed :input :exact])))))
+
+
+(deftest nested-inline-list-builders-recover-their-legacy-list-wrappers
+  (let [inner {:args {:x false} :parent :sink}
+        body {:parent :sink :args {:items (array-map :closed false
+                                                     :append [{:value nil} {:ref :producer} inner])}}
+        host {:name :host :namespace "demo" :parent :sink :args {:items [body]}}
+        context (prepared [base producer host])
+        planned (source/plan-module [host] context)
+        entry (result (source/verify-module planned context) :host)
+        child (first (vals (get-in entry [:v2 :inline-definitions])))
+        grandchild (first (vals (:inline-definitions child)))
+        slot (ids/slot-id (ids/fn-id "demo" :sink) :items)
+        provenance-path [:definitions 0 :proposed :bind :items 1 :items 0 1 :legacy-forms :items]
+        altered (assoc-in planned (conj provenance-path 1) [:append :closed])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= [:list-origin [:closed :append] {0 :value-wrapper 1 :ref-wrapper}]
+           (get-in planned provenance-path)))
+    (is (= (:fn-id grandchild) (get-in child [:list-builders [slot] :fragments 0 :items 2 :fn-id])))
+    (is (= :blocked (:status (result (source/verify-module altered context) :host))))))

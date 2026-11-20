@@ -137,6 +137,16 @@
     :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
     (:wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value)
     (inline-edit source starts leaf op path)
+    :local-projection
+    (let [[operator exposed & more] (when (= :map (z/tag leaf)) (children leaf))]
+      (when-not (and operator exposed (empty? more) (= :as (z/sexpr operator)) (simple-keyword? (z/sexpr exposed)))
+        (refuse :unsupported-projection {:path path}))
+      (let [span (node-edit source starts leaf identity)
+            op (node-edit source starts operator identity)
+            field (node-edit source starts exposed identity)]
+        (assoc span :after (str "[" (subs source (inc (:start span)) (:start op))
+                                ":project" (subs source (:end op) (:start field)) "[" (:before field) "]"
+                                (subs source (:end field) (dec (:end span))) "]"))))
     :wrap-ref
     (do
       (when-not (keyword? (z/sexpr leaf))
@@ -248,6 +258,17 @@
           (refuse :existing-input {:definition definition}))
         (rename-edit source starts loc definition path :input))
 
+      :declare-projection-input
+      (let [input (:input operation)
+            [exposed spec] (first input)
+            target (value-at loc [:args (:field operation)])]
+        (when-not (and (= 1 (count input)) (simple-keyword? exposed)
+                       (map? spec) (= #{:type :required} (set (keys spec))) (simple-keyword? (:type spec))
+                       (false? (:required spec)) (= {:as exposed} (z/sexpr target))
+                       (or (key-loc loc :parent) (key-loc loc :parents)) (not (key-loc loc :input)))
+          (refuse :invalid-projection-declaration {:definition definition}))
+        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (:type spec) " :required false}} :bind")))
+
       :rename-bind
       (do
         (when-not (some #(some-> (key-loc loc %) z/right z/sexpr) [:parent :parents])
@@ -255,7 +276,7 @@
         (rename-edit source starts loc definition path :bind))
 
       (:wrap-value :wrap-ref :wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value
-                   :map-expression-to-vector)
+                   :map-expression-to-vector :local-projection)
       (leaf-edit source starts (argument-loc loc path) op path)
 
       :partition-composed-args
@@ -266,6 +287,16 @@
               {:recommendation "Define comment ownership and exact source/destination spans before moving entries."})
 
       (refuse :unknown-operation {:op op}))))
+
+
+(defn- projection-operation
+  [source {:keys [source-path origin expression rename policy]}]
+  (let [{exposed :alias :keys [alias-id field-id]} rename]
+    (when-not (and (simple-keyword? exposed) (= {:as exposed} (get-in source source-path))
+                   (= [:project [exposed]] expression) (empty? policy)
+                   (uuid? alias-id) (= field-id (:slot-id origin)) (uuid? field-id))
+      (refuse :planner-ledger-mismatch {:path source-path}))
+    {:op :local-projection :definition (:name source) :path source-path}))
 
 
 (defn- argument-operation
@@ -328,8 +359,11 @@
             paths (mapv :source-path arguments)
             {fields :declaration binds :binding} (group-by :kind arguments)
             declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
+            alias-entries (filterv :rename binds)
+            alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
+            declarations (merge declarations alias-input)
             bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
-            operations (mapv #(argument-operation source %) binds)
+            operations (mapv #((if (:rename %) projection-operation argument-operation) source %) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
                                            (when (= :typed-expression op)
                                              [[(second path)] (select-keys (get-in source path) [:type])])))
@@ -340,15 +374,23 @@
                        (= (set paths) (set (for [field (keys (:args source))] [:args field])))
                        (every? #(= (:spec %) (get-in source (:source-path %))) fields)
                        (= proposed (cond-> (dissoc source :args)
-                                     (seq fields) (assoc :input declarations)
+                                     (seq declarations) (assoc :input declarations)
                                      (or (seq binds) (and has-args? (empty? fields))) (assoc :bind bindings)
                                      (seq configuration) (assoc :configure configuration))))
           (refuse :planner-ledger-mismatch {}))
-        (if (or (seq fields) (seq configuration))
+        (cond
+          (seq alias-entries)
+          (do
+            (when-not (and (= 1 (count alias-entries)) (empty? fields) (empty? configuration))
+              (refuse :unsupported-projection-mix {}))
+            (into [{:op :declare-projection-input :definition (:name source) :path [:args]
+                    :input alias-input :field (second (:source-path (first alias-entries)))}] operations))
+
+          (or (seq fields) (seq configuration))
           [{:op :partition-composed-args :definition (:name source) :path [:args]
             :declarations (vec (keys declarations))
             :operators (into {} (map (juxt (comp second :path) :op)) operations)}]
-          (into (rename :rename-bind) operations)))
+          :else (into (rename :rename-bind) operations)))
 
       (refuse :unsupported-source-entry {}))))
 

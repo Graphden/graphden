@@ -2,6 +2,12 @@
   "Version boundary shared by the offline reader and the legacy loader.")
 
 
+(defn local-projection?
+  [form]
+  (and (vector? form) (= 2 (count form)) (= :project (first form))
+       (vector? (second form)) (= 1 (count (second form))) (simple-keyword? (first (second form)))))
+
+
 (defn inline-leaf?
   "A single-parent computation with no authored fields, bindings or annotations."
   [form]

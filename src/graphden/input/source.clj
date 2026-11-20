@@ -8,6 +8,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
     [graphden.input.source-context :as source-context]
+    [graphden.input.source-rename :as rename]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -128,6 +129,8 @@
                       (filter #(= :binding (:kind %)) rows))
         own-sources (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
                                       [(:id %) (:source-slot-id %)])) rows)
+        grouped (group-by :kind rows)
+        own (some #(when (= (:fn-id definition) (:id %)) %) (:fn grouped))
         names (::ref-index context)]
     (mapv (fn [[arg value]]
             (if (types/own-slot-declaration? value)
@@ -139,19 +142,29 @@
                     slot-id (ids/slot-id owner-id field)
                     binding (get by-slot slot-id)
                     body (get-in source [:args arg])
+                    target-type (or (slots/slot-type-of owner field defs-by-name)
+                                    (slots/rename-source-type owner field defs-by-name))
+                    rename (rename/origin own grouped arg body)
+                    ;; Separate a primitive inherited field from an erased rich
+                    ;; declaration or another same-named field in the ref tree.
+                    rename (when (and rename (= arg field) (= slot-id (:field-id rename))
+                                      (= target-type (get-in rename [:declaration :type]))
+                                      (= (:id binding) (ids/binding-id (:id own) slot-id))
+                                      (empty? (binding-policy binding)))
+                             rename)
                     inline-id (when (and (format/legacy-inline? body) (keyword? value))
                                 (ids/fn-id (:namespace source) value))]
-                {:source-path [:args arg]
-                 :kind :binding
-                 :origin {:fn-id (:fn-id definition)
-                          :slot-id slot-id :binding-id (:id binding)}
-                 :target {:owner owner :field field
-                          :type (or (slots/slot-type-of owner field defs-by-name)
-                                    (slots/rename-source-type owner field defs-by-name))}
-                 :expression (if (and inline-id (= inline-id (:ref-fn-id binding)))
-                               [:ref body]
-                               (binding-expression binding names))
-                 :policy (binding-policy binding)})))
+                (cond-> {:source-path [:args arg]
+                         :kind :binding
+                         :origin {:fn-id (:fn-id definition)
+                                  :slot-id slot-id :binding-id (:id binding)}
+                         :target {:owner owner :field field
+                                  :type target-type}
+                         :expression (if (and inline-id (= inline-id (:ref-fn-id binding)))
+                                       [:ref body]
+                                       (binding-expression binding names))
+                         :policy (binding-policy binding)}
+                  rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
 
@@ -162,14 +175,14 @@
 
 
 (defn- source-argument-blockers
-  [source]
+  [source renames]
   (into []
         (mapcat (fn [[arg value]]
                   (when (map? value)
                     (cond-> []
                       (contains? value :secret-path)
                       (conj (blocker source :secret-path-binding-required [:args arg]))
-                      (contains? value :as)
+                      (and (contains? value :as) (not (contains? renames arg)))
                       (conj (blocker source :rename-projection-required [:args arg]))
                       (and (types/own-slot-declaration? value)
                            (not (source-context/own-field-declaration? value)))
@@ -248,11 +261,21 @@
   (let [arguments (argument-ledger context source definition rows)
         defs (:defs-by-name context)
         chain (set (slots/chain-of (slots/own-ref definition defs) defs))
+        aliases (keep :rename arguments)
+        ;; Mixed own declarations and simultaneous renames have independent
+        ;; slot-position/collision rules. Keep their existing blockers.
+        collision? (when-let [exposed (:alias (first aliases))]
+                     (some #(contains? (:args %) exposed) (cons definition (ancestor-definitions definition context))))
+        rename-fields (when (and (not collision?) (= 1 (count aliases))
+                                 (not-any? #(or (= :declaration (:kind %)) (seq (:policy %))) arguments))
+                        (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         blockers (vec (distinct
-                        (concat (source-argument-blockers source)
+                        (concat (when collision? [(blocker source :rename-field-collision [:args])])
+                                (source-argument-blockers source rename-fields)
                                 (mapcat #(argument-blockers source % chain) arguments)
                                 (inherited-blockers source definition context arguments))))
         declarations (into (array-map) (filter (comp types/own-slot-declaration? val)) (:args source))
+        declarations (into declarations (map (juxt :alias :declaration)) aliases)
         binds (filter #(= :binding (:kind %)) arguments)
         configuration (into {} (keep (fn [[field spec]]
                                        (when (typed-binding? spec) [[field] (select-keys spec [:type])])))
@@ -469,7 +492,7 @@
                               :asserted-types (into {} (keep (fn [[field spec]]
                                                                (when (typed-binding? spec) [[field] (:type spec)])))
                                                     (when (= :composed (:kind definition)) (:args prepared))))
-        v2-meaning (assoc (authored-meaning lowered v2 (mapv migration/legacy-binding (:bindings v2)))
+        v2-meaning (assoc (authored-meaning lowered v2 (mapv (partial rename/legacy-binding (:declaration-records v2)) (:bindings v2)))
                           :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
                                                 (:configurations v2)))]
     (verify-inline-children! environment definition prepared v2)

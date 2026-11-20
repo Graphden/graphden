@@ -1,7 +1,9 @@
 (ns graphden.input.source-context
   "Frozen declaration context for the offline v1-to-v2 source transition."
   (:require
+    [graphden.input.format :as format]
     [graphden.input.migration :as migration]
+    [graphden.input.source-rename :as rename]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -96,7 +98,7 @@
 
 
 (defn- field
-  [records slots specs path membership]
+  [records slots specs path rename-sources membership]
   (let [{:keys [id name type-fn-id required description source-slot-id]} (get slots (:slot-id membership))
         key (keyword name)
         field-path (conj path key)
@@ -104,23 +106,23 @@
         type (if (types/type-spec-map? spec) (:type spec) spec)]
     (when-not (and (uuid? id) (contains? specs key) (some? type))
       (reject! :missing-field-declaration field-path))
-    (when source-slot-id
+    (when-not (= source-slot-id (get rename-sources id))
       (reject! :field-projection-required field-path))
     (merge {:id id :name key :required required :description description :declaration spec}
            ;; Named and wrapped shapes retain their rich type. This bridge can
            ;; address inline record children whose rows the declaration emitted.
            (if (and (map? type) (seq type) (not (types/type-spec-map? type)))
-             (record-node type-fn-id (fields records type-fn-id type field-path))
+             (record-node type-fn-id (fields records type-fn-id type field-path {}))
              {:type type :type-id type-fn-id}))))
 
 
 (defn- fields
-  [records owner-id specs path]
+  [records owner-id specs path rename-sources]
   (let [slots (into {} (map (juxt :id identity)) (:slot records))
         members (memberships records owner-id)]
     (when-not (and (= (count specs) (count members)) (every? simple-keyword? (keys specs)))
       (reject! :unsupported-field-declarations path))
-    (mapv #(field records slots specs path %) members)))
+    (mapv #(field records slots specs path rename-sources %) members)))
 
 
 (defn- field-specs
@@ -139,7 +141,10 @@
         ordered (parent-order source-environment own)
         _ (ensure-acyclic! ordered)
         input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
-                                        (fields records (:id owner) (field-specs definition) [:input])))
+                                        (let [aliases (keep (fn [[k v]] (rename/origin owner records k v)) (:args definition))
+                                              specs (into (field-specs definition) (map (juxt :alias :declaration)) aliases)
+                                              sources (into {} (map (juxt :alias-id :field-id)) aliases)]
+                                          (fields records (:id owner) specs [:input] sources))))
                            ordered)
         members (into [] (mapcat #(memberships (:records %) (get-in % [:owner :id]))) ordered)
         id (:id owner)
@@ -199,15 +204,25 @@
    The new syntax reader handles :bind separately. Remove this legacy
    lowering adapter when the v2 package loader replaces the v1 loader."
   [{:keys [context]} definition]
-  (let [source (dissoc definition :input :bind :configure)
+  (let [projections (into {} (keep (fn [[arg form]] (when (format/local-projection? form) [arg (first (second form))])))
+                          (when (map? (:bind definition)) (:bind definition)))
+        source (dissoc definition :input :bind :configure)
         source (if (contains? definition :input)
                  (let [declaration (:input definition)]
                    (when-not (and (map? declaration)
                                   (or (not (or (:parent source) (:parents source)))
                                       (every? own-field-declaration? (vals declaration))))
                      (reject! :unsupported-input-declaration [:input]))
-                   (assoc source :args declaration))
+                   (assoc source :args (into (apply dissoc declaration (vals projections))
+                                             (map (fn [[arg exposed]] [arg {:as exposed}])) projections)))
                  source)
         normalized (rebase/rewrite-references
-                     source #(parse/normalize-ref % (:name->id context) (:namespace source)))]
-    [normalized (parse/parse-prepared-module (assoc context :fn-defs [normalized]))]))
+                     source #(parse/normalize-ref % (:name->id context) (:namespace source)))
+        rows (parse/parse-prepared-module (assoc context :fn-defs [normalized]))
+        grouped (when (seq projections) (group-by :kind rows))
+        own (some #(when (= (ids/fn-id (:namespace normalized) (:name normalized)) (:id %)) %) (:fn grouped))]
+    (doseq [[arg exposed] projections]
+      (let [origin (rename/origin own grouped arg {:as exposed})]
+        (when-not (and origin (= (get-in definition [:input exposed]) (:declaration origin)))
+          (reject! :rename-origin-mismatch [:bind arg]))))
+    [normalized rows]))

@@ -326,6 +326,59 @@
     (is (not (str/includes? target "_anon-")))))
 
 
+(deftest nested-inline-cst-preserves-wrapped-references-and-bare-collections
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :y :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:args {:y {:args {:x {:ref ; keep the ref\r\n :demo.main/producer}"
+                  " :y {:foo ; keep the data\r\n \"a\r\nb\"}} :parent :sink} :x nil} :parents [:sink]}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":x [:ref ; keep the ref\r\n :demo.main/producer]"))
+    (is (str/includes? target ":y [:value {:foo ; keep the data\r\n \"a\r\nb\"}]"))
+    (is (str/includes? target ":legacy-forms {:x :ref-wrapper, :y :bare-value} :bind"))
+    (is (not (str/includes? target "_anon-")))))
+
+
+(deftest inline-type-assertions-and-projection-retain-comments
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :text :y :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:parent :sink :args {:x {:type ; typed reference\r\n :any :ref :producer}}} "
+                  ":y {:parent :sink :args {:x {:as ; alias\r\n :exposed :type ; pin\r\n :text}}}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (str/includes? target "[:x] {:type ; typed reference\r\n :any}"))
+    (is (str/includes? target ":project ; alias\r\n [:exposed]"))
+    (is (str/includes? target ":type ; pin\r\n :text"))
+    (is (= {:exposed {:type :text :required false}} (get-in child [:bind :y 1 :input])))))
+
+
+(deftest nested-inline-cst-keeps-legacy-body-order-across-map-kinds
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:parent :sink :args {:x {:args {:x {:type :any :ref :producer}} :parent :sink"
+                  " :return-type :any :return-type-wide? true :description \"Test\","
+                  " :effects #{} :expects-effects [] :lambda-params []}}}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":legacy-order [:args :parent :return-type :return-type-wide? :description :effects :expects-effects :lambda-params]"))
+    (is (str/includes? target ":legacy-forms {:x :type-first}"))
+    (is (not (str/includes? target "_anon-")))))
+
+
+(deftest outer-inline-type-pins-move-to-the-enclosing-configurations
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:type ; outer pin\r\n :keyword :args {:x {:parent :producer"
+                  " :type ; inner pin\r\n :text :args {}}} :parent :sink}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))
+        outer (get-in child [:bind :x 1])
+        inner (get-in outer [:bind :x 1])]
+    (is (= {[:x] {:type :keyword}} (:configure child)))
+    (is (= {[:x] {:type :text}} (:configure outer)))
+    (is (= {:parent :producer :bind {}} inner))
+    (is (str/includes? target ":type ; outer pin\r\n :keyword"))
+    (is (str/includes? target ":type ; inner pin\r\n :text"))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))
@@ -452,6 +505,18 @@
     (is (str/includes? target ":xs ; list\r\n [:list-builder"))
     (is (str/includes? target "; end\r\n"))
     (is (str/includes? target "; assertion\r\n"))))
+
+
+(deftest list-and-typed-inline-producer-survive-the-same-field-partition
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :flag :bool} :return-type :any}"
+                  "{:name :producer :return-type :bool} "
+                  "{:name :child :parent :base :args {:xs [false] :flag {:parent :producer :type :bool} "
+                  ":title {:type :text}}}]}")
+        child (peek (:fns (edn/read-string (migrate-child text))))]
+    (is (= {:title {:type :text}} (:input child)))
+    (is (= {[:flag] {:type :bool}} (:configure child)))
+    (is (= {:xs [:list-builder {:items [[:value false]] :tail :open}]
+            :flag [:ref {:parent :producer}]} (:bind child)))))
 
 
 (deftest independent-scalar-projection-and-list-preserve-their-own-origins

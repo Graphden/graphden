@@ -148,13 +148,12 @@
                      {:name :anonymous :namespace "demo" :parent :sink
                       :args {:x {:parent :producer :args {}}}}]
         report (plan definitions)]
-    (is (= {:supported 3 :blocked 3} (:counts report)))
+    (is (= {:supported 4 :blocked 2} (:counts report)))
     (is (= [:list-builder {:items [[:ref :producer]] :tail :closed}]
            (get-in (result report :append) [:proposed :bind :items])))
     (is (contains? (codes (result report :rename)) :rename-projection-required))
     (is (contains? (codes (result report :secret)) :resolver-binding-required))
-    (is (= #{:inline-identity-or-source-mapping-required}
-           (codes (result report :anonymous))))
+    (is (= [:ref {:parent :producer :bind {}}] (get-in (result report :anonymous) [:proposed :bind :x])))
     (is (not (str/includes? (pr-str (:blockers report)) "private-payload")))))
 
 
@@ -541,7 +540,7 @@
 
 
 (deftest unsupported-inline-shapes-stay-at-their-source-field
-  (doseq [body [{:parent :producer :args {}} {:parents [:producer]} {:parent :producer :type :any}
+  (doseq [body [{:parent :producer :tag :unsupported}
                 [{:parent :producer}] {:append [{:parent :producer}]}]]
     (let [d {:name :child :namespace "demo" :parent :sink :args {:items body}}
           entry (result (plan [base producer d]) :child)]
@@ -606,9 +605,9 @@
       (let [changed (assoc-in planned [:definitions 0 :proposed :bind :x 1 :bind :x] replacement)]
         (is (= :blocked (get-in (source/verify-module changed ctx) [:definitions 0 :status])))))
     (let [wrapper (assoc-in host [:args :x :args :x] {:ref :producer})
-          report (source/plan-module [wrapper] (prepared [base producer wrapper]))]
-      (is (= [{:code :inline-binding-origin-required :definition ["demo" :host]
-               :source-path [:args :x :args :x]}] (:blockers report))))))
+          entry (result (verified [base producer wrapper]) :host)]
+      (is (= :authored-source-equivalent (:verification entry)))
+      (is (= {:x :ref-wrapper} (get-in entry [:proposed :bind :x 1 :legacy-forms]))))))
 
 
 (deftest inline-children-preserve-inherited-occupancy-blockers
@@ -660,3 +659,92 @@
                                 [(assoc child :parent :relay) :rename-projection-required]
                                 [(assoc-in child [:args :x :type] :int) :rename-projection-required]]]
       (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))
+
+
+(deftest nested-inline-declarations-retain-order-and-all-use-sites
+  (let [host-base (assoc base :args {:x :any :y :any :z :any})
+        inner (array-map :args (array-map :y {:ref :producer} :x {:example [1 2]}) :parent :sink)
+        outer (array-map :args (array-map :z inner :y {:parent :producer :args {}} :x false)
+                         :return-type :any :parents [:sink])
+        host {:name :host :namespace "demo" :parent :sink :args {:x outer}}
+        context (prepared [host-base producer host])
+        planned (source/plan-module [host] context)
+        checked (result (source/verify-module planned context) :host)
+        root (:v2 checked)
+        nodes (rest (tree-seq :inline-definitions (comp vals :inline-definitions) root))
+        legacy-owners (remove #{(ids/fn-id "demo" :host) (ids/fn-id "demo" :sink) (ids/fn-id "demo" :producer)}
+                              (map :fn-id (:fn-defs context)))
+        edited (update-in planned [:definitions 0 :proposed :bind :x 1 :bind]
+                          #(into (array-map) (reverse %)))]
+    (is (= :authored-source-equivalent (:verification checked)))
+    (is (= 3 (count nodes)))
+    (is (= (set legacy-owners) (set (map :fn-id nodes))))
+    (is (= :blocked (:status (result (source/verify-module edited context) :host))))))
+
+
+(deftest inline-type-assertions-retain-wrapper-order-and-rich-types
+  (let [host-base (assoc base :args {:x :any :y :any})
+        child {:parent :sink :args {:x (array-map :type [:list :int] :ref :producer)
+                                    :y (array-map :value nil :type :text)}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x child}}
+        ctx (prepared [host-base producer host])
+        planned (source/plan-module [host] ctx)
+        entry (result (source/verify-module planned ctx) :host)
+        inline (first (vals (get-in entry [:v2 :inline-definitions])))
+        rewritten (get-in entry [:proposed :bind :x 1])
+        changed (update-in planned [:definitions 0 :proposed :bind :x 1 :legacy-forms] dissoc :x)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {[:x] {:type [:list :int]} [:y] {:type :text}} (:configure rewritten)))
+    (is (= {:x :type-first} (:legacy-forms rewritten)))
+    (is (= {[:x] [:list :int] [:y] :text} (update-vals (:configurations inline) :type)))
+    (is (= :blocked (:status (result (source/verify-module changed ctx) :host))))))
+
+
+(deftest inline-scalar-rename-preserves-the-own-alias-slot
+  (let [sink (assoc-in base [:args :x] :text)
+        child {:parent :sink :args {:x (array-map :type :text :as :alias)}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x child}}
+        entry (result (verified [sink host]) :host)
+        inline (first (vals (get-in entry [:v2 :inline-definitions])))
+        alias-id (ids/slot-id (:fn-id inline) :alias)
+        original (ids/slot-id (ids/fn-id "demo" :sink) :x)
+        [binding] (:bindings inline)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:alias {:type :text :required false}} (get-in entry [:proposed :bind :x 1 :input])))
+    (is (= {:x [:project [:alias]]} (get-in entry [:proposed :bind :x 1 :bind])))
+    (is (= [original] (:target-path binding)))
+    (is (= [alias-id] (:projection-path binding)))))
+
+
+(deftest nested-inline-order-survives-the-array-map-threshold
+  (let [inner (array-map :args {:x (array-map :type :any :ref :producer)} :parent :sink
+                         :return-type :any :return-type-wide? true :description "Metadata"
+                         :effects #{} :expects-effects [] :lambda-params [])
+        outer {:parent :sink :args {:x inner}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x outer}}
+        context (prepared [base producer host])
+        planned (source/plan-module [host] context)
+        nested-path [:definitions 0 :proposed :bind :x 1 :bind :x 1]
+        dropped (update-in planned nested-path dissoc :legacy-order)]
+    (is (= (vec (keys inner)) (:legacy-order (get-in planned nested-path))))
+    (is (= :authored-source-equivalent (get-in (source/verify-module planned context)
+                                               [:definitions 0 :verification])))
+    (is (= :blocked (get-in (source/verify-module dropped context) [:definitions 0 :status])))))
+
+
+(deftest an-inline-type-pin-belongs-to-its-enclosing-binding
+  (let [inner (array-map :parent :producer :type :text :args {})
+        outer (array-map :type :keyword :args {:x inner} :parent :sink)
+        host {:name :host :namespace "demo" :parent :sink :args {:x outer}}
+        entry (result (verified [base producer host]) :host)
+        outer-v2 (first (vals (get-in entry [:v2 :inline-definitions])))
+        inner-v2 (first (vals (:inline-definitions outer-v2)))
+        unpinned (update-in host [:args :x] dissoc :type)
+        unpinned-plan (result (verified [base producer unpinned]) :host)
+        unpinned-outer (first (vals (get-in unpinned-plan [:v2 :inline-definitions])))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:x [:inline-type 1]} (get-in entry [:proposed :bind :x 1 :legacy-forms])))
+    (is (= {:parent :producer :bind {}} (:inline-body inner-v2)))
+    (is (= (:fn-id outer-v2) (:fn-id unpinned-outer)))
+    (is (= (ids/primitive-fn-id :keyword) (get-in entry [:v2 :bindings 0 :type-override-fn-id])))
+    (is (= (ids/primitive-fn-id :text) (get-in outer-v2 [:bindings 0 :type-override-fn-id])))))

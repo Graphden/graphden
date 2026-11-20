@@ -109,39 +109,77 @@
 
 
 (declare ^:private leaf-edit)
-(declare ^:private projection-leaf)
+(declare ^:private projection-leaf ^:private typed-leaf)
 (declare ^:private patched-text)
 
 
+(declare ^:private inline-edit)
+
+
+(defn- inline-binding-edit
+  [source starts loc form spelling configured? path]
+  (cond
+    (not (vector? form)) nil
+    (= :project (first form)) (projection-leaf source starts loc)
+    (and (= :ref (first form)) (map? (second form)))
+    (inline-edit source starts loc (second form) path)
+    configured? (typed-leaf source starts loc)
+    (= spelling :bare-value) (leaf-edit source starts loc :wrap-value path)
+    (or (= spelling :ref-wrapper) (= :value (first form)))
+    (leaf-edit source starts loc :map-expression-to-vector path)
+    :else (leaf-edit source starts loc :wrap-ref path)))
+
+
+(defn- inline-field-edits
+  [source starts loc {:keys [bind input configure legacy-forms legacy-order]} path]
+  (let [fields (mapv (fn [[field form]]
+                       (let [arg-path [:args field]]
+                         [field (inline-binding-edit source starts (value-at loc arg-path) form
+                                                     (get legacy-forms field) (contains? configure [field])
+                                                     (into path arg-path))]))
+                     bind)
+        configurations (keep (fn [[field edit]]
+                               (when-let [spec (:configuration edit)]
+                                 (str (migration/stable-edn [field]) " " spec)))
+                             fields)
+        key (rename-edit source starts loc nil [:args] :bind)]
+    (cons (assoc key :after (str (when (seq input) (str ":input " (migration/stable-edn input) " "))
+                                 (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
+                                 (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
+                                 (when (seq legacy-order) (str ":legacy-order " (migration/stable-edn legacy-order) " "))
+                                 ":bind"))
+          (keep second fields))))
+
+
+(defn- inline-type-edit
+  [source starts loc]
+  (when-let [key (key-loc loc :type)]
+    (let [start (:start (node-edit source starts key identity))
+          end (:end (node-edit source starts (z/right key) identity))
+          before (subs source start end)]
+      {:start start :end end :before before :after ""
+       :configuration (str "{" before "}")})))
+
+
 (defn- inline-edit
-  [source starts loc op path]
-  (let [body (z/sexpr loc)
-        span (node-edit source starts loc identity)]
-    (when-not (and (format/legacy-inline? body) (= (= op :wrap-inline-ref) (format/inline-leaf? body)))
+  [source starts loc body path]
+  (let [span (node-edit source starts loc identity)
+        original (format/inline-binding-body (inventory/read-edn path (:before span)))
+        type-edit (inline-type-edit source starts loc)]
+    (when-not (and original (migration/same-edn? original (format/inline-origin body)))
       (refuse :unsupported-inline-declaration {:path path}))
-    (let [edits (when-let [[field value] (first (:args body))]
-                  (let [leaf (value-at loc [:args field])
-                        edit (case op
-                               :inline-bare-value
-                               (if (coll? value)
-                                 (refuse :unsupported-inline-declaration {:path path})
-                                 (node-edit source starts leaf identity))
-                               :inline-bare-ref (leaf-edit source starts leaf :wrap-ref path)
-                               :inline-wrapped-value
-                               (if (and (map? value) (= #{:value} (set (keys value))))
-                                 (leaf-edit source starts leaf :map-expression-to-vector path)
-                                 (refuse :unsupported-inline-declaration {:path path})))]
-                    [(rename-edit source starts loc nil [:args] :bind) edit]))
-          local (mapv #(-> % (update :start - (:start span)) (update :end - (:start span))) edits)]
-      (assoc span :after (str "[:ref " (patched-text (:before span) local) "]")))))
+    (let [edits (when (contains? original :args) (inline-field-edits source starts loc body path))
+          edits (cond-> edits type-edit (conj type-edit))
+          local (into [] (map #(-> % (update :start - (:start span)) (update :end - (:start span))))
+                      (sort-by :start edits))]
+      (cond-> (assoc span :after (str "[:ref " (patched-text (:before span) local) "]"))
+        type-edit (assoc :configuration (:configuration type-edit))))))
 
 
 (defn- leaf-edit
   [source starts leaf op path]
   (case op
     :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
-    (:wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value)
-    (inline-edit source starts leaf op path)
     :local-projection (projection-leaf source starts leaf)
     :wrap-ref
     (do
@@ -246,6 +284,7 @@
                                                  (when-not (and (= definition (:definition operation)) (= [:args field] (:path operation)))
                                                    (refuse :invalid-field-partition {:definition definition}))
                                                  (list-builder-edit source starts value operation))
+                                 :inline-ref (inline-edit source starts value (:body operation) [:args field])
                                  (leaf-edit source starts value op [:args field])))))
         chunks (field-chunks source map-span spans)
         by-field (into {} chunks)
@@ -351,9 +390,11 @@
           (refuse :not-composed-definition {:definition definition}))
         (rename-edit source starts loc definition path :bind))
 
-      (:wrap-value :wrap-ref :wrap-inline-ref :inline-bare-value :inline-bare-ref :inline-wrapped-value
-                   :map-expression-to-vector :local-projection)
+      (:wrap-value :wrap-ref :map-expression-to-vector :local-projection)
       (leaf-edit source starts (argument-loc loc path) op path)
+
+      :inline-ref
+      (inline-edit source starts (argument-loc loc path) (:body operation) path)
 
       :partition-composed-args
       (partition-composed-edit source starts loc operation)
@@ -379,10 +420,12 @@
   [source {:keys [source-path kind expression policy]}]
   (let [[operator payload] expression
         raw (get-in source source-path)
-        inline? (and (= :ref operator) (format/legacy-inline? raw) (= raw (format/inline-origin payload)))
+        inline? (and (= :ref operator)
+                     (when-let [body (format/inline-binding-body raw)]
+                       (migration/same-edn? body (format/inline-origin payload))))
         wrapper? (and (map? raw) (some #(contains? raw %) [:value :ref]))
-        typed? (and wrapper? (= #{operator :type} (set (keys raw)))
-                    (or (keyword? (:type raw)) (vector? (:type raw)))
+        typed? (and (or inline? (and wrapper? (= #{operator :type} (set (keys raw)))))
+                    (format/configuration-type? (:type raw))
                     (= #{:type-override-fn-id} (set (keys policy))) (uuid? (:type-override-fn-id policy)))]
     (when-not (and (= :binding kind) (or typed? (empty? policy))
                    (vector? source-path) (= 2 (count source-path)) (= :args (first source-path))
@@ -396,16 +439,13 @@
                          (keyword? (get raw operator))))
                 (if (= :value operator) (= payload raw) (or (keyword? raw) inline?)))
       (refuse :planner-ledger-mismatch {:path source-path}))
-    {:op (cond inline? (if-let [[_ form] (first (:bind payload))]
-                         (if (vector? form)
-                           (if (= :ref (first form)) :inline-bare-ref :inline-wrapped-value)
-                           :inline-bare-value)
-                         :wrap-inline-ref)
-               typed? :typed-expression
-               wrapper? :map-expression-to-vector
-               (= :value operator) :wrap-value
-               :else :wrap-ref)
-     :definition (:name source) :path source-path}))
+    (cond-> {:op (cond inline? :inline-ref
+                       typed? :typed-expression
+                       wrapper? :map-expression-to-vector
+                       (= :value operator) :wrap-value
+                       :else :wrap-ref)
+             :definition (:name source) :path source-path}
+      inline? (assoc :body payload))))
 
 
 (defn- binding-operation
@@ -452,7 +492,8 @@
             bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
             operations (mapv (partial binding-operation source) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
-                                           (when (or (= :typed-expression op) (and (= :local-projection op) (contains? (get-in source path) :type)))
+                                           (when (or (= :typed-expression op)
+                                                     (and (#{:local-projection :inline-ref} op) (contains? (get-in source path) :type)))
                                              [[(second path)] (select-keys (get-in source path) [:type])])))
                                 operations)]
         (when-not (and (or (not has-args?) (map? (:args source)))

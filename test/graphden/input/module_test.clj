@@ -239,7 +239,7 @@
            (error-code #(module/parse-module-v2 (assoc-in source [:fns 0 :bind :value 1 :parent] :unknown)
                                                 options))))
     (is (= :unsupported-inline-declaration
-           (error-code #(module/parse-module-v2 (assoc-in source [:fns 0 :bind :value 1 :bind] {}) options))))
+           (error-code #(module/parse-module-v2 (assoc-in source [:fns 0 :bind :value 1 :bind] []) options))))
     (is (= :duplicate-definition
            (error-code #(module/parse-module-v2 (update source :fns conj (:source child)) options))))
     (is (= :export-origin-drift

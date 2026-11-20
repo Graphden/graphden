@@ -1409,13 +1409,14 @@ restore_candidate_proof() {
 # gate_body (same shell — it sets built_candidate there and uses its `step`).
 run_scoped_ci_gate() {
   local wt="$1" base_sha="$2" ci_receipt="$3" ci_expected="$4"
+  local -a ci_args=(--since "$base_sha")
   step "bb ci (diff-scoped lint + tests, on merged result)"
   if [ -n "${WTQ_CI_SKIP:-}" ]; then
     echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
-    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
-  else
-    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" ) || { echo "FAIL: bb ci"; return 1; }
+    ci_args+=(--skip "$WTQ_CI_SKIP")
   fi
+  ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" GRAPHDEN_CI_PRIORITY_DIGEST="$PRIORITY_DIGEST" bb ci "${ci_args[@]}" ) \
+    || { echo "FAIL: bb ci"; return 1; }
   # A report cannot define its own roster. Compare against the independent
   # selector result fixed before the build/browser phases.
   ( cd "$wt" && bb scripts/ci_gate.clj verify "$ci_expected" "$ci_receipt" ) \
@@ -1760,8 +1761,8 @@ gate_suites() {
   ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
     || { echo "FAIL: cannot calculate required CI checks"; return 1; }
 
-  local priority_prefix="$GRAPHDEN_RESUME_OUT.priority"
-  (cd "$wt" && bb scripts/ci_priority.clj gate-plan "$base_sha" "$priority_prefix" "$ci_sha") \
+  local priority_prefix="$GRAPHDEN_RESUME_OUT.priority" PRIORITY_DIGEST
+  PRIORITY_DIGEST="$(cd "$wt" && bb scripts/ci_priority.clj gate-plan "$base_sha" "$priority_prefix" "$ci_sha" "$ci_expected")" \
     || { echo "FAIL: cannot prepare candidate ordering hints"; return 1; }
   if [ "$NEED_INTEGRATION" = 1 ]; then
     PRIORITY_INTEGRATION="$(cat "$priority_prefix.integration")" \

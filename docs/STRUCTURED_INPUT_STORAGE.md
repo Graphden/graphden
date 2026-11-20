@@ -124,8 +124,9 @@ batches both membership and binding reads by reachable owner. The projection
 contains the remaining visible fields, their types and requiredness. The
 server retains bound data, hidden fields and the route ledger. The editor
 keeps the projection with the installed subtree and displays it in the root
-card's **Remaining inputs** popover. The editor reports unavailable input
-fields when the snapshot lacks sufficient signature evidence.
+card's **Remaining inputs** popover. A public primitive supplies only its
+verified shipped type identity. Incomplete analysis or unresolved runtime
+type obligations produce an unavailable status.
 
 ## Verification
 

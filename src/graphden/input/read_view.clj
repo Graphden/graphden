@@ -2,6 +2,7 @@
   "Collect a branch-resolved structured input closure under one source policy."
   (:require
     [clojure.set :as set]
+    [graphden.executor.browser-contracts :as contracts]
     [graphden.input.context :as context]
     [graphden.storage.protocol.core :as sp]))
 
@@ -27,19 +28,20 @@
       [rows (- remaining used)])))
 
 
-(defn- authorized-owners
+(defn- authorized-source
   [authorize! fns]
   (when-let [prepare! (:graphden.tenancy.context/prepare-namespaces (meta authorize!))]
     (prepare! (vals fns)))
-  (into #{}
-        (keep (fn [[id row]]
-                (case (authorize! row)
-                  nil id
-                  :bare-type nil
-                  ;; A browser ABI disclosure grants no authority to read that
-                  ;; function's structured binding rows or arbitrary type body.
-                  (context/reject! :input-source-interface-only {}))))
-        fns))
+  (reduce-kv
+    (fn [result id row]
+      (case (authorize! row)
+        nil (-> result (update :owners conj id) (assoc-in [:fns id] row))
+        :bare-type (if (contracts/bare-primitive-owner? row)
+                     ;; Resolve the shipped type from the canonical ID only.
+                     (assoc-in result [:fns id] {:id id})
+                     (context/reject! :primitive-type-source-mismatch {}))
+        (context/reject! :input-source-interface-only {})))
+    {:owners #{} :fns {}} fns))
 
 
 (defn- dependencies
@@ -68,8 +70,7 @@
       (freeze view)
       (let [_ (when (> (+ (count pending) (count (:fns view))) max-functions)
                 (context/reject! :stored-input-function-limit {}))
-            fns (exact-rows storage :fn pending)
-            owners (authorized-owners authorize! fns)
+            {:keys [fns owners]} (authorized-source authorize! (exact-rows storage :fn pending))
             binding-owners (into #{} (filter #(get-in fns [% :input-type-fn-id])) owners)
             [members remaining] (owned-rows storage :fn-slot owners remaining)
             [bindings remaining] (owned-rows storage :input-binding binding-owners remaining)

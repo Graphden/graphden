@@ -53,7 +53,9 @@
   (when (get-in ctx [:fns root :input-type-fn-id])
     (let [ctx (assoc ctx :signatures (signature-view ctx))
           graph (analysis/analyze-effective-input ctx root {:check-expression check/check-input-binding})
-          incomplete? (or (not (get-in graph [:coverage :recursive-availability]))
+          incomplete? (or (not= :checked (:status graph))
+                          (seq (:obligations graph))
+                          (not (get-in graph [:coverage :recursive-availability]))
                           (some #(#{:graph-callable :callable-producer} (:mode %)) (:dependencies graph)))]
       (if incomplete?
         {:status :unavailable}

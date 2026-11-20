@@ -1066,6 +1066,16 @@
     (walk 0)))
 
 
+(defn compile-list-items
+  "Compile ordered sequence item descriptors into (fn [free-args ctx]).
+   Demand and ref caching follow the consumer's existing delivery policy."
+  [owner-id items lazy-seq? child-callables lookups]
+  (let [builders (mapv #(seq-item-builder % child-callables lookups owner-id) items)]
+    (if lazy-seq?
+      (fn [fa ctx] (map (fn [build] (delay (build fa ctx))) builders))
+      (fn [fa ctx] (lazy-seq-of-values builders fa ctx)))))
+
+
 (defn- arg-builder
   "Return `(fn [free-args ctx])` producing the value for one
    classified binding.
@@ -1183,14 +1193,7 @@
                                    fa ref-renames)
                         ctx))))))
     :seq
-    (let [item-builders (mapv #(seq-item-builder % child-callables lookups
-                                                 (or binder-fn-id fn-id))
-                              items)]
-      (if lazy-seq?
-        (fn [fa ctx]
-          (map (fn [b] (delay (b fa ctx))) item-builders))
-        (fn [fa ctx]
-          (lazy-seq-of-values item-builders fa ctx))))
+    (compile-list-items (or binder-fn-id fn-id) items lazy-seq? child-callables lookups)
     (throw (ex-info (str "compile-eager: unsupported binding kind " kind)
                     {:type :compile/unsupported-kind :binding bnd}))))
 

@@ -4,6 +4,7 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.format :as format]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
@@ -45,14 +46,56 @@
 
 
 (defn- plan-entry
-  [{:keys [prepared declarations originals]} id]
+  [{:keys [prepared declarations originals staged-proposals]} id]
   (let [[original & more] (get originals id)
         definition (get declarations id)]
     (when-not original (reject! :missing-original-declaration id))
     (when (seq more) (reject! :ambiguous-original-declaration id))
     (when-not (= id (:fn-id definition)) (reject! :missing-prepared-declaration id))
-    (let [context (assoc prepared :fn-defs [definition])]
-      (first (:definitions (source/verify-module (source/plan-module [original] context) context))))))
+    (let [context (assoc prepared :fn-defs [definition])
+          plan (source/plan-module [original] context)
+          plan (if-let [staged (get staged-proposals id)]
+                 (update-in plan [:definitions 0 :proposed]
+                            #(merge (select-keys % [:namespace :source-file]) staged))
+                 plan)]
+      (first (:definitions (source/verify-module plan context))))))
+
+
+(defn with-staged-module
+  "Replay all version-2 forms from one staged file against its original
+   legacy module and visible preparer's package index. Compiling a root
+   reuses these authored forms and verifies them in its usual closure."
+  [{:keys [originals] :as package} legacy staged]
+  (format/require-legacy! legacy "<original staged module>")
+  (format/require-v2! staged)
+  (let [namespace (:namespace legacy)
+        original (:fns legacy)
+        proposed (:fns staged)
+        expected-header (assoc (dissoc legacy :fns) :input-format 2)]
+    (when-not (and (vector? original) (seq original) (every? map? original)
+                   (vector? proposed) (every? map? proposed)
+                   (migration/same-edn? expected-header (dissoc staged :fns)))
+      (reject! :staged-module-ledger-mismatch nil))
+    (let [names (mapv :name original)]
+      (when-not (and (every? simple-keyword? names)
+                     (= (count names) (count (set names)))
+                     (= names (mapv :name proposed)))
+        (reject! :staged-module-ledger-mismatch nil)))
+    (let [by-id (into {} (map (fn [definition draft]
+                                (let [source (assoc definition :namespace namespace)
+                                      id (definition-id source)
+                                      [indexed & more] (get originals id)]
+                                  (when-not (and indexed (empty? more)
+                                                 (migration/same-edn? (dissoc source :source-file)
+                                                                      (dissoc indexed :source-file)))
+                                    (reject! :staged-original-mismatch id))
+                                  [id draft]))
+                              original proposed))
+          package (assoc package :staged-proposals by-id)]
+      (doseq [id (keys by-id)]
+        (when-not (= :authored-source-equivalent (:verification (plan-entry package id)))
+          (reject! :unverified-staged-declaration id)))
+      package)))
 
 
 (defn- omit-argument

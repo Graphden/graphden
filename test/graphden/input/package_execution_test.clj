@@ -8,10 +8,14 @@
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
     [graphden.input.package-execution :as execution]
+    [graphden.input.source :as source]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse]))
+    [graphden.packages.records.parse :as parse])
+  (:import
+    (java.nio.charset
+      StandardCharsets)))
 
 
 (use-fixtures :each
@@ -31,33 +35,69 @@
 
 
 (defn- runtimes
-  [source root]
-  (let [prepared (parse/prepare-module source {} {})
-        records (group-by :kind (parse/parse-prepared-module prepared))
-        graph {:fns (:fn records) :slots (:slot records) :fn-slots (:fn-slot records)
-               :bindings (:binding records) :list-items (:binding-list-item records)}
-        base-declarations (filter #(contains? @loaded (:name %)) source)
-        _ (doseq [{:keys [name] module-ns :namespace} base-declarations]
-            (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded name)))
-        roots (:by-id @registry/*rich-types-override*)
-        implementations (into {} (map (fn [{:keys [name] module-ns :namespace}]
-                                        [(ids/fn-id module-ns name) (:impl (get @loaded name))])) base-declarations)
-        canonical (execution/compile-package (snapshot/package-index prepared source)
-                                             root roots implementations)
-        legacy (eager/compile-all (assoc (lookups/build-lookups graph)
-                                         :base-fns (registry/compute-base-fns-map @loaded)))
-        invoke (fn [compiled args]
-                 (executor/execute {:compiled-registry (atom compiled)
-                                    :graph-cache (atom graph) :base-fns {}}
-                                   root args))]
-    {:analysis (:analysis canonical)
-     :canonical #(invoke {root (:invoke canonical)} %)
-     :legacy #(invoke legacy %)}))
+  ([source root] (runtimes source root execution/compile-package))
+  ([source root compile-package]
+   (let [prepared (parse/prepare-module source {} {})
+         records (group-by :kind (parse/parse-prepared-module prepared))
+         graph {:fns (:fn records) :slots (:slot records) :fn-slots (:fn-slot records)
+                :bindings (:binding records) :list-items (:binding-list-item records)}
+         base-declarations (filter #(contains? @loaded (:name %)) source)
+         _ (doseq [{:keys [name] module-ns :namespace} base-declarations]
+             (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded name)))
+         roots (:by-id @registry/*rich-types-override*)
+         implementations (into {} (map (fn [{:keys [name] module-ns :namespace}]
+                                         [(ids/fn-id module-ns name) (:impl (get @loaded name))])) base-declarations)
+         canonical (compile-package (snapshot/package-index prepared source)
+                                    root roots implementations)
+         legacy (eager/compile-all (assoc (lookups/build-lookups graph)
+                                          :base-fns (registry/compute-base-fns-map @loaded)))
+         invoke (fn [compiled args]
+                  (executor/execute {:compiled-registry (atom compiled)
+                                     :graph-cache (atom graph) :base-fns {}}
+                                    root args))]
+     {:analysis (:analysis canonical) :staged-source (:staged-source canonical)
+      :canonical #(invoke {root (:invoke canonical)} %)
+      :legacy #(invoke legacy %)})))
 
 
 (defn- rejection-code
   [f]
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
+
+
+(defn- staged-options
+  [legacy proposed visible]
+  (let [text (pr-str proposed)]
+    {:legacy-module legacy :bytes (String/.getBytes text StandardCharsets/UTF_8)
+     :sha256 (ids/digest-hex "SHA-256" text) :visible-fn-ids visible}))
+
+
+(deftest staged-module-replays-byte-derived-bindings-before-execution
+  (let [module-ns "offline.fixture"
+        name :fixed-negation
+        root (ids/fn-id module-ns name)
+        neg (ids/fn-id "core.arithmetic" :neg)
+        legacy {:namespace module-ns :fns [{:name name :parent :neg :args {:number 8}}]}
+        source (into (mapv #(assoc % :namespace module-ns) (:fns legacy))
+                     (declarations "packages/core/arithmetic/fns.edn" #{:neg}))
+        prepared (parse/prepare-module source {} {})
+        proposal (get-in (source/plan-module [(first source)] prepared) [:definitions 0 :proposed])
+        module (assoc legacy :input-format 2 :fns [(dissoc proposal :namespace)])
+        run (fn [options] (runtimes source root #(execution/compile-staged-module %1 %2 %3 %4 options)))
+        options (staged-options legacy module #{root neg})
+        {:keys [canonical staged-source] legacy-invoke :legacy} (run options)]
+    (is (= (:sha256 options) (:sha256 staged-source)))
+    (is (= -8 (legacy-invoke {}) (canonical {})))
+    (is (= :staged-function-not-visible
+           (rejection-code #(run (assoc options :visible-fn-ids #{root})))))
+    (is (= :staged-function-not-visible
+           (rejection-code #(run (assoc options :visible-fn-ids #{neg})))))
+    (let [changed (assoc-in module [:fns 0 :bind :number] [:value 9])
+          changed-options (staged-options (:legacy-module options) changed #{root neg})]
+      (is (= :unverified-staged-declaration (rejection-code #(run changed-options)))))
+    (let [changed (assoc module :fns [])]
+      (is (= :staged-module-ledger-mismatch
+             (rejection-code #(run (staged-options legacy changed #{root neg}))))))))
 
 
 (deftest prepared-package-rename-executes-through-both-compilers

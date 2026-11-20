@@ -59,7 +59,7 @@ recover the original anonymous-body hash and independently parse the child
 binding. The child retains its own binding UUID and target field UUID.
 An explicit legacy `{:ref P}` needs additional provenance to distinguish
 it from a bare reference. Empty explicit `:args {}`, multi-field bodies,
-annotated inline refs and inline list items also remain blocked. List continuations,
+annotated inline refs and inline list items also remain blocked. Unresolved list origins,
 rename projections, referenced input scopes, assertions that require inline
 type rows and unknown binding policies have explicit blockers.
 Secret-path resolution must never become an ordinary literal value.
@@ -246,7 +246,9 @@ ordinary input bindings. It reconstructs all items, the owner edge and the
 optional seal from those records and compares them with their source origins.
 The dry run counts a whole list definition under `:reparsed-definitions` only
 after parsing the actual CST bytes and repeating the legacy/v2 comparison.
-Further inherited contributions retain `:list-continuation-lowering-required`.
+Each subsequent append resolves against the frozen previous fragments and
+binds the prior open tail at its use site. The child module emits only its
+own new callable and input rows. An append following a closed tail fails.
 Positional projections, inline items, mixed declarations and ambiguous or
 missing ancestry have separate diagnostics.
 

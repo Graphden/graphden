@@ -121,7 +121,7 @@
                   [:project [(:name field)]])
     :ref (cond
            (get (:list-at context) path)
-           (let [fragment (first (:fragments (get (:list-at context) path)))]
+           (let [fragment (peek (:fragments (get (:list-at context) path)))]
              (when-not (= (:builder-id fragment) (:fn-id expression)) (reject! :list-reference-mismatch path))
              (builder/emit-fragment fragment id->name))
 

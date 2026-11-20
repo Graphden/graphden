@@ -1,5 +1,6 @@
 (ns graphden.input.list-builder-test
   (:require
+    [clojure.set :as set]
     [clojure.test :refer [deftest is]]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-records :as list-records]
@@ -168,3 +169,53 @@
       (is (= [:legacy-v2-meaning-mismatch] (mapv :code (:blockers (check (alter plan)))))))
     (is (= [:unresolved-list-item-ref]
            (mapv :code (:blockers (check (assoc-in plan (into path [1 :items 0]) [:ref :consume]))))))))
+
+
+(deftest descendants-author-only-their-own-tail-contributions
+  (let [base {:name :collect :namespace "demo" :args {:xs :sequence} :return-type :any}
+        step (fn [name parent body] {:name name :namespace "demo" :parent parent :args {:xs body}})
+        head (step :head :collect [1])
+        middle (step :middle :head [2])
+        tail (step :tail :middle {:append [3] :closed true})
+        sibling (step :sibling :head [4])
+        sealed (step :sealed :tail [5])
+        sources [base head middle tail sibling sealed]
+        ctx (parse/prepare-module sources {} {})
+        checked (source/verify-module (source/plan-module sources ctx) ctx)
+        [_ first-entry second-entry third-entry sibling-entry sealed-entry] (:definitions checked)
+        field (ids/slot-id (ids/fn-id "demo" :collect) :xs)
+        trace #(get-in % [:v2 :list-builders [field]])
+        [a b c] (:fragments (trace third-entry))
+        bind #(get-in % [:v2 :bindings 0])
+        second-edge (bind second-entry)
+        third-edge (bind third-entry)
+        sibling-edge (bind sibling-entry)
+        third-state (get-in third-entry [:v2 :binding-state])
+        own (list-records/authored-records (trace third-entry))]
+    (is (= {:supported 5 :blocked 1} (:counts checked)))
+    (is (= [:list-builder-required :closed-list-continuation] (mapv :code (:blockers sealed-entry))))
+    (is (= [[1] [2] [3]] (mapv #(mapv :value (:items %)) [a b c])))
+    (is (= [(:binding-id a)] (:scope-path second-edge) (:scope-path sibling-edge)))
+    (is (= [(:tail-id a)] (:target-path second-edge) (:target-path sibling-edge)))
+    (is (not= (:fn-id second-edge) (:fn-id sibling-edge)))
+    (is (= [(:binding-id a) (:binding-id b)] (:scope-path third-edge)))
+    (is (= [(:tail-id b)] (:target-path third-edge)))
+    (is (= #{[[(:owner-id c) (:scope-path third-edge)] [(:tail-id b)]]} (set (keys third-state))))
+    (is (= #{(:builder-id c) (:owner-id c)}
+           (set (map :fn-id (filter #(= :input-binding (:kind %)) own)))))
+    (is (empty? (set/intersection (set own) (set (list-records/authored-records (trace first-entry))))))
+    (is (= (:records (trace third-entry))
+           (list-records/materialize-chain [a b c] (:field (trace third-entry)) (:name->id ctx))))))
+
+
+(deftest missing-or-malformed-frozen-list-history-cannot-reopen-a-field
+  (let [[head] (fixture {:append [1] :closed true} [])
+        id (:owner-id head)
+        slot (:target-id head)
+        context {:fn-id id :scope [id []] :binding-id (fn [_ _] (:binding-id head)) :name->id {}}
+        field {:id slot :type :sequence :type-id (ids/primitive-fn-id :sequence)}
+        form [:list-builder {:items [] :tail :open}]
+        read-list #(list-records/parse-contribution % field form)]
+    (is (= :list-history-required (reason #(read-list context))))
+    (is (= :list-history-required (reason #(read-list (assoc-in context [:list-history [slot]] nil)))))
+    (is (= :invalid-list-chain (reason #(read-list (assoc-in context [:list-history [slot]] [head])))))))

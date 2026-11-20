@@ -202,7 +202,7 @@
                 (when (and (vector? form) (= :list-builder (first form)))
                   (let [path (:path (input/resolve-address contract scope [name]))
                         field (some #(when (= (first path) (:id %)) %) (:fields contract))]
-                    [path (list-records/parse-direct ctx field form)]))))
+                    [path (list-records/parse-contribution ctx field form)]))))
         (when (map? (:bind source)) (:bind source))))
 
 
@@ -218,7 +218,8 @@
             builders (list-builders source ctx)
             expression (syntax/parse-expression (:contract ctx) (:scope ctx) (get source :bind {})
                                                 (assoc ctx :inline-at inlines :list-at builders))
-            state (input/bind-input (:contract ctx) {} (:scope ctx) expression)
+            state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
+                                                     (:scope ctx) builders)
             configs (resolve-configurations ctx state (:configure source))
             by-path (into {} (map (juxt :target-path identity)) (vals configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
@@ -230,7 +231,7 @@
 (defn- definition-records
   [parsed]
   (concat (:declaration-records parsed) (:bindings parsed)
-          (mapcat :records (vals (:list-builders parsed)))
+          (mapcat list-records/authored-records (vals (:list-builders parsed)))
           (mapcat definition-records (vals (:inline-definitions parsed)))))
 
 

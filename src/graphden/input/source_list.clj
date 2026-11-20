@@ -71,18 +71,18 @@
         (throw error)))))
 
 
-(defn direct-expression
-  "Use the authored spelling for checked first contributions. Retain only
+(defn contribution-expression
+  "Use the authored spelling for checked contributions. Retain only
    reference aliases actually used by this field for the CST replay."
   [trace source module-ns name->id]
-  (when (and (:records trace) (= 1 (count (:fragments trace))))
+  (when (:records trace)
     (let [names (field-names name->id module-ns source)
           form (builder/source-form source names)
           refs (keep (fn [[op payload]] (when (= :ref op) payload)) (get-in form [1 :items]))]
       {:expression form :list-ref-names (select-keys names refs)})))
 
 
-(defn direct-traces
+(defn verified-traces
   [arguments]
   (into {} (keep (fn [{:keys [list-builder origin]}]
                    (when (:records list-builder) [[(:slot-id origin)] list-builder]))) arguments))

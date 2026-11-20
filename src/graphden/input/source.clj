@@ -169,7 +169,7 @@
                                        [:ref body]
                                        (binding-expression binding names))
                          :policy (binding-policy binding)}
-                  builder (merge {:list-builder builder} (source-list/direct-expression builder body (:namespace source) name->id))
+                  builder (merge {:list-builder builder} (source-list/contribution-expression builder body (:namespace source) name->id))
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -232,8 +232,7 @@
       (and (= :binding (:kind entry)) (not (contains? ancestor-ids (:owner target))))
       (conj (problem :ref-scope-required))
       (and (or (:list-append policy) (:list-closed policy)) (not= :list-builder (first expression)))
-      (conj (problem (if (< 1 (count (get-in entry [:list-builder :fragments])))
-                       :list-continuation-lowering-required :list-builder-required)))
+      (conj (problem :list-builder-required))
       (get-in entry [:list-builder :record-blocker])
       (conj (problem (get-in entry [:list-builder :record-blocker])))
       (get-in entry [:list-builder :blocker])
@@ -494,8 +493,8 @@
         prepared (get-in environment [:definition-by-id definition-id])
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
-        list-traces (source-list/direct-traces (:arguments legacy))
-        list-ids (set (map (comp :binding-id first :fragments) (vals list-traces)))
+        list-traces (source-list/verified-traces (:arguments legacy))
+        list-ids (set (map (comp :binding-id peek :fragments) (vals list-traces)))
         ordinary (fn [rows] (remove #(contains? list-ids (:id %)) rows))
         legacy-context (source-context/declaration-context environment prepared records bindings)
         context-for (fn [v2]

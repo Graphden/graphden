@@ -2,6 +2,7 @@
   "Offline declarations and ordinary input-binding rows for a generated list
    callable. Keep the ordered operand rows reconstructible by stable IDs."
   (:require
+    [graphden.input.core :as input]
     [graphden.input.list-builder :as builder]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
@@ -123,18 +124,55 @@
     (assoc (builder/link-fragments fragments) :fragments fragments)))
 
 
-(defn parse-direct
-  "Read a direct builder in a declared field with frozen list ancestry.
-   An inherited contribution changes the continuation address."
+(defn parse-contribution
+  "Read the current fragment against frozen list ancestry. Reconstruct the
+   complete chain before exporting this contribution's own declarations."
   [{:keys [fn-id scope binding-id name->id list-history list-type-names]} field form]
   (let [target (:id field)
         path [target]
+        prior (get list-history path)
         origin (builder/origin fn-id target)]
-    (when-not (vector? (get list-history path)) (reject! :list-history-required))
-    (when (seq (get list-history path)) (reject! :list-continuation-lowering-required))
+    (when-not (vector? prior) (reject! :list-history-required))
     (when-not (= (:binding-id origin) (binding-id scope path)) (reject! :list-binding-origin-mismatch))
     (let [fragment (merge origin (builder/parse-fragment (:binding-id origin) form name->id))
           descriptor (select-keys field [:type :type-id])
           names (or list-type-names name->id)
-          records (materialize-chain [fragment] descriptor names)]
-      (assoc (recover-chain [fn-id] target descriptor names records) :field descriptor :records records))))
+          fragments (conj prior fragment)
+          records (materialize-chain fragments descriptor names)]
+      (assoc (recover-chain (mapv :owner-id fragments) target descriptor names records) :field descriptor :records records))))
+
+
+(defn authored-records
+  "Select the declarations and binding rows written by the current
+   contribution. Ancestor builders can belong to another source module."
+  [{:keys [fragments records]}]
+  (let [{:keys [binding-id builder-id]} (peek fragments)
+        input-id (:id (migration/input-type-record {:id builder-id}))
+        slots (into #{} (keep #(when (and (= :fn-slot (:kind %)) (= input-id (:fn-id %))) (:slot-id %))) records)]
+    (filterv (fn [{:keys [kind id fn-id]}]
+               (case kind
+                 :fn (or (= builder-id id) (= input-id id))
+                 :slot (contains? slots id)
+                 :fn-slot (= input-id fn-id)
+                 :input-binding (or (= binding-id id) (= builder-id fn-id))
+                 false))
+             records)))
+
+
+(defn locate-contributions
+  "A child appends at the preceding builder's open tail in this use of the
+   inherited field. Move only its newly authored ref to the proven address."
+  [state scope builders]
+  (reduce-kv
+    (fn [bindings path {:keys [fragments] :as trace}]
+      (if (< 1 (count fragments))
+        (let [{:keys [binding-id builder-id]} (peek fragments)
+              edge (some #(when (= binding-id (:id %)) %) (:bindings trace))
+              address [[(:fn-id edge) (:scope-path edge)] (:target-path edge)]
+              entry (get bindings [scope path])]
+          (when-not (and (= binding-id (:binding-id entry)) (= builder-id (:ref-fn-id edge))
+                         (= builder-id (get-in entry [:expression :fn-id])))
+            (reject! :list-binding-origin-mismatch))
+          (input/merge-bindings (dissoc bindings [scope path]) {address entry}))
+        bindings))
+    state builders))

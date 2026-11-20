@@ -62,8 +62,8 @@
   "Verify a previously lowered occurrence before using its callable as the
    field expression. The caller may have supplied a different expression."
   [trace form name->id]
-  (let [[fragment & others] (:fragments trace)]
-    (when-not (and fragment (empty? others)
+  (let [fragment (peek (:fragments trace))]
+    (when-not (and fragment
                    (migration/same-edn? (dissoc fragment :owner-id :target-id)
                                         (parse-fragment (:binding-id fragment) form name->id)))
       (reject! :list-fragment-mismatch))

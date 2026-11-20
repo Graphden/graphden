@@ -227,7 +227,7 @@
                                    {:name :tail :parent :head :args {:xs {:append [2] :closed true}}}]]])
       (let [report (dry/dry-run roots)
             stats (get-in report [:verification :list-builders])]
-        (is (= {:linked-fields 2 :reparsed-fields 2} stats))
+        (is (= {:linked-fields 2 :reparsed-fields 2 :reconstructed-fields 2} stats))
         (is (= {:supported 1 :blocked 2} (:counts report)))
         (is (= #{:list-builder-required} (codes report)))))))
 

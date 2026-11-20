@@ -233,6 +233,8 @@
       (conj (problem :ref-scope-required))
       (or (:list-append policy) (:list-closed policy))
       (conj (problem :list-builder-required))
+      (get-in entry [:list-builder :record-blocker])
+      (conj (problem (get-in entry [:list-builder :record-blocker])))
       (get-in entry [:list-builder :blocker])
       (conj (problem (get-in entry [:list-builder :blocker])))
       (:resolver-fn-id policy)

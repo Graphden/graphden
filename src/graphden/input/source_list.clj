@@ -3,6 +3,8 @@
    adapter does not activate a runtime or publish generated declarations."
   (:require
     [graphden.input.list-builder :as builder]
+    [graphden.input.list-records :as list-records]
+    [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slots]
@@ -54,6 +56,21 @@
           (builder/source-fragment binding items form (field-names name->id (:namespace original) form)))))))
 
 
+(defn- materialize
+  [trace field name->id]
+  (try
+    (let [fragments (:fragments trace)
+          records (list-records/materialize-chain fragments field name->id)
+          owners (mapv :owner-id fragments)
+          decoded (list-records/recover-chain owners (:target-id (first fragments)) field name->id records)]
+      (when-not (migration/same-edn? trace decoded) (reject! :list-declaration-mismatch))
+      (assoc trace :records records :field field))
+    (catch clojure.lang.ExceptionInfo error
+      (if (= :input/list-builder (:type (ex-data error)))
+        (assoc trace :record-blocker (:code (ex-data error)))
+        (throw error)))))
+
+
 (defn trace
   "Resolve the actual single-parent chain and ordered appends for one field.
    The retained fragment forms describe each authored contribution separately.
@@ -63,15 +80,18 @@
     (let [chain (ancestors definition defs-by-name)
           owner-name (slots/own-ref definition defs-by-name)
           [slot-owner slot-name] (slots/resolve-slot-owner owner-name field defs-by-name (get-in definition [:args field]))
-          type (slots/slot-type-of slot-owner slot-name defs-by-name)]
+          type (slots/slot-type-of slot-owner slot-name defs-by-name)
+          slot-definition (get defs-by-name slot-owner)]
       (when-not (and (uuid? binding-id) (= slot-name field)
                      (= target (ids/slot-id (get name->id slot-owner) field))
                      (or (= type :sequence) (and (vector? type) (= :list (first type))))
                      (some #(= (get name->id slot-owner) (:fn-id %)) chain))
         (reject! :list-target-origin-required))
-      (let [fragments (into [] (keep #(contribution % (records-of %) original-for name->id target field)) chain)]
-        (when-not (= binding-id (:binding-id (peek fragments))) (reject! :list-binding-origin-mismatch))
-        (assoc (builder/link-fragments fragments) :fragments fragments)))
+      (let [fragments (into [] (keep #(contribution % (records-of %) original-for name->id target field)) chain)
+            slot (some #(when (and (= :slot (:kind %)) (= target (:id %))) %) (records-of slot-definition))]
+        (when-not (and slot (= binding-id (:binding-id (peek fragments)))) (reject! :list-binding-origin-mismatch))
+        (materialize (assoc (builder/link-fragments fragments) :fragments fragments)
+                     {:type type :type-id (:type-fn-id slot)} name->id)))
     (catch clojure.lang.ExceptionInfo error
       (if (= :input/list-builder (:type (ex-data error)))
         {:blocker (:code (ex-data error))}

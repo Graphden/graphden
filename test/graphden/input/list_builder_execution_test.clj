@@ -1,10 +1,14 @@
 (ns graphden.input.list-builder-execution-test
   (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as execution]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.input.source :as source]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]))
 
 
 (deftest builder-ref-demand-and-call-cache-match-sequence-compilation
@@ -55,3 +59,21 @@
     (is (thrown? clojure.lang.ExceptionInfo
           (run (chain [head (fragment :middle 2 :closed)]) (assoc opts :continuations {address [:value [3]]}))))
     (is (thrown? clojure.lang.ExceptionInfo (run trace (assoc opts :continuations {address [:ref :unknown]}))))))
+
+
+(deftest existing-os-info-keys-compile-from-generated-rows-alone
+  (let [selected #{:zipmap :os-info :os-info-shape :os-name :os-arch :os-processors :os-load-average}
+        originals (into [] (mapcat (fn [module]
+                                     (let [path (str "packages/core/" module "/fns.edn")
+                                           {ns-id :namespace :keys [fns]} (edn/read-string (slurp (io/resource path)))]
+                                       (into [] (comp (filter #(contains? selected (:name %)))
+                                                      (map #(assoc % :namespace ns-id))) fns)))) ["system" "collections"])
+        ctx (parse/prepare-module originals {} {})
+        host (first (filter #(= :os-info (:name %)) originals))
+        entry (first (:definitions (source/plan-module [host] ctx)))
+        arg (first (filter #(= [:args :keys] (:source-path %)) (get-in entry [:legacy :arguments])))
+        {:keys [records field]} (:list-builder arg)
+        {:keys [fn-id slot-id]} (:origin arg)
+        run (execution/compile-rows [fn-id] slot-id field (:name->id ctx) records
+                                    {:lazy-seq? false :child-callables {} :lookups (lookups/build-lookups {})})]
+    (is (= (mapv :value (get-in host [:args :keys])) (vec (run {} {}))))))

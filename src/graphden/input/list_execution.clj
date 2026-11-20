@@ -2,7 +2,8 @@
   "Offline JVM execution of a source-verified list construction."
   (:require
     [graphden.executor.compile-eager :as compile]
-    [graphden.input.list-builder :as builder]))
+    [graphden.input.list-builder :as builder]
+    [graphden.input.list-records :as records]))
 
 
 (defn- reject!
@@ -38,3 +39,10 @@
       (fn [free-args ctx]
         (concat (evaluate free-args ctx) (if lazy-seq? (map (fn [v] (delay v)) tail) tail)))
       evaluate)))
+
+
+(defn compile-rows
+  "Compile a complete generated record set without rereading the legacy
+   argument source or its list-item rows."
+  [owners target-id field name->id generated options]
+  (compile-construction (records/recover-chain owners target-id field name->id generated) options))

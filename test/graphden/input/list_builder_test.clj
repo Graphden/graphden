@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.list-builder :as builder]
+    [graphden.input.list-records :as list-records]
     [graphden.input.source :as source]
     [graphden.input.source-list :as source-list]
     [graphden.packages.records.ids :as ids]
@@ -107,3 +108,32 @@
     (is (= :list-item-origin-mismatch (reason #(check binding (assoc-in rows [1 :new-policy] false)))))
     (is (= :list-item-origin-mismatch (reason #(check binding (assoc-in rows [0 :value] 1)))))
     (is (= :list-item-origin-mismatch (reason #(check binding (assoc-in rows [0 :position] 1)))))))
+
+
+(deftest generated-callable-records-recover-every-item-and-its-order
+  (let [[fragment] (fixture [:source nil false 1N] [])
+        field {:type [:list :any] :type-id (ids/primitive-fn-id :sequence)}
+        records (list-records/materialize fragment field {})
+        origin (dissoc fragment :items)
+        rows (filterv #(= :input-binding (:kind %)) records)
+        idx (.indexOf records (first rows))]
+    (is (= (mapv :id (:items fragment)) (mapv :id rows)))
+    (is (= fragment (list-records/recover origin field {} (reverse records))))
+    (is (= :list-declaration-mismatch
+           (reason #(list-records/recover origin field {} (assoc-in records [idx :terminal] true)))))
+    (is (= :missing-list-operand
+           (reason #(list-records/recover origin field {} (remove #{(first rows)} records)))))
+    (is (= :list-element-declarations-required
+           (reason #(list-records/materialize fragment (assoc field :type :text) {}))))))
+
+
+(deftest full-row-inverse-checks-the-tail-use-site-and-seal
+  (let [fragments (fixture [1] {:append [:source] :closed true})
+        field {:type [:list :any] :type-id (ids/primitive-fn-id :sequence)}
+        records (list-records/materialize-chain fragments field {})
+        recover #(list-records/recover-chain (mapv :owner-id fragments) (:target-id (first fragments)) field {} %)
+        [base append seal] (:bindings (builder/link-fragments fragments))]
+    (is (= fragments (:fragments (recover (reverse records)))))
+    (is (= :list-declaration-mismatch (reason #(recover (remove #{base} records)))))
+    (is (= :list-declaration-mismatch (reason #(recover (replace {append (assoc append :scope-path [])} records)))))
+    (is (= :list-declaration-mismatch (reason #(recover (replace {seal (assoc seal :value [0])} records)))))))

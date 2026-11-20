@@ -17,6 +17,16 @@
   (ids/uuid-v5 binding-id "list-builder"))
 
 
+(defn origin
+  "Derive a generated construction's identities from its old field binding."
+  [owner-id target-id]
+  (when-not (and (uuid? owner-id) (uuid? target-id)) (reject! :invalid-list-chain))
+  (let [binding-id (ids/binding-id owner-id target-id)
+        builder-id (fragment-id binding-id)]
+    {:owner-id owner-id :target-id target-id :binding-id binding-id
+     :builder-id builder-id :tail-id (ids/slot-id builder-id :tail)}))
+
+
 (defn- parse-item
   [binding-id name->id position form]
   (when-not (and (vector? form) (= 2 (count form)))
@@ -148,8 +158,7 @@
   (loop [remaining (seq fragments) path [] prior nil bindings []]
     (if-let [{:keys [owner-id target-id binding-id builder-id tail tail-id] :as current} (first remaining)]
       (do
-        (when-not (and (uuid? owner-id) (uuid? target-id) (= binding-id (ids/binding-id owner-id target-id))
-                       (= builder-id (fragment-id binding-id)) (= tail-id (ids/slot-id builder-id :tail))
+        (when-not (and (= (origin owner-id target-id) (select-keys current [:owner-id :target-id :binding-id :builder-id :tail-id]))
                        (contains? #{:open :closed} tail) (not (some #{binding-id} path))
                        (or (nil? prior) (= target-id (:target-id prior))))
           (reject! :invalid-list-chain))

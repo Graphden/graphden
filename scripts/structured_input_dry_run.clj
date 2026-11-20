@@ -135,6 +135,7 @@
   [package verification definition]
   (let [original (:source definition)
         verified (get-in verification [:verified (:source-file original) (:name original)])
+        reconstructed (count (keep #(get-in % [:list-builder :records]) (get-in definition [:legacy :arguments])))
         linked (count (keep #(get-in % [:list-builder :bindings]) (get-in definition [:legacy :arguments])))]
     (-> (select-keys definition [:identity :kind :status :origins :verification])
         (assoc :definition [(:namespace original) (:name original)]
@@ -142,6 +143,7 @@
                :blockers (mapv #(assoc % :repository (:repository package) :package (:name package))
                                (:blockers definition)))
         (cond-> (pos? linked) (assoc :linked-list-fields linked)
+                (pos? reconstructed) (assoc :reconstructed-list-fields reconstructed)
                 verified (assoc :reparsed-list-fields verified)))))
 
 
@@ -253,7 +255,8 @@
         report {:schema-version 1
                 :mode :read-only-source-plan
                 :verification {:authored-source-equivalence {:verified-definitions verified}
-                               :list-builders {:linked-fields (transduce (keep :linked-list-fields) + (mapcat :definitions summaries))
+                               :list-builders {:reconstructed-fields (transduce (keep :reconstructed-list-fields) + (mapcat :definitions summaries))
+                                               :linked-fields (transduce (keep :linked-list-fields) + (mapcat :definitions summaries))
                                                :reparsed-fields (transduce (keep :reparsed-list-fields) + (mapcat :definitions summaries))}
                                :new-loader-equivalence false :runtime-equivalence false :history false}
                 :source-identities (mapv #(select-keys % [:label :source-identity]) (:repositories manifest))

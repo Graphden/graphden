@@ -77,7 +77,24 @@
     (is (= :closure-capture-route-mismatch
            (code (assoc-in model [:analysis :closures callback :captures 0 :source] item))))
     (is (= :unsupported-closure-scope
-           (code (assoc-in model [:analysis :closures callback :external-captures] [{:target item}]))))))
+           (code (assoc-in model [:analysis :closures callback :external-captures] [{:target item}]))))
+    (is (= :cross-frame-expression
+           (code (assoc-in model [:analysis :scopes [] :bindings configuration]
+                           {:reference {:mode :projection :source item}}))))))
+
+
+(deftest explicit-zero-parameter-closure-has-only-lexical-captures
+  (let [definitions {:root {:input {:callback [:fn {} :any #{}] :config :any} :return :any
+                            :bindings {[:callback] {:ref :child :id :callback-use} [:config] {:value nil}}}
+                     :child {:input {:config :any} :return :any :lambda-params []
+                             :field-origins {[:config] :root}}}
+        plan (lower (structural-model definitions) definitions)
+        callback (fixture/address :root [] :root [:callback])
+        closure (get-in plan [:closures callback])
+        capture (fixture/address :root [:callback-use] :root [:config])]
+    (is (= [] (:parameters closure) (:call-sites closure)))
+    (is (= #{} (get-in plan [:frame-layouts (:scope closure) :parameters])))
+    (is (= (fixture/address :root [] :root [:config]) (get-in plan [:expressions capture :source])))))
 
 
 (deftest special-base-semantics-and-missing-abi-provenance-reject

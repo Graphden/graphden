@@ -12,7 +12,8 @@
     [graphden.packages.records.slot-resolution :as slots]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]
-    [structured-input-inventory :as inventory])
+    [structured-input-inventory :as inventory]
+    [structured-input-list-probe :as list-probe])
   (:import
     (java.io
       StringWriter)
@@ -28,14 +29,19 @@
     (str/join (map #(format "%02x" (bit-and % 255)) digest))))
 
 
-(defn checked-source
-  "Read source bytes once and verify their inventory checksum BEFORE parsing.
-   Returns private source data; callers must not log this value or reader errors."
+(defn- checked-text
   [root path checksum]
   (let [source-bytes (Files/readAllBytes (fs/path root path))]
     (when-not (= checksum (sha256 source-bytes))
       (throw (ex-info "Source differs from inventory" {:code :source-checksum-mismatch :file path})))
-    (inventory/read-edn path (String. ^bytes source-bytes "UTF-8"))))
+    (String. ^bytes source-bytes "UTF-8")))
+
+
+(defn checked-source
+  "Read source bytes once and verify their inventory checksum BEFORE parsing.
+   Returns private source data; callers must not log this value or reader errors."
+  [root path checksum]
+  (inventory/read-edn path (checked-text root path checksum)))
 
 
 (defn- problem
@@ -56,6 +62,7 @@
                            :definitions (mapv #(assoc % :namespace (:namespace module) :source-file path)
                                               (:fns module))})) paths)
         package (assoc package :repository (:label repository)
+                       :read-source #(checked-text root % (get checksums %))
                        :source-modules modules :dependencies (or (:dependencies metadata) []))
         blockers (cond-> []
                    (or (seq (:missing package)) (seq (:unlisted package)) (seq (:duplicate-modules package)))
@@ -125,13 +132,27 @@
 
 
 (defn- summarize-definition
-  [package definition]
-  (let [original (:source definition)]
+  [package verification definition]
+  (let [original (:source definition)
+        eligible? (seq (get-in definition [:v2 :list-builders]))
+        migrated? (contains? (:migrated verification) (:identity definition))
+        definition (if (and eligible? (not migrated?))
+                     (-> definition (assoc :status :blocked :blockers [{:definition [(:namespace original) (:name original)]
+                                                                        :file (:source-file original) :code :list-definition-cst-replay-required}])
+                         (dissoc :verification))
+                     definition)
+        verified (get-in verification [:verified (:source-file original) (:name original)])
+        reconstructed (count (keep #(get-in % [:list-builder :records]) (get-in definition [:legacy :arguments])))
+        linked (count (keep #(get-in % [:list-builder :bindings]) (get-in definition [:legacy :arguments])))]
     (-> (select-keys definition [:identity :kind :status :origins :verification])
         (assoc :definition [(:namespace original) (:name original)]
                :file (:source-file original)
                :blockers (mapv #(assoc % :repository (:repository package) :package (:name package))
-                               (:blockers definition))))))
+                               (:blockers definition)))
+        (cond-> migrated? (assoc :reparsed-list-definition true)
+                (pos? linked) (assoc :linked-list-fields linked)
+                (pos? reconstructed) (assoc :reconstructed-list-fields reconstructed)
+                verified (assoc :reparsed-list-fields verified)))))
 
 
 (defn- blocked-state
@@ -164,11 +185,13 @@
           (blocked-state package [(problem package :duplicate-visible-definition)])
           (let [context (parse/prepare-module original names definitions)
                 planned (source/verify-module (source/plan-module original context) context)
-                summaries (mapv #(summarize-definition package %) (:definitions planned))]
+                verification (list-probe/verify-package (:read-source package) (:definitions planned) context)
+                summaries (mapv #(summarize-definition package verification %) (:definitions planned))]
             {:status :prepared
              :exports (vec (distinct (concat dependencies (qualify-definitions context))))
-             :definitions summaries :counts (:counts planned)
-             :blockers (vec (mapcat :blockers summaries))}))
+             :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
+             :blockers (into (vec (mapcat :blockers summaries))
+                             (map #(assoc % :repository (:repository package) :package (:name package))) (:blockers verification))}))
         (catch Exception error
           (blocked-state package (preparation-errors package all-names error)))))))
 
@@ -240,6 +263,10 @@
         report {:schema-version 1
                 :mode :read-only-source-plan
                 :verification {:authored-source-equivalence {:verified-definitions verified}
+                               :list-builders {:reparsed-definitions (count (filter :reparsed-list-definition (mapcat :definitions summaries)))
+                                               :reconstructed-fields (transduce (keep :reconstructed-list-fields) + (mapcat :definitions summaries))
+                                               :linked-fields (transduce (keep :linked-list-fields) + (mapcat :definitions summaries))
+                                               :reparsed-fields (transduce (keep :reparsed-list-fields) + (mapcat :definitions summaries))}
                                :new-loader-equivalence false :runtime-equivalence false :history false}
                 :source-identities (mapv #(select-keys % [:label :source-identity]) (:repositories manifest))
                 :inventory-totals (:totals manifest)

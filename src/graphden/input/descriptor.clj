@@ -4,13 +4,18 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.core :as input]
+    [graphden.input.format :as format]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.types :as records]
     [graphden.types.core :as types]
     [graphden.types.expansion :as expansion]))
 
 
+(def ^:private primitive-ids (ids/primitive-fn-ids))
+
+
 (def ^:private primitive-by-id
-  (into {} (map (fn [[name id]] [id name])) (ids/primitive-fn-ids)))
+  (into {} (map (fn [[name id]] [id name])) primitive-ids))
 
 
 (def ^:dynamic ^:private *remaining-nodes* nil)
@@ -91,6 +96,26 @@
 (declare ^:private resolve-node)
 
 
+(defn stored-source-type?
+  "A frozen field declaration may retain generic collection shapes erased
+   to a primitive by storage. Its leaves and actual FK must be accounted for."
+  [type field-type-id]
+  (and (format/collection-type? #(or (contains? primitive-ids %) (types/type-var? %)) type)
+       (= field-type-id (records/resolve-type-ref type {}))))
+
+
+(defn- declared-field-node
+  [ctx type-id field source seen]
+  (let [field-type-id (:type-fn-id field)
+        node (resolve-node ctx field-type-id seen)
+        witnessed (get (:source-field-types ctx) [(:id field) field-type-id])]
+    (if (and (some? witnessed) (not= source (:type node)) (contains? (:type-bodies ctx) type-id)
+             (= source (types/resolve-alias witnessed)) (stored-source-type? witnessed field-type-id))
+      (cond-> {:type-id field-type-id :type source}
+        (types/union-type? source) (assoc :alternatives (vec (types/union-members source))))
+      node)))
+
+
 (defn- record-fields
   [ctx type-id rich seen]
   (let [owner (or (membership-owner ctx type-id #{})
@@ -104,7 +129,7 @@
       (context/reject! :field-identity-mismatch {:type-id type-id}))
     (mapv (fn [field]
             (let [name (keyword (:name field))
-                  child (resolve-node ctx (:type-fn-id field) seen)]
+                  child (declared-field-node ctx type-id field (get rich name) seen)]
               (when-not (= (get rich name) (:type child))
                 (context/reject! :field-type-mismatch {:type-id type-id :field-id (:id field)}))
               (merge child (select-keys field [:description])

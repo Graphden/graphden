@@ -25,6 +25,7 @@
     [graphden.executor.compile.renames :as r]
     [graphden.executor.registry.core :as reg]
     [graphden.executor.runtime :as rt]
+    [graphden.input.capture :as input-capture]
     [graphden.util.counters :as counters]
     [graphden.util.json-size :as json-size]))
 
@@ -311,6 +312,19 @@
   5000)
 
 
+(defn invocation-context
+  "Reuse the enclosing execution memo, honor per-request/worker overrides,
+   and preserve cache-less handler construction. Shared by closure builders;
+   authorization, effects and cancellation remain execute's responsibility."
+  [ctx]
+  (let [request-cache *request-call-cache*]
+    (cond
+      (and request-cache (not (identical? (::call-cache ctx) request-cache)))
+      (assoc ctx ::call-cache request-cache)
+      (or (::call-cache ctx) (skip-cache-priming-key ctx)) ctx
+      :else (assoc ctx ::call-cache (java.util.HashMap.)))))
+
+
 (def ^:private single-fire-effect-cats
   "Side-effecting effect categories whose within-execute single-fire
    RELIES on the call-cache. A fn-def that pulls a side-effecting ref
@@ -445,12 +459,15 @@
    through the SAME safety machinery as `:result` persistence (the
    streaming JSON byte counter): within `max-captured-value-bytes` →
    `{:value v, value-bytes-key n}`; oversize or unserializable →
-   `{:value-truncated? true}` (no value — nothing partial leaks).
+   `{:value-truncated? true}` (no value — nothing partial leaks). Only
+   bounded eager data is admitted: optional capture must not become the
+   first consumer of a deferred record or sequence.
    NEVER called for secret-touching fns — their branch in
    `path-traced-call` records `{:hidden :secret}` without
    reading the value at all (constraint 4)."
   [v]
-  (if-some [n (json-size/json-bytes-up-to v max-captured-value-bytes)]
+  (if-some [n (when (input-capture/safe-value? v)
+                (json-size/json-bytes-up-to v max-captured-value-bytes))]
     {:value v value-bytes-key n}
     {:value-truncated? true}))
 
@@ -745,6 +762,18 @@
              v)))))))
 
 
+(defn invoke-compiled
+  "Invoke a canonical compiled dependency through the existing trace/memo
+   seam. The caller supplies a non-forcing input key and an actual scoped
+   specialization, never a public record view. Target ID remains the key head
+   so effectful eviction and always-fresh policy retain their meaning.
+   This is not an authorization or execute entry point."
+  [{:keys [target-id specialization input-key name]} child ctx]
+  (call-with-cache target-id nil name
+                   (fn [_ ctx] (child ctx))
+                   {::canonical-input [specialization input-key]} ctx))
+
+
 (defn- has-impl?
   "Root-fn carries a registered Clojure impl. Type-rows return false
    and never enter the compile pipeline."
@@ -835,32 +864,21 @@
 
 
 (defn- seq-item-builder
-  "Compile one `binding-list-item` row into a `(fn [fa ctx])`
-   producing the item's runtime value. Four shapes:
-     - `{:value {:as :name} :literal nil}` — positional free-arg
-       substitution (`:route :args :items [{:as :path} ...]`);
-       reads via `force-value` so a delay in `free-args` gets
-       forced before the consumer sees it.
-     - `:value` present — literal value.
-     - `:ref-fn-id` — invoke pre-compiled child callable.
-     - everything nil — literal `nil`.
-
-   `owner-fn-id` is the fn-id whose seq binding contains this item.
-   The positional `{:as :name}` resolves to that owner's OWN rename
-   slot (parser creates one per rename); the reader indexes `fa`
-   by that rename slot's id — pure slot-id, no name fallback."
+  "Compile one binding-list-item into a function of free args and call context.
+   Positional items read the contributing owner's slot on demand. Generated
+   projections also supply its UUID, which must match that owner's membership.
+   Both accept the named free arg when the UUID is absent. Other rows supply
+   a literal (including nil) or invoke their precompiled child callable."
   [item child-callables lookups owner-fn-id]
   (cond
-    (and (map? (:value item))
-         (:as (:value item))
-         (not (:literal item)))
-    (let [k (keyword (:as (:value item)))
-          ;; Phase 4 — rename-aware slot-id from owner's own rename
-          ;; slot for this `:as` name. Falls back to name fallback
-          ;; below when the rename slot doesn't exist (some seq
-          ;; binding shapes don't produce slot rows via parser).
-          sid (some-> (get (:slot-by-fn-name lookups) [owner-fn-id k])
-                      :id)]
+    (or (:projection-slot-id item)
+        (and (map? (:value item)) (:as (:value item)) (not (:literal item))))
+    (let [projected (:projection-slot-id item)
+          owner (if projected (:projection-owner-id item) owner-fn-id)
+          k (if projected (some-> (get-in lookups [:slot-map projected :name]) keyword) (keyword (:as (:value item))))
+          sid (get-in lookups [:slot-by-fn-name [owner k] :id])]
+      (when (and projected (not= projected sid))
+        (throw (ex-info "Unresolved positional list input" {:type :input/list-builder :code :positional-list-field-mismatch})))
       (if sid
         (fn [fa _ctx]
           (let [v (get fa sid ::miss)]
@@ -1066,6 +1084,16 @@
     (walk 0)))
 
 
+(defn compile-list-items
+  "Compile ordered sequence item descriptors into (fn [free-args ctx]).
+   Demand and ref caching follow the consumer's existing delivery policy."
+  [owner-id items lazy-seq? child-callables lookups]
+  (let [builders (mapv #(seq-item-builder % child-callables lookups owner-id) items)]
+    (if lazy-seq?
+      (fn [fa ctx] (map (fn [build] (delay (build fa ctx))) builders))
+      (fn [fa ctx] (lazy-seq-of-values builders fa ctx)))))
+
+
 (defn- arg-builder
   "Return `(fn [free-args ctx])` producing the value for one
    classified binding.
@@ -1183,14 +1211,7 @@
                                    fa ref-renames)
                         ctx))))))
     :seq
-    (let [item-builders (mapv #(seq-item-builder % child-callables lookups
-                                                 (or binder-fn-id fn-id))
-                              items)]
-      (if lazy-seq?
-        (fn [fa ctx]
-          (map (fn [b] (delay (b fa ctx))) item-builders))
-        (fn [fa ctx]
-          (lazy-seq-of-values item-builders fa ctx))))
+    (compile-list-items (or binder-fn-id fn-id) items lazy-seq? child-callables lookups)
     (throw (ex-info (str "compile-eager: unsupported binding kind " kind)
                     {:type :compile/unsupported-kind :binding bnd}))))
 
@@ -1380,24 +1401,7 @@
                  ;;    through such a handler also runs cache-less (every `:ref`
                  ;;    a fresh call) — correct + per-principal, trading away
                  ;;    within-request memo for these low-traffic admin routes.
-                 ctx (let [rc *request-call-cache*]
-                       (cond
-                         ;; Per-scope override active (an `:http-server`
-                         ;; request or `:future` worker bound a fresh cache):
-                         ;; install ITS map, overriding any build-time cache
-                         ;; this ctx captured — that captured map is shared by
-                         ;; every invocation of a build-time handler and races
-                         ;; a CME under concurrency. Idempotent for nested runs
-                         ;; (ctx already carries `rc` → the next clause returns
-                         ;; it unchanged).
-                         (and rc (not (identical? (::call-cache ctx) rc)))
-                         (assoc ctx ::call-cache rc)
-
-                         (or (::call-cache ctx) (skip-cache-priming-key ctx))
-                         ctx
-
-                         :else
-                         (assoc ctx ::call-cache (java.util.HashMap.))))
+                 ctx (invocation-context ctx)
                  fa (r/apply-rename-aliases fa rename-aliases)
                  ;; The `fa-ref` volatile ONLY exists so env-binding delays can
                  ;; read the post-merge map at force time (forward references

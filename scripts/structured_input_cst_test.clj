@@ -326,6 +326,59 @@
     (is (not (str/includes? target "_anon-")))))
 
 
+(deftest nested-inline-cst-preserves-wrapped-references-and-bare-collections
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :y :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:args {:y {:args {:x {:ref ; keep the ref\r\n :demo.main/producer}"
+                  " :y {:foo ; keep the data\r\n \"a\r\nb\"}} :parent :sink} :x nil} :parents [:sink]}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":x [:ref ; keep the ref\r\n :demo.main/producer]"))
+    (is (str/includes? target ":y [:value {:foo ; keep the data\r\n \"a\r\nb\"}]"))
+    (is (str/includes? target ":legacy-forms {:x :ref-wrapper, :y :bare-value} :bind"))
+    (is (not (str/includes? target "_anon-")))))
+
+
+(deftest inline-type-assertions-and-projection-retain-comments
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :text :y :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:parent :sink :args {:x {:type ; typed reference\r\n :any :ref :producer}}} "
+                  ":y {:parent :sink :args {:x {:as ; alias\r\n :exposed :type ; pin\r\n :text}}}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (str/includes? target "[:x] {:type ; typed reference\r\n :any}"))
+    (is (str/includes? target ":project ; alias\r\n [:exposed]"))
+    (is (str/includes? target ":type ; pin\r\n :text"))
+    (is (= {:exposed {:type :text :required false}} (get-in child [:bind :y 1 :input])))))
+
+
+(deftest nested-inline-cst-keeps-legacy-body-order-across-map-kinds
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:parent :sink :args {:x {:args {:x {:type :any :ref :producer}} :parent :sink"
+                  " :return-type :any :return-type-wide? true :description \"Test\","
+                  " :effects #{} :expects-effects [] :lambda-params []}}}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":legacy-order [:args :parent :return-type :return-type-wide? :description :effects :expects-effects :lambda-params]"))
+    (is (str/includes? target ":legacy-forms {:x :type-first}"))
+    (is (not (str/includes? target "_anon-")))))
+
+
+(deftest outer-inline-type-pins-move-to-the-enclosing-configurations
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:type ; outer pin\r\n :keyword :args {:x {:parent :producer"
+                  " :type ; inner pin\r\n :text :args {}}} :parent :sink}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))
+        outer (get-in child [:bind :x 1])
+        inner (get-in outer [:bind :x 1])]
+    (is (= {[:x] {:type :keyword}} (:configure child)))
+    (is (= {[:x] {:type :text}} (:configure outer)))
+    (is (= {:parent :producer :bind {}} inner))
+    (is (str/includes? target ":type ; outer pin\r\n :keyword"))
+    (is (str/includes? target ":type ; inner pin\r\n :text"))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))
@@ -418,6 +471,98 @@
         (is (= (get-in arg [:origin :binding-id]) (:id row)))
         (is (= [(get-in arg [:origin :slot-id])] (:target-path row)))
         (is (= [(get-in arg [:rename :alias-id])] (:projection-path row)))))))
+
+
+(deftest list-contributions-preserve-item-bytes-and-ref-spelling
+  (doseq [wrap [(fn [xs] xs) #(str "{:append ; appending\r\n " % "}") #(str "{:closed ; seal\r\n true :append " % "}")]]
+    (let [items "[:read ; first\r\n {:value ; literal\r\n \"a\r\nb\"} nil false 1N]"
+          text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:xs {:type [:list :any]}} :return-type :any}"
+                    "{:name :read :args {} :return-type :int} {:name :child :parent :sink :args {:xs " (wrap items) "}}]}")
+          definitions (mapv #(assoc % :namespace "demo.main") (:fns (edn/read-string text)))
+          ctx (parse/prepare-module definitions {} {})
+          entry (peek (:definitions (source/plan-module definitions ctx)))
+          fragment (-> entry :legacy :arguments first :list-builder :fragments peek)
+          op (cst/list-builder-operation (peek definitions) :xs fragment (:name->id ctx))
+          patch (cst/plan text (request {:op :rename-bind :definition :child :path [:args]} op))
+          after (:text (cst/apply-text patch text))]
+      (is (= :already-applied (:status (cst/apply-text patch after))))
+      (is (= (:form op) (get-in (edn/read-string after) [:fns 2 :bind :xs])))
+      (is (str/includes? after "[[:ref :read] ; first\r\n [:value ; literal\r\n \"a\r\nb\"] [:value nil] [:value false] [:value 1N]]"))
+      (is (= :list-fragment-drift
+             (reason #(cst/list-builder-operation (assoc (peek definitions) :name :other) :xs fragment (:name->id ctx))))))))
+
+
+(deftest mixed-list-contributions-retain-field-trivia-and-configuration
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :flag :bool} :return-type :any}\r\n"
+                  "{:name :child :parent :base :args {:xs ; list\r\n [{:value \"line one\r\nline two\"} false] ; end\r\n"
+                  " :flag {:value true :type :bool} ; assertion\r\n :title {:type :text}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:title {:type :text}} (:input child)))
+    (is (= {[:flag] {:type :bool}} (:configure child)))
+    (is (= {:xs [:list-builder {:items [[:value "line one\r\nline two"] [:value false]] :tail :open}]
+            :flag [:value true]} (:bind child)))
+    (is (str/includes? target ":xs ; list\r\n [:list-builder"))
+    (is (str/includes? target "; end\r\n"))
+    (is (str/includes? target "; assertion\r\n"))))
+
+
+(deftest list-and-typed-inline-producer-survive-the-same-field-partition
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :flag :bool} :return-type :any}"
+                  "{:name :producer :return-type :bool} "
+                  "{:name :child :parent :base :args {:xs [false] :flag {:parent :producer :type :bool} "
+                  ":title {:type :text}}}]}")
+        child (peek (:fns (edn/read-string (migrate-child text))))]
+    (is (= {:title {:type :text}} (:input child)))
+    (is (= {[:flag] {:type :bool}} (:configure child)))
+    (is (= {:xs [:list-builder {:items [[:value false]] :tail :open}]
+            :flag [:ref {:parent :producer}]} (:bind child)))))
+
+
+(deftest independent-scalar-projection-and-list-preserve-their-own-origins
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :key {:type :text}} :return-type :any}"
+                  "{:name :child :parent :base :args {:key {:as :label} :xs [false nil]}}]}")
+        child (peek (:fns (edn/read-string (migrate-child text))))]
+    (is (= {:label {:type :text :required false}} (:input child)))
+    (is (= [:project [:label]] (get-in child [:bind :key])))
+    (is (= [:list-builder {:items [[:value false] [:value nil]] :tail :open}] (get-in child [:bind :xs])))))
+
+
+(deftest positional-list-inputs-preserve-item-comments-and-rich-annotation-trivia
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :collect :args {:xs :sequence} :return-type :any}\r\n"
+                  "{:name :child :parent :collect :args {:xs [{:as ; uses caller\r\n"
+                  " :label :type [:union ; rich input\r\n :text :null]} {:as :other} \"a  b\"]}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= :unsupported-reader-discard
+           (reason #(migrate-child (str/replace text ":text :null" ":text #_:discarded :null")))))
+    (is (= {:label {:type [:union :text :null] :required false} :other {:type :any :required false}} (:input child)))
+    (is (= [[:project [:label]] [:project [:other]] [:value "a  b"]] (get-in child [:bind :xs 1 :items])))
+    (doseq [remark ["; uses caller\r\n" "; rich input\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern remark) target)))))))
+
+
+(deftest positional-occurrence-policy-preserves-the-original-literal-and-comments
+  (let [description "\"line 1\\n; stays in the string\""
+        text (str "{:namespace \"demo.main\" :fns [{:name :collect :args {:xs :sequence} :return-type :any}\r\n"
+                  "{:name :child :parent :collect :args {:xs [{:description " description " ; item note\r\n"
+                  " :as :value :required ; explicit on the item\r\n false :type :text}]}}]}")
+        result (migrate-child text)
+        child (peek (:fns (edn/read-string result)))]
+    (is (= {:value {:type :text :required false}} (:input child)))
+    (is (= [:project [:value] {:description (edn/read-string description) :required false}] (get-in child [:bind :xs 1 :items 0])))
+    (doseq [snippet [description "; item note\r\n" "; explicit on the item\r\n"]]
+      (is (str/includes? result snippet)))))
+
+
+(deftest generic-projection-retains-the-authored-pin-and-variable-declaration
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :collect :args {:xs {:type [:list a]}} :return-type :any}\r\n"
+                  "{:name :child :parent :collect :args {:xs {:as ; alias\r\n :items}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (str/includes? target "; alias\r\n"))
+    (is (= {:items {:type '[:list a] :required false}} (:input child)))
+    (is (= {:xs [:project [:items]]} (:bind child)))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]

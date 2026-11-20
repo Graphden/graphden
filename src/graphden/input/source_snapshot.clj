@@ -3,11 +3,14 @@
   (:require
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
+    [graphden.input.descriptor :as descriptor]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
+    [graphden.input.source-rename :as rename]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
+    [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
 
 
@@ -28,10 +31,12 @@
    Call in the marker policy scope of preparation. Duplicate originals are
    ambiguous. Unreachable source need not be lowered."
   [prepared originals]
-  {:prepared prepared
-   :markers (shapes/markers-snapshot)
-   :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
-   :originals (group-by definition-id originals)})
+  (let [by-id (group-by definition-id originals)
+        ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
+    {:prepared (assoc prepared ::rename/ambiguous-type-ids ambiguous)
+     :markers (shapes/markers-snapshot)
+     :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
+     :originals by-id}))
 
 
 (defn- plan-entry
@@ -72,6 +77,7 @@
             (throw (ex-info "Unverified dependency in source closure"
                             {:type :input/source-snapshot :code :unverified-source-declaration
                              :fn-id id :blockers (mapv :code (:blockers entry))})))
+          (when (seq (:list-builders v2)) (reject! :list-builder-signature-required id))
           (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2))
                          (<= (count (:parent-ids owner)) 1))
             (reject! :unsupported-scope-declaration id))
@@ -89,15 +95,49 @@
     (assoc-in records [kind id] row)))
 
 
+(defn- source-field-types
+  [entries]
+  (reduce (fn [witnesses {:keys [id type-id type]}]
+            (let [key [id type-id]]
+              (when (and (contains? witnesses key) (not= (get witnesses key) type))
+                (reject! :conflicting-source-field-type id))
+              (assoc witnesses key type)))
+          {} (into [] (comp (mapcat #(get-in % [:contract :fields])) (remove (comp keyword? :type))) (vals entries))))
+
+
+(defn- dictionary-evidence
+  "Capture a named homogeneous map only when the original, prepared identity,
+   parsed fn row and primitive key/value body all agree."
+  [package entries]
+  (let [lookup (memoize (partial plan-entry package))]
+    (reduce
+      (fn [evidence {:keys [type type-id]}]
+        (if (and (keyword? type) (= type-id (get-in package [:prepared :name->id type]))
+                 (get-in package [:declarations type-id :map]))
+          (let [{:keys [verification v2]} (lookup type-id)
+                {:keys [key value]} (get-in v2 [:source :map])
+                body [:map key value]
+                [row & more] (:declaration-records v2)]
+            (when-not (and (= :authored-source-equivalent verification)
+                           (every? types/primitive? [key value]) (= body (:constraint row))
+                           (= :fn (:kind row)) (= type-id (:id row)) (empty? more))
+              (reject! :named-dictionary-evidence-required type-id))
+            (-> evidence (assoc-in [:aliases type] body) (assoc-in [:alias-ids type] type-id)
+                (assoc-in [:fns type-id] row)))
+          evidence))
+      {:aliases {} :alias-ids {} :fns {}} (mapcat #(get-in % [:contract :fields]) (vals entries)))))
+
+
 (defn- snapshot
-  [entries markers]
+  [entries markers dictionaries]
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
         (reduce merge-record {} (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries)))
         inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))]
     (context/build-context
-      {:fns fns :fields (or fields {}) :bindings (or bindings {})
-       :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
-       :type-bodies inputs :aliases {} :markers markers})))
+      (assoc dictionaries
+             :fns (merge (:fns dictionaries) fns) :fields (or fields {}) :bindings (or bindings {})
+             :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
+             :type-bodies inputs :source-field-types (source-field-types entries) :markers markers))))
 
 
 (defn- root-id
@@ -110,34 +150,43 @@
 
 
 (defn- exact-projection-pin?
-  [contract bindings {:keys [target-path type type-override-fn-id]}]
+  [type-ids contract bindings {:keys [target-path type type-override-fn-id]}]
   (let [row (some #(when (= target-path (:target-path %)) %) bindings)
         field-by-id (into {} (map (juxt :id identity)) (:fields contract))
         target (get field-by-id (first target-path))
         source (get field-by-id (first (:projection-path row)))]
     (and (= "projection" (:expression-kind row)) (= [] (:scope-path row) (:projection-scope-path row))
          (= [(:id target)] target-path) (= [(:id source)] (:projection-path row))
-         (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row) (:type-id target) (:type-id source))
-         (= type (:type target) (:type source)))))
+         (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row) (:type-id source))
+         (= type (:type source)) (= type-override-fn-id (get type-ids type)))))
 
 
 (defn- check-type-provenance!
-  [{:keys [source contract owner configurations bindings]}]
+  [named-ids {:keys [source contract owner configurations bindings]}]
   (let [primitives (ids/primitive-fn-ids)
+        type-ids (merge primitives named-ids)
         return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
-    (when-not (and (every? #(exact-projection-pin? contract bindings %) (vals configurations))
-                   (or (and (seq (:parent-ids owner)) (nil? return))
+    (when-not (every? #(exact-projection-pin? type-ids contract bindings %) (vals configurations))
+      (reject! :configuration-evidence-required (:id owner)))
+    (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? primitives return)
                             (= (get primitives return) (:return-type-fn-id owner))))
                    (every? (fn [{:keys [type type-id declaration]}]
-                             (and (or (keyword? declaration)
-                                      (and (map? declaration)
+                             (and (or (= type declaration)
+                                      (and (map? declaration) (= type (:type declaration))
                                            (every? #{:type :required :description} (keys declaration))))
-                                  (contains? primitives type) (= type-id (get primitives type))))
+                                  (or (descriptor/stored-source-type? type type-id) (and (uuid? type-id) (= type-id (get named-ids type))))))
                            (:fields contract)))
       (reject! :rich-type-source-required (:id owner)))))
+
+
+(defn- verified-context
+  [package entries]
+  (let [dictionaries (dictionary-evidence package entries)]
+    (doseq [entry (vals entries)] (check-type-provenance! (:alias-ids dictionaries) entry))
+    (snapshot entries (:markers package) dictionaries)))
 
 
 (defn- implementation
@@ -146,7 +195,7 @@
         entry (get roots base)
         declaration (get entries base)
         fields (get-in declaration [:contract :fields])
-        args (into {} (map (juxt :name :type)) fields)
+        args (into {} (map (juxt :name (comp types/resolve-alias :type))) fields)
         return (:return-type (:source declaration))]
     (when-not (and (= base (:fn-id entry)) (= (get-in declaration [:source :name]) (:name entry))
                    (= (:namespace declaration) (:namespace entry))
@@ -161,6 +210,16 @@
      :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}))
 
 
+(defn- implementation-options
+  [ctx entries roots]
+  (context/call-with-types
+    ctx
+    (fn []
+      {:implementations (into {} (map (fn [id] [id (implementation entries roots id)])) (keys entries))
+       :check-expression check/check-input-binding
+       :infer-signature check/infer-input-signature})))
+
+
 (defn freeze-closure
   "Build the immutable stage-4 context and checker options from the original
    package preparation, verified v2 rows, and frozen rich implementation
@@ -168,12 +227,54 @@
    signature view and are rejected here. Include any ref introduced by an overlay in
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
-  (let [entries (closure package function-ids)]
-    (doseq [entry (vals entries)] (check-type-provenance! entry))
-    {:context (snapshot entries (:markers package))
-     :options {:implementations (into {} (map (fn [id] [id (implementation entries roots id)])) (keys entries))
-               :check-expression check/check-input-binding
-               :infer-signature check/infer-input-signature}}))
+  (let [entries (closure package function-ids)
+        ctx (verified-context package entries)]
+    {:context ctx :options (implementation-options ctx entries roots)}))
+
+
+(defn- confirmed-projections
+  [owner bindings graph]
+  (let [by-id (into {} (map (juxt :id identity)) bindings)]
+    (mapv (fn [{[scope path :as address] :from :as route}]
+            (let [bound (get-in graph [:scopes (second scope) :bindings address])
+                  id (:binding-id bound)
+                  row (get by-id id)]
+              (when-not (and row (= (:fn-id row) (:origin-fn-id bound))
+                             (= path (:target-path row)) (= [scope (:projection-path row)] (:source route)))
+                (reject! :projection-origin-mismatch owner))
+              (assoc route :binding-id id :origin-fn-id (:fn-id row) :proof (get-in graph [:proofs address]))))
+          (:projections graph))))
+
+
+(defn projection-readiness
+  "Analyze verified rename rows at each traversed use with the scoped analyzer.
+   Keep runtime obligations and missing implementation/signature coverage
+   visible even when all field and binding identities are established."
+  [package owner roots]
+  (try
+    (let [entries (closure package [owner])
+          bindings (filter #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %)))
+                           (mapcat :bindings (vals entries)))
+          _ (when-not (seq bindings) (reject! :missing-source-projection owner))
+          ctx (verified-context package entries)
+          options (try (implementation-options ctx entries roots)
+                       (catch clojure.lang.ExceptionInfo error
+                         (if (#{:implementation-signature-required :rule-signature-view-required} (:code (ex-data error)))
+                           {:check-expression check/check-input-binding
+                            :gap (select-keys (ex-data error) [:code :fn-id])}
+                           (throw error))))
+          graph (analysis/analyze-effective-input ctx owner (dissoc options :gap))
+          projections (confirmed-projections owner bindings graph)]
+      (cond-> (assoc (select-keys graph [:status :coverage :required-addresses :obligations :diagnostics])
+                     :fn-id owner :projections projections)
+        (empty? projections) (-> (assoc :status :incomplete) (update :diagnostics conj {:code :no-evaluated-projection}))
+        (:gap options) (-> (assoc :status :incomplete) (update :diagnostics conj (:gap options)))))
+    (catch clojure.lang.ExceptionInfo error
+      (let [data (ex-data error)
+            code (or (:code data) (when (= :types/check-failed (:type data)) :types/check-failed))]
+        (if code
+          {:fn-id owner :status :blocked :diagnostics [(assoc (select-keys data [:fn-id :blockers :address]) :code code)]}
+          (throw error))))))
 
 
 (defn verify-binding

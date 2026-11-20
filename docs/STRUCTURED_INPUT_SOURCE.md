@@ -47,22 +47,35 @@ assertion or a list, map, tuple or union assertion with named leaves.
 The verifier compares the rich form as well as its storage ID, since
 different collection types can share that ID.
 
-A direct anonymous binding whose entire body is `{:parent P}` becomes
-`[:ref {:parent P}]`. The reader uses the original namespace, host name,
-field and normalized parent spelling to reproduce the legacy child UUID.
-The exported source retains the authored parent spelling. Verification
-compares the child's declaration rows and the owner's reference to that child.
-A direct child may also bind one field. Its bare scalars stay bare,
-a bare graph reference `P` becomes `[:ref P]`, and a literal wrapper
-`{:value x}` becomes `[:value x]`. These spellings let a fresh reader
-recover the original anonymous-body hash and independently parse the child
-binding. The child retains its own binding UUID and target field UUID.
-An explicit legacy `{:ref P}` needs additional provenance to distinguish
-it from a bare reference. Empty explicit `:args {}`, multi-field bodies,
-annotated inline refs and inline list items also remain blocked. List builders,
-rename projections, referenced input scopes, assertions that require inline
-type rows and unknown binding policies have explicit blockers.
-Secret-path resolution must never become an ordinary literal value.
+A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
+The reader uses the original namespace, host name, field and normalized
+reference spellings to reproduce each legacy child UUID. The host name of
+a nested child is the legacy synthetic name of its enclosing child.
+The CST edit preserves the authored reference spelling and argument order.
+
+Children can bind multiple fields and contain direct inline descendants.
+A bare scalar stays bare, a bare reference `P` becomes `[:ref P]`, and a
+value wrapper `{:value x}` becomes `[:value x]`. The child declaration's
+`:legacy-forms` map records the field keys whose original spelling needs
+extra information to recover the legacy hash. `:ref-wrapper` preserves
+`{:ref P}`, and `:bare-value` preserves a bare collection treated as a
+whole value by the legacy loader. Inline children use the same
+`:configure` assertions and scalar alias projections as named
+declarations. `:type-first` preserves the original wrapper key order
+when restoring a configured binding. If the added keys would change the
+legacy declaration's iteration order, `:legacy-order` records that order.
+The reader keeps absent arguments distinct from `:bind {}` and verifies
+rows and binding origins recursively.
+
+A type pin authored on an inline reference moves to the enclosing
+binding's `:configure`. The referenced declaration keeps its original UUID.
+For nested uses, `[:inline-type position]` records the pin's position when
+reconstructing the enclosing declaration's hash.
+
+Inline list items, unsupported list origins and rename projections,
+referenced input scopes, assertions that require inline type rows and
+unknown binding policies have explicit blockers. Secret paths keep
+resolver semantics.
 
 `graphden.input.source/verify-module` checks each supported plan entry against
 the same prepared package context. The offline adapter lowers the actual
@@ -107,10 +120,35 @@ owner UUID, and frozen base-function registry entries to
 a private baseline, verifies reachable declarations through the v2 reader and
 uses their field IDs as implementation argument paths. The stage 4 signature
 engine and directional checker run before and after adding the scoped row.
-Only single-parent closures with supported primitive declarations currently
-supply this proof. A declaration gap identifies the dependency UUID and source
+Single-parent closures can also retain a source-declared type variable or a
+collection of primitive and variable types when the exact field UUID and its
+storage type agree. This preserves a rich field whose storage FK also occurs
+on an unrelated `:any` field. A declaration gap identifies the dependency UUID and source
 blocker codes. Public source files and source-plan counts require a separate
 scoped writer.
+
+A scalar rename can project a direct or inherited field when the legacy
+alias slot points at the declaring field's UUID. Its input declaration keeps
+the prepared type expression, including type variables. Supported pins retain
+the original binding UUID and a separate `:configure` assertion. Ambiguous
+names, conflicting pins and occupied ancestor fields remain diagnostics.
+
+A named pin on a union field uses the prepared package's namespace-resolved
+type definitions. The source planner checks finite expansion, marker
+preservation and directional subtyping. The pin must expand to a concrete
+type and the target may carry each type variable once. Unknown references,
+recursive aliases and unsupported declaration shapes keep the migration blocked.
+
+`source-snapshot/projection-readiness` returns the analyzer's scoped routes,
+binding UUIDs, directional proofs, runtime obligations and signature coverage.
+Missing implementation evidence or a custom rule's missing signature view
+produces an incomplete result with a diagnostic. For example, a rename of
+`core.collections/get`'s generic collection input can have a verified route
+and a deferred field-read obligation while its return rule needs that view.
+A named dictionary can supply its field type to this analysis when the
+verified original declaration and stored type UUID agree on a homogeneous
+map with primitive key and value types. Other named bodies still require
+their own declaration and field-identity evidence.
 
 Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-test
 --focus graphden.input.source-snapshot-test`.
@@ -142,8 +180,8 @@ and change an old single-operator map to a vector expression. Independently owne
 composed fields move to `:input` while inherited bindings move to `:bind`.
 Same-line trailing comments follow their values, standalone comments precede
 the next field, and declaration ordering retains original slot positions.
-Fields forwarding an inherited or referenced slot require a projection and
-remain blocked. Other entry moves fail explicitly. Literal contents are
+Verified inherited renames emit an explicit projection. A field in a referenced
+graph requires a proven use-site address. Other entry moves fail explicitly. Literal contents are
 kept verbatim.
 
 For example, `{:x {:ref :query :type :text}}` becomes
@@ -220,6 +258,60 @@ or `:configure` keys before any implementation in the resolved package closure
 is evaluated. Legacy arguments and literal maps may still use those names.
 Preflight snapshots package metadata and every module's parsed source per load
 call; processing consumes that same snapshot without rereading source files.
+
+## List contribution migration
+
+The offline field migrator accepts a sequence append from original source and
+its prepared binding and item rows. It can emit this constructor expression:
+
+```edn
+[:list-builder {:items [[:ref :app/load-row] [:value :status] [:value nil]]
+                :tail :open}]
+```
+
+Items retain their original binding UUID and position-derived item UUID. Each
+single-parent contribution gets a separate builder and optional tail field.
+A descendant append binds its builder to the previous tail's use-site address.
+A closed contribution binds an empty vector to its own tail. Repeated refs keep
+their target UUIDs and run through the existing sequence item compiler, which
+applies the receiving base function's delay policy and shared call cache.
+
+The package dry run reports these field proofs under
+`:verification :list-builders`. It counts edges linked to their source origins
+and field splices reparsed from checksummed modules. The offline v2 module
+reader materializes the first append to an unoccupied field as a callable with
+ordinary input bindings. It reconstructs all items, the owner edge and the
+optional seal from those records and compares them with their source origins.
+The dry run counts a whole list definition under `:reparsed-definitions` only
+after parsing the actual CST bytes and repeating the legacy/v2 comparison.
+Each subsequent append resolves against the frozen previous fragments and
+binds the prior open tail at its use site. The child module emits only its
+own new callable and input rows. An append following a closed tail fails.
+`graphden.input.list-records/recover-use` reconstructs one verified chain
+from the combined module rows and rejects unexpected writes into that use.
+Independent field declarations, assertions and a supported scalar rename can
+coexist with list contributions. Unsupported item annotations, inline items and
+ambiguous or missing ancestry have separate diagnostics.
+
+An item `{:as :label}` declares an optional owner input and becomes
+`[:project [:label]]` inside the builder. The projected operand keeps the
+legacy item UUID. Its binding belongs to the contributing owner, uses the full
+builder occurrence path and reads the owner's original field UUID. This also
+applies to an explicit `:type` with named or supported collection leaves.
+Fields use their original membership positions. Repeated reads use separate
+item UUIDs. The JVM resolves the original owner slot before reading it at the
+consumer's demand point.
+
+An occurrence with its own documentation or an explicit optional flag can
+carry that policy as the last projection argument, for example
+`[:project [:label] {:description "Display label" :required false}]`.
+The same item UUID stores the description and required flag on its scoped
+projection row. Other occurrences can read the same owner field with a
+different description. The owner field keeps its original optional contract.
+Legacy `:required true` on an item retains
+`:positional-list-annotation-required` because the old parser does not
+make that owner input mandatory.
+
 
 ## Focused verification
 

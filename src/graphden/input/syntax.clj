@@ -4,7 +4,8 @@
    Literal contents are opaque; parsing never loads or executes a graph."
   (:require
     [graphden.input.core :as input]
-    [graphden.input.format :as format]))
+    [graphden.input.format :as format]
+    [graphden.input.list-builder :as builder]))
 
 
 (defn- reject!
@@ -37,12 +38,15 @@
 
 
 (defn- parse-leaf
-  [path form {:keys [name->id binding-id scope inline-at root-contract]}]
+  [path form {:keys [name->id binding-id scope inline-at list-at root-contract]}]
   (when-not (and (vector? form) (= 2 (count form)))
     (reject! :explicit-expression-required path))
   (let [[operator payload] form
         expression (case operator
                      :value {:kind :value :value payload}
+                     :list-builder (if-let [trace (get list-at path)]
+                                     (builder/reference-expression trace form name->id)
+                                     (reject! :missing-list-construction path))
                      :project (do
                                 (when-not (and (= 1 (count path)) (format/local-projection? form))
                                   (reject! :unsupported-projection path))
@@ -115,13 +119,18 @@
                   (when-not (and field (= [id] (:path expression)) (= (:scope expression) (:scope context)))
                     (reject! :unsupported-expression path))
                   [:project [(:name field)]])
-    :ref (if-let [child (get (:inline-at context) path)]
-           (if (= (:fn-id child) (:fn-id expression))
-             [:ref (:inline-body child)]
-             (reject! :inline-reference-mismatch path))
-           (if-let [ref-name (get id->name (:fn-id expression))]
-             (if (keyword? ref-name) [:ref ref-name] (reject! :unresolved-ref path))
-             (reject! :unresolved-ref path)))
+    :ref (let [fragment (peek (get-in context [:list-at path :fragments]))
+               child (get-in context [:inline-at path])
+               ref-name (get id->name (:fn-id expression))]
+           (cond
+             fragment (do
+                        (when-not (= (:builder-id fragment) (:fn-id expression)) (reject! :list-reference-mismatch path))
+                        (builder/emit-fragment fragment id->name (into {} (map (juxt :id :name)) (get-in context [:root-contract :fields]))))
+             child (if (= (:fn-id child) (:fn-id expression))
+                     [:ref (:inline-body child)]
+                     (reject! :inline-reference-mismatch path))
+             (keyword? ref-name) [:ref ref-name]
+             :else (reject! :unresolved-ref path)))
     (reject! :unsupported-expression path)))
 
 

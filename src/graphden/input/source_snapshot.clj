@@ -69,28 +69,59 @@
                    #(update-vals % (fn [d] (if (= owner (:fn-id d)) baseline d)))))))
 
 
+(defn- owned-declaration
+  [{:keys [fn-id declaration-records] :as v2}]
+  (assoc v2 :owner (some #(when (and (= :fn (:kind %)) (= fn-id (:id %))) %) declaration-records)))
+
+
+(defn- direct-inline-entry
+  "The verified parent's round trip compared the child's original body, use-site
+   UUID and authored rows. Admit a leaf only through its matching local edge."
+  [package {:keys [fn-id bindings inline-definitions]}]
+  (let [[[path child] & more] (seq inline-definitions)
+        id (:fn-id child)
+        entry (owned-declaration child)
+        edge (some #(when (and (= path (:target-path %)) (empty? (:scope-path %))) %) bindings)]
+    (when-not (and (empty? more) (= 1 (count path)) (uuid? id)
+                   (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge)) (= id (:ref-fn-id edge))
+                   (= (ids/binding-id fn-id (first path)) (:id edge))
+                   (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
+                   (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
+                   (= 1 (count (get-in entry [:owner :parent-ids])))
+                   (every? empty? ((juxt :inline-definitions :list-builders :configurations :scoped-inputs) child)))
+      (reject! :unsupported-scope-declaration fn-id))
+    (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
+    entry))
+
+
+(defn- closure-entries
+  [package id resolve-named]
+  (let [{:keys [verification blockers v2]} (plan-entry package id)]
+    (when-not (= :authored-source-equivalent verification)
+      (throw (ex-info "Unverified dependency in source closure"
+                      {:type :input/source-snapshot :code :unverified-source-declaration
+                       :fn-id id :blockers (mapv :code blockers)})))
+    (when-not (:input-type-id v2) (reject! :unsupported-scope-declaration id))
+    (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]) resolve-named)
+                          (vals (:list-builders v2)))]
+      (cond-> (conj generated (owned-declaration v2))
+        (seq (:inline-definitions v2)) (conj (direct-inline-entry package v2))))))
+
+
 (defn- closure
   [package roots resolve-named]
   (loop [pending (vec roots) entries {}]
     (if-let [id (peek pending)]
       (if (contains? entries id)
         (recur (pop pending) entries)
-        (let [entry (plan-entry package id)
-              v2 (:v2 entry)
-              owner (some #(when (and (= :fn (:kind %)) (= id (:id %))) %) (:declaration-records v2))]
-          (when-not (= :authored-source-equivalent (:verification entry))
-            (throw (ex-info "Unverified dependency in source closure"
-                            {:type :input/source-snapshot :code :unverified-source-declaration
-                             :fn-id id :blockers (mapv :code (:blockers entry))})))
-          (when-not (and (:input-type-id v2) (empty? (:inline-definitions v2)))
-            (reject! :unsupported-scope-declaration id))
-          (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]) resolve-named)
-                                (vals (:list-builders v2)))
-                declared (assoc v2 :owner owner)
-                added (conj generated declared)
-                next-entries (into entries (map (juxt (comp :id :owner) identity)) added)
-                refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
-            (recur (into (into (pop pending) (:parent-ids owner)) refs) next-entries))))
+        (let [added (closure-entries package id resolve-named)
+              next-entries (reduce (fn [acc entry]
+                                     (let [id (get-in entry [:owner :id])]
+                                       (when (contains? acc id) (reject! :conflicting-declaration-record id))
+                                       (assoc acc id entry))) entries added)
+              parents (mapcat #(get-in % [:owner :parent-ids]) added)
+              refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
+          (recur (into (into (pop pending) parents) refs) next-entries)))
       entries)))
 
 

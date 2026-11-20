@@ -439,5 +439,29 @@
              (reason #(cst/list-builder-operation (assoc (peek definitions) :name :other) :xs fragment (:name->id ctx))))))))
 
 
+(deftest mixed-list-contributions-retain-field-trivia-and-configuration
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :flag :bool} :return-type :any}\r\n"
+                  "{:name :child :parent :base :args {:xs ; list\r\n [{:value \"line one\r\nline two\"} false] ; end\r\n"
+                  " :flag {:value true :type :bool} ; assertion\r\n :title {:type :text}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:title {:type :text}} (:input child)))
+    (is (= {[:flag] {:type :bool}} (:configure child)))
+    (is (= {:xs [:list-builder {:items [[:value "line one\r\nline two"] [:value false]] :tail :open}]
+            :flag [:value true]} (:bind child)))
+    (is (str/includes? target ":xs ; list\r\n [:list-builder"))
+    (is (str/includes? target "; end\r\n"))
+    (is (str/includes? target "; assertion\r\n"))))
+
+
+(deftest independent-scalar-projection-and-list-preserve-their-own-origins
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :key {:type :text}} :return-type :any}"
+                  "{:name :child :parent :base :args {:key {:as :label} :xs [false nil]}}]}")
+        child (peek (:fns (edn/read-string (migrate-child text))))]
+    (is (= {:label {:type :text :required false}} (:input child)))
+    (is (= [:project [:label]] (get-in child [:bind :key])))
+    (is (= [:list-builder {:items [[:value false] [:value nil]] :tail :open}] (get-in child [:bind :xs])))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

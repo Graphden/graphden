@@ -251,8 +251,9 @@ binds the prior open tail at its use site. The child module emits only its
 own new callable and input rows. An append following a closed tail fails.
 `graphden.input.list-records/recover-use` reconstructs one verified chain
 from the combined module rows and rejects unexpected writes into that use.
-Positional projections, inline items, mixed declarations and ambiguous or
-missing ancestry have separate diagnostics.
+Independent field declarations, assertions and a supported scalar rename can
+coexist with list contributions. Positional projections, inline items and
+ambiguous or missing ancestry have separate diagnostics.
 
 ## Focused verification
 

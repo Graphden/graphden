@@ -171,7 +171,7 @@
     (if-let [{:keys [owner-id target-id binding-id builder-id tail tail-id] :as current} (first remaining)]
       (do
         (when-not (and (= (origin owner-id target-id) (select-keys current [:owner-id :target-id :binding-id :builder-id :tail-id]))
-                       (contains? #{:open :closed} tail) (not (some #{binding-id} path))
+                       (contains? #{:open :closed} tail) (not-any? #{binding-id} path)
                        (or (nil? prior) (= target-id (:target-id prior))))
           (reject! :invalid-list-chain))
         (when (= :closed (:tail prior)) (reject! :closed-list-continuation))

@@ -117,7 +117,7 @@
         records (list-records/materialize fragment field {})
         origin (dissoc fragment :items)
         rows (filterv #(= :input-binding (:kind %)) records)
-        idx (.indexOf records (first rows))]
+        idx (java.util.List/.indexOf records (first rows))]
     (is (= (mapv :id (:items fragment)) (mapv :id rows)))
     (is (= fragment (list-records/recover origin field {} (reverse records))))
     (is (= :list-declaration-mismatch
@@ -161,12 +161,12 @@
     (is (= (first (:bindings actual)) (get-in entry [:v2 :bindings 0])))
     (is (= :list-fragment-mismatch
            (reason #(builder/reference-expression actual [:list-builder {:items [] :tail :closed}] {}))))
-    (doseq [alter [(fn [d] (assoc-in d (into path [1 :items 2]) [:value 1]))
-                   (fn [d] (assoc-in d (into path [1 :tail]) :open))
-                   (fn [d] (assoc-in d (into path [1 :items 0]) [:value :read]))
-                   (fn [d] (update-in d (into path [1 :items]) #(vec (reverse %))))
-                   (fn [d] (update-in d [:definitions 0 :proposed :bind] dissoc :xs))]]
-      (is (= [:legacy-v2-meaning-mismatch] (mapv :code (:blockers (check (alter plan)))))))
+    (doseq [change-plan [(fn [d] (assoc-in d (into path [1 :items 2]) [:value 1]))
+                         (fn [d] (assoc-in d (into path [1 :tail]) :open))
+                         (fn [d] (assoc-in d (into path [1 :items 0]) [:value :read]))
+                         (fn [d] (update-in d (into path [1 :items]) #(vec (reverse %))))
+                         (fn [d] (update-in d [:definitions 0 :proposed :bind] dissoc :xs))]]
+      (is (= [:legacy-v2-meaning-mismatch] (mapv :code (:blockers (check (change-plan plan)))))))
     (is (= [:unresolved-list-item-ref]
            (mapv :code (:blockers (check (assoc-in plan (into path [1 :items 0]) [:ref :consume]))))))))
 

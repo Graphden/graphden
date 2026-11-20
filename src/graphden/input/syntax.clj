@@ -119,22 +119,18 @@
                   (when-not (and field (= [id] (:path expression)) (= (:scope expression) (:scope context)))
                     (reject! :unsupported-expression path))
                   [:project [(:name field)]])
-    :ref (cond
-           (get (:list-at context) path)
-           (let [fragment (peek (:fragments (get (:list-at context) path)))]
-             (when-not (= (:builder-id fragment) (:fn-id expression)) (reject! :list-reference-mismatch path))
-             (builder/emit-fragment fragment id->name))
-
-           (get (:inline-at context) path)
-           (let [child (get (:inline-at context) path)]
-             (if (= (:fn-id child) (:fn-id expression))
-               [:ref (:inline-body child)]
-               (reject! :inline-reference-mismatch path)))
-
-           :else
-           (if-let [ref-name (get id->name (:fn-id expression))]
-             (if (keyword? ref-name) [:ref ref-name] (reject! :unresolved-ref path))
-             (reject! :unresolved-ref path)))
+    :ref (let [fragment (peek (get-in context [:list-at path :fragments]))
+               child (get-in context [:inline-at path])
+               ref-name (get id->name (:fn-id expression))]
+           (cond
+             fragment (do
+                        (when-not (= (:builder-id fragment) (:fn-id expression)) (reject! :list-reference-mismatch path))
+                        (builder/emit-fragment fragment id->name))
+             child (if (= (:fn-id child) (:fn-id expression))
+                     [:ref (:inline-body child)]
+                     (reject! :inline-reference-mismatch path))
+             (keyword? ref-name) [:ref ref-name]
+             :else (reject! :unresolved-ref path)))
     (reject! :unsupported-expression path)))
 
 

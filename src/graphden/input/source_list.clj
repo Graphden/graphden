@@ -16,7 +16,7 @@
   (throw (ex-info "Unverified list construction" {:type :input/list-builder :code code})))
 
 
-(defn- ancestors
+(defn- ordered-ancestry
   [definition defs]
   (loop [current definition seen #{} chain ()]
     (let [id (:fn-id current)
@@ -102,7 +102,7 @@
    Unsupported or unavailable ancestry keeps an explicit source diagnostic."
   [{:keys [defs-by-name name->id]} records-of original-for definition field target binding-id]
   (try
-    (let [chain (ancestors definition defs-by-name)
+    (let [chain (ordered-ancestry definition defs-by-name)
           owner-name (slots/own-ref definition defs-by-name)
           [slot-owner slot-name] (slots/resolve-slot-owner owner-name field defs-by-name (get-in definition [:args field]))
           type (slots/slot-type-of slot-owner slot-name defs-by-name)

@@ -226,27 +226,27 @@
 
 
 (defn- partition-composed-edit
-  [source starts loc {:keys [definition path declarations operators list-operations]}]
+  [source starts loc {:keys [definition path declarations operators]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
                  (not-any? #(key-loc loc %) [:input :bind :configure])
                  (vector? declarations) (= (count declarations) (count (set declarations)))
-                 (map? operators) (not-any? (set declarations) (keys operators))
-                 (= (set (keys list-operations))
-                    (into #{} (keep (fn [[field op]] (when (= :list-builder op) field))) operators))
-                 (every? (fn [[field op]]
-                           (and (= definition (:definition op)) (= :list-builder (:op op)) (= [:args field] (:path op))))
-                         list-operations))
+                 (map? operators) (not-any? (set declarations) (keys operators)))
     (refuse :invalid-field-partition {:definition definition}))
   (let [args (value-at loc path)
         key-edit (rename-edit source starts loc definition path (if (seq declarations) :input :bind))
         map-span (node-edit source starts args identity)
         spans (field-spans source starts args
                            (fn [field value]
-                             (case (get operators field)
-                               nil (node-edit source starts value identity)
-                               :typed-expression (typed-leaf source starts value)
-                               :list-builder (list-builder-edit source starts value (get list-operations field))
-                               (leaf-edit source starts value (get operators field) [:args field]))))
+                             (let [operation (get operators field)
+                                   op (if (map? operation) (:op operation) operation)]
+                               (case op
+                                 nil (node-edit source starts value identity)
+                                 :typed-expression (typed-leaf source starts value)
+                                 :list-builder (do
+                                                 (when-not (and (= definition (:definition operation)) (= [:args field] (:path operation)))
+                                                   (refuse :invalid-field-partition {:definition definition}))
+                                                 (list-builder-edit source starts value operation))
+                                 (leaf-edit source starts value op [:args field])))))
         chunks (field-chunks source map-span spans)
         by-field (into {} chunks)
         owns? (set declarations)
@@ -476,8 +476,7 @@
           (or (seq fields) (seq configuration))
           [{:op :partition-composed-args :definition (:name source) :path [:args]
             :declarations (vec (keys declarations))
-            :operators (into {} (map (juxt (comp second :path) :op)) operations)
-            :list-operations (into {} (keep #(when (= :list-builder (:op %)) [(second (:path %)) %])) operations)}]
+            :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
           :else (into (rename :rename-bind) operations)))
 
       (refuse :unsupported-source-entry {}))))

@@ -46,8 +46,8 @@
         (doseq [op ops] (check-field! by-name module-ns name->id migrated op))
         {:fields (frequencies (map (comp :definition first) ops))
          :entries (mapv (fn [entry]
-                          (let [{:keys [name namespace source-file]} (:source entry)]
-                            (assoc entry :proposed (assoc (get by-name name) :namespace namespace :source-file source-file))))
+                          (let [{source-ns :namespace :keys [name source-file]} (:source entry)]
+                            (assoc entry :proposed (assoc (get by-name name) :namespace source-ns :source-file source-file))))
                         whole)}))))
 
 

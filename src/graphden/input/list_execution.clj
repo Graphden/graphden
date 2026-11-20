@@ -22,6 +22,11 @@
       (second form))))
 
 
+(defn- delayed-literal
+  [value]
+  (delay value))
+
+
 (defn compile-construction
   "Compile the checked chain with the receiving base's explicit delay policy
    and the ordinary child's execution context and call cache. A descendant
@@ -37,7 +42,7 @@
         evaluate (compile/compile-list-items (:owner-id (peek fragments)) items lazy-seq? child-callables lookups)]
     (if (seq tail)
       (fn [free-args ctx]
-        (concat (evaluate free-args ctx) (if lazy-seq? (map (fn [v] (delay v)) tail) tail)))
+        (concat (evaluate free-args ctx) (if lazy-seq? (map delayed-literal tail) tail)))
       evaluate)))
 
 

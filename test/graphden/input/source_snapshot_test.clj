@@ -197,14 +197,14 @@
 (deftest inline-list-leaves-preserve-original-operand-positions
   (let [body {:parent :str-upper :args {:string "same"}}
         host {:name :sample :namespace "fixture" :parent :str :args {:parts [body body]}}
-        sources (conj (filterv #(#{:str-upper :str} (:name %)) (sources "strings")) host)
-        prepared (parse/prepare-module sources {} {})
+        originals (conj (filterv #(#{:str-upper :str} (:name %)) (sources "strings")) host)
+        prepared (parse/prepare-module originals {} {})
         definition (some #(when (= :sample (:name %)) %) (:fn-defs prepared))
         children (mapv (:name->id prepared) (get-in definition [:args :parts]))
         owner (:fn-id definition)
         field (ids/slot-id (ids/fn-id "core.strings" :str) :parts)
         {:keys [binding-id builder-id]} (list-builder/origin owner field)
-        {:keys [context options]} (snapshot/freeze-closure (snapshot/package-index prepared sources) [owner] @roots)
+        {:keys [context options]} (snapshot/freeze-closure (snapshot/package-index prepared originals) [owner] @roots)
         link (get-in context [:bindings binding-id])
         ctx (assoc prepared :fn-defs [definition])
         entry (first (:definitions (source/verify-module (source/plan-module [host] ctx) ctx)))

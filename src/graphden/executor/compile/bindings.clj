@@ -16,7 +16,7 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.registry.core :as reg]
     [graphden.packages.records.ids :as ids]
-    [graphden.types.core :as types]))
+    [graphden.types.reference :as reference]))
 
 
 ;; Binding-row shape predicates. Single source of truth for "what kind
@@ -232,7 +232,7 @@
    This dispatch only chooses evaluation versus wrapping; it grants no
    permission to consume a secret as a plain value."
   [ref-fn-id lookups]
-  (some? (types/callable-signature (effective-return-type ref-fn-id lookups))))
+  (reference/produces-callable? (effective-return-type ref-fn-id lookups)))
 
 
 (defn- lazy-seq-arg-names

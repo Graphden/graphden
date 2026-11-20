@@ -37,7 +37,8 @@
       (reject! :invalid-expression))
     (when-not (case kind
                 nil (and (not (:value-present row)) (nil? (:ref-fn-id row)))
-                "value" (and (true? (:value-present row)) (nil? (:ref-fn-id row)))
+                "value" (and (true? (:value-present row)) (nil? (:ref-fn-id row))
+                             (or (nil? (:resolver-fn-id row)) (uuid? (:resolver-fn-id row))))
                 "ref" (and (uuid? (:ref-fn-id row)) (not (:value-present row))
                            (nil? (:resolver-fn-id row)))
                 "projection" (and (not (:value-present row)) (nil? (:ref-fn-id row))

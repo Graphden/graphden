@@ -770,6 +770,24 @@
            definition keys fail during the entire package closure's preflight, before any impl
            executes. Absent/version-1 headers still use legacy semantics; same-named argument
            fields and literal map keys remain ordinary data."}
+    {:ns graphden.input.descriptor :defn resolve-contract
+     :say "Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs
+           come from memberships; aliases retain those identities, marker/refinement obligations
+           survive, and ambiguous union roots are rejected. This descriptor never stores generated
+           reference dependencies or the remaining input back into the declaration."}
+    {:ns graphden.input.analysis :defn analyze-effective-input
+     :say "Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope;
+           scoped overlays must fit its target's unoccupied fields. Identity refs do not import
+           target inputs, and callable producers expose constructor inputs. Required addresses and
+           typed projections expose their source inputs. Metadata narrows contracts; value cycles
+           reject. Callable plans separate invocation parameters and captures by origin. Deferred
+           field/container obligations remain explicit. Stored-value resolvers consume their own
+           literal argument without capturing ambient caller fields; execution remains inactive."}
+    {:ns graphden.input.signatures :defn infer-use
+     :say "Feeds canonical scoped input facts through the existing type-rule engine using explicit
+           implementation argument paths. Frozen registry views preserve rule lookup isolation;
+           implementation functions never run here. Returned substitutions and proofs must join
+           graph checking before the inferred signature can be treated as checked."}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

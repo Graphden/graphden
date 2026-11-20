@@ -90,6 +90,7 @@
     [graphden.types.check.markers :as markers]
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
+    [graphden.types.reference :as reference]
     [graphden.types.view :as view]))
 
 
@@ -216,27 +217,7 @@
    `:call-time-effects` subset, so the picker could disagree with
    `check-binding!` about the very bind it was offering."
   [fn-name]
-  (when-let [info (registry/rich-type-of fn-name)]
-    (let [ret (or (:return info) :any)
-          ;; `:effects` is unconditionally stored — by record-rich-types!
-          ;; AND record-rich-types-raw! (both default `#{}` for pure
-          ;; fns post-P8). Direct lookup is safe.
-          ;;
-          ;; `:call-time-effects` (when present) is the per-invocation
-          ;; subset — bound-arg ref-effects subtracted. HOF slots
-          ;; (`:filter :pred #{}`, `:map :func #{}`) measure against
-          ;; per-invocation purity, NOT against the fn's full
-          ;; construction-time effect set; prefer the call-time
-          ;; subset when recorded. Falls back to `:effects` for
-          ;; base-fns / older raw entries without the split.
-          eff (or (:call-time-effects info) (:effects info))]
-      (if-let [signature (types/callable-signature ret)]
-        ;; Producer-of-callable: the inner fn-type already carries
-        ;; whatever effects-constraint the slot declared. We can't
-        ;; meaningfully inject the producer's own effects here.
-        signature
-        (types/make-fn-type (or (:args info) {}) ret eff
-                            (get info :execution :unknown))))))
+  (reference/callable-contract (registry/rich-type-of fn-name)))
 
 
 (defn- has-type-var?
@@ -610,6 +591,33 @@
 ;; check-fn-def! is split into named phase helpers; the top-level fn
 ;; below just composes them.
 ;; -----------------------------------------------------------------------------
+
+(defn check-input-binding
+  "ID-addressed entry to the existing directional binding checker. This does
+   not infer a reference mode or publish a signature. The caller supplies the
+   actual type after ref/capture classification and scopes the type registry.
+   Gradual/refinement acceptance remains explicit deferred evidence; it is
+   never a portable execution certificate. Error data omits literal payloads."
+  [{:keys [address expected actual expression substitution]}]
+  (if (nil? actual)
+    {:status :deferred :reason :missing-actual-type :substitution substitution}
+    (let [b-form (when (= :value (:kind expression)) {:value (:value expression)})]
+      (try
+        (let [next-subst (binding [*source-info* {}]
+                           (check-binding! nil address expected actual (or substitution {}) nil b-form))
+              expected (types/resolve next-subst expected)
+              actual (types/resolve next-subst actual)
+              unresolved? (or (types/type-any? #(or (= :any %) (= :jsonb %) (types/type-var? %)) actual)
+                              (types/type-any? #(or (types/refine-type? %) (types/type-var? %)) expected))]
+          {:status (if unresolved? :deferred :checked)
+           :substitution next-subst
+           :reason (when unresolved? :runtime-type-obligation)})
+        (catch clojure.lang.ExceptionInfo e
+          (if (= :types/check-failed (:type (ex-data e)))
+            (throw (ex-info "Structured input binding does not fit its expected type"
+                            {:type :types/check-failed :address address
+                             :reason (or (:reason (ex-data e)) :type-mismatch)}))
+            (throw e)))))))
 
 
 (defn ref-targets
@@ -1344,42 +1352,7 @@
    If neither args nor effects changed, return `actual` unchanged
    (avoids needless allocation in the common path)."
   [expected actual b-form]
-  (let [call-site-keys (set (keys (types/fn-args expected)))
-        raw-args       (types/fn-args actual)
-        args-after-var (if (and (empty? raw-args)
-                                (seq call-site-keys))
-                         (types/fn-args expected)
-                         raw-args)
-        declared       (:lambda-params (registry/rich-type-of b-form))
-        extras         (if (some? declared)
-                         (remove (set declared) (keys args-after-var))
-                         (when (> (count args-after-var)
-                                  (count call-site-keys))
-                           (remove call-site-keys (keys args-after-var))))
-        stripped       (if (seq extras)
-                         (apply dissoc args-after-var extras)
-                         args-after-var)
-        final-args     (if (and (empty? stripped) (seq call-site-keys))
-                         (types/fn-args expected)
-                         stripped)
-        stripped-keys  (set extras)
-        actual-effects (types/fn-effects actual)
-        per-arg        (or (some-> (registry/rich-type-of b-form) :arg-effects)
-                           {})
-        capture-eff    (reduce into #{}
-                               (vals (select-keys per-arg stripped-keys)))
-        ;; `:any` in effect position is the canonical "no effect
-        ;; constraint declared" marker (parse-fn-type-decl's 4th
-        ;; element), not a set — stripping captures from an
-        ;; unconstrained contract leaves it unconstrained.
-        final-effects  (if (and (seq stripped-keys) (set? actual-effects))
-                         (set/difference actual-effects capture-eff)
-                         actual-effects)]
-    (if (and (= final-args raw-args)
-             (= final-effects actual-effects))
-      actual
-      (types/make-fn-type final-args (types/fn-ret actual) final-effects
-                          (types/fn-execution actual)))))
+  (reference/call-site-contract expected actual (registry/rich-type-of b-form)))
 
 
 (defn- throw-literal-bound-to-fn-slot!
@@ -2331,6 +2304,27 @@
           resolved)))))
 
 
+(defn rule-return-for-entry
+  "Apply the existing return-rule engine to an explicitly supplied root entry.
+   Entry selection performs no lookup. Registered rules may consult the active
+   registry; offline callers must bind a frozen view. Binding facts use the
+   implementation's argument keys, not authored input identity."
+  [entry binfo static-ret]
+  (let [rule (:return-type-rule entry)
+        taint? (:taint-propagate? entry)
+        sig? (and (not rule) (has-type-var? (:return entry)))]
+    (if-not (or rule taint? sig?)
+      static-ret
+      (let [binfo (if (fn? binfo) (binfo) binfo)
+            structural (cond
+                         rule (rule binfo static-ret)
+                         sig? (signature-return entry binfo static-ret)
+                         :else static-ret)]
+        (if taint?
+          (types/taint-with-secret-if-tainted binfo structural)
+          structural)))))
+
+
 (defn rule-return
   "The return type the ROOT base-fn under `parent` computes for one call
    site: its recorded `:return-type-rule` (e.g. `:assoc`'s record
@@ -2349,20 +2343,8 @@
    Public so the per-rule unit tests (`types.rules-test`) dispatch
    through exactly this wiring instead of a copy of it."
   [parent binfo static-ret]
-  (let [entry (registry/rich-type-of (registry/root-base-fn-name parent))
-        rule (:return-type-rule entry)
-        taint? (:taint-propagate? entry)
-        sig? (and (not rule) (has-type-var? (:return entry)))]
-    (if-not (or rule taint? sig?)
-      static-ret
-      (let [binfo (if (fn? binfo) (binfo) binfo)
-            structural (cond
-                         rule (rule binfo static-ret)
-                         sig? (signature-return entry binfo static-ret)
-                         :else static-ret)]
-        (if taint?
-          (types/taint-with-secret-if-tainted binfo structural)
-          structural)))))
+  (rule-return-for-entry (registry/rich-type-of (registry/root-base-fn-name parent))
+                         binfo static-ret))
 
 
 (defn- compute-return-type
@@ -2492,6 +2474,59 @@
                 :declared declared
                 :computed computed-return})))
     recorded))
+
+
+(defn- check-signature-arguments
+  [root-entry bindings-info]
+  (when-not (= (set (keys (:args root-entry))) (set (keys bindings-info)))
+    (throw (ex-info "Structured signature requires every implementation argument"
+                    {:type :input/unresolved-contract :code :signature-argument-mismatch})))
+  (reduce-kv
+    (fn [{:keys [substitution] :as result} argument info]
+      (let [proof (check-input-binding
+                    {:address (:address info) :expected (get-in root-entry [:args argument])
+                     :actual (:type info) :substitution substitution
+                     :expression (if (:value-present info)
+                                   {:kind :value :value (:value info)}
+                                   {:kind :type-fact})})]
+        (-> result (assoc :substitution (:substitution proof))
+            (assoc-in [:proofs argument]
+                      (assoc proof :address (:address info)
+                             :expected-type (types/resolve (:substitution proof) (get-in root-entry [:args argument])))))))
+    {:substitution {} :proofs {}} bindings-info))
+
+
+(defn infer-input-signature
+  "Run existing return, effect, declaration and execution policies for one
+   structured-input use. Facts are keyed by explicit implementation ABI keys;
+   no legacy fn-def binding AST is constructed. The supplied registry view is
+   complete for this use and has no process-global or tenant fallback. This
+   function computes evidence only and never publishes a registry entry."
+  [{:keys [fn-id root-entry bindings-info argument-effects free-arguments
+           signature-view declaration static-return]}]
+  (when-not (and (map? root-entry) (map? bindings-info)
+                 (map? argument-effects) (map? (:by-id signature-view))
+                 (map? (:by-name signature-view)))
+    (throw (ex-info "Structured signature requires frozen evidence"
+                    {:type :input/unresolved-contract :code :signature-evidence-required})))
+  (binding [registry/*rich-types-override* (atom signature-view)
+            registry/*per-org-rich-override* (atom {})]
+    (let [{:keys [substitution proofs]} (check-signature-arguments root-entry bindings-info)
+          static-return (types/resolve substitution (or static-return (:return root-entry)))
+          computed (types/resolve substitution (rule-return-for-entry root-entry bindings-info static-return))
+          effects (compute-effects argument-effects root-entry)
+          result {:return (enforce-declared-return! fn-id declaration computed)
+                  :substitution substitution :argument-proofs proofs
+                  :effects effects
+                  :arg-effects argument-effects
+                  :call-time-effects (compute-call-time-effects argument-effects root-entry free-arguments)
+                  :execution (execution/derive root-entry bindings-info registry/rich-type-of)}]
+      (check-effects-policy! fn-id declaration effects)
+      (reduce (fn [result [rule-key result-key]]
+                (if-let [rule (get root-entry rule-key)]
+                  (assoc result result-key (rule bindings-info))
+                  result))
+              result [[:slot-types-rule :slot-types] [:nav-types-rule :nav-types]]))))
 
 
 (defn- return-type-drift

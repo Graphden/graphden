@@ -187,7 +187,7 @@
                        reference (get-in analysis [:scopes (second owner) :bindings address :reference])]
                    (when-not (and (= (:root-scope analysis) owner) (:capture-resolved? reference)
                                   (empty? external-captures) (vector? parameters)
-                                  (every? keyword? parameters) (apply distinct? parameters))
+                                  (every? keyword? parameters) (= (count parameters) (count (set parameters))))
                      (reject! :unsupported-closure-scope {:address address}))
                    (doseq [{:keys [from source role via] :as capture} captures]
                      (when-not (and (= :capture role) (= binding-id via) (= owner (first source))

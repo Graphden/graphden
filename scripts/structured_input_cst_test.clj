@@ -351,6 +351,18 @@
     (is (= {:exposed {:type :text :required false}} (get-in child [:bind :y 1 :input])))))
 
 
+(deftest nested-inline-cst-keeps-legacy-body-order-across-map-kinds
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any} :return-type :any}"
+                  "{:name :producer :return-type :any} {:name :child :parent :sink :args {"
+                  ":x {:parent :sink :args {:x {:args {:x {:type :any :ref :producer}} :parent :sink"
+                  " :return-type :any :return-type-wide? true :description \"Test\","
+                  " :effects #{} :expects-effects [] :lambda-params []}}}}}]}")
+        target (migrate-child text)]
+    (is (str/includes? target ":legacy-order [:args :parent :return-type :return-type-wide? :description :effects :expects-effects :lambda-params]"))
+    (is (str/includes? target ":legacy-forms {:x :type-first}"))
+    (is (not (str/includes? target "_anon-")))))
+
+
 (deftest own-field-positions-survive-a-large-mixed-map
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :return-type :text :args {:a :int :b :int :c :int :d :int :e :int :f :int :g :int}} {:name :child :parent :base :args {:z {:type :int} :a 1 :b 2 :c 3 :d 4 :e 5 :f 6 :g 7 :x {:type :text} :q {:type :bool}}}]}"
         args (:args (peek (:fns (edn/read-string text))))

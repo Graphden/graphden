@@ -128,7 +128,7 @@
 
 
 (defn- inline-field-edits
-  [source starts loc {:keys [bind input configure legacy-forms]} path]
+  [source starts loc {:keys [bind input configure legacy-forms legacy-order]} path]
   (let [fields (mapv (fn [[field form]]
                        (let [arg-path [:args field]]
                          [field (inline-binding-edit source starts (value-at loc arg-path) form
@@ -143,6 +143,7 @@
     (cons (assoc key :after (str (when (seq input) (str ":input " (migration/stable-edn input) " "))
                                  (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
                                  (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
+                                 (when (seq legacy-order) (str ":legacy-order " (migration/stable-edn legacy-order) " "))
                                  ":bind"))
           (keep second fields))))
 

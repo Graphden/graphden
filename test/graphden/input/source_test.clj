@@ -713,3 +713,19 @@
     (is (= {:x [:project [:alias]]} (get-in entry [:proposed :bind :x 1 :bind])))
     (is (= [original] (:target-path binding)))
     (is (= [alias-id] (:projection-path binding)))))
+
+
+(deftest nested-inline-order-survives-the-array-map-threshold
+  (let [inner (array-map :args {:x (array-map :type :any :ref :producer)} :parent :sink
+                         :return-type :any :return-type-wide? true :description "Metadata"
+                         :effects #{} :expects-effects [] :lambda-params [])
+        outer {:parent :sink :args {:x inner}}
+        host {:name :host :namespace "demo" :parent :sink :args {:x outer}}
+        context (prepared [base producer host])
+        planned (source/plan-module [host] context)
+        nested-path [:definitions 0 :proposed :bind :x 1 :bind :x 1]
+        dropped (update-in planned nested-path dissoc :legacy-order)]
+    (is (= (vec (keys inner)) (:legacy-order (get-in planned nested-path))))
+    (is (= :authored-source-equivalent (get-in (source/verify-module planned context)
+                                               [:definitions 0 :verification])))
+    (is (= :blocked (get-in (source/verify-module dropped context) [:definitions 0 :status])))))

@@ -62,8 +62,10 @@ extra information to recover the legacy hash. `:ref-wrapper` preserves
 whole value by the legacy loader. Inline children use the same
 `:configure` assertions and scalar alias projections as named
 declarations. `:type-first` preserves the original wrapper key order
-when restoring a configured binding. The reader keeps absent arguments
-distinct from `:bind {}` and verifies rows and binding origins recursively.
+when restoring a configured binding. If the added keys would change the
+legacy declaration's iteration order, `:legacy-order` records that order.
+The reader keeps absent arguments distinct from `:bind {}` and verifies
+rows and binding origins recursively.
 
 Inline annotations on the enclosing binding and inline list items still
 have explicit blockers. List builders, rename projections, referenced

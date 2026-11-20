@@ -265,8 +265,22 @@ own new callable and input rows. An append following a closed tail fails.
 `graphden.input.list-records/recover-use` reconstructs one verified chain
 from the combined module rows and rejects unexpected writes into that use.
 Independent field declarations, assertions and a supported scalar rename can
-coexist with list contributions. Positional projections, inline items and
+coexist with list contributions. Annotated positional projections, inline items and
 ambiguous or missing ancestry have separate diagnostics.
+
+An item `{:as :label}` declares an optional owner input and becomes
+`[:project [:label]]` inside the builder. The projected operand keeps the
+legacy item UUID. Its binding belongs to the contributing owner, uses the full
+builder occurrence path and reads the owner's original field UUID. This also
+applies to an explicit `:type` with named or supported collection leaves.
+Fields use their original membership positions. Repeated reads use separate
+item UUIDs. The JVM resolves the original owner slot before reading it at the
+consumer's demand point.
+
+Legacy items with `:description` or `:required` retain
+`:positional-list-annotation-required`. The original parser stores those
+keys on the item's raw value while creating an optional owner slot with an
+empty description. Promoting those keys onto that slot changes its contract.
 
 ## Focused verification
 

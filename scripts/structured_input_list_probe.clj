@@ -23,7 +23,7 @@
         path (cond-> (:path operation) (contains? migrated name) (assoc 0 :bind))
         form (get-in (get by-name name) path)
         names (source-list/field-names name->id module-ns (:original operation))
-        result (builder/parse-fragment (:binding-id fragment) form names)]
+        result (builder/parse-fragment (:binding-id fragment) form names (:owner-id fragment))]
     (when-not (migration/same-edn? (dissoc fragment :owner-id :target-id) result)
       (throw (ex-info "List item identity changed" {:code :list-item-origin-mismatch})))))
 

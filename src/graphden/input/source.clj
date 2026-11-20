@@ -5,6 +5,7 @@
   (:require
     [clojure.edn :as edn]
     [graphden.input.format :as format]
+    [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
     [graphden.input.source-context :as source-context]
@@ -172,6 +173,8 @@
                                        [:ref inline-body]
                                        (binding-expression binding names))
                          :policy (binding-policy binding)}
+                  (some :source-id (:items (peek (:fragments builder))))
+                  (assoc :list-inputs (positions/authored-inputs (:id own) grouped name->id body))
                   builder (merge {:list-builder builder} (source-list/contribution-expression builder body (:namespace source) name->id))
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
@@ -303,7 +306,7 @@
                                 (mapcat #(argument-blockers source % chain) arguments)
                                 (inherited-blockers source definition context arguments))))
         declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
-        declarations (into declarations (map (juxt :alias :declaration)) aliases)
+        declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
         binds (filter #(= :binding (:kind %)) arguments)
         configuration (field-assertions source arguments)
         bindings (into (array-map)

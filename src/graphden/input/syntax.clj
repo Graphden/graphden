@@ -125,7 +125,7 @@
            (cond
              fragment (do
                         (when-not (= (:builder-id fragment) (:fn-id expression)) (reject! :list-reference-mismatch path))
-                        (builder/emit-fragment fragment id->name))
+                        (builder/emit-fragment fragment id->name (into {} (map (juxt :id :name)) (get-in context [:root-contract :fields]))))
              child (if (= (:fn-id child) (:fn-id expression))
                      [:ref (:inline-body child)]
                      (reject! :inline-reference-mismatch path))

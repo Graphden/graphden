@@ -528,5 +528,17 @@
     (is (= [:list-builder {:items [[:value false] [:value nil]] :tail :open}] (get-in child [:bind :xs])))))
 
 
+(deftest positional-list-inputs-preserve-item-comments-and-rich-annotation-trivia
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :collect :args {:xs :sequence} :return-type :any}\r\n"
+                  "{:name :child :parent :collect :args {:xs [{:as ; uses caller\r\n"
+                  " :label :type [:union ; rich input\r\n :text :null]} {:as :other} \"a  b\"]}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:label {:type [:union :text :null] :required false} :other {:type :any :required false}} (:input child)))
+    (is (= [[:project [:label]] [:project [:other]] [:value "a  b"]] (get-in child [:bind :xs 1 :items])))
+    (doseq [comment ["; uses caller\r\n" "; rich input\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern comment) target)))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

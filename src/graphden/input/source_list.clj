@@ -3,8 +3,10 @@
    adapter does not activate a runtime or publish generated declarations."
   (:require
     [graphden.input.list-builder :as builder]
+    [graphden.input.list-positions :as positions]
     [graphden.input.list-records :as list-records]
     [graphden.input.migration :as migration]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slots]
@@ -52,8 +54,20 @@
       (let [original (original-for definition)
             items (filter #(= (:id binding) (:binding-id %)) (:binding-list-item rows))]
         (when-not (contains? (:args original) field) (reject! :list-source-origin-required))
-        (let [form (get-in original [:args field])]
-          (builder/source-fragment binding items form (field-names name->id (:namespace original) form)))))))
+        (let [form (get-in original [:args field])
+              normalize (fn [items]
+                          (mapv #(if (and (positions/marker? %) (contains? % :type))
+                                   (update % :type rebase/rewrite-type-references
+                                           (fn [ref] (parse/normalize-ref ref name->id (:namespace original))))
+                                   %) items))
+              prepared (cond (vector? form) (normalize form)
+                             (vector? (:append form)) (update form :append normalize)
+                             :else form)
+              fragment (builder/source-fragment binding items prepared (field-names name->id (:namespace original) form))
+              anchors (when (some :source-id (:items fragment)) (positions/inputs owner rows name->id))]
+          (when-not (every? (set (map :id (vals anchors))) (keep :source-id (:items fragment)))
+            (reject! :positional-list-field-mismatch))
+          fragment)))))
 
 
 (defn- materialize

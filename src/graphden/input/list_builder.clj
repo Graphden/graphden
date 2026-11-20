@@ -2,6 +2,7 @@
   "Ordered list fragments for the offline source migration. Item references
    retain their own occurrences and the consumer's existing delivery policy."
   (:require
+    [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]))
@@ -28,13 +29,16 @@
 
 
 (defn- parse-item
-  [binding-id name->id position form]
+  [binding-id name->id owner position form]
   (when-not (and (vector? form) (= 2 (count form)))
     (reject! :invalid-list-item))
   (let [[op payload] form
         id (ids/binding-list-item-id binding-id position)]
     (case op
       :value {:id id :position position :kind :value :value payload}
+      :project (if (and (uuid? owner) (vector? payload) (= 1 (count payload)) (simple-keyword? (first payload)))
+                 {:id id :position position :kind :projection :source-id (ids/slot-id owner (first payload))}
+                 (reject! :positional-list-field-mismatch))
       :ref (let [ref-id (get name->id payload)]
              (when-not (and (keyword? payload) (uuid? ref-id))
                (reject! :unresolved-list-item-ref))
@@ -45,17 +49,18 @@
 (defn parse-fragment
   "Parse an explicit builder at a particular binding occurrence. A fragment's
    continuation belongs only to this occurrence, even for identical contents."
-  [binding-id form name->id]
-  (when-not (and (uuid? binding-id) (vector? form) (= 2 (count form)) (= :list-builder (first form)))
-    (reject! :invalid-list-builder))
-  (let [{:keys [items tail] :as spec} (second form)
-        builder-id (fragment-id binding-id)]
-    (when-not (and (map? spec) (= #{:items :tail} (set (keys spec)))
-                   (vector? items) (contains? #{:open :closed} tail))
-      (reject! :invalid-list-builder))
-    {:binding-id binding-id :builder-id builder-id :tail tail
-     :tail-id (ids/slot-id builder-id :tail)
-     :items (into [] (map-indexed (partial parse-item binding-id name->id)) items)}))
+  ([binding-id form name->id] (parse-fragment binding-id form name->id nil))
+  ([binding-id form name->id owner]
+   (when-not (and (uuid? binding-id) (vector? form) (= 2 (count form)) (= :list-builder (first form)))
+     (reject! :invalid-list-builder))
+   (let [{:keys [items tail] :as spec} (second form)
+         builder-id (fragment-id binding-id)]
+     (when-not (and (map? spec) (= #{:items :tail} (set (keys spec)))
+                    (vector? items) (contains? #{:open :closed} tail))
+       (reject! :invalid-list-builder))
+     {:binding-id binding-id :builder-id builder-id :tail tail
+      :tail-id (ids/slot-id builder-id :tail)
+      :items (into [] (map-indexed (partial parse-item binding-id name->id owner)) items)})))
 
 
 (defn reference-expression
@@ -65,22 +70,24 @@
   (let [fragment (peek (:fragments trace))]
     (when-not (and fragment
                    (migration/same-edn? (dissoc fragment :owner-id :target-id)
-                                        (parse-fragment (:binding-id fragment) form name->id)))
+                                        (parse-fragment (:binding-id fragment) form name->id (:owner-id fragment))))
       (reject! :list-fragment-mismatch))
     {:kind :ref :fn-id (:builder-id fragment)}))
 
 
 (defn emit-fragment
   "Emit structured source. Every reference must resolve in the frozen index."
-  [{:keys [tail items]} id->name]
-  [:list-builder
-   {:tail tail
-    :items (mapv (fn [{:keys [kind value fn-id]}]
-                   (case kind
-                     :ref [:ref (or (get id->name fn-id) (reject! :unresolved-list-item-ref))]
-                     :value [:value value]
-                     (reject! :invalid-list-item)))
-                 items)}])
+  ([fragment id->name] (emit-fragment fragment id->name {}))
+  ([{:keys [tail items]} id->name field-names]
+   [:list-builder
+    {:tail tail
+     :items (mapv (fn [{:keys [kind value fn-id source-id]}]
+                    (case kind
+                      :ref [:ref (or (get id->name fn-id) (reject! :unresolved-list-item-ref))]
+                      :projection [:project [(or (get field-names source-id) (reject! :positional-list-field-mismatch))]]
+                      :value [:value value]
+                      (reject! :invalid-list-item)))
+                  items)}]))
 
 
 (defn- source-item
@@ -90,7 +97,8 @@
     (not (map? value)) [:value value]
     (= #{:value} (set (keys value))) [:value (:value value)]
     (= #{:ref} (set (keys value))) [:ref (:ref value)]
-    (:as value) (reject! :positional-list-input-required)
+    (positions/marker? value) [:project [(:as value)]]
+    (:as value) (reject! :positional-list-annotation-required)
     (or (:parent value) (:parents value)) (reject! :inline-list-item-origin-required)
     (some #(contains? value %) [:as :parent :parents :ref :value]) (reject! :unsupported-list-item-origin)
     :else [:value value]))
@@ -100,27 +108,29 @@
   "Build the ordered item descriptors accepted by the existing JVM sequence
    compiler. It owns demand, delay delivery, and the call cache for refs.
    An authored literal map containing :as stays data on that compiler path."
-  [{:keys [binding-id items]}]
+  [{:keys [binding-id items owner-id]}]
   (when-not (and (uuid? binding-id) (vector? items)) (reject! :invalid-list-builder))
   (into []
         (map-indexed
-          (fn [position {:keys [id kind value fn-id] :as item}]
+          (fn [position {:keys [id kind value fn-id source-id] :as item}]
             (when-not (and (= position (:position item)) (= id (ids/binding-list-item-id binding-id position))
                            (case kind
+                             :projection (and (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
                              :ref (and (uuid? fn-id) (not (contains? item :value)))
                              :value (and (contains? item :value) (nil? fn-id))
                              false))
               (reject! :list-item-origin-mismatch))
-            {:kind :binding-list-item :id id :binding-id binding-id :position position
-             :value value :ref-fn-id fn-id :literal (when (and (map? value) (:as value)) true)}))
+            (cond-> {:kind :binding-list-item :id id :binding-id binding-id :position position
+                     :value value :ref-fn-id fn-id :literal (when (and (map? value) (:as value)) true)}
+              (= :projection kind) (assoc :projection-slot-id source-id :projection-owner-id owner-id))))
         items))
 
 
 (defn- check-item!
-  [actual expected]
-  (when (and (map? (:value actual)) (:as (:value actual)) (not (:literal actual)))
+  [actual expected raw]
+  (when (and (not (:projection-slot-id expected)) (map? (:value actual)) (:as (:value actual)) (not (:literal actual)))
     (reject! :positional-list-input-required))
-  (when-not (migration/same-edn? expected actual)
+  (when-not (migration/same-edn? (if (:projection-slot-id expected) (assoc (dissoc expected :projection-slot-id :projection-owner-id) :value raw) expected) actual)
     (reject! :list-item-origin-mismatch)))
 
 
@@ -153,11 +163,11 @@
                    (false? (:value-present binding))
                    (= list-closed (when (map? source) (= :closed (get-in form [1 :tail])))))
       (reject! :unsupported-list-binding))
-    (let [fragment (parse-fragment id form name->id)
+    (let [fragment (parse-fragment id form name->id fn-id)
           ordered (sort-by :position item-rows)]
       (when-not (= (count (:items fragment)) (count ordered)) (reject! :list-item-count-mismatch))
-      (doseq [[actual expected] (map vector ordered (compiler-items fragment))]
-        (check-item! actual expected))
+      (doseq [[actual expected raw] (map vector ordered (compiler-items fragment) (if (vector? source) source (:append source)))]
+        (check-item! actual expected raw))
       (assoc fragment :owner-id fn-id :target-id slot-id))))
 
 

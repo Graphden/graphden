@@ -219,3 +219,48 @@
     (is (= :list-history-required (reason #(read-list context))))
     (is (= :list-history-required (reason #(read-list (assoc-in context [:list-history [slot]] nil)))))
     (is (= :invalid-list-chain (reason #(read-list (assoc-in context [:list-history [slot]] [head])))))))
+
+
+(deftest positional-projections-retain-source-slots-and-occurrence-uuids
+  (let [base {:namespace "fixture" :name :consumer :args {:xs :sequence} :return-type :any}
+        head {:namespace "fixture" :name :head :parent :consumer :args {:xs [{:as :x} {:as :x}]}}
+        tail {:namespace "fixture" :name :tail :parent :head :args {:xs [{:as :y :type :text}]}}
+        defs [base head tail]
+        prepared (parse/prepare-module defs {} {})
+        planned (source/plan-module defs prepared)
+        replay (source/verify-module planned prepared)
+        [_ head-entry tail-entry] (:definitions replay)
+        x (ids/slot-id (:identity head-entry) :x)
+        y (ids/slot-id (:identity tail-entry) :y)
+        field (ids/slot-id (ids/fn-id "fixture" :consumer) :xs)
+        trace (get-in tail-entry [:v2 :list-builders [field]])
+        [a b] (mapv :binding-id (:fragments trace))
+        rows (filterv #(= "projection" (:expression-kind %)) (:records trace))
+        all (distinct (mapcat (fn [{:keys [v2]}]
+                                (concat (:declaration-records v2) (:bindings v2)
+                                        (mapcat list-records/authored-records (vals (:list-builders v2)))))
+                              (:definitions replay)))
+        recover #(list-records/recover-use [(:identity head-entry) (:identity tail-entry)] field (:field trace)
+                                           (:name->id prepared) %)
+        bad (source/verify-module (update-in planned [:definitions 2 :proposed :input] dissoc :y) prepared)]
+    (is (= {:supported 3 :blocked 0} (:counts replay)))
+    (is (= {:x {:type :any :required false}} (get-in head-entry [:proposed :input])))
+    (is (= {:y {:type :text :required false}} (get-in tail-entry [:proposed :input])))
+    (is (= [[x] [x] [y]] (mapv :projection-path rows)))
+    (is (= [[] [] []] (mapv :projection-scope-path rows)))
+    (is (= [[a] [a] [a b]] (mapv :scope-path rows)))
+    (is (= [(ids/binding-list-item-id a 0) (ids/binding-list-item-id a 1) (ids/binding-list-item-id b 0)] (mapv :id rows)))
+    (is (= (:fragments trace) (:fragments (recover all))))
+    (is (= :positional-list-field-mismatch
+           (reason #(recover (remove (fn [r] (and (= :slot (:kind r)) (= x (:id r)))) all)))))
+    (is (= :positional-list-field-mismatch (get-in bad [:definitions 2 :blockers 0 :code])))))
+
+
+(deftest positional-marker-annotations-are-not-interpreted-as-input-requirements
+  (let [base {:namespace "fixture" :name :consumer :args {:xs :sequence} :return-type :any}
+        child {:namespace "fixture" :name :child :parent :consumer
+               :args {:xs [{:as :name :required true :description "marker documentation"}]}}
+        defs [base child]
+        entry (peek (:definitions (source/plan-module defs (parse/prepare-module defs {} {}))))]
+    (is (= #{:positional-list-annotation-required :list-builder-required} (set (map :code (:blockers entry)))))
+    (is (nil? (:proposed entry)))))

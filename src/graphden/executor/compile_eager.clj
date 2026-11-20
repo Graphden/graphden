@@ -851,6 +851,14 @@
    by that rename slot's id — pure slot-id, no name fallback."
   [item child-callables lookups owner-fn-id]
   (cond
+    (:projection-slot-id item)
+    (let [sid (:projection-slot-id item)
+          field (some-> (get-in lookups [:slot-map sid :name]) keyword)]
+      (when-not (and field (= sid (get-in lookups [:slot-by-fn-name [(:projection-owner-id item) field] :id])))
+        (throw (ex-info "Unresolved positional list input" {:type :input/list-builder :code :positional-list-field-mismatch})))
+      (fn [fa _ctx]
+        (force-value (if (contains? fa sid) (get fa sid) (get fa field)))))
+
     (and (map? (:value item))
          (:as (:value item))
          (not (:literal item)))

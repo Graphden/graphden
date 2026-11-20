@@ -34,11 +34,13 @@
 
 
 (defn- operand-rows
-  [input-id owner element-id {:keys [id position kind fn-id value]}]
-  (let [[field membership] (field-rows input-id owner (str "item-" position) position element-id true)
+  [input-id {:keys [owner-id builder-id]} use-path element-id {:keys [id position kind fn-id value source-id]}]
+  (let [[field membership] (field-rows input-id builder-id (str "item-" position) position element-id (not= :projection kind))
         binding (rows/normalize
-                  (merge {:kind :input-binding :id id :fn-id owner :scope-path [] :target-path [(:id field)]}
+                  (merge {:kind :input-binding :id id :fn-id builder-id :scope-path [] :target-path [(:id field)]}
                          (case kind
+                           :projection {:fn-id owner-id :scope-path use-path :expression-kind "projection" :value-present false
+                                        :projection-scope-path [] :projection-path [source-id]}
                            :value {:expression-kind "value" :value-present true :value value}
                            :ref {:expression-kind "ref" :value-present false :ref-fn-id fn-id}
                            (reject! :invalid-list-item))))]
@@ -50,16 +52,17 @@
    and input bindings from one source fragment. The optional tail belongs to
    this builder. link-fragments supplies its external ref and any closed seal.
    Field descriptor and prepared names are supplied by the source context."
-  [{:keys [builder-id tail-id items] :as fragment} field name->id]
-  (builder/link-fragments [fragment])
-  (builder/compiler-items fragment)
-  (let [element-id (item-type-id field name->id)
-        input (assoc (migration/input-type-record {:id builder-id}) :kind :fn)
-        input-id (:id input)
-        owner {:kind :fn :id builder-id :parent-ids [] :input-type-fn-id input-id :return-type-fn-id (:type-id field)}
-        tail (field-rows input-id builder-id :tail (count items) (:type-id field) false)]
-    (when-not (= tail-id (:id (first tail))) (reject! :invalid-list-chain))
-    (into (into [owner input] (mapcat (partial operand-rows input-id builder-id element-id)) items) tail)))
+  ([fragment field name->id] (materialize fragment field name->id [(:binding-id fragment)]))
+  ([{:keys [builder-id tail-id items] :as fragment} field name->id use-path]
+   (builder/link-fragments [fragment])
+   (builder/compiler-items fragment)
+   (let [element-id (item-type-id field name->id)
+         input (assoc (migration/input-type-record {:id builder-id}) :kind :fn)
+         input-id (:id input)
+         owner {:kind :fn :id builder-id :parent-ids [] :input-type-fn-id input-id :return-type-fn-id (:type-id field)}
+         tail (field-rows input-id builder-id :tail (count items) (:type-id field) false)]
+     (when-not (= tail-id (:id (first tail))) (reject! :invalid-list-chain))
+     (into (into [owner input] (mapcat (partial operand-rows input-id fragment use-path element-id)) items) tail))))
 
 
 (defn- read-operand
@@ -68,6 +71,7 @@
         item {:id (:id row) :position (:position membership)}]
     (case (:expression-kind row)
       "value" (assoc item :kind :value :value (:value row))
+      "projection" (assoc item :kind :projection :source-id (first (:projection-path row)))
       "ref" (assoc item :kind :ref :fn-id (:ref-fn-id row))
       (reject! :missing-list-operand))))
 
@@ -77,38 +81,42 @@
    independently known open/closed state. Regenerate and compare every local
    row so swapped slots, membership positions or policies cannot slip through.
    Pass only materialize's declaration rows, excluding link-fragments' edges."
-  [origin field name->id records]
-  (let [members (sort-by :position (filter #(= :fn-slot (:kind %)) records))
-        bindings (filter #(= :input-binding (:kind %)) records)
-        by-field (into {} (map (juxt (comp first :target-path) identity)) bindings)
-        result (assoc (dissoc origin :items) :items (mapv (partial read-operand by-field) (butlast members)))
-        order #(sort-by (juxt :kind (comp str :id)) %)]
-    (when-not (migration/same-edn? (order records) (order (materialize result field name->id)))
-      (reject! :list-declaration-mismatch))
-    result))
+  ([origin field name->id records] (recover origin field name->id records [(:binding-id origin)]))
+  ([origin field name->id records use-path]
+   (let [members (sort-by :position (filter #(= :fn-slot (:kind %)) records))
+         bindings (filter #(= :input-binding (:kind %)) records)
+         by-field (into {} (map (juxt (comp first :target-path) identity)) bindings)
+         result (assoc (dissoc origin :items) :items (mapv (partial read-operand by-field) (butlast members)))
+         order #(sort-by (juxt :kind (comp str :id)) %)]
+     (when-not (migration/same-edn? (order records) (order (materialize result field name->id use-path)))
+       (reject! :list-declaration-mismatch))
+     result)))
 
 
 (defn materialize-chain
   "Produce all source-derived declaration and binding rows for a complete
    chain, including the owner/use ref edges and the optional final seal."
   [fragments field name->id]
-  (into (:bindings (builder/link-fragments fragments))
-        (mapcat #(materialize % field name->id)) fragments))
+  (let [paths (rest (reductions conj [] (map :binding-id fragments)))]
+    (into (:bindings (builder/link-fragments fragments))
+          (mapcat #(materialize %1 field name->id %2) fragments paths))))
 
 
 (defn- read-contribution
-  [rows-by-kind owner-id target-id field name->id]
+  [rows-by-kind owner-id target-id field name->id use-path]
   (let [{:keys [builder-id tail-id] :as origin} (builder/origin owner-id target-id)
         input-id (:id (migration/input-type-record {:id builder-id}))
         memberships (filter #(= input-id (:fn-id %)) (:fn-slot rows-by-kind))
         field-ids (set (map :slot-id memberships))
-        own (filter #(= builder-id (:fn-id %)) (:input-binding rows-by-kind))
+        own (filter #(or (= builder-id (:fn-id %))
+                         (and (= owner-id (:fn-id %)) (= use-path (:scope-path %))
+                              (contains? field-ids (first (:target-path %))))) (:input-binding rows-by-kind))
         seal-id (ids/binding-id builder-id tail-id)
         declarations (concat (filter #(contains? #{builder-id input-id} (:id %)) (:fn rows-by-kind))
                              (filter #(contains? field-ids (:id %)) (:slot rows-by-kind))
                              memberships (remove #(= seal-id (:id %)) own))
         tail (if (some #(= seal-id (:id %)) own) :closed :open)]
-    (recover (assoc origin :tail tail) field name->id declarations)))
+    (recover (assoc origin :tail tail) field name->id declarations use-path)))
 
 
 (defn recover-chain
@@ -117,7 +125,8 @@
    the actual continuation address, its owner, and any sealed empty value."
   [owners target-id field name->id records]
   (let [by-kind (group-by :kind records)
-        fragments (mapv #(read-contribution by-kind % target-id field name->id) owners)
+        paths (rest (reductions conj [] (map #(ids/binding-id % target-id) owners)))
+        fragments (mapv #(read-contribution by-kind %1 target-id field name->id %2) owners paths)
         order #(sort-by (juxt :kind (comp str :id)) %)]
     (when-not (migration/same-edn? (order records) (order (materialize-chain fragments field name->id)))
       (reject! :list-declaration-mismatch))
@@ -127,18 +136,20 @@
 (defn parse-contribution
   "Read the current fragment against frozen list ancestry. Reconstruct the
    complete chain before exporting this contribution's own declarations."
-  [{:keys [fn-id scope binding-id name->id list-history list-type-names]} field form]
+  [{:keys [fn-id scope binding-id name->id list-history list-type-names contract]} field form]
   (let [target (:id field)
         path [target]
         prior (get list-history path)
         origin (builder/origin fn-id target)]
     (when-not (vector? prior) (reject! :list-history-required))
     (when-not (= (:binding-id origin) (binding-id scope path)) (reject! :list-binding-origin-mismatch))
-    (let [fragment (merge origin (builder/parse-fragment (:binding-id origin) form name->id))
+    (let [fragment (merge origin (builder/parse-fragment (:binding-id origin) form name->id fn-id))
           descriptor (select-keys field [:type :type-id])
           names (or list-type-names name->id)
           fragments (conj prior fragment)
           records (materialize-chain fragments descriptor names)]
+      (when-not (every? (set (map :id (:fields contract))) (keep :source-id (:items fragment)))
+        (reject! :positional-list-field-mismatch))
       (assoc (recover-chain (mapv :owner-id fragments) target descriptor names records) :field descriptor :records records))))
 
 
@@ -158,7 +169,8 @@
                  :fn-slot (members? row)
                  :input-binding (or (contains? links id) (contains? builders fn-id) (contains? inputs fn-id)
                                     (and (contains? owners fn-id)
-                                         (or (= (:binding-id first-origin) (first scope-path))
+                                         (or (and (contains? links (peek scope-path)) (contains? slots (first target-path)))
+                                             (= (:binding-id first-origin) (first scope-path))
                                              (and (empty? scope-path) (= target-path [(:target-id first-origin)])))))
                  false))
              records)))
@@ -171,6 +183,21 @@
   (use-records [(peek fragments)] records))
 
 
+(defn- check-position-fields!
+  [fragments records]
+  (let [groups (group-by :kind records)
+        fields (into {} (map (juxt :id identity)) (:slot groups))
+        owners (into {} (map (juxt :id identity)) (:fn groups))
+        members (set (map (juxt :fn-id :slot-id) (:fn-slot groups)))]
+    (doseq [{:keys [owner-id items]} fragments
+            source (keep :source-id items)]
+      (let [field (get fields source)
+            input-type (get-in owners [owner-id :input-type-fn-id])]
+        (when-not (and (string? (:name field)) (= source (ids/slot-id owner-id (:name field)))
+                       (contains? members [input-type source]))
+          (reject! :positional-list-field-mismatch))))))
+
+
 (defn recover-use
   "Read one use from the combined records of validated v2 modules. Owners
    are the contributing declarations in verified parent order. Extra writes
@@ -178,8 +205,11 @@
    complete chain comparison. Sibling uses retain independent bindings."
   [owners target-id field name->id records]
   (when-not (and (vector? owners) (seq owners)) (reject! :invalid-list-chain))
-  (let [origins (mapv #(builder/origin % target-id) owners)]
-    (recover-chain owners target-id field name->id (use-records origins records))))
+  (let [origins (mapv #(builder/origin % target-id) owners)
+        trace (recover-chain owners target-id field name->id (use-records origins records))]
+    (when (some #(some :source-id (:items %)) (:fragments trace))
+      (check-position-fields! (:fragments trace) records))
+    trace))
 
 
 (defn locate-contributions

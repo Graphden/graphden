@@ -2,6 +2,7 @@
   "Frozen declaration context for the offline v1-to-v2 source transition."
   (:require
     [graphden.input.format :as format]
+    [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.source-rename :as rename]
     [graphden.packages.rebase :as rebase]
@@ -142,7 +143,9 @@
         _ (ensure-acyclic! ordered)
         input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
                                         (let [aliases (keep (fn [[k v]] (rename/origin owner records k v)) (:args definition))
-                                              specs (into (field-specs definition) (map (juxt :alias :declaration)) aliases)
+                                              anchors (positions/inputs (:id owner) records (get-in source-environment [:context :name->id]))
+                                              specs (into (merge (field-specs definition) (update-vals anchors :declaration))
+                                                          (map (juxt :alias :declaration)) aliases)
                                               sources (into {} (map (juxt :alias-id :field-id)) aliases)]
                                           (fields records (:id owner) specs [:input] sources))))
                            ordered)
@@ -221,6 +224,15 @@
         normalized (rebase/rewrite-references
                      source #(parse/normalize-ref % (:name->id context) (:namespace source)))
         rows (parse/parse-prepared-module (assoc context :fn-defs [normalized]))
+        projected (positions/projected-names (:bind definition))
+        owner-id (ids/fn-id (:namespace normalized) (:name normalized))
+        ids (set (map #(ids/slot-id owner-id %) projected))
+        rows (if (seq ids)
+               (mapv #(if (and (= :slot (:kind %)) (contains? ids (:id %)))
+                        (do (when (:source-slot-id %) (reject! :positional-list-field-mismatch [:input]))
+                            (assoc % :source-slot-id nil))
+                        %) rows)
+               rows)
         grouped (when (seq projections) (group-by :kind rows))
         own (some #(when (= (ids/fn-id (:namespace normalized) (:name normalized)) (:id %)) %) (:fn grouped))]
     (doseq [[arg exposed] projections]

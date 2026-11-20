@@ -77,3 +77,31 @@
         run (execution/compile-rows [fn-id] slot-id field (:name->id ctx) records
                                     {:lazy-seq? false :child-callables {} :lookups (lookups/build-lookups {})})]
     (is (= (mapv :value (get-in host [:args :keys])) (vec (run {} {}))))))
+
+
+(deftest positional-items-read-their-own-host-slot-when-demanded
+  (let [base {:namespace "fixture" :name :base :args {:xs :sequence} :return-type :any}
+        head {:namespace "fixture" :name :head :parent :base :args {:xs [0 {:as :a}]}}
+        tail {:namespace "fixture" :name :tail :parent :head :args {:xs [{:as :b}]}}
+        defs [base head tail]
+        prepared (parse/prepare-module defs {} {})
+        groups (group-by :kind (parse/parse-prepared-module prepared))
+        env (lookups/build-lookups {:fns (:fn groups) :slots (:slot groups) :fn-slots (:fn-slot groups)})
+        entry (peek (:definitions (source/verify-module (source/plan-module defs prepared) prepared)))
+        slot (ids/slot-id (ids/fn-id "fixture" :base) :xs)
+        trace (get-in entry [:v2 :list-builders [slot]])
+        a (ids/slot-id (ids/fn-id "fixture" :head) :a)
+        b (ids/slot-id (ids/fn-id "fixture" :tail) :b)
+        opts {:lazy-seq? true :child-callables {} :lookups env}
+        run (execution/compile-construction trace opts)
+        calls (atom 0)
+        items (run {a (delay (swap! calls inc) false) :a :wrong b nil :b :wrong} {})]
+    (is (= 0 @(first items)))
+    (is (zero? @calls))
+    (is (false? @(second items)))
+    (is (= 1 @calls))
+    (is (nil? @(nth items 2)))
+    (is (= [0 :fallback nil] (mapv deref (run {:a :fallback} {}))))
+    (is (= :positional-list-field-mismatch
+           (try (execution/compile-construction trace (assoc opts :lookups {})) nil
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

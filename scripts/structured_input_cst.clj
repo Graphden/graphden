@@ -6,6 +6,7 @@
     [clojure.string :as str]
     [graphden.input.format :as format]
     [graphden.input.list-builder :as list-builder]
+    [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.source-list :as source-list]
     [graphden.packages.records.ids :as ids]
@@ -264,14 +265,16 @@
 
 
 (defn- partition-composed-edit
-  [source starts loc {:keys [definition path declarations operators]}]
+  [source starts loc {:keys [definition path declarations position-inputs operators]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
                  (not-any? #(key-loc loc %) [:input :bind :configure])
                  (vector? declarations) (= (count declarations) (count (set declarations)))
                  (map? operators) (not-any? (set declarations) (keys operators)))
     (refuse :invalid-field-partition {:definition definition}))
   (let [args (value-at loc path)
-        key-edit (rename-edit source starts loc definition path (if (seq declarations) :input :bind))
+        input? (or (seq declarations) (seq position-inputs))
+        extra-fields (map (fn [[field spec]] (str (pr-str field) " " (pr-str spec))) position-inputs)
+        key-edit (rename-edit source starts loc definition path (if input? :input :bind))
         map-span (node-edit source starts args identity)
         spans (field-spans source starts args
                            (fn [field value]
@@ -301,8 +304,9 @@
     {:start (:start key-edit) :end (:end map-span)
      :before (subs source (:start key-edit) (:end map-span))
      :after (str (:after key-edit) (subs source (:end key-edit) (:start map-span))
-                 (when (seq declarations) (str "{" (str/join ordered) "}"))
-                 (when (and (seq declarations) (seq binds)) " :bind ")
+                 (when input? (str "{" (str/join ordered) (when (and (seq declarations) (seq position-inputs)) " ")
+                                   (str/join " " extra-fields) "}"))
+                 (when (and input? (seq binds)) " :bind ")
                  (when (seq binds) (str "{" (str/join (map second binds)) "}"))
                  (when (seq configs) (str " :configure {" (str/join " " configs) "}")))}))
 
@@ -314,12 +318,27 @@
   (let [original (get-in source [:args field])
         names (source-list/field-names name->id (:namespace source) original)
         form (list-builder/source-form original names)
-        checked (list-builder/parse-fragment (:binding-id fragment) form names)]
+        checked (list-builder/parse-fragment (:binding-id fragment) form names (:owner-id fragment))]
     (when-not (and (= (:owner-id fragment) (ids/fn-id (:namespace source) (:name source)))
                    (= (:binding-id fragment) (ids/binding-id (:owner-id fragment) (:target-id fragment)))
                    (migration/same-edn? checked (dissoc fragment :owner-id :target-id)))
       (refuse :list-fragment-drift {}))
     {:op :list-builder :definition (:name source) :path [:args field] :original original :form form}))
+
+
+(defn- position-item-edit
+  [source starts node]
+  (let [span (node-edit source starts node identity)
+        field (value-at node [:as])
+        type (key-loc node :type)
+        edits (cond-> [(node-edit source starts (key-loc node :as) (constantly ":project"))
+                       (node-edit source starts field #(str "[" % "]"))]
+                type (conj (node-edit source starts type (constantly ""))
+                           (node-edit source starts (z/right type)
+                                      #(str/join (re-seq #";[^\r\n]*|[\s,]+" %)))))
+        local (mapv #(-> % (update :start - (:start span)) (update :end - (:start span))) (sort-by :start edits))
+        inner (patched-text (:before span) local)]
+    (assoc span :after (str "[" (subs inner 1 (dec (count inner))) "]"))))
 
 
 (defn- list-builder-edit
@@ -336,7 +355,9 @@
     (let [items (mapv (fn [node [operator]]
                         (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))
                               op (if wrapped? :map-expression-to-vector (if (= :ref operator) :wrap-ref :wrap-value))]
-                          (leaf-edit source starts node op path))) item-nodes expressions)
+                          (if (= :project operator)
+                            (position-item-edit source starts node)
+                            (leaf-edit source starts node op path)))) item-nodes expressions)
           closed-key (when-not bare? (key-loc loc :closed))
           edits (cond-> items
                   (not bare?) (conj (node-edit source starts (key-loc loc :append) (constantly ":items")))
@@ -381,7 +402,8 @@
                        (false? (:required spec)) (= (cond-> {:as exposed} pin (assoc :type (:type spec))) (z/sexpr target))
                        (or (key-loc loc :parent) (key-loc loc :parents)) (not (key-loc loc :input)))
           (refuse :invalid-projection-declaration {:definition definition}))
-        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (:type spec) " :required false}}"
+        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (:type spec) " :required false}"
+                                                                                 (str/join (map (fn [[name decl]] (str " " name " " (pr-str decl))) (:position-inputs operation))) "}"
                                                                                  (when pin (str " :configure {[" field "] " pin "}")) " :bind")))
 
       :rename-bind
@@ -488,7 +510,8 @@
             declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
             alias-entries (filterv :rename binds)
             alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
-            declarations (merge declarations alias-input)
+            position-inputs (positions/declarations arguments)
+            declarations (merge declarations alias-input position-inputs)
             bindings (into {} (map (juxt (comp second :source-path) :expression)) binds)
             operations (mapv (partial binding-operation source) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
@@ -512,11 +535,12 @@
             (when-not (and (= 1 (count alias-entries)) (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
               (refuse :unsupported-projection-mix {}))
             (into [{:op :declare-projection-input :definition (:name source) :path [:args]
-                    :input alias-input :field (second (:source-path (first alias-entries)))}] operations))
+                    :input alias-input :position-inputs position-inputs :field (second (:source-path (first alias-entries)))}] operations))
 
-          (or (seq fields) (seq configuration))
+          (or (seq fields) (seq configuration) (seq position-inputs))
           [{:op :partition-composed-args :definition (:name source) :path [:args]
-            :declarations (vec (keys declarations))
+            :declarations (vec (remove (set (keys position-inputs)) (keys declarations)))
+            :position-inputs position-inputs
             :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
           :else (into (rename :rename-bind) operations)))
 

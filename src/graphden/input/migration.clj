@@ -240,8 +240,10 @@
         by-owner (group-by :fn-id (:fn-slot snapshot))
         memberships (into (sorted-map) (map (fn [id] [id (vec (mapcat by-owner (sort-by str (closure fns id))))])) executable-ids)
         renamed (renames/evidence snapshot fns by-owner)
-        problems (vec (sort-by stable-edn (exceptions snapshot fns executable-ids memberships
-                                                      (into #{} (map :membership-id) (vals renamed)))))
+        problems (vec (sort-by stable-edn
+                               (into (exceptions snapshot fns executable-ids memberships
+                                                 (into #{} (keep :membership-id) (vals renamed)))
+                                     (keep :exception) (vals renamed))))
         descriptors (mapv #(input-type-record (get fns %)) (sort-by str executable-ids))
         descriptor-versions (mapv descriptor-version (filter #(contains? executable-ids (:fn-id %)) (:fn-version snapshot)))
         copied-members (vec (membership-copies fns memberships))

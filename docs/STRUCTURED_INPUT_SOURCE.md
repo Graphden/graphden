@@ -68,6 +68,16 @@ assertion or a list, map, tuple or union assertion with named leaves.
 The verifier compares the rich form as well as its storage ID, since
 different collection types can share that ID.
 
+A same-name `{:as :title :type :text :description "Document title"}` on
+an inherited `:title` field is a metadata-only binding, not a rename slot.
+When the authored type is unchanged, it becomes
+`:configure {[:title] {:type :text :description "Document title"}}`.
+The original binding UUID and description survive, and the field stays free.
+Narrowing assertions, extra policies and fields supplied through reference
+scopes still require separate evidence. The CST writer supports an argument
+map containing only these annotations without moving its entries; mixed
+annotation/value maps retain an explicit writer blocker.
+
 A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
 The reader uses the original namespace, host name, field and normalized
 reference spellings to reproduce each legacy child UUID. The host name of
@@ -87,6 +97,11 @@ when restoring a configured binding. If the added keys would change the
 legacy declaration's iteration order, `:legacy-order` records that order.
 The reader keeps absent arguments distinct from `:bind {}` and verifies
 rows and binding origins recursively.
+
+Metadata-only inline arguments use `[:annotation original-key-order]` in
+`:legacy-forms`. `:legacy-args-order` retains the original argument order
+when annotations move to `:configure`. These source-spelling records reproduce
+the existing anonymous UUID; they do not create runtime bindings.
 
 A type pin authored on an inline reference moves to the enclosing
 binding's `:configure`. The referenced declaration keeps its original UUID.

@@ -42,7 +42,7 @@
         (keep (fn [[k v]]
                 (cond
                   (= from k) [to fields]
-                  (#{:legacy-forms :legacy-order :input :configure} k) nil
+                  (#{:legacy-forms :legacy-order :legacy-args-order :input :configure} k) nil
                   :else [k v])))
         body))
 
@@ -192,12 +192,16 @@
 
 
 (defn- valid-inline-configuration?
-  [{:keys [bind configure] :as body}]
+  [{:keys [bind configure legacy-forms] :as body}]
   (or (not (contains? body :configure))
       (and (map? configure)
            (every? (fn [[path spec]]
-                     (and (vector? path) (= 1 (count path)) (contains? bind (first path))
-                          (map? spec) (= #{:type} (set (keys spec)))
+                     (and (vector? path) (= 1 (count path))
+                          (or (contains? bind (first path))
+                              (let [spelling (get legacy-forms (first path))]
+                                (and (vector? spelling) (= :annotation (first spelling)))))
+                          (map? spec) (contains? spec :type) (every? #{:type :description} (keys spec))
+                          (or (not (contains? spec :description)) (string? (:description spec)))
                           (configuration-type? (:type spec))))
                    configure))))
 
@@ -228,29 +232,61 @@
     original))
 
 
+(defn- annotation-spelling?
+  [spelling]
+  (and (vector? spelling) (= 2 (count spelling)) (= :annotation (first spelling))
+       (vector? (second spelling)) (= (count (second spelling)) (count (set (second spelling))))
+       (contains? #{#{:as :type} #{:as :type :description}} (set (second spelling)))))
+
+
+(defn- original-annotation
+  [field spelling configure]
+  (let [spec (get configure [field])
+        spelling-keys (second spelling)]
+    (when (and (annotation-spelling? spelling) (= (disj (set spelling-keys) :as) (set (keys spec))))
+      (let [raw (assoc spec :as field)]
+        [field (apply array-map (mapcat (juxt identity raw) spelling-keys))]))))
+
+
+(defn- restore-argument-order
+  [body arguments]
+  (if (contains? body :legacy-args-order)
+    (let [order (:legacy-args-order body)]
+      (when (and (vector? order) (= (count arguments) (count order))
+                 (= (set (keys arguments)) (set order)))
+        (apply array-map (mapcat (juxt identity arguments) order))))
+    arguments))
+
+
 (defn inline-origin
   "Recover the legacy body from direct v2 binds. :legacy-forms records
    spellings that explicit expressions or configuration would erase.
    The prefix and position of an inline use are supplied by its parent."
   [body]
-  (when (inline-shape? body #{:parent :parents :bind :legacy-forms :legacy-order :input :configure})
+  (when (inline-shape? body #{:parent :parents :bind :legacy-forms :legacy-order :legacy-args-order :input :configure})
     (if-not (contains? body :bind)
-      (when-not (some #(contains? body %) [:legacy-forms :legacy-order :input :configure]) body)
+      (when-not (some #(contains? body %) [:legacy-forms :legacy-order :legacy-args-order :input :configure]) body)
       (let [{:keys [bind input legacy-forms configure]} body]
         (when (and (fields? bind) (valid-inline-configuration? body) (valid-inline-input? body)
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
-                            (every? (set (keys bind)) (keys legacy-forms))
+                            (every? #(or (contains? bind %) (annotation-spelling? (get legacy-forms %))) (keys legacy-forms))
                             (every? #(or (#{:bare-value :ref-wrapper :type-first} %)
-                                         (inline-type-position? %) (list-origin? %))
+                                         (inline-type-position? %) (list-origin? %) (annotation-spelling? %))
                                     (vals legacy-forms)))))
           (let [originals (mapv (fn [[k form]]
                                   (when-let [[original] (original-leaf form (get legacy-forms k)
                                                                        (get-in configure [[k] :type]) input)]
                                     [k original]))
-                                bind)]
+                                bind)
+                annotations (mapv (fn [[field spelling]]
+                                    (when-not (contains? bind field)
+                                      (original-annotation field spelling configure)))
+                                  (filter (comp annotation-spelling? val) legacy-forms))
+                originals (into originals annotations)]
             (when (every? some? originals)
-              (restore-inline-order body (replace-inline-fields body :bind :args (into (empty bind) originals))))))))))
+              (when-let [arguments (restore-argument-order body (into (empty bind) originals))]
+                (restore-inline-order body (replace-inline-fields body :bind :args arguments))))))))))
 
 
 (defn- migrated-asserted-leaf
@@ -305,15 +341,20 @@
   (if-not (contains? body :args)
     body
     (let [leaves (mapv (fn [[k raw]]
-                         (when-let [[form spelling] (migrated-leaf raw (get bind k) (get configure [k]))]
-                           [k form spelling]))
+                         (if (and (not (contains? bind k)) (map? raw) (= k (:as raw))
+                                  (= (select-keys raw [:type :description]) (get configure [k]))
+                                  (contains? #{#{:as :type} #{:as :type :description}} (set (keys raw))))
+                           [k ::annotation [:annotation (vec (keys raw))]]
+                           (when-let [[form spelling] (migrated-leaf raw (get bind k) (get configure [k]))]
+                             [k form spelling])))
                        (:args body))]
       (when (every? some? leaves)
-        (let [fields (into (empty (:args body)) (map (fn [[k form _]] [k form])) leaves)
+        (let [fields (into (empty (:args body)) (comp (remove #(= ::annotation (second %))) (map (fn [[k form _]] [k form]))) leaves)
               spellings (into (array-map) (keep (fn [[k _ spelling]] (when spelling [k spelling]))) leaves)
               migrated (cond-> (into (replace-inline-fields body :args :bind fields)
                                      (select-keys proposed [:input :configure]))
-                         (seq spellings) (assoc :legacy-forms spellings))
+                         (seq spellings) (assoc :legacy-forms spellings)
+                         (some #(= ::annotation (second %)) leaves) (assoc :legacy-args-order (vec (keys (:args body)))))
               restored (inline-origin migrated)]
           (cond-> migrated
             (and restored (not= (seq (keys body)) (seq (keys restored))))

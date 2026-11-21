@@ -10,6 +10,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.signatures :as signatures]
     [graphden.input.source :as source]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-primitive :as primitive]
@@ -237,7 +238,15 @@
                                   list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
                                   (rich/collection-return? type-id return) [[id type-id] return]))))
                    entries)
-             :source-field-types (source-field-types entries) :markers markers))))
+             :source-field-types (source-field-types entries)
+             :source-binding-types
+             (into {}
+                   (for [{:keys [owner contract configurations]} (vals entries)
+                         {:keys [row type target-path type-override-fn-id] :as config} (vals configurations)
+                         :let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
+                         :when (annotations/exact? owner field config)]
+                     [[(:id row) type-override-fn-id] type]))
+             :markers markers))))
 
 
 (defn- root-id
@@ -269,9 +278,10 @@
     ;; Only freeze types whose declared forms match their exact row IDs.
     (when-not (every? (fn [{:keys [row target-path] :as config}]
                         (if row
-                          (and (some #{row} bindings)
-                               (rich/exact-self-pin? owner (some #(when (= [(:id %)] target-path) %) (:fields contract))
-                                                     config type-rows))
+                          (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
+                            (and (some #{row} bindings)
+                                 (or (annotations/exact? owner field config)
+                                     (rich/exact-self-pin? owner field config type-rows))))
                           (exact-projection-pin? type-ids contract bindings config)))
                       (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
@@ -352,9 +362,9 @@
     ;; The checker retains the narrowed callable at its field-read boundary.
     ;; An external function has no verified invocation signature. Executable
     ;; admission needs a proved graph closure or a suitable runtime validator.
-    (doseq [[id {:keys [configurations]}] entries
-            {:keys [row]} (vals configurations)
-            :when row]
+    (doseq [[id {:keys [configurations contract owner]}] entries
+            {:keys [row target-path] :as config} (vals configurations)
+            :when (and row (not (annotations/exact? owner (some #(when (= [(:id %)] target-path) %) (:fields contract)) config)))]
       (throw (ex-info "Execution requires proof of the callable field-read contract"
                       {:type :input/source-snapshot :code :callable-self-pin-obligation-required :fn-id id
                        :binding-id (:id row) :target-path (:target-path row) :type-override-fn-id (:type-override-fn-id row)})))

@@ -8,6 +8,7 @@
     [graphden.input.list-builder :as list-builder]
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-list :as source-list]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
@@ -115,7 +116,7 @@
 (declare ^:private patched-text)
 
 
-(declare ^:private inline-edit ^:private list-builder-edit)
+(declare ^:private inline-edit ^:private list-builder-edit ^:private annotation-map-edit)
 
 
 (defn- inline-binding-edit
@@ -136,24 +137,33 @@
 
 
 (defn- inline-field-edits
-  [source starts loc {:keys [bind input configure legacy-forms legacy-order]} path]
-  (let [fields (mapv (fn [[field form]]
-                       (let [arg-path [:args field]]
-                         [field (inline-binding-edit source starts (value-at loc arg-path) form
-                                                     (get legacy-forms field) (contains? configure [field])
-                                                     (into path arg-path))]))
-                     bind)
-        configurations (keep (fn [[field edit]]
-                               (when-let [spec (:configuration edit)]
-                                 (str (migration/stable-edn [field]) " " spec)))
-                             fields)
-        key (rename-edit source starts loc nil [:args] :bind)]
-    (cons (assoc key :after (str (when (seq input) (str ":input " (migration/stable-edn input) " "))
-                                 (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
-                                 (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
-                                 (when (seq legacy-order) (str ":legacy-order " (migration/stable-edn legacy-order) " "))
-                                 ":bind"))
-          (keep second fields))))
+  [source starts loc {:keys [bind input configure legacy-forms legacy-order legacy-args-order]} path]
+  (if legacy-args-order
+    (do
+      (when-not (and (empty? bind) (empty? input)
+                     (= (set legacy-args-order) (set (map first (keys configure)))))
+        (refuse :unsupported-inline-annotation-mix {:path path}))
+      [(annotation-map-edit source starts loc configure
+                            (str ":bind {} :legacy-forms " (migration/stable-edn legacy-forms)
+                                 " :legacy-args-order " (migration/stable-edn legacy-args-order) " "
+                                 (when legacy-order (str ":legacy-order " (migration/stable-edn legacy-order) " "))))])
+    (let [fields (mapv (fn [[field form]]
+                         (let [arg-path [:args field]]
+                           [field (inline-binding-edit source starts (value-at loc arg-path) form
+                                                       (get legacy-forms field) (contains? configure [field])
+                                                       (into path arg-path))]))
+                       bind)
+          configurations (keep (fn [[field edit]]
+                                 (when-let [spec (:configuration edit)]
+                                   (str (migration/stable-edn [field]) " " spec)))
+                               fields)
+          key (rename-edit source starts loc nil [:args] :bind)]
+      (cons (assoc key :after (str (when (seq input) (str ":input " (migration/stable-edn input) " "))
+                                   (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
+                                   (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
+                                   (when (seq legacy-order) (str ":legacy-order " (migration/stable-edn legacy-order) " "))
+                                   ":bind"))
+            (keep second fields)))))
 
 
 (defn- inline-type-edit
@@ -424,6 +434,30 @@
       {:start start :end end :before before :after (patched-text before local)})))
 
 
+(defn- annotation-map-edit
+  [source starts loc configuration prefix]
+  (let [args (value-at loc [:args])
+        original (inventory/read-edn "<annotation>" (:before (node-edit source starts args identity)))]
+    (when-not (and (or (key-loc loc :parent) (key-loc loc :parents))
+                   (not-any? #(key-loc loc %) [:bind :input :configure])
+                   (map? original) (seq original)
+                   (every? (fn [[field spec]] (annotations/source-form? field spec)) original)
+                   (= configuration (into {} (map (fn [[field spec]] [[field] (select-keys spec [:type :description])])) original)))
+      (refuse :annotation-origin-mismatch {}))
+    (let [key-edit (assoc (rename-edit source starts loc nil [:args] :configure) :after (str prefix ":configure"))
+          edits (into [key-edit]
+                      (mapcat (fn [[key spec]]
+                                [(node-edit source starts key #(str "[" % "]"))
+                                 (node-edit source starts (key-loc spec :as) (constantly ""))
+                                 (node-edit source starts (value-at spec [:as]) (constantly ""))]))
+                      (partition 2 (children args)))
+          start (:start key-edit)
+          end (:end (node-edit source starts args identity))
+          before (subs source start end)
+          local (map #(-> % (update :start - start) (update :end - start)) (sort-by :start edits))]
+      {:start start :end end :before before :after (patched-text before local)})))
+
+
 (defn- projection-declaration-edit
   [source starts loc {:keys [definition path input fields position-inputs]}]
   (when-not (and (map? input) (vector? fields) (seq fields) (= (count fields) (count input))
@@ -457,6 +491,7 @@
   (let [loc (or (get definitions definition)
                 (refuse :missing-definition {:definition definition}))]
     (case op
+      :field-annotations (annotation-map-edit source starts loc (:configuration operation) "")
       :self-pin (self-pin-edit source starts loc operation)
       :list-builder (list-builder-edit source starts (argument-loc loc path) operation)
       :scope-key
@@ -592,8 +627,19 @@
     (refuse :unsupported-source-entry {}))
   (let [has-args? (contains? source :args)
         pin (:self-pin (first (:arguments legacy)))
+        annotations (filter :annotation (:arguments legacy))
         rename (fn [op] (if has-args? [{:op op :definition (:name source) :path [:args]}] []))]
-    (case (if (and (= :composed kind) pin) :self-pin kind)
+    (case (cond (and (= :composed kind) (seq annotations)) :annotations
+                (and (= :composed kind) pin) :self-pin
+                :else kind)
+      :annotations
+      (let [config (into {} (map (fn [{:keys [source-path annotation]}]
+                                   [[(second source-path)] (annotations/configuration annotation)])) annotations)]
+        (when-not (and (= (count annotations) (count (:arguments legacy)))
+                       (= proposed (assoc (dissoc source :args) :configure config)))
+          (refuse :unsupported-annotation-mix {}))
+        [{:op :field-annotations :definition (:name source) :path [:args] :configuration config}])
+
       :self-pin (self-pin-operation source proposed (:arguments legacy) pin)
 
       :base

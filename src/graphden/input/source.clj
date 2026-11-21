@@ -8,6 +8,7 @@
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-forward :as forward]
     [graphden.input.source-list :as source-list]
@@ -185,6 +186,7 @@
                              rename)
                     pin (when (and (= arg field) (= #{:type-override-fn-id} (set (keys (binding-policy binding)))))
                           (rich/self-pin definition arg rows binding target-type))
+                    annotation (annotations/annotation context source rows arg)
                     inline-body (format/inline-binding-body body)
                     inline-ref (prepared-inline-ref value)
                     inline-id (when (and inline-body (keyword? inline-ref))
@@ -204,6 +206,7 @@
                   builder (merge {:list-builder (dissoc builder :inline-items)}
                                  (source-list/contribution-expression builder body (:namespace source) name->id))
                   pin (assoc :self-pin pin)
+                  annotation (assoc :annotation annotation)
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -217,10 +220,11 @@
 
 (defn- field-assertions
   [definition arguments]
-  (into {} (keep (fn [{:keys [rename self-pin source-path]}]
+  (into {} (keep (fn [{:keys [rename self-pin annotation source-path]}]
                    (let [spec (get-in definition source-path)]
-                     (when (or self-pin (:pin-id rename) (typed-binding? spec))
-                       [[(second source-path)] (select-keys spec [:type])])))) arguments))
+                     (when (or self-pin annotation (:pin-id rename) (typed-binding? spec))
+                       [[(second source-path)] (if annotation (annotations/configuration annotation)
+                                                   (select-keys spec [:type]))])))) arguments))
 
 
 (defn- authored-own-field?
@@ -257,7 +261,7 @@
   (let [{:keys [source-path origin expression policy target]} entry
         problem #(blocker source % source-path)
         raw (get-in source source-path)
-        typed? (or (:self-pin entry) (get-in entry [:rename :pin-id]) (typed-binding? raw))
+        typed? (or (:self-pin entry) (:annotation entry) (get-in entry [:rename :pin-id]) (typed-binding? raw))
         inline-body (format/inline-binding-body raw)
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
@@ -288,9 +292,9 @@
       (and typed? (not (uuid? (:type-override-fn-id policy))))
       (conj (problem :unresolved-binding-type))
       (or (and (contains? policy :type-override-fn-id) (not typed?))
-          (some #(contains? policy %) [:required :terminal :description]))
+          (and (not (:annotation entry)) (some #(contains? policy %) [:required :terminal :description])))
       (conj (problem :binding-metadata-required))
-      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? expression)
+      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? (:annotation entry)) (nil? expression)
            (not (or (:list-append policy) (:list-closed policy))))
       (conj (problem :non-value-binding-required))
       (and (= :ref (first expression)) (nil? (second expression)))
@@ -318,7 +322,7 @@
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         blockers (concat (when collision? [(blocker source :rename-field-collision [:args])])
-                         (source-argument-blockers source (into (set rename-fields) (keep #(when (:self-pin %) (peek (:source-path %)))) arguments))
+                         (source-argument-blockers source (into (set rename-fields) (keep #(when (or (:self-pin %) (:annotation %)) (peek (:source-path %)))) arguments))
                          (mapcat #(argument-blockers source % chain) arguments))]
     {:arguments arguments :aliases aliases :blockers blockers}))
 
@@ -376,7 +380,7 @@
   [source arguments aliases]
   (let [declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
         declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
-        binds (filter #(and (= :binding (:kind %)) (not (:self-pin %))) arguments)
+        binds (filter #(and (= :binding (:kind %)) (not (:self-pin %)) (not (:annotation %))) arguments)
         configuration (field-assertions source arguments)
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
@@ -565,6 +569,7 @@
   [record]
   (cond-> (select-keys record [:id :fn-id :slot-id :value-present])
     (:type-override-fn-id record) (assoc :type-override-fn-id (:type-override-fn-id record))
+    (some? (:description record)) (assoc :description (:description record))
     (:value-present record) (assoc :value (:value record))
     (:ref-fn-id record) (assoc :ref-fn-id (:ref-fn-id record))))
 

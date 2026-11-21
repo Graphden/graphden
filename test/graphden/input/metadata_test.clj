@@ -54,6 +54,29 @@
             (with-rows context [narrowed (row child field {:type-override-fn-id any-type})]) child)))))
 
 
+(deftest exact-source-annotation-retains-the-erased-collection-type-test
+  (let [{:keys [base child field context]} (fixture)
+        sequence-id (get (ids/primitive-fn-ids) :sequence)
+        input-id (get-in context [:fns base :input-type-fn-id])
+        rich [:list :text]
+        annotation (row child field {:expression-kind nil :value-present false :type-override-fn-id sequence-id
+                                     :description "Authored head elements"})
+        ctx (-> context
+                (assoc-in [:fields field :type-fn-id] sequence-id)
+                (assoc-in [:type-bodies input-id] {:value rich})
+                (assoc :source-field-types {[field sequence-id] rich})
+                (with-rows [annotation]))
+        frozen (assoc ctx :source-binding-types {[(:id annotation) sequence-id] rich})
+        analyzed (analysis/analyze-input frozen child)]
+    (is (= rich (get-in analyzed [:configured-contract :fields 0 :type])))
+    (is (= "Authored head elements" (get-in analyzed [:configured-contract :fields 0 :description])))
+    (is (empty? (:bindings analyzed)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+          (analysis/analyze-input ctx child)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+          (analysis/analyze-input (assoc frozen :source-binding-types {[(:id annotation) sequence-id] [:list :int]}) child)))))
+
+
 (deftest terminal-locks-descendant-but-does-not-retroactively-reject-ancestor-test
   (let [{:keys [base child field context]} (fixture)
         value {:expression-kind "value" :value-present true :value 1}]

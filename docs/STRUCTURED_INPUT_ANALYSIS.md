@@ -76,6 +76,12 @@ values and refinement obligations remain deferred, and error data omits literal
 payloads. Required missing fields describe invocation readiness independently of
 whether a definition's types have been checked.
 
+A verified source snapshot can retain an unchanged annotation's rich type in
+`:source-binding-types`, keyed by `[binding-id type-id]`. This prevents a
+collection stored under the legacy `:sequence` FK from losing its element
+type during metadata application. The witness must match the field's current
+type and FK exactly; it is not a type inferred from that primitive FK.
+
 `analysis/analyze-effective-input` expands evaluated value and callable-producer
 references into `:scopes`, keyed by vectors of reference binding IDs. Its
 `:dependencies` record source addresses, target use scopes, target function IDs

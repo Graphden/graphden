@@ -83,6 +83,36 @@
     (is (= "checked" (get-in certificate [:row :value])))))
 
 
+(deftest unchanged-hiccup-field-annotation-freezes-with-its-rich-collection-type
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})
+            shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})]
+    (let [declarations (vec (concat (filter #(= :keyword-or-text (:name %)) (sources "refinements"))
+                                    (fixtures/declarations "packages/web/html/fns.edn" #{:hiccup-node :hiccup})))
+          child {:name :head-annotation :namespace "fixture" :parent :hiccup
+                 :args {:children {:as :children :type [:list :hiccup-node] :description "Extra head elements"}}}
+          definitions (conj declarations child)
+          _ (sync/register-type-aliases! declarations)
+          base (get @fixtures/web-base-definitions :hiccup)
+          _ (registry/record-rich-types! (ids/fn-id "web.html" :hiccup) :hiccup base)
+          roots (:by-id @registry/*rich-types-override*)
+          prepared (parse/prepare-module definitions {} {})
+          package (snapshot/package-index prepared definitions)
+          owner (ids/fn-id "fixture" :head-annotation)
+          field (ids/slot-id (ids/fn-id "web.html" :hiccup) :children)
+          binding (ids/binding-id owner field)
+          {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+          graph (analysis/analyze-effective-input context owner options)
+          child-field (some #(when (= field (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (empty? (:obligations graph)))
+      (is (= [:list :hiccup-node] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
+      (is (= [:list (types/resolve-alias :hiccup-node)] (:type child-field)))
+      (is (= "Extra head elements" (:description child-field)))
+      (is (= nil (get-in context [:bindings binding :expression-kind])))
+      (is (not (contains? (get-in graph [:public-input :bindings]) [[owner []] [field]]))))))
+
+
 (deftest generated-list-parameters-retain-frozen-element-variables
   (let [base (some #(when (= :zipmap (:name %)) %) (sources "collections"))
         owner (ids/fn-id "fixture" :directory)

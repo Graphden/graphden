@@ -20,7 +20,7 @@
 ## Lessons
 
 Read them top to bottom — the table is in **teaching order**, in the same
-five chapters the in-editor picker uses, and the numbering is
+chapters the in-editor picker uses, and the numbering is
 **sequential in that order**: the number is the file name, the deep link
 (`?tutorial=16`), and the tour's `:id`. Inserting a lesson mid-sequence
 renumbers everything after it — that is a mechanical, repo-wide
@@ -94,6 +94,12 @@ of order.
 | 40 | [The Marketplace: themes, keyboard layouts, and what others published](40-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
 | 41 | [The package lifecycle — both sides of a version](41-package-lifecycle.md) | ▶ interactive + written |
 | 42 | [AI clients and API tokens: the graph over `/mcp`](42-ai-clients-and-api-tokens.md) | ✅ written · ▶ interactive |
+
+### Structured input
+
+| # | Lesson | Status |
+|---|---|---|
+| 43 | [Bind part of a record and run with the rest](43-structured-input.md) | Written · ▶ interactive when structured Run is available |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for

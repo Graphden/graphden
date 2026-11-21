@@ -79,6 +79,16 @@ function _tourStructuredInputPath(check) {
     && (!Object.hasOwn(check, 'version-id') || field['version-id'] === check['version-id']);
 }
 
+function _tourJsonEquals(actual, expected) {
+  if (actual === expected) return true;
+  if (!actual || !expected || typeof actual !== 'object' || typeof expected !== 'object'
+    || Array.isArray(actual) !== Array.isArray(expected)) return false;
+  const keys = Object.keys(expected);
+  return Object.keys(actual).length === keys.length && keys.every(
+    key => Object.hasOwn(actual, key) && _tourJsonEquals(actual[key], expected[key]),
+  );
+}
+
 // Rename views and their persisted source bindings share an identity even
 // when their names differ. Missing or cyclic source chains fail closed.
 function _tourCanonicalSlotId(id) {
@@ -429,10 +439,15 @@ function _tourCheckPasses(check) {
         // results and rendered text for scalars. Submitting clears the host, so an
         // earlier result cannot complete a step while the new run is pending.
         if (!_tourDomVisible('.execute-popover.visible .execute-result-pane')) return false;
+        if (Object.hasOwn(check, 'name')) {
+          const fn = _tourFnForCheck(check);
+          const host = document.querySelector('.execute-popover.visible .execute-result-host');
+          if (!fn || fn.id !== selectedFnId || host?.gdExecutionFnId !== fn.id) return false;
+        }
         const raw = document.querySelector(
           '.execute-popover.visible .execute-result-host .execute-result-raw pre');
         if (!Object.hasOwn(check, 'value')) return false;
-        if (raw) return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+        if (raw) return _tourJsonEquals(JSON.parse(raw.textContent), check.value);
         // The production scalar pane has no Raw details; it renders the
         // primitive directly. This proves the displayed value, not its type:
         // numeric 2 and text "2" share that markup. Shaped results use raw JSON.

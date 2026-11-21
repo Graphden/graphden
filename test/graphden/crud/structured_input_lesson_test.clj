@@ -39,7 +39,7 @@
                                (let [{:keys [id]} (sp/create-entity storage :slot {:name name :type-fn-id text-id :required true})]
                                  {:fn-id person :slot-id id :position position}))
                              ["id" "name" "email"])
-        root (:id (sp/create-entity storage :fn {:name "lesson-run-owner" :input-type-fn-id input}))]
+        root (:id (sp/create-entity storage :fn {:name "tutorial-structured-profile" :input-type-fn-id input}))]
     (sp/create-entities storage :fn-slot (into [{:fn-id input :slot-id profile :position 0}] members))
     {:root root :profile profile}))
 
@@ -69,9 +69,14 @@
   {:status status :headers {"Content-Type" "application/json"} :body (json/generate-string body)})
 
 
+(defn- fixture-request?
+  [ctx req]
+  (and access/*offline?* (:authenticated? (auth/authenticate (:auth-provider ctx) req))))
+
+
 (defn- run-response
   [ctx {:keys [root] :as fixture} req]
-  (if-not (and access/*offline?* (:authenticated? (auth/authenticate (:auth-provider ctx) req)))
+  (if-not (fixture-request? ctx req)
     (json-response 403 {:ok false})
     (try
       (let [{:keys [fn-id args] :as body} (request/read-json-body req)]
@@ -83,10 +88,13 @@
 
 
 (defn- lesson-handler
-  [ctx fixture app]
+  [ctx fixture app lesson]
   (fn [{:keys [request-method uri] :as req}]
     (case [request-method uri]
       [:get "/"] {:status 200 :headers {"Content-Type" "text/html"} :body "<!doctype html><title>Structured input fixture</title>"}
+      [:get "/fixture/lesson"] (if (fixture-request? ctx req)
+                                 (json-response 200 lesson)
+                                 (json-response 403 {:ok false}))
       [:post "/fixture/run"] (run-response ctx fixture req)
       ([:get "/api/graph/entities"]
        [:post "/api/structured-input/preview"]
@@ -147,16 +155,21 @@
         ctx (exec/create-context {:storage storage :auth-provider (auth/single-token-provider token)})
         _ (executor/rebuild! ctx)
         app (router/create-router ctx "_app-ring-response")
+        lesson (some #(when (= "structured-input" (:slug %)) %)
+                     (:lessons (golden/exec-handler :_tour-lessons {})))
         allow? (atom true)
         handler (lesson-handler (assoc ctx :execute-guard
                                        (fn [_ id]
                                          (when-not (and @allow? (= root id))
                                            (throw (ex-info "Outside the fixture" {:type :authz/forbidden})))))
-                                fixture app)
+                                fixture app lesson)
         registry (:compiled-registry ctx)
         run {:fn-id (str root) :args {:profile {:id "42" :email "ada@example.test"}}}
         command {:fn-id (str root) :action "bind" :path ["profile" "name"] :value "Ada"}]
     (is (= 403 (:status (post handler token "/fixture/run" run))))
+    (is (= 403 (:status (handler {:request-method :get :uri "/fixture/lesson"
+                                  :headers {"authorization" (str "Bearer " token)}}))))
+    (is (= "structured-input-run" (:requires lesson)))
     (binding [access/*offline?* true]
       (is (= 403 (:status (post handler "invalid" "/fixture/run" run))))
       (is (= 400 (:status (post handler token "/fixture/run" (assoc run :fn-id (str (random-uuid)))))))

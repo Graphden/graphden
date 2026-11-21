@@ -25,7 +25,12 @@
       (is (= "https://graphden.dev/tutorial/" (get-in body [:text :base]))))
     (testing "every row still points at its written lesson"
       (is (seq (:lessons body)))
-      (is (every? #(and (:id %) (:slug %) (:reads %)) (:lessons body))))))
+      (is (every? #(and (:id %) (:slug %) (:reads %)) (:lessons body))))
+    (testing "the public catalogue retains the slot lessons and omits the staged structured Run lesson"
+      (let [slugs (into #{} (map :slug) (:lessons body))]
+        (is (contains? slugs "free-arguments"))
+        (is (contains? slugs "executing-a-fn"))
+        (is (not (contains? slugs "structured-input")))))))
 
 
 (deftest the-deployment-setting-overrides-the-text-base

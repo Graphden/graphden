@@ -114,6 +114,8 @@
 ;;     (`REQUIRE_SIGNALS` in editor-tour-picker.js): `services` = the dedicated
 ;;     plan (or a platform / self-host instance), `org` = organizations exist
 ;;     here, `assets` = a single-tenant instance.
+;; `structured-input-run` is held before serialization until the ordinary
+;; editor can prepare an editable sample and execute its remaining inputs.
 ;;
 ;; ONE ACTION PER RING (from a reader walking lesson 18): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
@@ -3201,6 +3203,42 @@
               {:title "Continue with your client"
                :body "You created a token with a short expiry, proved its scope ceiling and revoked it. The written lesson explains connecting an external MCP client and using a branch. Click [[Finish]]; cleanup removes only token UUIDs created by this lesson, including an ambiguous creation reply."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "43"
+             :slug "structured-input"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :title "Bind part of a record and run with the rest"
+             :reads "explains how the declared record, the binding and the values supplied for one run fit together."
+             :steps
+             [{:title "Select the sample"
+               :body "Find `tutorial-structured-profile` in the Explorer and select the lesson’s sample. It accepts a profile with three fields and returns that profile."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "tutorial-structured-profile"}}
+              {:title "Find the name field"
+               :body "Open [[Remaining inputs]], expand [[profile]] and choose [[Bind]] beside name."
+               :target ".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"profile — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind profile.name\"]"]
+               :check {:kind "dom" :selector ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"}}
+              {:title "Bind the name"
+               :body "Enter `Ada` and click [[Bind]]. The lesson checks the saved binding at profile.name."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :path ["profile" "name"] :state "occupied"}}
+              {:title "Open Run"
+               :body "Click [[▶ Run]] on the sample. In the Run form, profile asks for id and email."
+               :target ".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "dom" :selector ".execute-popover.visible .execute-run-btn"}}
+              {:title "Supply the rest and run"
+               :body "Enter `42` for id and `ada@example.test` for email. Click [[Run]]. The returned profile must contain all three values, including the saved name."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-structured-profile"
+                       :value {:id "42" :name "Ada" :email "ada@example.test"}}}
+              {:title "Finish the lesson"
+               :body "The name stays bound on your lesson branch. The id and email were supplied for this run. Click [[Finish]] to close the lesson and clean up its branch."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
@@ -3219,9 +3257,25 @@
   {:name :_tour-text-base
    :parent :coalesce
    :args {:value :_tour-text-base-env :default :_tour-text-base-default}}
-  {:name :_tour-payload
+  {:name :_tour-resolved-text
    :parent :assoc-in
    :args {:m :_tour-lessons :path {:value [:text :base]} :v :_tour-text-base}}
+
+  {:name :_tour-public-lesson?
+   :description "Keep staged structured-input teaching out of the public payload until ordinary Run can execute it."
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get
+                             :args {:coll {:as :item} :key {:value :requires} :default nil}}
+                         :b {:value "structured-input-run"}}}}}
+  {:name :_tour-payload
+   :parent :assoc-in
+   :args {:m :_tour-resolved-text
+          :path {:value [:lessons]}
+          :v {:parent :filter
+              :args {:pred :_tour-public-lesson?
+                     :coll {:parent :get-in
+                            :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}}}}}
 
   {:name :_tour-json
    :parent :to-json-string

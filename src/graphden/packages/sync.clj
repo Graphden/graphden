@@ -282,11 +282,16 @@
                        :offenders (vec offenders)})))))
 
 
+(defn- primitive-input-types
+  [primitives]
+  (into {} (map (comp (juxt :fn-id :input-type-id) :parsed val)) primitives))
+
+
 (defn- sync-package-bases!
   [storage definitions ns-id-map all-name->id impls primitives]
   (if (empty? primitives)
     (registry/sync-defs-to-storage! storage definitions ns-id-map all-name->id)
-    (binding [input-access/*package-input-types* (into {} (map (comp (juxt :fn-id :input-type-id) :parsed val)) primitives)]
+    (binding [input-access/*package-input-types* (primitive-input-types primitives)]
       (registry-core/sync-defs-to-storage!
         storage definitions ns-id-map all-name->id
         (fn [signatures]
@@ -361,8 +366,9 @@
          (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written)))
          {:ns-id-map ns-id-map
           :all-name->id all-name->id
-          :base-fns (vary-meta base-fns-map assoc ::owned/native-signatures
-                               (::registry-core/registered-signatures (meta written)))})))))
+          :base-fns (vary-meta base-fns-map assoc
+                               ::owned/native-signatures (::registry-core/registered-signatures (meta written))
+                               ::owned/primitive-input-types (primitive-input-types primitives))})))))
 
 
 (defn- ancestor-parents

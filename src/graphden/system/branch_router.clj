@@ -32,6 +32,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
     [graphden.executor.registry.core :as registry-core]
+    [graphden.input.authoring-principal :as authoring-principal]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.cache :as cache]
@@ -1025,7 +1026,7 @@
             (fn []
               (if request-scope
                 (request-scope base-ctx request run)
-                (run))))))))
+                (authoring-principal/with-standalone-request base-ctx request run))))))))
 
 
 ;; =============================================================================

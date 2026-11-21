@@ -13,6 +13,7 @@
     [graphden.system.init.packages]
     [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.golden-app :as golden]
+    [graphden.test-infra.lesson-contact :as contact]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
@@ -116,13 +117,13 @@
 
 (deftest anonymous-catalogue-and-owned-structured-lesson-lifecycle-test
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons"]
-                                             :primitive-input lesson/admission})
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "lesson-contact"]
+                                             :primitive-inputs [lesson/admission contact/admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
-        denied (atom false)
+        denied (atom nil)
         guard (fn [_ id]
-                (when (and @denied (= lesson/root id))
+                (when (= @denied id)
                   (throw (ex-info "Denied" {:type :authz/forbidden}))))
         ctx (exec/create-context {:storage storage :base-fns base-fns :execute-guard guard
                                   :auth-provider (auth/single-token-provider token)})
@@ -133,14 +134,21 @@
     (is (contains? anonymous "15"))
     (is (not (contains? anonymous "43")))
     (is (= (str lesson/root) (get-in eligible ["43" :template-id])))
-    (reset! denied true)
-    (is (not (contains? (catalogue app token) "43")))
-    (reset! denied false)
+    (is (not (contains? anonymous "44")))
+    (is (= (str contact/root) (get-in eligible ["44" :template-id])))
+    (doseq [[denied-id root available-id] [["43" lesson/root "44"] ["44" contact/root "43"]]]
+      (reset! denied root)
+      (let [available (catalogue app token)]
+        (is (contains? available available-id))
+        (is (not (contains? available denied-id)))))
+    (reset! denied nil)
     (ordinary-branch-exercise! app token storage)
     (when (= "1" (System/getenv "GD_STRUCTURED_LESSON_LIFECYCLE_PLAYWRIGHT"))
       (let [api-cache (ig/init-key :exec/api-routes-js-cache {:context ctx})]
         (try
-          (browser/exercise! #(router/dispatch app %) token "tools/browser-test/fixtures/structured-lesson-lifecycle.js" lesson/root)
+          (doseq [[id root] [["43" lesson/root] ["44" contact/root]]]
+            (browser/exercise! #(router/dispatch app %) token "tools/browser-test/fixtures/structured-lesson-lifecycle.js" root id))
           (finally (ig/halt-key! :exec/api-routes-js-cache api-cache)))))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-structured-profile"})))
+    (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-contact-route"})))
     (is (not (contains? (catalogue app nil) "43")))))

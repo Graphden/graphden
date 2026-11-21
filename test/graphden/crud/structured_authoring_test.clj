@@ -17,6 +17,7 @@
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.golden-app :as golden]
+    [graphden.test-infra.lesson-contact :as contact]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]
@@ -301,17 +302,6 @@
       (when (:id row) (exercise-reference-changes! origin token storage seams denied child (:id row))))))
 
 
-(def ^:private pair-root (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route))
-
-
-(def ^:private pair-admission
-  (let [contact {:name :text :address {:city :text}}]
-    {:module ["lesson-contact" "structured-input"] :fn-id pair-root
-     :abi-fn-id (ids/fn-id "lesson-contact.native" :contact-route-native)
-     :record-contract {:sender contact :recipient contact}
-     :sha256 "3ac94222a4c8baf5f54e3b9a362859de99211e45172f2e2ca1fd151cf6110c5e"}))
-
-
 (defn- address-routes
   [view side]
   (let [lookup (fn [fields field] (some #(when (= field (:name %)) %) fields))]
@@ -321,7 +311,7 @@
 (defn- exercise-pair!
   [origin token storage]
   (let [name "lesson-paired-contact-route"
-        created (extend-native origin token name pair-root)
+        created (extend-native origin token name contact/root)
         owner (:id (first (sp/query-entities storage :fn {:name name})))
         sender ["sender" "address" "city"]
         recipient ["recipient" "address" "city"]
@@ -370,7 +360,7 @@
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
         packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "lesson-contact"]
-                                             :primitive-inputs [lesson/admission uppercase-admission pair-admission]})
+                                             :primitive-inputs [lesson/admission uppercase-admission contact/admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
         denied (atom nil)

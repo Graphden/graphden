@@ -21,6 +21,7 @@
  "grants" {:version 1, :steps "f54a1f416cbe54f9ddb654a87f4a423b1e62a72a"}
  "higher-order-functions" {:version 5, :steps "b4a51f3c9a660c9021c4ca439605f91bc307217e"}
  "htmx-fragments" {:version 2, :steps "1cd2796d19a85bbd9085544ec72126a73303e3ae"}
+ "independent-contact-records" {:version 1, :steps "97527369f27df640e6d437f9b34dce5f569a90db"}
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
  "lists" {:version 4, :steps "db22c172d0e3246ea91ee13854ebca56dca9ff89"}
  "marketplace-themes-keymaps" {:version 3, :steps "1d5b8b9cda2428d3b2ca516498afee74c8d40246"}

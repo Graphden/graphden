@@ -95,7 +95,29 @@ async function run() {
   assert.deepEqual(Array.from((await scope()).lessons), [legacy]);
   t.setPrincipal(true);
   assert.deepEqual(Array.from((await scope(() => false)).lessons), [legacy], 'a stale catalogue load cannot advertise the lesson');
-  console.log('✓ tutorial 43: proof, exact sandbox/child, resumed binding and fail-closed catalogue');
+
+  const contactTemplate = 'b67af3a3-67c3-5237-89cf-62a815d5dfa1';
+  const contactLesson = {id: '44', 'template-id': contactTemplate};
+  const contactFields = ['sender', 'recipient'].map(name => ({
+    name, fields: [field('name'), {name: 'address', fields: [field('city')]}],
+  }));
+  const contactInput = {...templateInput, fields: contactFields};
+  t.ctx._tourState = null;
+  t.setBranch('main');
+  t.setResponse({id: contactTemplate, 'structured-input': contactInput});
+  const pairedPayload = {lessons: [legacy, contactLesson, lesson]};
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(pairedPayload, () => true)).lessons),
+    [legacy, contactLesson], 'one template offer cannot authorize the other lesson');
+  const impostor = {...contactLesson, 'template-id': template};
+  t.setResponse({id: template, 'structured-input': contactInput});
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson({lessons: [legacy, impostor]}, () => true)).lessons),
+    [legacy], 'a mismatched template cannot substitute for the known package owner');
+  const occupied = side => ({type: 'text', path: [side, 'address', 'city'], 'binding-id': side, 'version-id': side});
+  const boundContacts = {...contactInput, fields: contactFields.map(({name}) => ({name, fields: [field('name')]})),
+    occupied: ['sender', 'recipient'].map(occupied)};
+  assert.equal(t.ctx._tourStructuredContacts(boundContacts, true), true);
+  assert.equal(t.ctx._tourStructuredContacts({...boundContacts, occupied: [occupied('sender')]}, true), false);
+  console.log('✓ structured tutorials: exact templates, sandbox ownership, independent contact paths and resume');
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1; });

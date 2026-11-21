@@ -371,7 +371,7 @@ async function startTutorialIsolated(lessonId, ticket = _tourStartTicket()) {
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
-  const requiresSandbox = lessonId === '43';
+  const requiresSandbox = ['43', '44'].includes(lessonId);
   if (requiresSandbox && (!lesson || !onMain)) return false;
   if (lesson?.requires === 'services'
       && !await _tourPrepareServiceLesson(lesson, () => _tourStartCurrent(ticket))) return false;

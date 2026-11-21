@@ -159,7 +159,7 @@
           apply-request (assoc request :expected-state (:expected-state preview))]
       (is (:ok preview))
       (is (empty? (sp/query-entities storage :input-binding {})))
-      (is (= :input/leaf-unavailable
+      (is (= :types/check-failed
              (attempt #(bind-command/preview ctx (assoc request :path ["user"])))))
       (is (= :types/check-failed
              (attempt #(bind-command/preview ctx (assoc request :value 42)))))

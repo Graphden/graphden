@@ -44,7 +44,7 @@
     :else false))
 
 
-(defn free-leaf-route
+(defn free-field-route
   "Select an own, free field addressed by the declared public names."
   [routes path]
   (let [route (get routes path)]
@@ -57,12 +57,13 @@
   [editable-routes path {:keys [type fields result-type] :as node}]
   (when-not (or (concealed-type? result-type)
                 (if fields (concealed-container? type) (concealed-type? type)))
-    (let [info (select-keys node [:kind :name :required :required-now?])]
+    (let [bindable? (and (free-field-route editable-routes path) (not (concealed-type? type)))
+          info (cond-> (select-keys node [:kind :name :required :required-now?])
+                 bindable? (assoc :bind-path path :type type))]
       (if fields
         (cond-> (assoc info :fields (into [] (keep #(wire-node editable-routes (conj path (:name %)) %)) fields))
           (= :reference-inputs (:kind node)) (dissoc :required :required-now?))
-        (cond-> (assoc info :type type)
-          (free-leaf-route editable-routes path) (assoc :bind-path path))))))
+        (assoc info :type type)))))
 
 
 (defn analyze
@@ -116,19 +117,19 @@
         row))))
 
 
-(defn- occupied-leaf
+(defn- occupied-field
   [ctx root scope address path node declared]
   (let [{:keys [binding-id origin-fn-id expected-type]} (get-in scope [:bindings address])
         row (when (= root origin-fn-id) (own-command-row root (get-in ctx [:bindings binding-id])))]
     (when (and row (= (second address) (:target-path row))
-               (<= 1 (count path) 64) (nil? (:fields declared))
+               (<= 1 (count path) 64)
                (= :checked (get-in scope [:proofs address :status]))
                (some? expected-type) (= expected-type (:type node))
                (not-any? concealed-type? [expected-type (:type declared)]))
       {:path path :type expected-type :binding-id binding-id})))
 
 
-(defn- visible-occupied-leaves
+(defn- visible-occupied-fields
   [ctx {:keys [fn-id hidden-input-addresses] :as graph}]
   (let [{:keys [configured-contract declared-contract] :as scope} (get-in graph [:scopes []])]
     (letfn [(visit
@@ -136,21 +137,21 @@
               (let [address [[fn-id []] ids]]
                 (when (and node declared (some? (:type declared)) (some? (:type node))
                            (not (contains? hidden-input-addresses address)))
-                  (if-let [fields (:fields node)]
-                    (when-not (or (concealed-container? (:type node))
-                                  (concealed-container? (:type declared)))
+                  (if-let [fact (occupied-field ctx fn-id scope address names node declared)]
+                    [fact]
+                    (when (and (:fields node)
+                               (not (or (concealed-container? (:type node))
+                                        (concealed-container? (:type declared)))))
                       (let [declared-fields (into {} (map (juxt :id identity)) (:fields declared))]
                         (mapcat (fn [{:keys [id name] :as child}]
                                   (visit (conj ids id) (conj names name) child (get declared-fields id)))
-                                fields)))
-                    (when-let [fact (occupied-leaf ctx fn-id scope address names node declared)]
-                      [fact])))))]
+                                (:fields node))))))))]
       (vec (visit [] [] configured-contract declared-contract)))))
 
 
 (defn- occupied-editor-fields
   [storage ctx graph]
-  (let [fields (visible-occupied-leaves ctx graph)
+  (let [fields (visible-occupied-fields ctx graph)
         versions (input-storage/binding-versions storage (into {} (map (fn [{:keys [binding-id]}]
                                                                          [binding-id (get-in ctx [:bindings binding-id :fn-id])])) fields))]
     (into [] (keep (fn [field]
@@ -159,10 +160,10 @@
 
 
 (defn editable-binding?
-  "Recheck this exact own leaf against an authorized current analysis."
+  "Recheck this exact own field against an authorized current analysis."
   [ctx graph id]
   (and (checked-projection? graph)
-       (some #(= id (:binding-id %)) (visible-occupied-leaves ctx graph))))
+       (some #(= id (:binding-id %)) (visible-occupied-fields ctx graph))))
 
 
 (defn- editing-authorized?

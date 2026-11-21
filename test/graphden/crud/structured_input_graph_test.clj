@@ -75,7 +75,7 @@
       (is (not (contains? leaf :bind-path))))
     (binding [access/*offline?* true]
       (let [fields (:fields (input-view app token owner))]
-        (is (nil? (get-in fields [0 :bind-path])))
+        (is (= ["profile"] (get-in fields [0 :bind-path])))
         (is (= (:path create) (get-in fields [0 :fields 0 :bind-path]))))
       (is (= 401 (:status (send-command app nil "preview" create))))
       (is (= 400 (:status (send-command app token "preview" []))))

@@ -88,20 +88,20 @@
     (crypto/sha256-hex (migration/stable-edn (ordered-map-keys state)))))
 
 
-(defn visible-leaf
-  "Resolve a visible, free leaf in the function's own input scope."
+(defn visible-field
+  "Resolve a visible, free field in the function's own input scope."
   [graph path]
-  (let [view (structured/project-analysis graph)
+  (let [view (structured/project-analysis graph true)
         wire (reduce (fn [node name] (some #(when (= name (:name %)) %) (:fields node))) view path)
-        route (structured/free-leaf-route (get-in graph [:public-input :routes]) path)]
-    (when-not (and (= :available (:status view)) wire (not (contains? wire :fields)) route)
+        route (structured/free-field-route (get-in graph [:public-input :routes]) path)]
+    (when-not (and (= :available (:status view)) (= path (:bind-path wire)) route)
       (reject! :input/leaf-unavailable "This input field is unavailable for binding"))
     route))
 
 
 (defn- proposed-row
   [ctx graph {:keys [fn-id path ref-fn-id value]} id]
-  (let [{[scope field-path :as address] :address} (visible-leaf graph path)
+  (let [{[scope field-path :as address] :address} (visible-field graph path)
         form (reduce (fn [form key] {key form}) (if ref-fn-id [:ref ::target] [:value value]) (rseq path))
         bound (surface/bind-input ctx (:public-input graph) form {:name->id {::target ref-fn-id} :binding-id (constantly id)})
         {:keys [binding-id expression]} (get bound address)]

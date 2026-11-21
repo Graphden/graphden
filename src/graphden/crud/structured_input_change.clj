@@ -45,7 +45,7 @@
         address [[owner []] (:target-path row)]
         path (some #(when (= address (:address (val %))) (key %))
                    (get-in opened [:public-input :routes]))]
-    (bind/visible-leaf opened path)
+    (bind/visible-field opened path)
     path))
 
 

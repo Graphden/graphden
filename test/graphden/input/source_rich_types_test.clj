@@ -26,6 +26,7 @@
 
 
 (deftest collection-return-shape-must-match-the-physical-return-fk
-  (is (rich/list-return? (ids/primitive-fn-id :sequence) [:list 'b]))
-  (is (not (rich/list-return? (ids/primitive-fn-id :text) [:list 'b])))
-  (is (not (rich/list-return? (ids/primitive-fn-id :sequence) [:list :unverified-typedef]))))
+  (is (rich/collection-return? (ids/primitive-fn-id :sequence) [:list 'b]))
+  (is (rich/collection-return? (ids/primitive-fn-id :jsonb) [:map 'k 'v]))
+  (is (not (rich/collection-return? (ids/primitive-fn-id :text) [:list 'b])))
+  (is (not (rich/collection-return? (ids/primitive-fn-id :sequence) [:list :unverified-typedef]))))

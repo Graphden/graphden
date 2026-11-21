@@ -28,9 +28,9 @@
            (every? #(migration/same-edn? row %) stored)))))
 
 
-(defn list-return?
-  "Recover a list return that the legacy parser stored as a sequence.
+(defn collection-return?
+  "Recover a list or map return stored under a legacy primitive identity.
    Its frozen rich implementation entry must still match the authored type."
   [type-id type]
-  (and (vector? type) (= :list (first type))
+  (and (vector? type) (contains? #{:list :map} (first type))
        (descriptor/stored-source-type? type type-id)))

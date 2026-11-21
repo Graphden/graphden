@@ -220,8 +220,14 @@
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
              :type-bodies inputs
-             :source-return-types (into {} (keep (fn [[id {:keys [owner list-implementation]}]]
-                                                   (when list-implementation [[id (:return-type-fn-id owner)] (get-in list-implementation [:root-entry :return])]))) entries)
+             :source-return-types
+             (into {} (keep (fn [[id {:keys [owner source list-implementation]}]]
+                              (let [type-id (:return-type-fn-id owner)
+                                    return (:return-type source)]
+                                (cond
+                                  list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
+                                  (rich/collection-return? type-id return) [[id type-id] return]))))
+                   entries)
              :source-field-types (source-field-types entries) :markers markers))))
 
 
@@ -257,7 +263,7 @@
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
                             (= (get type-ids return) (:return-type-fn-id owner)))
-                       (rich/list-return? (:return-type-fn-id owner) return))
+                       (rich/collection-return? (:return-type-fn-id owner) return))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))

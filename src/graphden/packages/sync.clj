@@ -292,17 +292,20 @@
   (if (empty? primitives)
     (registry/sync-defs-to-storage! storage definitions ns-id-map all-name->id)
     (let [admitted (mapcat (fn [{:keys [parsed children]}] (cons parsed children)) (vals primitives))
-          bindings (mapcat :bindings admitted)]
-      (binding [input-access/*package-input-types* (into {} (map (juxt :fn-id :input-type-id)) admitted)]
+          list-modules (keep :list-module (vals primitives))
+          list-rows (mapcat :records list-modules)
+          bindings (distinct (concat (mapcat :bindings admitted) (filter #(= :input-binding (:kind %)) list-rows)))]
+      (binding [input-access/*package-input-types* (merge (into {} (map (juxt :fn-id :input-type-id)) admitted)
+                                                          (into {} (keep #(when-let [input (:input-type-fn-id %)] [(:id %) input])) list-rows))]
         (writer/with-write [storage :graph]
                            (let [written (registry-core/sync-defs-to-storage!
                                            storage definitions ns-id-map all-name->id
                                            (fn [signatures]
                                              (update-vals primitives #(primitive/checked-records % impls signatures))))]
-                             (doseq [{:keys [fn-id id] :as row} bindings]
+                             (doseq [{:keys [fn-id id] :as row} (sort-by (comp count :scope-path) bindings)]
                                ;; JSONB stores path UUIDs as strings. Send that
                                ;; same representation to the version diff.
-                               (let [data (-> row (dissoc :kind) (update :target-path #(mapv str %)))]
+                               (let [data (-> row (dissoc :kind) (update :target-path #(mapv str %)) (update :scope-path #(mapv str %)))]
                                  (input-access/with-binding-write fn-id id
                                                                   #(sp/upsert-entities storage :input-binding [data]))))
                              written))))))
@@ -378,6 +381,8 @@
           :all-name->id all-name->id
           :base-fns (vary-meta base-fns-map assoc
                                ::owned/native-signatures (::registry-core/registered-signatures (meta written))
+                               ::owned/list-implementations (into {} (mapcat (fn [m] ((requiring-resolve 'graphden.input.pinned-list-runtime/implementations) m)))
+                                                                  (keep :list-module (vals primitives)))
                                ::owned/primitive-input-types (primitive-input-types primitives))})))))
 
 

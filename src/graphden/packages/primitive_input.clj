@@ -3,6 +3,7 @@
   (:require
     [clojure.java.io :as io]
     [graphden.input.analysis :as analysis]
+    [graphden.input.pinned-list :as lists]
     [graphden.input.source-primitive :as primitive]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
@@ -16,14 +17,14 @@
 
 
 (deftype ^:private PrimitiveReceipt
-  [seal parsed abi-id staged children]
+  [seal parsed abi-id staged children list-module]
 
   PrimitiveProof
 
   (receipt-evidence
     [_ expected-seal]
     (when (identical? seal expected-seal)
-      {:parsed parsed :abi-fn-id abi-id :module staged :children children})))
+      {:parsed parsed :abi-fn-id abi-id :module staged :children children :list-module list-module})))
 
 
 (defonce ^:private seal (Object.))
@@ -56,7 +57,7 @@
 
 (defn read-module
   "Preflight exactly the pinned classpath module before any package code runs."
-  [package module {:keys [fn-id abi-fn-id sha256 record-contract]}]
+  [package module {:keys [fn-id abi-fn-id sha256 record-contract list-contract]}]
   (let [path (str "packages/" package "/" module "/fns.edn")
         resource (io/resource path)]
     (when-not (and resource (uuid? fn-id) (uuid? abi-fn-id) (not= fn-id abi-fn-id)) (reject!))
@@ -64,10 +65,12 @@
                    (staged/read-pinned (java.io.InputStream/.readAllBytes stream) sha256))]
       (when-not (every? #{:input-format :namespace :description :fns} (keys source))
         (reject!))
-      (let [parsed (primitive/prepare source fn-id record-contract)
+      (when (and list-contract record-contract) (reject!))
+      (let [list-module (when list-contract (lists/prepare source fn-id list-contract))
+            parsed (if list-module (first (:definitions list-module)) (primitive/prepare source fn-id record-contract))
             definition (:source parsed)
-            children (literal-descendants source fn-id)
-            receipt (PrimitiveReceipt. seal parsed abi-fn-id source children)]
+            children (if list-module (subvec (:definitions list-module) 1) (literal-descendants source fn-id))
+            receipt (PrimitiveReceipt. seal parsed abi-fn-id source children list-module)]
         (when (seq (:effects definition)) (reject!))
         {:ns-path (:namespace source) :ns-description (:description source)
          :fns (into [(assoc definition :source-file path)]
@@ -126,7 +129,7 @@
 (defn checked-records
   "Validate the independently registered package ABI and exact native function
    identity. Both entries must come from the current registration."
-  [{:keys [parsed abi-fn-id module children]} impls signatures]
+  [{:keys [parsed abi-fn-id module children list-module]} impls signatures]
   (let [id (:fn-id parsed)
         signature (get signatures id)
         witness (get signatures abi-fn-id)
@@ -140,10 +143,13 @@
                    (= (:return signature) (get-in parsed [:source :return-type]))
                    (= (select-keys signature abi-keys) (select-keys witness abi-keys)))
       (reject!))
-    (doseq [{owner :fn-id} children]
-      (let [{:keys [context options]} (snapshot/freeze-literal-root module owner signatures #{id owner})
-            result (analysis/analyze-effective-input context owner options)]
-        (when-not (= :checked (:status result)) (reject!))))
-    (into (:declaration-records parsed)
-          (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
-          children)))
+    (if list-module
+      ((requiring-resolve 'graphden.input.pinned-list-runtime/checked-declarations) list-module id signature impl)
+      (do
+        (doseq [{owner :fn-id} children]
+          (let [{:keys [context options]} (snapshot/freeze-literal-root module owner signatures #{id owner})
+                result (analysis/analyze-effective-input context owner options)]
+            (when-not (= :checked (:status result)) (reject!))))
+        (into (:declaration-records parsed)
+              (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
+              children)))))

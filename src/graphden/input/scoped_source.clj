@@ -18,14 +18,20 @@
 
 
 (defn- read-leaf
-  [names path form]
+  [{:keys [name->id contract scope]} {:keys [source-names]} path form]
   (when-not (and (vector? form) (= 2 (count form))) (reject! :unsupported-scoped-expression path))
   (let [[op payload] form]
     (case op
       :value {:kind :value :value payload}
-      :ref (if-let [id (and (keyword? payload) (get names payload))]
+      :ref (if-let [id (and (keyword? payload) (get name->id payload))]
              {:kind :ref :fn-id id}
              (reject! :unresolved-scoped-reference path))
+      :project (do
+                 (when-not (and (= payload source-names) (vector? payload)
+                                (= 1 (count payload)) (simple-keyword? (first payload)))
+                   (reject! :unverified-forwarded-source path))
+                 (assoc (select-keys (input/resolve-address contract scope payload) [:scope :path])
+                        :kind :projection))
       (reject! :unsupported-scoped-expression path))))
 
 
@@ -56,7 +62,7 @@
 
 
 (defn- parse-route
-  [{:keys [scope name->id scoped-inputs declaration-records] :as ctx} local-state public-path form]
+  [{:keys [scope scoped-inputs declaration-records] :as ctx} local-state public-path form]
   (let [{:keys [address row edges field-owner owner-parents snapshot-id] :as certificate} (get scoped-inputs public-path)
         [owner] scope
         parents (:parent-ids (some #(when (and (= :fn (:kind %)) (= owner (:id %))) %) declaration-records))]
@@ -67,17 +73,26 @@
       (reject! :unverified-scoped-input public-path))
     (let [use-path (mapv :binding-id edges)
           field-id (ids/slot-id field-owner (peek public-path))
-          expression (read-leaf name->id public-path form)
+          expression (read-leaf ctx certificate public-path form)
+          projection? (= :projection (:kind expression))
+          id (if projection?
+               (migration/derived-id :forwarded-field owner (first use-path) field-id)
+               (ids/binding-id owner field-id))
           parsed (rows/normalize
                    (merge (select-keys row [:org-id])
-                          {:kind :input-binding :id (ids/binding-id owner field-id) :fn-id owner
+                          {:kind :input-binding :id id :fn-id owner
                            :scope-path use-path :target-path [field-id]}
                           (case (:kind expression)
                             :value {:expression-kind "value" :value-present true :value (:value expression)}
-                            :ref {:expression-kind "ref" :value-present false :ref-fn-id (:fn-id expression)})))]
-      (when-not (and (every? uuid? use-path) (= address [[owner use-path] [field-id]]) (migration/same-edn? parsed row))
+                            :ref {:expression-kind "ref" :value-present false :ref-fn-id (:fn-id expression)}
+                            :projection {:expression-kind "projection" :value-present false
+                                         :projection-scope-path (second (:scope expression))
+                                         :projection-path (:path expression)})))]
+      (when-not (and (or (not projection?) (= 1 (count use-path)))
+                     (every? uuid? use-path) (= address [[owner use-path] [field-id]]) (migration/same-edn? parsed row))
         (reject! :scoped-origin-mismatch public-path))
-      {:address address :row parsed :expression expression})))
+      (cond-> {:address address :row parsed :expression expression}
+        projection? (assoc :source-names (:source-names certificate))))))
 
 
 (defn parse-bindings
@@ -96,8 +111,9 @@
 
 (defn emit-bindings
   [local routes id->name]
-  (reduce-kv (fn [form path {:keys [expression]}]
+  (reduce-kv (fn [form path {:keys [expression source-names]}]
                (assoc form path (case (:kind expression)
                                   :value [:value (:value expression)]
-                                  :ref [:ref (or (get id->name (:fn-id expression)) (reject! :unresolved-scoped-reference path))])))
+                                  :ref [:ref (or (get id->name (:fn-id expression)) (reject! :unresolved-scoped-reference path))]
+                                  :projection [:project source-names])))
              local routes))

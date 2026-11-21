@@ -147,7 +147,7 @@
         row (lookup/resolve-fn storage parsed)]
     (when-let [cache (::eager/call-cache ctx)]
       (java.util.HashMap/.put cache ::resolved-row
-            [row storage (tc/current-org) tc/*current-principal*]))
+                              [row storage (tc/current-org) tc/*current-principal*]))
     row))
 
 

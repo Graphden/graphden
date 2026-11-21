@@ -80,7 +80,7 @@
     (is (= -4 (:result (post root {:number -3.2}))))
     (is (= -4 (:result (post floor {:number -3.2}))))
     (is (= -8 (:result (post child {}))))
-    (is (= "unknown-input-field" (get-in (post child {:number 1}) [:error-data :reason])))
+    (is (= "unknown-input-field" (get-in (post child {:number 1}) [:error-data :code])))
     (is (= "invalid-structured-arguments" (get-in (post root {:unknown 1}) [:error-data :reason])))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"primitive admission failed"
           (ig/init-key :exec/base-fns {:storage storage :packages packages

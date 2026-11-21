@@ -29,7 +29,7 @@
     "binding-flag" "fn-sibling-variation" "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
     "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "list-values" "fn-field"
     "graph-view-filters" "graph-view-run" "review-comment" "created-branch" "app-route-created"
-    "owned-entity" "package-published" "package-pin" "package-reference" "package-run"
+    "owned-entity" "package-published" "package-pin" "package-reference" "package-run" "structured-input-path"
     "token-created" "token-execute-denied" "token-revoked" "token-form-scopes"})
 
 

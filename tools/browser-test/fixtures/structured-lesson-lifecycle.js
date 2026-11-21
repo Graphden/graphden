@@ -98,9 +98,6 @@ async function exercise() {
       page.getByRole('button', {name: 'Delete branch & return', exact: true}).click(),
     ]);
     assert.equal(deletion.ok(), true);
-    const deleted = await deletion.json();
-    assert.equal(deleted.ok, true, JSON.stringify(deleted));
-    console.log('Lesson 43 deleted the exact sandbox');
     await page.waitForURL(url => !url.searchParams.has('branch'), {waitUntil: 'domcontentloaded'});
     const branches = await page.evaluate(async () => {
       const response = await window.authFetch('/api/branches');

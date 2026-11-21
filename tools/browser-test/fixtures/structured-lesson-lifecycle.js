@@ -20,11 +20,21 @@ async function exercise() {
     }, {origin, token});
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
+    const failedResponses = [];
+    page.on('response', response => {
+      if (response.status() >= 400) failedResponses.push([new URL(response.url()).pathname, response.status()]);
+    });
     page.setDefaultTimeout(15000);
     const step = title => page.locator('#gd-tour-pop .gd-tour-title').filter({hasText: new RegExp('^' + title + '$')});
     const doc = await page.goto(origin + '/?tutorial=43', {waitUntil: 'domcontentloaded'});
     assert.equal(doc.status(), 200, 'the fixture serves the normal editor document');
-    await page.waitForURL(url => url.searchParams.get('branch')?.startsWith('tutorial-43-'));
+    try {
+      await page.waitForFunction(() => window.API?.api_tour && window.API?.api_graph_entities);
+      await page.waitForURL(url => url.searchParams.get('branch')?.startsWith('tutorial-43-'), {waitUntil: 'domcontentloaded'});
+    } catch (error) {
+      console.error('Editor startup', {pageErrors, failedResponses});
+      throw error;
+    }
     const branch = new URL(page.url()).searchParams.get('branch');
     await step('Select the template').waitFor();
     await page.getByPlaceholder('Filter...', {exact: true}).fill('lesson-profile');

@@ -9,6 +9,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
+    [graphden.system.init.exec]
     [graphden.system.init.packages]
     [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.golden-app :as golden]
@@ -100,5 +101,8 @@
     (reset! denied false)
     (ordinary-branch-exercise! app token storage)
     (when (= "1" (System/getenv "GD_STRUCTURED_LESSON_LIFECYCLE_PLAYWRIGHT"))
-      (browser/exercise! #(router/dispatch app %) token "tools/browser-test/fixtures/structured-lesson-lifecycle.js" lesson/root))
+      (let [api-cache (ig/init-key :exec/api-routes-js-cache {:context ctx})]
+        (try
+          (browser/exercise! #(router/dispatch app %) token "tools/browser-test/fixtures/structured-lesson-lifecycle.js" lesson/root)
+          (finally (ig/halt-key! :exec/api-routes-js-cache api-cache)))))
     (is (not (contains? (catalogue app nil) "43")))))

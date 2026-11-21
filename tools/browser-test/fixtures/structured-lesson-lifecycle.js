@@ -64,7 +64,8 @@ async function exercise() {
     assert.ok(sample.id);
     assert.equal(sample['parent-id'], templateId);
     assert.equal(sample['branch-id'], receipt.sandboxBranchId);
-    await page.getByRole('button', {name: 'Remaining inputs', exact: true}).click();
+    const sampleCard = page.locator('.node-overlay[data-fn-name="tutorial-structured-profile"]');
+    await sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}).press('Enter');
     await page.getByRole('button', {name: /^profile — Type:/}).press('Space');
     await page.getByRole('button', {name: 'Bind profile.name'}).press('Enter');
     await reach('Bind the name');
@@ -98,6 +99,7 @@ async function exercise() {
     ]);
     assert.equal(deletion.ok(), true);
     assert.equal((await deletion.json()).ok, true);
+    console.log('Lesson 43 deleted the exact sandbox');
     await page.waitForURL(url => !url.searchParams.has('branch'), {waitUntil: 'domcontentloaded'});
     const branches = await page.evaluate(async () => {
       const response = await window.authFetch('/api/branches');

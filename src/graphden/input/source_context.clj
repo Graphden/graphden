@@ -146,7 +146,9 @@
                                               anchors (positions/inputs (:id owner) records (get-in source-environment [:context :name->id]))
                                               specs (into (merge (field-specs definition) (update-vals anchors :declaration))
                                                           (map (juxt :alias :declaration)) aliases)
-                                              sources (into {} (map (juxt :alias-id :field-id)) aliases)]
+                                              checked-links (when (not= (:id owner) (get-in own [:owner :id]))
+                                                              (get-in source-environment [:context ::forwarded-parent-links (:id owner)]))
+                                              sources (into (or checked-links {}) (map (juxt :alias-id :field-id)) aliases)]
                                           (fields records (:id owner) specs [:input] sources))))
                            ordered)
         members (into [] (mapcat #(memberships (:records %) (get-in % [:owner :id]))) ordered)

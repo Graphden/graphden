@@ -117,7 +117,19 @@
     (is (= [local-slot] (get-in certificate [:row :projection-path])))
     (is (= [target-slot] (get-in certificate [:row :target-path])))
     (is (= :implementation-signature-required
-           (:code (failure #(snapshot/migrate-forwarded-field package owner :data (dissoc @roots (ids/fn-id "core.system" :to-json-string)))))))))
+           (:code (failure #(snapshot/migrate-forwarded-field package owner :data (dissoc @roots (ids/fn-id "core.system" :to-json-string)))))))
+    (let [legacy {:namespace "fixture" :fns [(dissoc host :namespace)]}
+          staged {:namespace "fixture" :input-format 2 :fns [(dissoc (:proposed migrated) :namespace)]}
+          certified (snapshot/with-migrated-forwarding package owner :data @roots)
+          replay (snapshot/with-staged-module certified legacy staged)
+          {:keys [context]} (snapshot/freeze-closure replay [owner] @roots)
+          row (:row certificate)]
+      (is (= row (get-in context [:bindings (:id row)])))
+      (is (= :unverified-staged-declaration
+             (:code (failure #(snapshot/with-staged-module package legacy staged)))))
+      (is (= :unverified-staged-declaration
+             (:code (failure #(snapshot/with-staged-module certified legacy
+                                                           (assoc-in staged [:fns 0 :bind path] [:project [:other]])))))))))
 
 
 (deftest scoped-path-crosses-two-references-and-an-inherited-declaration

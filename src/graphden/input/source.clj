@@ -314,8 +314,10 @@
     (cond-> {:owner (:id owner) :parents (:parent-ids owner) :occupied occupied :addresses (mapv :slot-id bindings)}
       (seq links)
       (assoc :proven? (let [original (or ((::original-of context) ancestor) ancestor)
-                            {:keys [aliases blockers]} (local-arguments original ancestor context rows)]
-                        (and (empty? blockers) (= links (into {} (map (juxt :alias-id :field-id)) aliases))))))))
+                            {:keys [aliases blockers]} (local-arguments original ancestor context rows)
+                            certified (get-in context [::source-context/forwarded-parent-links (:id owner)])]
+                        (or (= links certified)
+                            (and (empty? blockers) (= links (into {} (map (juxt :alias-id :field-id)) aliases)))))))))
 
 
 (defn- shared-implementation?
@@ -767,3 +769,23 @@
                                      (mapv #(cond-> % (= source-path (:source-path %))
                                                     (assoc :scope-certificate certificate)) arguments))))]
       (first (:definitions (verify-module {:definitions [candidate]} context))))))
+
+
+(defn with-forwarded-parent
+  "Allow descendants to read the legacy declaration under an already verified
+   forwarding proof. Bind only the exact original local and destination IDs."
+  [context {owner-id :identity :keys [verification v2]}]
+  (let [projections (filter :source-names (vals (:scoped-inputs v2)))
+        rows (set (:bindings v2))
+        links (into {} (map (fn [{:keys [row]}] [(first (:projection-path row)) (first (:target-path row))]))
+                    projections)]
+    (when-not (and (= :authored-source-equivalent verification) (uuid? owner-id) (seq links)
+                   (= (count links) (count projections))
+                   (every? (fn [{:keys [row]}]
+                             (and (contains? rows row) (= "projection" (:expression-kind row))
+                                  (= owner-id (:fn-id row)) (empty? (:projection-scope-path row))
+                                  (= 1 (count (:projection-path row)) (count (:target-path row)))))
+                           projections))
+      (throw (ex-info "Cannot reuse an unchecked parent forwarding"
+                      {:type :input/source-verification :code :forwarded-parent-required})))
+    (assoc-in context [::source-context/forwarded-parent-links owner-id] links)))

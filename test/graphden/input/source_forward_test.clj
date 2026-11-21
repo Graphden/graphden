@@ -12,14 +12,16 @@
 
 
 (defn- fixture
-  [args]
-  (let [forms [{:name :combine :args {:left {:type :any} :right {:type :any}} :return-type :any}
-               {:name :encode :args {:data {:type :text :required true}} :return-type :text}
-               {:name :encode-body :parent :encode}
-               {:name :response :parent :combine :args args}]
-        declarations (mapv #(assoc % :namespace "fixture") forms)
-        prepared (parse/prepare-module declarations {} {})]
-    [prepared (last (:definitions (source/plan-module declarations prepared)))]))
+  ([args] (fixture args []))
+  ([args extensions]
+   (let [forms [{:name :combine :args {:left {:type :any} :right {:type :any}} :return-type :any}
+                {:name :encode :args {:data {:type :text :required true}} :return-type :text}
+                {:name :encode-body :parent :encode}
+                {:name :response :parent :combine :args args}]
+         declarations (mapv #(assoc % :namespace "fixture") (into forms extensions))
+         prepared (parse/prepare-module declarations {} {})
+         scope (source/plan-module declarations prepared)]
+     [prepared (some #(when (= :response (get-in % [:source :name])) %) (:definitions scope))])))
 
 
 (defn- rejection
@@ -147,3 +149,21 @@
                                   (get-in migrated [:v2 :bindings]))))
     (is (thrown? clojure.lang.ExceptionInfo
           (source/rewrite-forwarded-field prepared entry :data (assoc-in certificate [:row :id] (random-uuid)))))))
+
+
+(deftest derived-source-reuses-only-its-exact-verified-parent-link
+  (let [child {:namespace "fixture" :name :json-result :parent :response :args {:data "ready"}}
+        [prepared entry] (fixture {:left :encode-body :data {:type :text}} [child])
+        {:keys [field-id] :as proof} (forward/verify-forwarded-field prepared entry :data)
+        certificate (scope/verify-forwarded-projection (checked-snapshot proof) proof analyze)
+        parent (source/rewrite-forwarded-field prepared entry :data certificate)
+        certified (source/with-forwarded-parent prepared parent)
+        child-plan (fn [context] (first (:definitions (source/verify-module (source/plan-module [child] context) context))))
+        unproved (child-plan prepared)
+        verified (child-plan certified)]
+    (is (= [:inherited-projection-required] (mapv :code (:blockers unproved))))
+    (is (= :authored-source-equivalent (:verification verified)) (:blockers verified))
+    (is (= [:value "ready"] (get-in verified [:proposed :bind :data])))
+    (is (= [field-id] (get-in verified [:v2 :bindings 0 :target-path])))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (source/with-forwarded-parent prepared (assoc parent :verification nil))))))

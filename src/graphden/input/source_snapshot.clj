@@ -47,19 +47,21 @@
 
 
 (defn- plan-entry
-  [{:keys [prepared declarations originals staged-proposals]} id]
+  [{:keys [prepared declarations originals staged-proposals closure-baselines]} id]
   (let [[original & more] (get originals id)
         definition (get declarations id)]
     (when-not original (reject! :missing-original-declaration id))
     (when (seq more) (reject! :ambiguous-original-declaration id))
     (when-not (= id (:fn-id definition)) (reject! :missing-prepared-declaration id))
     (let [context (assoc prepared :fn-defs [definition])
-          plan (source/plan-module [original] context)
-          plan (if-let [staged (get staged-proposals id)]
-                 (update-in plan [:definitions 0 :proposed]
-                            #(merge (select-keys % [:namespace :source-file]) staged))
-                 plan)]
-      (first (:definitions (source/verify-module plan context))))))
+          certified (get closure-baselines id)
+          staged (get staged-proposals id)]
+      (if (and certified (nil? staged))
+        certified
+        (let [entry (or certified (first (:definitions (source/plan-module [original] context))))
+              entry (cond-> entry staged
+                            (update :proposed #(merge (select-keys % [:namespace :source-file]) staged)))]
+          (first (:definitions (source/verify-module {:definitions [entry]} context))))))))
 
 
 (defn with-staged-module
@@ -150,7 +152,7 @@
 
 (defn- closure-entries
   [package id resolve-named]
-  (let [{:keys [verification blockers v2]} (or (get-in package [:closure-baselines id]) (plan-entry package id))]
+  (let [{:keys [verification blockers v2]} (plan-entry package id)]
     (when-not (= :authored-source-equivalent verification)
       (throw (ex-info "Unverified dependency in source closure"
                       {:type :input/source-snapshot :code :unverified-source-declaration
@@ -468,3 +470,15 @@
                 (reject! :unverified-scoped-declaration owner))
               (assoc-in package [:closure-baselines owner] result)))
           package owners))
+
+
+(defn with-migrated-forwarding
+  "Keep one verified forwarding declaration available to later closures and
+   to staged module replay. Bound occurrence evidence is kept in the package."
+  [package owner field roots]
+  (let [{:keys [verification] :as result} (migrate-forwarded-field package owner field roots)]
+    (when-not (= :authored-source-equivalent verification)
+      (reject! :unverified-forwarded-declaration owner))
+    (-> package
+        (assoc-in [:closure-baselines owner] result)
+        (update :prepared source/with-forwarded-parent result))))

@@ -114,8 +114,8 @@
 ;;     (`REQUIRE_SIGNALS` in editor-tour-picker.js): `services` = the dedicated
 ;;     plan (or a platform / self-host instance), `org` = organizations exist
 ;;     here, `assets` = a single-tenant instance.
-;; `structured-input-run` is held before serialization until the ordinary
-;; editor can prepare an editable sample and execute its remaining inputs.
+;; `structured-input-run` is omitted before serialization unless the current
+;; viewer has the branch and certified template offers.
 ;;
 ;; ONE ACTION PER RING (from a reader walking lesson 18): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
@@ -3278,29 +3278,39 @@
    :args {:m :_tour-lessons :path {:value [:text :base]} :v :_tour-text-base}}
 
   {:name :_tour-public-lesson?
-   :description "Keep staged structured-input teaching out of the public payload until ordinary Run can execute it."
+   :description "Keep the lessons with a general audience."
    :parent :not
    :args {:value {:parent :equal?
                   :args {:a {:parent :get
                              :args {:coll {:as :item} :key {:value :requires} :default nil}}
                          :b {:value "structured-input-run"}}}}}
+  {:name :_structured-profile-lesson-available?
+   :description "Read the current viewer's branch creation, template Extend and structured Run eligibility."
+   :args {}
+   :return-type :bool
+   :effects #{:db}}
+  {:name :_tour-all-lessons
+   :parent :get-in
+   :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}
   {:name :_tour-payload
    :parent :assoc-in
    :args {:m :_tour-resolved-text
           :path {:value [:lessons]}
-          :v {:parent :filter
-              :args {:pred :_tour-public-lesson?
-                     :coll {:parent :get-in
-                            :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}}}}}
+          :v {:parent :if
+              :args {:test :_structured-profile-lesson-available?
+                     :then :_tour-all-lessons
+                     :else {:parent :filter
+                            :args {:pred :_tour-public-lesson? :coll :_tour-all-lessons}}}}}}
 
   {:name :_tour-json
    :parent :to-json-string
    :args {:data :_tour-payload}}
 
   {:name :tour-lessons-handler
-   :description "GET /api/tour handler — the interactive-tutorial lesson scripts as JSON. Static teaching content, no data reads; open route (the demo's anonymous session must reach it)."
+   :description "GET /api/tour handler — graph-authored lessons with viewer-scoped availability. Anonymous sessions receive the general lessons."
    :parent :json-ok-response
-   :args {:body :_tour-json}}
+   :args {:body :_tour-json
+          :headers {:value {"Content-Type" "application/json" "Cache-Control" "private, no-store"}}}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/tour/progress — the funnel.

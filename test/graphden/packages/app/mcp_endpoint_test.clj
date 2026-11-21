@@ -140,6 +140,7 @@
                                :params {:name "describe-fn" :arguments {:name "add"}}})
           data (tool-text rpc)]
       (is (= ["nums"] (:free-args data)))
+      (is (not (contains? data :structured-input)))
       (is (= ["nums"] (:start-blocking-free-args data)))
       (is (empty? (:effects data)))
       (is (contains? (:arg-types data) :nums))

@@ -175,26 +175,27 @@
 
 (defn read-input
   "Recheck the visible root in the same snapshot as its source permissions
-   and v2 closure. Failed authorization omits the projection entirely."
-  [storage root]
-  (try
-    (source/with-snapshot storage
-                          (fn [snapshot authorize!]
-                            (let [ctx (read-view/collect snapshot root authorize!)
-                                  graph (analyze ctx root)
-                                  editable? (fixture-editable? snapshot root)]
-                              (context/call-with-types
-                                ctx
-                                (fn []
-                                  (let [view (project-analysis graph editable?)]
-                                    (cond-> view
-                                      (and editable? (= :available (:status view)))
-                                      (assoc :occupied (occupied-editor-fields snapshot ctx graph)))))))))
-    (catch clojure.lang.ExceptionInfo error
-      (case (:type (ex-data error))
-        :authz/forbidden nil
-        (:input/unresolved-contract :input/invalid-binding :input/invalid-row
-                                    :types/check-failed :browser-plan/unsupported
-                                    :storage-error/candidate-limit :storage-error/bounded-query-unsupported)
-        {:status :unavailable}
-        (throw error)))))
+   and v2 closure. Set `editor?` false for a read-only consumer."
+  ([storage root] (read-input storage root true))
+  ([storage root editor?]
+   (try
+     (source/with-snapshot storage
+                           (fn [snapshot authorize!]
+                             (let [ctx (read-view/collect snapshot root authorize!)
+                                   graph (analyze ctx root)
+                                   editable? (and editor? (fixture-editable? snapshot root))]
+                               (context/call-with-types
+                                 ctx
+                                 (fn []
+                                   (let [view (project-analysis graph editable?)]
+                                     (cond-> view
+                                       (and editable? (= :available (:status view)))
+                                       (assoc :occupied (occupied-editor-fields snapshot ctx graph)))))))))
+     (catch clojure.lang.ExceptionInfo error
+       (case (:type (ex-data error))
+         :authz/forbidden nil
+         (:input/unresolved-contract :input/invalid-binding :input/invalid-row
+                                     :types/check-failed :browser-plan/unsupported
+                                     :storage-error/candidate-limit :storage-error/bounded-query-unsupported)
+         {:status :unavailable}
+         (throw error))))))

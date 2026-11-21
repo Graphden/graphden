@@ -3308,9 +3308,9 @@
 
   {:name :tour-lessons-handler
    :description "GET /api/tour handler — graph-authored lessons with viewer-scoped availability. Anonymous sessions receive the general lessons."
-   :parent :json-ok-response
+   :parent :ok-response
    :args {:body :_tour-json
-          :headers {:value {"Content-Type" "application/json" "Cache-Control" "private, no-store"}}}}
+          :headers {"Content-Type" "application/json" "Cache-Control" "private, no-store"}}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/tour/progress — the funnel.

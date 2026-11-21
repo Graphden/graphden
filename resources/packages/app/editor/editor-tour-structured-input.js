@@ -7,14 +7,14 @@ const structuredLessonProofs = new WeakMap();
 function _tourStructuredBranchMatches(saved) {
   return saved?.lessonId === STRUCTURED_TOUR_ID && !!_tourOwnedBranch(saved)
     && saved.sandboxBranch === _tourSessionBranch() && _tourPrincipalMatches(saved)
-    && saved.created?.some(row => row.type === 'branch' && row.id === saved.sandboxBranchId
+    && Array.isArray(saved.created) && saved.created.some(row => row?.type === 'branch' && row.id === saved.sandboxBranchId
       && row.name === saved.sandboxBranch && row['base-branch-id'] === saved.sandboxBaseBranchId
       && row.receipt === 'created');
 }
 
 function _tourStructuredChild(saved, parentId) {
   return _tourStructuredBranchMatches(saved) && saved.created.find(row =>
-    row.type === 'fn' && row.name === STRUCTURED_TOUR_CHILD && row.id
+    row?.type === 'fn' && row.name === STRUCTURED_TOUR_CHILD && row.id
     && row['parent-id'] === parentId && row['namespace-id'] === null
     && row['branch-id'] === saved.sandboxBranchId && row.receipt === 'created');
 }
@@ -63,7 +63,8 @@ async function _tourStructuredAvailable(lesson, saved, current) {
   const id = child ? child.id : lesson['template-id'];
   try {
     if (ownsBranch && (await _tourBranchStatus(saved, saved.sandboxBranch) !== 'available' || !current())) return false;
-    const response = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(id));
+    const response = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(id),
+      {cache: 'no-store'});
     if (!response.ok || !current()) return false;
     const data = await response.json();
     if (!current()) return false;

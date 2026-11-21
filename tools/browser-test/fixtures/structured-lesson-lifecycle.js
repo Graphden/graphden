@@ -26,7 +26,8 @@ async function exercise() {
     await page.waitForURL(url => url.searchParams.get('branch')?.startsWith('tutorial-43-'));
     const branch = new URL(page.url()).searchParams.get('branch');
     await step('Select the template').waitFor();
-    await page.evaluate(id => selectFn(id), templateId);
+    await page.getByPlaceholder('Filter...', {exact: true}).fill('lesson-profile');
+    await page.locator(`#entity-list .entity-item[data-fn-id="${templateId}"]`).click();
     await step('Create your editable sample').waitFor();
 
     const template = page.locator('.node-overlay[data-fn-name="lesson-profile"] .ancestor-line[data-level="0"]');

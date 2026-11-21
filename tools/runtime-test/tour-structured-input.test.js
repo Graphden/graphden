@@ -85,6 +85,9 @@ async function run() {
   t.setResponse({id: childReceipt.id, 'parent-ids': ['other'], 'structured-input': childInput});
   assert.deepEqual(Array.from((await scope()).lessons), [legacy], 'external reparent hides the sample');
   t.setResponse({id: childReceipt.id, 'parent-ids': [template], 'structured-input': childInput});
+  t.ctx._tourState = {...saved, created: {}};
+  assert.deepEqual(Array.from((await scope()).lessons), [legacy], 'a damaged receipt leaves other lessons available');
+  t.ctx._tourState = saved;
   t.setExactBranch(false);
   assert.deepEqual(Array.from((await scope()).lessons), [legacy], 'same branch name cannot replace the receipt UUID');
   t.setExactBranch(true);

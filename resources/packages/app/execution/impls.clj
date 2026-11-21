@@ -51,7 +51,7 @@
    by-alias) wrapping the canonical shape `{:fn-id ?  :fn-name ?}`."
   [parsed]
   (cr/record-effect! :db)
-  (lookup/resolve-fn (request/require-storage ctx) parsed))
+  (fn-exec/resolve-request-fn ctx parsed))
 
 
 ;; `:free-arg-slot-map` lives in `web/crud/impls.clj` so CRUD-write-

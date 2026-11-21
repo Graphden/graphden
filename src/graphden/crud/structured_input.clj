@@ -2,6 +2,7 @@
   "Viewer-safe structured input projection for the standard graph subtree."
   (:require
     [graphden.crud.package-guard :as pkg]
+    [graphden.crud.structured-run :as run]
     [graphden.executor.browser-source :as source]
     [graphden.input.access :as access]
     [graphden.input.analysis :as analysis]
@@ -177,18 +178,22 @@
   "Recheck the visible root in the same snapshot as its source permissions
    and v2 closure. Set `editor?` false for a read-only consumer."
   ([storage root] (read-input storage root true))
-  ([storage root editor?]
+  ([storage root editor?] (read-input storage root editor? nil))
+  ([storage root editor? exec-ctx]
    (try
      (source/with-snapshot storage
                            (fn [snapshot authorize!]
                              (let [ctx (read-view/collect snapshot root authorize!)
-                                   graph (analyze ctx root)
+                                   runnable (when exec-ctx (run/runnable-analysis exec-ctx ctx root))
+                                   graph (or runnable (analyze ctx root))
                                    editable? (and editor? (fixture-editable? snapshot root))]
                                (context/call-with-types
                                  ctx
                                  (fn []
                                    (let [view (project-analysis graph editable?)]
                                      (cond-> view
+                                       (and runnable (= :available (:status view)))
+                                       (assoc :run-available true)
                                        (and editable? (= :available (:status view)))
                                        (assoc :occupied (occupied-editor-fields snapshot ctx graph)))))))))
      (catch clojure.lang.ExceptionInfo error

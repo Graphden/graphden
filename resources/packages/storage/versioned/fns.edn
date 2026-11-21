@@ -50,6 +50,7 @@
           :constraint :nullable-jsonb
           :base-fn-id :nullable-uuid
           :element-fn-id :nullable-uuid
+          :input-type-fn-id :nullable-uuid
           :return-type-fn-id :nullable-uuid
           :anonymous-hash :nullable-text
           :expects-effects :nullable-jsonb

@@ -168,7 +168,8 @@
       (is (= :input/stale-preview
              (attempt #(bind-command/bind! ctx (assoc apply-request :value "Different")))))
       (binding [access/*offline?* false]
-        (is (= :input/offline-only (attempt #(bind-command/bind! ctx apply-request)))))
+        (is (= :authz/forbidden (attempt #(bind-command/preview ctx request))))
+        (is (= :authz/forbidden (attempt #(bind-command/bind! ctx apply-request)))))
       (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
         (tenancy/install-browser-source-policy!
           (constantly (fn [row]

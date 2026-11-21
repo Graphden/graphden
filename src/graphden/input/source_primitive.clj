@@ -97,27 +97,28 @@
       (keyword? value) (uuid? value) (inst? value)))
 
 
-(defn- bound-field
+(defn- bound-fields
   [{:keys [parent bind] :as definition}]
   (when-not (and (simple-keyword? parent) (not (contains? definition :parents)))
     (reject! :staged-literal-parent-unsupported))
   (when-not (and (every? #{:name :namespace :description :parent :bind} (keys definition))
                  (or (nil? (:description definition)) (string? (:description definition))))
     (reject! :staged-literal-declaration-unsupported))
-  (let [[field expression] (when (map? bind) (first bind))]
-    (when-not (and (map? bind) (= 1 (count bind)) (simple-keyword? field)
-                   (vector? expression) (= 2 (count expression))
-                   (= :value (first expression)) (scalar-literal? (peek expression)))
-      (reject! :staged-literal-binding-unsupported))
-    field))
+  (when-not (and (map? bind) (seq bind)
+                 (every? (fn [[field expression]]
+                           (and (simple-keyword? field) (vector? expression) (= 2 (count expression))
+                                (= :value (first expression)) (scalar-literal? (peek expression))))
+                         bind))
+    (reject! :staged-literal-binding-unsupported))
+  (keys bind))
 
 
 (defn prepare-literal-root
-  "Prepare a v2 root with one scalar literal binding to a visible primitive
+  "Prepare a v2 root with scalar literal bindings to a visible primitive
    parent in the same file. Reuse the parent's declared membership identities."
   [{module-ns :namespace :as source} root visible-fn-ids]
   (let [definition (selected-root source root)
-        field (bound-field definition)
+        fields (bound-fields definition)
         parent-name (:parent definition)
         parent-id (ids/fn-id module-ns parent-name)
         parent (some #(when (= parent-name (:name %)) %) (:fns source))]
@@ -127,19 +128,21 @@
                    (contains? visible-fn-ids parent-id))
       (reject! :staged-function-not-visible))
     (require-primitive! parent)
-    (when-not (contains? (:input parent) field)
+    (when-not (every? #(contains? (:input parent) %) fields)
       (reject! :staged-literal-field-unknown))
     (let [parent-source (assoc parent :namespace module-ns)
           parent-rows (parse/base-declaration-records parent-source (:input parent-source) {})
           environment (assoc (source-context/environment {:name->id {}})
                              :definition-by-id {parent-id parent-source}
                              :records-of (constantly parent-rows))
-          slot (ids/slot-id parent-id field)
-          origin {:fn-id root :slot-id slot :id (ids/binding-id root slot)}
+          origins (mapv (fn [field]
+                          (let [slot (ids/slot-id parent-id field)]
+                            {:fn-id root :slot-id slot :id (ids/binding-id root slot)}))
+                        fields)
           context-for (fn [authored]
                         (if (= parent-name (:name authored))
                           (source-context/declaration-context environment authored parent-rows [])
                           (let [owner (parse/composed-declaration-record authored [parent-id] nil)]
-                            (source-context/declaration-context environment authored [owner] [origin]))))]
+                            (source-context/declaration-context environment authored [owner] origins))))]
       (:definitions (module/parse-module-v2 (assoc source :fns [parent definition])
                                             {:context-for context-for})))))

@@ -56,11 +56,12 @@
                 (throw (ex-info "The lesson contract changed" {:type :input/lesson-contract})))
             implementation {:base-fn-id root :argument-paths {:profile [profile]}
                             :root-entry {:args {:profile profile-type} :return profile-type}
-                            :impl (fn [inputs _] (runtime/resolve-arg inputs :profile))}
+                            :impl (fn [inputs _]
+                                    (input-runtime/materialize-record (runtime/resolve-arg inputs :profile)))}
             closure (compile/compile-named graph {:context frozen :implementations {root implementation}})
             invocation (assoc ctx :storage storage :allowed-effects #{}
                               :registry-stale? (atom false) :compiled-registry (atom {root closure}))]
-        (input-runtime/materialize-record (exec/execute invocation root args))))))
+        (exec/execute invocation root args)))))
 
 
 (defn- json-response
@@ -87,7 +88,10 @@
     (case [request-method uri]
       [:get "/"] {:status 200 :headers {"Content-Type" "text/html"} :body "<!doctype html><title>Structured input fixture</title>"}
       [:post "/fixture/run"] (run-response ctx fixture req)
-      (router/dispatch app req))))
+      ([:get "/api/graph/entities"]
+       [:post "/api/structured-input/preview"]
+       [:post "/api/structured-input/apply"]) (router/dispatch app req)
+      {:status 404 :body "Not part of the lesson"})))
 
 
 (defn- post

@@ -28,8 +28,11 @@
   "A frozen closure can run audited callbacks that use its binding facts and
    type policy. Other callbacks may look up signatures outside the closure."
   [signature]
-  (every? (comp true? :graphden.input/local-type-rule meta)
-          (keep signature [:return-type-rule :slot-types-rule :nav-types-rule])))
+  (every? (fn [[rule callback]]
+            (or (nil? callback)
+                (true? (:graphden.input/local-type-rule (meta callback)))
+                (identical? (get-in signature [:local-type-rule-evidence rule]) callback)))
+          (select-keys signature [:return-type-rule :slot-types-rule :nav-types-rule])))
 
 
 (defn- names-at

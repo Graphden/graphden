@@ -485,6 +485,7 @@
                        args)
          raw-effects (set (:effects fn-def))
          desc (:description fn-def)
+         local-rules (select-keys fn-def (:local-type-rules fn-def))
          build (fn [final-effects]
                  (cond-> {:return (or ret :any)
                           :args   per-arg
@@ -506,6 +507,7 @@
                                                      (:slot-types-rule fn-def))
                    (:nav-types-rule fn-def)   (assoc :nav-types-rule
                                                      (:nav-types-rule fn-def))
+                   (seq local-rules)         (assoc :local-type-rule-evidence local-rules)
                    ;; `:taint-propagate?` — checker applies marker-taint
                    ;; propagation centrally on this base-fn's results.
                    (:taint-propagate? fn-def)  (assoc :taint-propagate? true)

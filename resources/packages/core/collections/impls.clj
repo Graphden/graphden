@@ -1037,9 +1037,8 @@
    :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
    :get {:impl get-fn :return-type-rule get-return-rule :taint-propagate? true}
    :get-in {:impl get-in-fn :return-type-rule get-in-return-rule :taint-propagate? true}
-   :assoc {:impl assoc-any-fn
-           :return-type-rule (with-meta assoc-return-rule {:graphden.input/local-type-rule true})
-           :taint-propagate? true}
+   :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule
+           :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule :taint-propagate? true}
    :count {:impl count-fn :taint-propagate? true}
    :empty? {:impl empty?-fn :taint-propagate? true}

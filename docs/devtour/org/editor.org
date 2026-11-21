@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~203 min
+[[file:index.org][index]] · ~204 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -504,13 +504,13 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 :PROPERTIES:
 :CUSTOM_ID: editor/mountStructuredRunInputs
 :FILE: resources/packages/app/editor/editor-execute-inputs.js
-:LINE: 132
-:MINS: 2.4
+:LINE: 184
+:MINS: 3.1
 :END:
 
-The Run pane builds named record inputs from the authorized residual descriptor for the selected root when its Run capability is true. Required fields surface a focused error before submission. Optional fields preserve the distinction between omission and explicit values such as false, null and empty text. Legacy slot-based value forms still use their existing route. Both forms submit through the same execution handler.
+The Run pane builds named record inputs from the authorized residual descriptor for the selected root when its Run capability is true. Required fields surface a focused error before submission. Optional fields preserve the distinction between omission and explicit values such as false, null and empty text. Legacy slot-based value forms still use their existing route. Both forms submit through the same execution handler. Structured Repeat matches the saved run's identity and branch source fingerprint with a fresh authorized subtree before restoring any fields.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-execute-inputs.js::function mountStructuredRunInputs(body, descriptor) {][resources/packages/app/editor/editor-execute-inputs.js:132]]
+- source :: [[file:../../../resources/packages/app/editor/editor-execute-inputs.js::function mountStructuredRunInputs(body, descriptor) {][resources/packages/app/editor/editor-execute-inputs.js:184]]
 - see also :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:crud.org::#crud/apply-execute][apply-execute]]
 
 * 38. submitExecution

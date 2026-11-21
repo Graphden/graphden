@@ -105,7 +105,9 @@
           graph (analysis/analyze-effective-input context owner options)
           child-field (some #(when (= field (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]
       (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
-      (is (empty? (:obligations graph)))
+      (is (= #{[:value-type :field-read [field]]
+               [:value-type :field-read [(ids/slot-id (ids/fn-id "web.html" :hiccup) :attrs)]]}
+             (set (map (juxt :kind :trigger :path) (:obligations graph)))))
       (is (= [:list :hiccup-node] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
       (is (= [:list (types/resolve-alias :hiccup-node)] (:type child-field)))
       (is (= "Extra head elements" (:description child-field)))

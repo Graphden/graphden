@@ -232,7 +232,8 @@
 ;; tells you what the secret IS.
 (def impls
   {:add {:impl add :return-type-rule add-return-rule :taint-propagate? true}
-   :sub {:impl sub :return-type-rule sub-return-rule :taint-propagate? true}
+   :sub {:impl sub :return-type-rule sub-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :mul {:impl mul :return-type-rule mul-return-rule :taint-propagate? true}
    :div {:impl div :taint-propagate? true}
    :mod {:impl mod-fn :return-type-rule mod-return-rule :taint-propagate? true}

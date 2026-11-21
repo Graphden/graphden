@@ -74,7 +74,10 @@
         (is (= {:id "42" :name "Ada" :email "ada@example.test"} (:result run)))
         (is (empty? (sp/query-entities storage :fn {:name "tutorial-structured-profile"}))))
       (finally
-        (is (<= 200 (:status (request app token :delete (str "/api/branches/" branch-id) nil nil)) 299))))))
+        (let [response (request app token :delete (str "/api/branches/" branch-id) nil nil)
+              deletion (response-json response)]
+          (is (<= 200 (:status response) 299))
+          (is (true? (:ok deletion)) (pr-str deletion)))))))
 
 
 (deftest anonymous-catalogue-and-owned-structured-lesson-lifecycle-test

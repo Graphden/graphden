@@ -557,10 +557,20 @@ async function responseError(r) {
   });
 }
 
-function openStructuredInputPopover(anchorEl, {fnId, isCurrent}, action, {path, type, bindingId, versionId}) {
+function openStructuredInputPopover(anchorEl, target, action, field, draft = {}) {
+  const {fnId, isCurrent} = target;
+  const {path, type, bindingId, versionId} = field;
+  const {ref, text = ''} = draft;
   const label = path.join('.');
   const verb = {bind: 'Bind', edit: 'Edit', remove: 'Remove'}[action];
-  const valueKind = dereferenceType(type) === 'text' ? 'text' : 'any';
+  const expectedType = dereferenceType(type);
+  const valueKind = expectedType === 'text' ? 'text' : 'any';
+  const modeButtons = [];
+  const reopen = (nextDraft) => {
+    if (anchorEl.isConnected && isCurrent()) {
+      openStructuredInputPopover(anchorEl, target, action, field, nextDraft);
+    }
+  };
   const request = async (endpoint, body) => {
     const response = await authFetch(endpoint, {
       method: 'POST',
@@ -589,8 +599,37 @@ function openStructuredInputPopover(anchorEl, {fnId, isCurrent}, action, {path, 
       const control = document.createElement('input');
       control.type = 'text';
       control.className = 'arg-value-edit-input';
-      control.setAttribute('aria-label', (action === 'edit' ? 'New value for ' : 'Value for ') + label);
+      control.setAttribute('aria-label', (ref ? 'Function for ' : action === 'edit' ? 'New value for ' : 'Value for ') + label);
+      control.value = ref ? ref.name : text;
+      control.readOnly = !!ref;
       host.appendChild(control);
+      if (action === 'bind' && typeof openFnPicker === 'function') {
+        const addButton = (caption, select) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+          button.textContent = caption;
+          button.addEventListener('click', select);
+          modeButtons.push(button);
+          host.appendChild(button);
+        };
+        addButton(ref ? 'Change function' : 'Choose function', () => {
+          if (!isCurrent()) return;
+          const literal = ref ? text : control.value;
+          closeInlineEdit();
+          openFnPicker({
+            anchorEl,
+            excludeIds: [fnId],
+            expectedType,
+            onPick(fn, candidate) {
+              const picked = fn?.id ? {id: fn.id, name: candidate?.qualified || fn.name} : ref;
+              reopen({text: literal, ref: picked});
+            },
+            onCancel() { reopen({text: literal, ref}); },
+          });
+        });
+        if (ref) addButton('Use a value', () => reopen({text}));
+      }
       return control;
     },
     async doSave(control, dialog) {
@@ -603,13 +642,16 @@ function openStructuredInputPopover(anchorEl, {fnId, isCurrent}, action, {path, 
       if (action === 'bind') command.path = path;
       else if (bindingId && versionId) command['binding-id'] = bindingId;
       else return targetError;
-      if (control) {
+      if (ref) {
+        command['ref-fn-id'] = ref.id;
+      } else if (control) {
         if (valueKind !== 'text' && !control.value.trim()) return {ok: false, error: 'Enter a value.'};
         const {value, error} = readFieldValue(control, valueKind);
         if (error) return {ok: false, error};
         command.value = value;
-        control.readOnly = true;
       }
+      if (control) control.readOnly = true;
+      for (const button of modeButtons) button.disabled = true;
       try {
         const preview = await request(previewEndpoint, command);
         if (!dialog.isConnected || !isCurrent()) return targetError;
@@ -622,7 +664,8 @@ function openStructuredInputPopover(anchorEl, {fnId, isCurrent}, action, {path, 
         if (bindingId) proposal['expected-version'] = versionId;
         return await request(applyEndpoint, proposal);
       } finally {
-        if (control) control.readOnly = false;
+        if (control) control.readOnly = !!ref;
+        for (const button of modeButtons) button.disabled = false;
       }
     },
     async onSaved() {

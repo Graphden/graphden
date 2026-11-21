@@ -5,13 +5,16 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
+    [graphden.system.init.exec]
     [graphden.system.init.packages]
     [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.golden-app :as golden]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
@@ -20,7 +23,7 @@
     [org.httpkit.server :as server]))
 
 
-(use-fixtures :once (golden/fixture (ns-name *ns*)))
+(use-fixtures :once setup/ensure-build-hashes-fixture (golden/fixture (ns-name *ns*)))
 
 
 (defn- request
@@ -199,6 +202,24 @@
       (is (= {:id "a" :email "e" :name "ADA"} (:result result)) (pr-str result)))))
 
 
+(defn- exercise-reference-picker!
+  [origin handler token storage ctx]
+  (let [owner-name "profile-with-picked-reference"
+        created (extend-native origin token owner-name lesson/root)
+        owner (:id (first (sp/query-entities storage :fn {:name owner-name})))
+        api-cache (ig/init-key :exec/api-routes-js-cache {:context ctx})]
+    (try
+      (is (<= 200 (:status created) 299))
+      (browser/exercise! handler token "tools/browser-test/fixtures/structured-reference-bind.js"
+                         owner owner-name uppercase)
+      (let [row (first (sp/query-entities storage :input-binding {:fn-id owner}))
+            fields (get-in (subtree origin token owner) [:fields 0 :fields])
+            name-field (some #(when (= "name" (:name %)) %) fields)]
+        (is (= uppercase (:ref-fn-id row)))
+        (is (= ["string"] (mapv :name (:fields name-field)))))
+      (finally (ig/halt-key! :exec/api-routes-js-cache api-cache)))))
+
+
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
         packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext"]
@@ -218,5 +239,7 @@
     (try
       (let [origin (str "http://127.0.0.1:" (:local-port (meta stop)))]
         (exercise-commands! origin token storage seams)
-        (exercise-reference! origin token storage seams denied))
+        (exercise-reference! origin token storage seams denied)
+        (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
+          (exercise-reference-picker! origin handler token storage ctx)))
       (finally (stop)))))

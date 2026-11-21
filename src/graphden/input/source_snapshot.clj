@@ -156,8 +156,9 @@
   [package {:keys [fn-id list-builders] :as v2} resolve-named]
   (let [generated (mapv (partial list-signature/entry fn-id (get-in package [:prepared :name->id]) resolve-named)
                         (vals list-builders))
-        children (inline-entries package v2 generated)]
-    (into (conj generated (owned-declaration v2))
+        children (inline-entries package v2 generated)
+        owner (update (owned-declaration v2) :bindings into (mapcat :owner-bindings generated))]
+    (into (conj generated owner)
           (mapcat #(verified-entry-tree package % resolve-named))
           children)))
 

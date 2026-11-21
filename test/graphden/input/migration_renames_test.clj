@@ -74,6 +74,7 @@
                                                                          :target-branch-id (random-uuid)}])))))
     (doseq [[code changed] [[:rename-atomic-origin-required (assoc-in base [:binding-version 0 :change-id] (random-uuid))]
                             [:rename-atomic-origin-required (assoc-in base [:binding-version 0 :change-revision] nil)]
+                            [:rename-atomic-origin-required (assoc-in base [:binding-version 0 :author-id] "other")]
                             [:rename-atomic-origin-required (assoc-in base [:binding-version 0 :deleted-at] (:created-at edit))]
                             [:rename-position-history-required (assoc-in base [:fn-slot-version 1 :deleted-at] (:created-at edit))]
                             [:rename-position-history-required (assoc-in base [:fn-slot-version 1 :change-revision] 3)]

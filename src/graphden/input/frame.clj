@@ -85,13 +85,25 @@
                   #(invoke-scope frame scope %) ctx)))))
 
 
+(defn- required-on-entry
+  [program supplied]
+  (into #{} (comp (filter #(and (= :supplied-record (:kind %)) (contains? supplied (:address %))))
+                  (mapcat :required-fields))
+        program))
+
+
 (defn- instantiate-frame
   [ir validators scope supplied parent ctx]
   (when-not (map? supplied) (ir/reject! :address-map-required {}))
-  (let [{:keys [scopes parameters presence-program required-addresses]} (get-in ir [:frame-layouts scope])
-        _ (when-not (every? parameters (keys supplied)) (ir/reject! :unknown-supplied-address {}))
+  (let [{:keys [scopes parameters record-inputs presence-program required-addresses]} (get-in ir [:frame-layouts scope])
+        _ (when-not (every? (fn [[address value]]
+                              (or (contains? parameters address)
+                                  (and (contains? record-inputs address) (= {} value))))
+                            supplied)
+            (ir/reject! :unknown-supplied-address {}))
         present (ir/present-addresses presence-program supplied (:present parent {}))
-        missing (filterv #(not (get present %)) required-addresses)]
+        required (into required-addresses (required-on-entry presence-program supplied))
+        missing (filterv #(not (get present %)) required)]
     (when (seq missing) (ir/reject! :missing-required-input {:addresses missing}))
     (let [frozen (volatile! nil)
           cell (fn [{:keys [address]}]

@@ -50,9 +50,10 @@
 
 (defn- wire-presence
   [{:keys [presence-program required-addresses]} address-ids]
-  {:presence (mapv (fn [{:keys [address kind sources]}]
-                     {:id (get address-ids address) :kind (name kind)
-                      :sources (mapv address-ids sources)})
+  {:presence (mapv (fn [{:keys [address kind sources required-fields]}]
+                     (cond-> {:id (get address-ids address) :kind (name kind)
+                              :sources (mapv address-ids sources)}
+                       (seq required-fields) (assoc :required-fields (mapv address-ids required-fields))))
                    presence-program)
    :required (vec (sort (map address-ids required-addresses)))})
 
@@ -129,21 +130,22 @@
 
 
 (defn- input-fields
-  [nodes address-ids encode]
+  [nodes address-ids record-inputs encode]
   (mapv (fn [{:keys [name address fields] :as node}]
           (let [field {:name (subs (str name) 1) :key (encode name)}]
             (if (contains? node :fields)
-              (assoc field :fields (input-fields fields address-ids encode))
+              (cond-> (assoc field :fields (input-fields fields address-ids record-inputs encode))
+                (contains? record-inputs address) (assoc :slot (get address-ids address)))
               (assoc field :slot (get address-ids address)))))
         nodes))
 
 
 (defn- input-plan
-  [{:keys [parameters] :as layout} surface address-ids encode]
-  (let [fields (input-fields (get-in surface [:root :fields]) address-ids encode)
-        slots (into [] (keep :slot) (tree-seq #(contains? % :fields) :fields {:fields fields}))]
-    (when-not (and (= (set slots) (into #{} (map address-ids) parameters))
-                   (= (count slots) (count parameters)))
+  [{:keys [parameters record-inputs] :as layout} surface address-ids encode]
+  (let [fields (input-fields (get-in surface [:root :fields]) address-ids record-inputs encode)
+        slots (into [] (keep :slot) (tree-seq #(contains? % :fields) :fields {:fields fields}))
+        expected (into #{} (map address-ids) (into parameters record-inputs))]
+    (when-not (and (= (set slots) expected) (= (count slots) (count expected)))
       (ir/reject! :browser-input-route-mismatch {}))
     {:structured (assoc (wire-presence layout address-ids) :fields fields)}))
 
@@ -173,7 +175,10 @@
     (ir/reject! :browser-visibility-policy-required {}))
   (let [{:keys [root-scope expressions scopes parameters frame-layouts] :as plan}
         (ir/lower-checked analysis options)]
-    (when (and closed? (seq parameters))
+    (when (and closed?
+               (or (seq parameters)
+                   (let [{:keys [record-inputs required-addresses]} (get frame-layouts root-scope)]
+                     (some record-inputs required-addresses))))
       (ir/reject! :browser-input-validation-required {}))
     (when (> (+ (count expressions) (count scopes)) browser/max-functions)
       (ir/reject! :browser-function-limit {}))

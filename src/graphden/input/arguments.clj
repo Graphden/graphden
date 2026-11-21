@@ -19,9 +19,11 @@
                   (ir/reject! :record-input-required {:path path}))
                 (when (some #(not (contains? accepted %)) (keys value))
                   (ir/reject! :unknown-input-field {:path path}))
-                (into {} (mapcat (fn [field]
-                                   (when (contains? value (:name field))
-                                     (route field (get value (:name field))
-                                            (conj path (:name field)))))) fields))
+                (into (if (= :input-field (:kind node)) {(:address node) {}} {})
+                      (mapcat (fn [field]
+                                (when (contains? value (:name field))
+                                  (route field (get value (:name field))
+                                         (conj path (:name field))))))
+                      fields))
               {(:address node) value}))]
     (route (:root surface) supplied [])))

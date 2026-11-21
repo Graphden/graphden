@@ -266,13 +266,13 @@ Matches a frozen stored declaration to the host's native implementation by UUID.
 :PROPERTIES:
 :CUSTOM_ID: types/compile-stored
 :FILE: src/graphden/input/compile.clj
-:LINE: 56
-:MINS: 1.3
+:LINE: 66
+:MINS: 1.1
 :END:
 
 Runs the structured-input checker on an authorized stored snapshot and prepares a named invocation closure for the ordinary executor. The caller supplies the trusted implementations alongside their frozen signatures and owns the execution authorization boundary.
 
-- source :: [[file:../../../src/graphden/input/compile.clj::(defn compile-stored][src/graphden/input/compile.clj:56]]
+- source :: [[file:../../../src/graphden/input/compile.clj::(defn compile-stored][src/graphden/input/compile.clj:66]]
 - see also :: [[file:types.org::#types/resolve-closure][resolve-closure]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 
 * 21. primitives

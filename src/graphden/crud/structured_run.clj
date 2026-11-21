@@ -37,16 +37,22 @@
 (defn- check-configured-fields!
   "Only a closure already lowered at this exact address stays inside the JVM.
    Public arguments, captured values and the result keep their wire contracts."
-  [closures scope path {:keys [fields type]}]
+  [callable-allowed? scope path {:keys [fields type]}]
   (cond
     (and (types/record-type? type) fields)
-    (doseq [field fields] (check-configured-fields! closures scope (conj path (:id field)) field))
+    (doseq [field fields] (check-configured-fields! callable-allowed? scope (conj path (:id field)) field))
 
-    (and (types/fn-type? type) (contains? closures [scope path]) (= #{} (types/fn-effects type)))
+    (and (types/fn-type? type) (callable-allowed? scope path) (= #{} (types/fn-effects type)))
     (do (run! values/contract (vals (types/fn-args type)))
         (values/contract (types/fn-ret type)))
 
     :else (values/contract type)))
+
+
+(defn- check-jvm-signature!
+  [{:keys [effects execution]}]
+  (when-not (and (= #{} effects) (set? execution) (contains? execution :jvm-server))
+    (input/reject! :unsupported-run-signature {})))
 
 
 (defn- prepare
@@ -62,14 +68,12 @@
                       (fn []
                         (values/contract (get-in surface [:root :type]))
                         (doseq [[use-path {:keys [signature configured-contract]}] (:scopes analysis)]
-                          (when-not (and (= #{} (:effects signature))
-                                         (set? (:execution signature))
-                                         (contains? (:execution signature) :jvm-server))
-                            (input/reject! :unsupported-run-signature {}))
-                          (check-configured-fields! (:closures analysis) [root use-path] [] configured-contract)
+                          (check-jvm-signature! signature)
+                          (check-configured-fields! #(contains? (:closures analysis) [%1 %2])
+                                                    [root use-path] [] configured-contract)
                           (values/contract (:return signature)))
                         (values/contract (get-in analysis [:scopes [] :signature :return]))))]
-    {:analysis analysis :targets targets
+    {:analysis (assoc analysis :compiled-input? true) :targets targets
      :invoke (executor/named-input-closure
                (fn [args context] (values/project result-type (invoke args context))))
      :surface surface
@@ -113,6 +117,27 @@
     (when-let [guard (:execute-guard ctx)] (guard ctx root))
     (let [prepared (prepare ctx frozen root)]
       (assoc (select-keys prepared [:analysis :free-slots]) :graph-hash (source-hash frozen)))
+    (catch clojure.lang.ExceptionInfo error (rejection error) nil)))
+
+
+(defn authorable-package-root?
+  "Check an open, pure package template before allowing a child to fill it.
+   An unbound callable stays unavailable to the public execution transport."
+  [ctx frozen root]
+  (try
+    (when-let [guard (:execute-guard ctx)] (guard ctx root))
+    (when-not (some #(= root (:fn-id %)) (vals (:bindings frozen)))
+      (let [{:keys [analysis]} (compile/analyze-stored frozen root (trusted-roots ctx frozen))
+            {:keys [signature configured-contract]} (get-in analysis [:scopes []])]
+        (when (and (= :checked (:status analysis)) (= 1 (count (:scopes analysis)))
+                   (empty? (:dependencies analysis)))
+          (input/call-with-types
+            frozen
+            (fn []
+              (check-jvm-signature! signature)
+              (check-configured-fields! (constantly true) [root []] [] configured-contract)
+              (values/contract (:return signature))
+              true)))))
     (catch clojure.lang.ExceptionInfo error (rejection error) nil)))
 
 

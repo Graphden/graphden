@@ -32,14 +32,30 @@
     (leaf-type? spec)))
 
 
+(defn- record-of?
+  [type member?]
+  (and (map? type) (seq type) (every? simple-keyword? (keys type)) (every? member? (vals type))))
+
+
+(defn- data-type?
+  [type]
+  (or (leaf-type? type) (record-of? type data-type?)))
+
+
+(defn- pinned-input-type?
+  [type]
+  (or (leaf-type? type)
+      (record-of? type pinned-input-type?)
+      (and (vector? type) (= 4 (count type)) (= :fn (first type))
+           (= #{} (peek type)) (record-of? (second type) data-type?) (data-type? (nth type 2)))))
+
+
 (defn- exact-record?
   [input return-type contract]
-  (when (and (map? contract) (= 1 (count contract)))
-    (let [[field shape] (first contract)]
-      (and (simple-keyword? field) (map? shape) (seq shape)
-           (every? simple-keyword? (keys shape)) (every? #{:text} (vals shape))
-           (= input {field {:type shape :required true}})
-           (= return-type shape)))))
+  (and (record-of? contract #(record-of? % pinned-input-type?))
+       (= input (update-vals contract #(hash-map :type % :required true)))
+       (or (leaf-type? return-type)
+           (and (some #{return-type} (vals contract)) (data-type? return-type)))))
 
 
 (defn- require-primitive!
@@ -80,8 +96,9 @@
 
 (defn prepare
   "Prepare a standalone pure-shape declaration. Scalar fields are the default.
-   A pinned record ABI may admit one required closed record of text leaves and
-   the same result type. The declarations contain no bindings or parents."
+   The optional record ABI pins exact required record fields. A callable field
+   must have a closed effect-free signature and data-only call values.
+   Results are scalar or an admitted data record. No bindings or parents."
   ([source root] (prepare source root nil))
   ([source root record-contract]
    (let [definition (selected-root source root)]

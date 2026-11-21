@@ -12,6 +12,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
     [graphden.system.init.packages]
+    [graphden.test-infra.closed-input :as closed]
     [graphden.test-infra.golden-app :as golden]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
@@ -79,3 +80,27 @@
     (is (= "forbidden" (get-in (post profile) [:error-data :reason])))
     (sync!)
     (is (= original (versions)))))
+
+
+(deftest pinned-package-boot-keeps-nested-callable-identity-and-contract
+  (let [storage (:storage golden/*bootstrap*)
+        root closed/root
+        input (migration/derived-id :input-type root)
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "closedinputfixture"]
+                                             :primitive-input closed/admission})
+        sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
+        {:keys [base-fns]} (sync!)
+        payload (sp/read-entity storage :slot (ids/slot-id root :payload))
+        record (:type-fn-id payload)
+        field (sp/read-entity storage :slot (ids/slot-id record :callback))
+        callable (:type-fn-id field)
+        versioned-ids [root input record callable]
+        versions #(resolution/resolve-version-ids (vs/unwrap storage) :fn versioned-ids (vs/current-branch-id storage))
+        before (versions)]
+    (is (identical? (:closed-apply-text base-fns) (:fixture-closed-apply-text base-fns)))
+    (is (owned/owned-impl? root (:fixture-closed-apply-text base-fns)))
+    (is (= input (:input-type-fn-id (sp/read-entity storage :fn root))))
+    (is (= closed/callback (:constraint (sp/read-entity storage :fn callable))))
+    (is (= (set versioned-ids) (set (keys before))))
+    (sync!)
+    (is (= before (versions)))))

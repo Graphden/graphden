@@ -666,6 +666,25 @@
       (is (contains? (codes (result (plan [sink relay variant]) :child)) expected)))))
 
 
+(deftest disjoint-renames-preserve-each-original-field-identity
+  (let [parent {:name :record-value :namespace "fixture"
+                :args {:name {:type :text} :identifier {:type :int}}
+                :return-type :any}
+        child {:name :profile :namespace "fixture" :parent :record-value
+               :args (array-map :identifier {:as :profile-id} :name {:as :profile-name})}
+        ctx (prepared [parent child])
+        entry (first (:definitions (source/verify-module (source/plan-module [child] ctx) ctx)))
+        parent-id (ids/fn-id "fixture" :record-value)
+        owner (:identity entry)
+        binding-paths (set (map (juxt :target-path :projection-path) (get-in entry [:v2 :bindings])))
+        duplicate (assoc-in child [:args :name :as] :profile-id)]
+    (is (= :authored-source-equivalent (:verification entry)) (pr-str (:blockers entry)))
+    (is (= #{[[(ids/slot-id parent-id :identifier)] [(ids/slot-id owner :profile-id)]]
+             [[(ids/slot-id parent-id :name)] [(ids/slot-id owner :profile-name)]]}
+           binding-paths))
+    (is (contains? (codes (result (plan [parent duplicate]) :profile)) :rename-field-collision))))
+
+
 (deftest generic-rename-keeps-the-source-type-variable-and-its-original-slot-identities
   (let [rich '[:union :null [:map a :any] [:list :any]]
         lookup {:name :lookup :namespace "fixture" :args {:coll {:type rich}} :return-type :any}

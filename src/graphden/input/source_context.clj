@@ -256,9 +256,9 @@
    The new syntax reader handles :bind separately. Remove this legacy
    lowering adapter when the v2 package loader replaces the v1 loader."
   [{:keys [context]} definition]
-  (let [projections (into {} (keep (fn [[arg form]]
-                                     (when (and (simple-keyword? arg) (format/local-projection? form))
-                                       [arg (first (second form))])))
+  (let [projections (into (array-map) (keep (fn [[arg form]]
+                                              (when (and (simple-keyword? arg) (format/local-projection? form))
+                                                [arg (first (second form))])))
                           (when (map? (:bind definition)) (:bind definition)))
         rename-form (fn [arg exposed]
                       (merge {:as exposed} (get-in definition [:configure [arg]])))

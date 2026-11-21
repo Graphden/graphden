@@ -299,11 +299,17 @@
         defs (:defs-by-name context)
         chain (set (slots/chain-of (slots/own-ref definition defs) defs))
         aliases (keep :rename arguments)
-        ;; Mixed own declarations and simultaneous renames have independent
-        ;; slot-position/collision rules. Keep their existing blockers.
-        collision? (when-let [exposed (:alias (first aliases))]
-                     (some #(contains? (:args %) exposed) (cons definition (ancestor-definitions definition context))))
-        rename-fields (when (and (not collision?) (= 1 (count aliases))
+        names (into [] (keep (fn [[arg spec]]
+                               (let [exposed (:as spec)]
+                                 (when (and (simple-keyword? exposed) (not= arg exposed)) exposed))))
+                    (:args source))
+        collision? (when (seq names)
+                     (or (not= (count names) (count (set names)))
+                         (some (fn [ancestor] (some #(contains? (:args ancestor) %) names))
+                               (cons definition (ancestor-definitions definition context)))))
+        ;; Own fields, field changes and metadata require separate row order
+        ;; and compatibility evidence.
+        rename-fields (when (and (seq aliases) (not collision?)
                                  (not-any? #(or (= :declaration (:kind %))
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))

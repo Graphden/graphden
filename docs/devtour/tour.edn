@@ -1783,6 +1783,14 @@
            change clears the mode. The comparison menu provides review and merge actions."
      :see [[:editor "mountDiffItem"] [:editor "selectDiffLens"]]}
 
+    {:file "resources/packages/app/editor/editor-execute-inputs.js" :defn mountStructuredRunInputs
+     :say "The Run pane builds named record inputs from the authorized residual descriptor for the
+           selected root when its Run capability is true. Required fields surface a focused error
+           before submission. Optional fields preserve the distinction between omission and explicit
+           values such as false, null and empty text. Legacy slot-based value forms still use their
+           existing route. Both forms submit through the same execution handler."
+     :see [[:editor "submitExecution"] [:crud "apply-execute"]]}
+
     {:file "resources/packages/app/editor/editor-execute.js" :defn submitExecution
      :say "The selected card's Run button delegates to the existing Inspector Run owner; it does
            not create another execution form. That form resolves typed inputs, keeps [effect

@@ -22,6 +22,10 @@ const { createDocument, MiniElement } = require('./mini-dom');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
   'app', 'editor', 'editor-execute.js'), 'utf8');
+const STRUCTURED = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
+  'app', 'editor', 'editor-execute-inputs.js'), 'utf8');
+const FORMS = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
+  'web', 'runtime', 'graphden-forms.js'), 'utf8');
 
 let fails = 0;
 let passes = 0;
@@ -76,6 +80,7 @@ function boot({ effects = false } = {}) {
     console, Promise, JSON,
     document: doc,
     window: {},
+    dereferenceType: type => type,
     API: { api_execute: '/api/execute', api_execute_id: (id) => '/api/execute/' + id,
            api_execute_id_cancel: (id) => '/api/execute/' + id + '/cancel' },
     lookups: { fnMap: new Map([['A', { id: 'A' }], ['B', { id: 'B' }]]) },
@@ -128,6 +133,10 @@ function boot({ effects = false } = {}) {
     },
   });
   ctx.__shell = { slots: ['x'], effects };
+  const collectSlot = ctx.collectFormValue;
+  vm.runInContext(FORMS, ctx);
+  ctx.collectFormValue = collectSlot;
+  vm.runInContext(STRUCTURED, ctx);
   vm.runInContext(SRC, ctx);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const resolveForm = (fnId, value) => formWaits.get(fnId).shift()({ ok: true, value });
@@ -138,6 +147,78 @@ function boot({ effects = false } = {}) {
 }
 
 (async () => {
+  console.log(' structured form submits only checked names and preserves false, null and empty text');
+  {
+    const t = boot();
+    MiniElement.prototype.focus = function focus() { this.setAttribute('data-focused', 'true'); };
+    const leaf = (name, type, required = false) =>
+      ({kind: 'input-field', name, type, required, 'required-now?': required});
+    let descriptor = {kind: 'input-record', status: 'available', 'run-available': true, fields: [
+      {kind: 'input-field', name: 'profile', required: true, 'required-now?': true, fields: [
+        leaf('id', 'int', true), leaf('active', 'bool'), leaf('extra', ['union', 'null', 'text']), leaf('name', 'text'),
+      ]},
+    ]};
+    const [installing, install] = t.hold();
+    t.ctx.ensureSubtreeFor = () => installing;
+    t.ctx.gdStructuredInputFor = id => id === 'A' ? descriptor : null;
+    const pending = t.ctx.gdMountRunPane('A');
+    await t.flush();
+    assert(!t.doc.querySelector('.execute-popover.visible'), 'pane waits for matching subtree');
+    install(true);
+    await pending;
+    const run = t.doc.querySelector('.execute-run-btn');
+    const status = t.doc.querySelector('[role="status"]');
+    const [id, includeName, name] = t.doc.querySelectorAll('fieldset input');
+    const active = t.doc.querySelector('fieldset select');
+    const extra = t.doc.querySelector('fieldset textarea');
+    assert(!t.doc.querySelector('[data-slot-id]'), 'v2 replaces flat slot hosts');
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 0 && status.textContent.includes('profile.id'), 'missing required value blocks POST');
+    assert(id.getAttribute('aria-invalid') === 'true' && id.getAttribute('data-focused') === 'true', 'invalid field is focused');
+    id.value = '42';
+    extra.value = 'bad JSON';
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 0 && status.textContent.includes('profile.extra'), 'invalid JSON blocks POST');
+    extra.value = 'null';
+    active.value = 'false';
+    includeName.checked = true;
+    includeName.dispatch('change');
+    assert(name.value === '', 'included optional text may be explicitly empty');
+    run.click();
+    await t.flush();
+    assert(JSON.stringify(t.posts[0]?.args) === '{"profile":{"id":42,"active":false,"extra":null,"name":""}}',
+      'structured values are serialized without losing presence');
+    t.ctx.__releasePost();
+    await t.flush();
+    includeName.checked = false;
+    includeName.dispatch('change');
+    active.value = '';
+    extra.value = '';
+    run.click();
+    await t.flush();
+    assert(JSON.stringify(t.posts[1]?.args) === '{"profile":{"id":42}}', 'unticked and blank optional fields are omitted');
+    t.ctx.__releasePost();
+    await t.flush();
+    descriptor = {...descriptor};
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 2 && run.disabled, 'an obsolete descriptor cannot submit');
+  }
+
+  console.log(' v2 without verified Run has no flat fallback');
+  {
+    const t = boot();
+    t.ctx.gdStructuredInputFor = () => ({kind: 'input-record', status: 'available', fields: []});
+    await t.ctx.gdMountRunPane('A');
+    const run = t.doc.querySelector('.execute-run-btn');
+    assert(run.disabled && !t.doc.querySelector('[data-slot-id]'), 'unavailable v2 hides the legacy fields and disables Run');
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 0, 'disabled v2 cannot submit');
+  }
+
   console.log(' summary Enter keeps native disclosure; text input Enter still submits');
   {
     const t = boot();

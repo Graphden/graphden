@@ -177,6 +177,7 @@
                   ;; its window.openTraceView.
                   "packages/app/editor/editor-trace-view.js"
                   "packages/app/editor/editor-execute-history.js"
+                  "packages/app/editor/editor-execute-inputs.js"
                   "packages/app/editor/editor-execute.js"
                   "packages/app/editor/editor-fn-versions.js"
                   "packages/app/editor/editor-fn-usages.js"

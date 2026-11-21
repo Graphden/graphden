@@ -5,7 +5,7 @@ const path = require('node:path');
 const {chromium} = require('playwright');
 
 const [origin, rootId] = process.argv.slice(2);
-const token = process.env.GD_LESSON_TOKEN;
+const token = process.env.GD_BROWSER_FIXTURE_TOKEN;
 assert.equal(new URL(origin).hostname, '127.0.0.1');
 assert.ok(rootId && token);
 

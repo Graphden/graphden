@@ -86,6 +86,12 @@ binding version IDs. Descriptor and membership IDs are deterministic; inherited
 memberships retain their source versions. Binding identities stay shared.
 `migration/binding-origin` accepts `[owner-fn-id use-path]` and a field path so
 source adapters can reuse the same origins without global name lookup.
+For a scalar rename with matching primitive slot types, the plan verifies the
+original parent membership, the alias field, and the legacy binding. When
+their branch histories have matching timestamps and change stamps, it writes
+a projection at each original binding version and preserves every version
+ID. Unpaired history or a binding that also supplies a value or reference
+requires further migration evidence.
 
 Apply regenerates the plan, verifies its source and target checksums, and compares
 the current raw graph snapshot under the ordinary semantic writer lock. Every
@@ -100,7 +106,7 @@ different snapshot rather than treating it as approval to continue.
 
 Any exception blocks the entire artifact. The inventory remains readable and
 deterministic so a subsequent semantic adapter can resolve it. Current reports
-cover list append/closed/item state requiring builders, rename projections,
+cover list append/closed/item state requiring builders, unproved rename projections,
 cross-reference inputs, multiple membership origins for one slot, historical
 membership moves, historical executable/type role changes, binding trait policy,
 owner mismatch, inconsistent legacy expressions, and already structured data. Invalid branch structure also fails

@@ -323,6 +323,42 @@
       (is (= (migration/fingerprint source) (migration/fingerprint (offline/snapshot base)))))))
 
 
+(deftest offline-artifact-replays-paired-scalar-rename-history
+  (with-storage [base (base-storage)]
+    (let [versioned (vs/wrap-with-versioning base)
+          type-id (record-ids/primitive-fn-id :text)
+          _ (sp/create-entity versioned :fn {:id type-id :name "text"})
+          root (:id (sp/create-entity versioned :fn {:name "encode" :return-type-fn-id type-id}))
+          owner (:id (sp/create-entity versioned :fn {:name "encode-body" :parent-ids [root]}))
+          field (:id (sp/create-entity versioned :slot {:name "value" :type-fn-id type-id :required true}))
+          alias-id (record-ids/slot-id owner :body)
+          membership {:id (record-ids/fn-slot-id owner alias-id) :fn-id owner :slot-id alias-id :position 0}
+          binding {:id (record-ids/binding-id owner field) :fn-id owner :slot-id field :value-present false
+                   :type-override-fn-id type-id}
+          _ (sp/create-entity versioned :fn-slot {:fn-id root :slot-id field :position 0})
+          _ (sp/create-entity versioned :slot {:id alias-id :name "body" :type-fn-id type-id :required false
+                                               :source-slot-id field})
+          branch (:id (some #(when (= "main" (:name %)) %) (sp/query-entities base :branch {})))
+          stamp {:branch-id branch :change-id (random-uuid) :created-at (java.time.Instant/now)}
+          member-version (merge stamp membership {:id (random-uuid) :fn-slot-id (:id membership)})
+          binding-version (merge stamp binding {:id (random-uuid) :binding-id (:id binding)})]
+      (sp/create-entity base :fn-slot membership)
+      (sp/create-entity base :binding binding)
+      (sp/create-entity base :fn-slot-version member-version)
+      (sp/create-entity base :binding-version binding-version)
+      (let [source (offline/snapshot base)
+            artifact (-> source offline/artifact offline/encode offline/decode)]
+        (is (empty? (get-in artifact [:plan :exceptions])))
+        (is (= {:status :applied} (offline/apply! base artifact)))
+        (is (= {:status :already-applied} (offline/apply! base artifact)))
+        (is (= {:expression-kind "projection" :projection-path [alias-id] :target-path [field]}
+               (select-keys (sp/read-entity versioned :input-binding (:id binding))
+                            [:expression-kind :projection-path :target-path])))
+        (is (= (:id binding) (:input-binding-id (sp/read-entity base :input-binding-version (:id binding-version)))))
+        (is (= {:status :restored} (offline/restore! base artifact)))
+        (is (= (migration/fingerprint source) (migration/fingerprint (offline/snapshot base))))))))
+
+
 (defn- binding-version
   [storage id]
   (:id (resolution/resolve-version (vs/unwrap storage) :input-binding id (vs/current-branch-id storage))))

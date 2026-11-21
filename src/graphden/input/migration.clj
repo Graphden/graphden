@@ -4,6 +4,7 @@
   (:require
     [clojure.set :as set]
     [clojure.string :as str]
+    [graphden.input.migration-renames :as renames]
     [graphden.input.rows :as input-rows]
     [graphden.schema.graph.schema :as graph-schema])
   (:import
@@ -101,7 +102,7 @@
 
 
 (defn- exceptions
-  [snapshot fns executable-ids memberships]
+  [snapshot fns executable-ids memberships renamed-memberships]
   (let [bindings (concat (:binding snapshot) (:binding-version snapshot))
         items (set (map :binding-id (concat (:binding-list-item snapshot) (:binding-list-item-version snapshot))))
         fields (into {} (map (juxt :id identity)) (:slot snapshot))]
@@ -136,7 +137,8 @@
             (issue :cross-reference-input :binding (or (:binding-id b) (:id b))))
           (for [[owner ms] memberships
                 m ms
-                :when (:source-slot-id (get fields (:slot-id m)))]
+                :when (and (:source-slot-id (get fields (:slot-id m)))
+                           (not (contains? renamed-memberships (:id m))))]
             (issue :rename-projection-required :fn owner))
           (for [[owner ms] memberships
                 [_ same] (group-by :slot-id ms)
@@ -202,15 +204,17 @@
 
 
 (defn- path-binding
-  [row version?]
-  (cond-> (-> row
-              (dissoc :slot-id :list-append :list-closed)
-              (assoc :scope-path [] :target-path [(:slot-id row)]
-                     :expression-kind (cond
-                                        (:value-present row) "value"
-                                        (:ref-fn-id row) "ref"
-                                        :else nil)))
-    version? (-> (assoc :input-binding-id (:binding-id row)) (dissoc :binding-id))))
+  [renames row version?]
+  (let [alias-id (get-in renames [(if version? (:binding-id row) (:id row)) :alias-id])]
+    (cond-> (-> row
+                (dissoc :slot-id :list-append :list-closed)
+                (assoc :scope-path [] :target-path [(:slot-id row)]
+                       :expression-kind (cond
+                                          (:value-present row) "value"
+                                          (:ref-fn-id row) "ref"
+                                          :else nil)))
+      alias-id (assoc :expression-kind "projection" :projection-scope-path [] :projection-path [alias-id])
+      version? (-> (assoc :input-binding-id (:binding-id row)) (dissoc :binding-id)))))
 
 
 (defn identity-mapping
@@ -235,7 +239,9 @@
         executable-ids (into #{} (comp (filter executable?) (map :id)) (:fn snapshot))
         by-owner (group-by :fn-id (:fn-slot snapshot))
         memberships (into (sorted-map) (map (fn [id] [id (vec (mapcat by-owner (sort-by str (closure fns id))))])) executable-ids)
-        problems (vec (sort-by stable-edn (exceptions snapshot fns executable-ids memberships)))
+        renamed (renames/evidence snapshot fns by-owner)
+        problems (vec (sort-by stable-edn (exceptions snapshot fns executable-ids memberships
+                                                      (into #{} (map :membership-id) (vals renamed)))))
         descriptors (mapv #(input-type-record (get fns %)) (sort-by str executable-ids))
         descriptor-versions (mapv descriptor-version (filter #(contains? executable-ids (:fn-id %)) (:fn-version snapshot)))
         copied-members (vec (membership-copies fns memberships))
@@ -246,8 +252,8 @@
                                    (filter #(contains? executable-ids (:fn-id %)) (:fn-version snapshot)))}
         additions {:fn descriptors :fn-version descriptor-versions
                    :fn-slot copied-members :fn-slot-version copied-versions
-                   :input-binding (mapv #(path-binding % false) (:binding snapshot))
-                   :input-binding-version (mapv #(path-binding % true) (:binding-version snapshot))}]
+                   :input-binding (mapv #(path-binding renamed % false) (:binding snapshot))
+                   :input-binding-version (mapv #(path-binding renamed % true) (:binding-version snapshot))}]
     {:format :graphden/structured-input-storage-v2
      :source-fingerprint (fingerprint snapshot)
      :exceptions problems :changes changes :additions additions

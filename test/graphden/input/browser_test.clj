@@ -109,7 +109,7 @@
         (is (= {:value (wire/encode-value {}) :sequence false} present))
         (if optional?
           (do (is (= "missing" (invoke {} nil)))
-              (is (= {:value "missing" :sequence false} absent)))
+              (is (= {:value (wire/encode-value "missing") :sequence false} absent)))
           (do (is (= :missing-required-input (invocation-error invoke {})))
               (is (= "Missing graph input field" (:error absent)))
               (is (= :browser-input-validation-required (rejection analysis options)))))))))
@@ -127,7 +127,7 @@
         present {:coll {:profile {:name "Ada"}}}
         [absent refused success] (run-browser (browser/export-named analysis options) [{} incomplete present])]
     (is (= "missing" (invoke {} nil)))
-    (is (= {:value "missing" :sequence false} absent))
+    (is (= {:value (wire/encode-value "missing") :sequence false} absent))
     (is (= :missing-required-input (invocation-error invoke incomplete)))
     (is (= "Missing graph input field" (:error refused)))
     (is (= {:name "Ada"} (invoke present nil)))

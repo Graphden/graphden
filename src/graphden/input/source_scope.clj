@@ -206,13 +206,16 @@
     (let [before (checked-graph analyze snapshot owner-id)
           source-names (free-route! before source-address source-type)
           target-names (free-route! before target-address target-type)
-          edge (checked-edge before snapshot owner-id uses)]
+          edge (checked-edge before snapshot owner-id uses)
+          field-owner (only (filter #(= target-id (ids/slot-id % (peek target-names)))
+                                    (get-in before [:scopes uses :declaration-order]))
+                            :reference-field-origin-mismatch)]
       (when-not (and (= target-address (occurrence before target-id))
                      (= target-fn-id (:target-fn-id edge))
                      (= 1 (count source-names))
                      (= [(:name edge) (first source-names)] target-names))
         (reject! :unproved-forwarded-use))
-      (let [row (rows/normalize {:id projection-id :fn-id owner-id
+      (let [row (rows/normalize {:kind :input-binding :id projection-id :fn-id owner-id
                                  :org-id (get-in snapshot [:fns owner-id :org-id])
                                  :scope-path uses :target-path target-path
                                  :expression-kind "projection" :value-present false
@@ -228,5 +231,6 @@
                        (not (contains? (get-in after [:public-input :routes]) target-names))
                        (= source-names (free-route! after source-address source-type)))
           (reject! :forwarded-replay-mismatch))
-        {:snapshot-id (:snapshot-id snapshot) :row row :edge edge
-         :source-names source-names :target-names target-names}))))
+        {:snapshot-id (:snapshot-id snapshot) :row row :edges [edge] :field-owner field-owner
+         :owner-parents (get-in snapshot [:fns owner-id :parent-ids])
+         :address target-address :public-path target-names :source-names source-names}))))

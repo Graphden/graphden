@@ -91,8 +91,14 @@ async function exercise() {
     assert.deepEqual((await response.json()).result, {id: '42', name: 'Ada', email: 'ada@example.test'});
     await reach('Finish the lesson');
     await page.getByRole('button', {name: 'Finish', exact: true}).click();
-    await page.getByRole('button', {name: 'Delete branch & return', exact: true}).click();
-    await page.waitForURL(url => !url.searchParams.has('branch'));
+    const [deletion] = await Promise.all([
+      page.waitForResponse(res => new URL(res.url()).pathname === '/api/branches/' + receipt.sandboxBranchId
+        && res.request().method() === 'DELETE'),
+      page.getByRole('button', {name: 'Delete branch & return', exact: true}).click(),
+    ]);
+    assert.equal(deletion.ok(), true);
+    assert.equal((await deletion.json()).ok, true);
+    await page.waitForURL(url => !url.searchParams.has('branch'), {waitUntil: 'domcontentloaded'});
     const branches = await page.evaluate(async () => {
       const response = await window.authFetch('/api/branches');
       return response.json();

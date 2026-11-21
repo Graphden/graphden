@@ -105,4 +105,5 @@
         (try
           (browser/exercise! #(router/dispatch app %) token "tools/browser-test/fixtures/structured-lesson-lifecycle.js" lesson/root)
           (finally (ig/halt-key! :exec/api-routes-js-cache api-cache)))))
+    (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-structured-profile"})))
     (is (not (contains? (catalogue app nil) "43")))))

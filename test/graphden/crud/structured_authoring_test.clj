@@ -5,6 +5,7 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.interface :as exec]
+    [graphden.input.access :as access]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]
@@ -152,6 +153,114 @@
     (is (= 409 (:http (command origin token "apply" (assoc proposal :expected-state (:expected-state before))))))))
 
 
+(defn- change!
+  [origin token proposal]
+  (let [preview (command origin token "preview" proposal)]
+    (is (true? (:ok preview)) (pr-str preview))
+    (command origin token "apply" (merge proposal (select-keys preview [:expected-state :expected-version])))))
+
+
+(defn- retained-reference!
+  "An older scoped overlay on a descendant may still address the use by UUID."
+  [origin token storage owner binding-id]
+  (let [input (:input-type-fn-id (sp/read-entity storage :fn owner))
+        [descendant dependent] (binding [access/*offline?* true]
+                                 (let [child (sp/create-entity storage :fn {:name "stored-profile-descendant"
+                                                                            :parent-ids [owner] :input-type-fn-id input})
+                                       binding (sp/create-entity storage :input-binding
+                                                                 {:fn-id (:id child) :scope-path [binding-id]
+                                                                  :target-path [(ids/slot-id uppercase :string)]
+                                                                  :expression-kind "value" :value-present true :value "scoped"})]
+                                   [(:id child) (:id binding)]))
+        proposal {:fn-id owner :binding-id binding-id :action "remove"}]
+    (try
+      (is (= 403 (:http (command origin token "preview" (assoc proposal :fn-id descendant)))))
+      (is (= 409 (:http (command origin token "preview" proposal))))
+      (is (= 409 (:http (command origin token "preview" (assoc proposal :action "edit" :value "would orphan")))))
+      (is (= uppercase (:ref-fn-id (sp/read-entity storage :input-binding binding-id))))
+      (finally
+        (binding [access/*offline?* true vs/*tombstone-delete?* true]
+          (sp/delete-entity storage :input-binding dependent))))))
+
+
+(defn- remove-hidden-reference!
+  [origin token storage seams denied owner binding-id]
+  (let [proposal {:fn-id owner :action "remove" :binding-id binding-id}
+        profile (ids/slot-id lesson/root :profile)
+        record (:type-fn-id (sp/read-entity storage :slot profile))
+        original @seams
+        forbidden (atom record)
+        reads (atom [])]
+    (try
+      (binding [tenancy/*seams-override* seams]
+        (tenancy/install-browser-source-policy!
+          (fn [_]
+            (fn [row & _]
+              (swap! reads conj (:id row))
+              (when (= @forbidden (:id row)) (throw (ex-info "Denied" {:type :authz/forbidden})))))))
+      (is (= 403 (:http (command origin token "preview" proposal))))
+      (reset! forbidden uppercase)
+      (reset! denied uppercase)
+      (is (= 403 (:http (command origin token "preview" (assoc proposal :action "edit" :value "hidden")))))
+      (reset! reads [])
+      (let [preview (command origin token "preview" proposal)
+            result (command origin token "apply" (merge proposal (select-keys preview [:expected-state :expected-version])))]
+        (is (true? (:ok preview)) (pr-str preview))
+        (is (= #{:ok :action :fn-id :binding-id :expected-state :expected-version :http} (set (keys preview))))
+        (is (true? (:committed result)) (pr-str result))
+        (is (= #{:ok :committed :action :fn-id :binding-id :http} (set (keys result))))
+        (is (not-any? #{uppercase} @reads))
+        (is (nil? (sp/read-entity storage :input-binding binding-id))))
+      (finally (reset! seams original) (reset! denied nil)))))
+
+
+(defn- run-profile-name
+  [origin token child fields]
+  (let [response (request origin token :post "/api/execute"
+                          {:content-type "application/json"
+                           :body (json/generate-string {:fn-id child :args {:profile (assoc fields :id "run")} :timeout-ms 20000})})]
+    (get-in (json/parse-string (:body response) true) [:result :name])))
+
+
+(defn- exercise-reference-changes!
+  [origin token storage seams denied child id]
+  (let [target (:id (first (sp/query-entities storage :fn {:name "changeable-uppercase"})))
+        target-row (:id (first (sp/query-entities storage :input-binding {:fn-id target})))
+        edit {:fn-id child :binding-id id :action "edit"}
+        reference (assoc edit :ref-fn-id target)
+        preview #(select-keys (command origin token "preview" %) [:expected-state :expected-version])
+        apply! #(command origin token "apply" (merge %1 %2))
+        expected (preview reference)
+        removal (assoc edit :action "remove")
+        removal-basis (preview removal)
+        read-expression #(-> (sp/read-entity storage :input-binding id)
+                             (select-keys [:id :expression-kind :value :ref-fn-id :value-present]))
+        current-target {:fn-id target :binding-id target-row :action "edit"}]
+    (is (true? (:committed (change! origin token {:fn-id child :action "bind" :path ["profile" "email"] :value "fixed"}))))
+    (is (= 409 (:http (apply! reference expected))))
+    (is (= 409 (:http (apply! removal removal-basis))))
+    (let [basis (preview reference)]
+      (is (true? (:committed (change! origin token (assoc current-target :value "second")))))
+      (is (= 409 (:http (apply! reference basis)))))
+    (is (true? (:committed (change! origin token reference))))
+    (is (= "SECOND" (run-profile-name origin token child {})))
+    (is (= [id "ref" target false] ((juxt :id :expression-kind :ref-fn-id :value-present) (read-expression))))
+    (is (= 409 (:http (command origin token "preview" {:fn-id child :binding-id target-row :action "remove"}))))
+    (is (= 409 (:http (command origin token "preview" reference))))
+    (let [literal (assoc edit :value "manual")
+          basis (preview literal)]
+      (is (true? (:committed (change! origin token (assoc current-target :value "third")))))
+      (is (= 409 (:http (apply! literal basis))))
+      (is (true? (:committed (change! origin token literal))))
+      (is (= "manual" (run-profile-name origin token child {})))
+      (is (= [id "value" nil "manual" true] ((juxt :id :expression-kind :ref-fn-id :value :value-present) (read-expression)))))
+    (is (true? (:committed (change! origin token (assoc edit :ref-fn-id uppercase)))))
+    (is (= [id "ref" uppercase nil false] ((juxt :id :expression-kind :ref-fn-id :value :value-present) (read-expression))))
+    (retained-reference! origin token storage child id)
+    (remove-hidden-reference! origin token storage seams denied child id)
+    (is (= "free" (run-profile-name origin token child {:name "free"})))))
+
+
 (defn- exercise-reference!
   [origin token storage seams denied]
   (let [name "profile-with-uppercase-name"
@@ -196,7 +305,8 @@
       (is (= ["reference-inputs" ["string"]] [(:kind group) (mapv :name (:fields group))]))
       (is (= 409 (:http (command origin token "preview" action))))
       (is (= 409 (:http (command origin token "apply" apply-args))))
-      (is (= {:id "a" :email "e" :name "ADA"} (:result result)) (pr-str result)))))
+      (is (= {:id "a" :email "e" :name "ADA"} (:result result)) (pr-str result))
+      (when (:id row) (exercise-reference-changes! origin token storage seams denied child (:id row))))))
 
 
 (deftest ordinary-extend-and-named-input-commands

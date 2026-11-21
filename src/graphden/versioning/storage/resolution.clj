@@ -244,7 +244,7 @@
    (the crud rollback replay hit exactly that once hard-deleted
    identities started being purged)."
   [version-record version-id-field]
-  (dissoc version-record :id :branch-id :change-id :change-revision
+  (dissoc version-record :id :branch-id :change-id :change-revision :merge-edge-id :merge-source-version-id :merge-selected-version-id
           :created-at :deleted-at
           version-id-field))
 
@@ -689,6 +689,9 @@
                                              (rest sorted) sorted))))
                             (group-by :source-branch-id merges))]
       (for [m merges
+            ;; Frozen input versions are target-owned rows with explicit source
+            ;; provenance. A later or backdated source edit cannot join this edge.
+            :when (not (and (= entity-name :input-binding) (:input-versions-materialized? m)))
             :let [lower (get prev-src-ts (:id m))
                   src-versions (get versions-by-branch (:source-branch-id m) [])
                   eligible (filter (fn [v]

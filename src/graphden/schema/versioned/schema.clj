@@ -823,7 +823,7 @@
   (let [mirror (get version-entity-for base)
         id-field (get version-id-field-for base)]
     (into #{}
-          (remove (conj framework-fields id-field))
+          (remove (into (conj framework-fields id-field) (when (= base :input-binding) [:merge-edge-id :merge-source-version-id :merge-selected-version-id])))
           (keys (get mirror-fields mirror)))))
 
 
@@ -896,7 +896,8 @@
       ;; branch-merge
       ;; -----------------------------------------------------------------
       (ds/add-entity :branch-merge branch-merge-entity-uuid
-                     {:source-branch-id {:uuid branch-merge-source-branch-id-field-uuid
+                     {:input-versions-materialized? {:uuid #uuid "ee720934-cfbb-4dfe-912e-e2b1dbc2f291" :type :bool :nullable? true}
+                      :source-branch-id {:uuid branch-merge-source-branch-id-field-uuid
                                          :type :ref :ref-entity :branch}
                       :source-timestamp {:uuid branch-merge-source-timestamp-field-uuid
                                          :type :timestamptz}

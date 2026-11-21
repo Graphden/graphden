@@ -104,7 +104,8 @@
 
 (defn assert-public-input!
   [entity data]
-  (when (and (#{:fn :fn-version} entity) (contains? data :input-type-fn-id))
+  (when (or (and (#{:fn :fn-version} entity) (contains? data :input-type-fn-id))
+            (and (= :branch-merge entity) (contains? data :input-versions-materialized?)))
     (deny!)))
 
 

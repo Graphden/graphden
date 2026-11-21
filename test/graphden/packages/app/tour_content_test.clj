@@ -2,7 +2,7 @@
   "Contract tests for the interactive tutorial's lesson scripts
    (`:_tour-lessons` in `resources/packages/app/tour/fns.edn`).
 
-   Lessons are DATA, served verbatim to the editor at `GET /api/tour`.
+   Lessons are DATA. The editor reads the public rows at `GET /api/tour`.
    A `:check {:kind …}` typo, a `:creates {:type …}` the client cannot
    clean up, an unknown capability or a duplicate reading-order entry
    can leave a reader stuck. These fast structural checks complement
@@ -39,10 +39,10 @@
 
 
 (def ^:private require-signals
-  "The `:requires` values that are named conditions rather than
-   capabilities (REQUIRE_SIGNALS in the picker)."
+  "Named conditions checked in the public payload or by REQUIRE_SIGNALS in
+   the picker."
   #{"services" "assets" "org" "package-lifecycle" "temporary-http"
-    "api-tokens" "personal-ui-graphs" "handler-preview"})
+    "api-tokens" "personal-ui-graphs" "handler-preview" "structured-input-run"})
 
 
 (def ^:private known-capabilities
@@ -218,8 +218,17 @@
         (is (string? (get-in s [:check :name]))
             (str "lesson " (:id l) ": graph-view-run needs the owned view name"))
         "result-value"
-        (is (contains? (:check s) :value)
-            (str "lesson " (:id l) " / “" (:title s) "”: result-value needs :value"))
+        (let [{:keys [name] :as check} (:check s)]
+          (is (and (contains? check :value)
+                   (or (not (contains? check :name)) (and (string? name) (not (str/blank? name)))))
+              (str "lesson " (:id l) " / “" (:title s) "”: result-value needs :value and an optional function name")))
+        "structured-input-path"
+        (let [{:keys [name path state]} (:check s)]
+          (is (and (string? name) (not (str/blank? name))
+                   (vector? path) (<= 1 (count path) 64)
+                   (every? #(and (string? %) (not (str/blank? %))) path)
+                   (contains? #{"remaining" "occupied"} state))
+              (str "lesson " (:id l) " / “" (:title s) "”: structured-input-path needs a name, path and state")))
         "owned-entity"
         (is (and (contains? #{"ns" "fn"} (get-in s [:check :type]))
                  (not (str/blank? (get-in s [:check :name]))))

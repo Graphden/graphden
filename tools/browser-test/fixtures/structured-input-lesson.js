@@ -16,8 +16,18 @@ const runtime = 'web/runtime/';
 async function installLesson(page) {
   await page.setContent(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Fill a structured input</title>
     <main><h1>Fill a structured input</h1><p>Bind the name, then supply the remaining fields and run.</p>
-    <div id="root-card"></div><form id="exercise" aria-label="Run inputs"></form>
-    <output id="result" aria-label="Run result" aria-live="polite"></output></main>`);
+    <div id="root-card" class="node-overlay">
+      <div class="ancestor-line" data-level="0"><button class="fn-run-trigger" type="button">Run sample</button></div>
+      <div id="input-strip"></div>
+    </div>
+    <section id="run-pane" class="execute-popover gd-insp-run" hidden>
+      <form id="exercise" aria-label="Run inputs"></form>
+      <div class="execute-result-host" hidden>
+        <div class="execute-result-pane">
+          <div class="execute-result-raw"><pre role="status" aria-label="Run result" aria-live="polite"></pre></div>
+        </div>
+      </div>
+    </section></main>`);
   await page.addStyleTag({path: path.join(resources, editor, 'editor-styles.css')});
   await page.evaluate(id => { window.lessonRootId = id; }, rootId);
   await page.addScriptTag({content: `
@@ -37,8 +47,13 @@ async function installLesson(page) {
     };
     const authFetch = window.fetch.bind(window);
     const card = document.querySelector('#root-card');
+    const strip = document.querySelector('#input-strip');
+    const pane = document.querySelector('#run-pane');
     const form = document.querySelector('#exercise');
-    const output = document.querySelector('#result');
+    const resultHost = pane.querySelector('.execute-result-host');
+    const output = resultHost.querySelector('pre');
+    const lookups = {fnMap: new Map()};
+    let selectedFnId;
     let descriptor;
     window.gdStructuredInputFor = id => id === window.lessonRootId ? descriptor : null;
     async function loadGraphData() {
@@ -46,11 +61,15 @@ async function installLesson(page) {
       const response = await fetch(url);
       if (!response.ok) throw new Error('Could not load the lesson graph');
       const {fns} = await response.json();
-      descriptor = fns.find(row => row.id === window.lessonRootId)?.['structured-input'];
+      const root = fns.find(row => row.id === window.lessonRootId);
+      descriptor = root?.['structured-input'];
       if (descriptor?.status !== 'available') throw new Error('The lesson declaration is missing');
+      selectedFnId = root.id;
+      lookups.fnMap.set(root.id, root);
+      card.dataset.fnName = root.name;
       hideAllInlineHosts();
-      card.replaceChildren();
-      appendStructuredInputStrip(card, window.lessonRootId);
+      strip.replaceChildren();
+      appendStructuredInputStrip(strip, root.id);
       form.replaceChildren();
       const fields = descriptor.fields.find(field => field.name === 'profile')?.fields || [];
       for (const {name} of fields) {
@@ -58,19 +77,29 @@ async function installLesson(page) {
         const input = document.createElement('input'); input.name = name; input.required = true;
         label.appendChild(input); form.appendChild(label);
       }
-      const run = document.createElement('button'); run.textContent = 'Run'; form.appendChild(run);
+      const run = document.createElement('button');
+      run.textContent = 'Run'; run.className = 'execute-run-btn'; form.appendChild(run);
     }
+    card.querySelector('.fn-run-trigger').addEventListener('click', () => {
+      pane.hidden = false;
+      pane.classList.add('visible');
+    });
     form.addEventListener('submit', async event => {
       event.preventDefault();
+      resultHost.hidden = true;
+      delete resultHost.gdExecutionFnId;
       const response = await fetch('/fixture/run', {method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({'fn-id': window.lessonRootId, args: {profile: Object.fromEntries(new FormData(form))}})});
       const result = await response.json();
+      if (response.ok && result.ok) resultHost.gdExecutionFnId = window.lessonRootId;
       output.textContent = response.ok && result.ok ? JSON.stringify(result.value) : 'Run refused';
+      resultHost.hidden = false;
     });
   `});
   for (const file of [runtime + 'graphden-popover.js', runtime + 'graphden-forms.js', editor + 'editor-passive-canvas.js',
     editor + 'editor-literal-types.js', editor + 'editor-type-format.js', editor + 'editor-edit-modes.js',
-    editor + 'editor-type-expand-render.js', editor + 'editor-overlay-type-expand.js', editor + 'editor-overlay-strips.js']) {
+    editor + 'editor-type-expand-render.js', editor + 'editor-overlay-type-expand.js', editor + 'editor-overlay-strips.js',
+    editor + 'editor-tour-checks.js']) {
     await page.addScriptTag({path: path.join(resources, file)});
   }
   await page.evaluate(() => loadGraphData());
@@ -88,15 +117,33 @@ async function exercise() {
     page.on('pageerror', error => pageErrors.push(error.message));
     await page.goto(origin);
     await installLesson(page);
+    const lesson = await page.evaluate(async () => {
+      const response = await fetch('/fixture/lesson');
+      if (!response.ok) throw new Error('Could not load the authored lesson');
+      return response.json();
+    });
+    assert.equal(lesson.id, '43');
+    const [select, findName, bindName, openRun, runResult] = lesson.steps;
+    const checked = step => page.evaluate(check => _tourCheckPasses(check), step.check);
+    assert.equal(await checked(select), true);
+    assert.equal(await checked(bindName), false);
+    await page.locator(findName.target).waitFor();
     const form = page.getByRole('form', {name: 'Run inputs'});
-    assert.equal(await form.getByRole('textbox', {name: 'name', exact: true}).count(), 1);
+    assert.deepEqual(await page.locator('#exercise input').evaluateAll(items => items.map(item => item.name)),
+      ['id', 'name', 'email']);
     await page.getByRole('button', {name: 'Remaining inputs', exact: true}).press('Enter');
     await page.getByRole('button', {name: /^profile — Type:/}).press('Space');
     await page.getByRole('button', {name: 'Bind profile.name'}).press('Enter');
     const dialog = page.getByRole('dialog', {name: 'Bind profile.name'});
+    assert.equal(await checked(findName), true);
     await dialog.getByRole('textbox', {name: 'Value for profile.name'}).fill('Ada');
     await dialog.getByRole('button', {name: 'Bind', exact: true}).click();
     await page.getByRole('button', {name: 'Structured inputs', exact: true}).waitFor();
+    assert.equal(await checked(bindName), true);
+    assert.equal(await checked(openRun), false);
+    await page.locator(openRun.target).press('Enter');
+    assert.equal(await checked(openRun), true);
+    assert.equal(await checked(runResult), false);
     const fields = await form.getByRole('textbox').evaluateAll(items => items.map(item => item.name));
     assert.deepEqual(fields, ['id', 'email']);
     await form.getByRole('textbox', {name: 'id'}).fill('42');
@@ -105,12 +152,12 @@ async function exercise() {
       page.waitForResponse(result => new URL(result.url()).pathname === '/fixture/run'),
       form.getByRole('button', {name: 'Run'}).press('Enter'),
     ]);
-    const expected = {id: '42', name: 'Ada', email: 'ada@example.test'};
+    const expected = runResult.check.value;
     assert.equal(response.status(), 200);
     assert.deepEqual(await response.json(), {ok: true, value: expected});
-    await page.waitForFunction(() => document.querySelector('#result').textContent !== '');
     const output = await page.getByRole('status', {name: 'Run result'}).textContent();
     assert.deepEqual(JSON.parse(output), expected);
+    assert.equal(await checked(runResult), true);
     assert.deepEqual(pageErrors, []);
     console.log('Checked structured input lesson passed in Chromium');
   } finally {

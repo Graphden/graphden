@@ -9,6 +9,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
     [graphden.input.source-context :as source-context]
+    [graphden.input.source-forward :as forward]
     [graphden.input.source-list :as source-list]
     [graphden.input.source-rename :as rename]
     [graphden.packages.rebase :as rebase]
@@ -344,25 +345,28 @@
       unproven? (conj (blocker source :inherited-projection-required [:args])))))
 
 
-(defn- composed-plan
-  [source definition context rows]
-  (let [{:keys [arguments aliases blockers]} (local-arguments source definition context rows)
-        blockers (vec (distinct (concat blockers (inherited-blockers source definition context arguments rows))))
-        declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
+(defn- composed-source
+  [source arguments aliases]
+  (let [declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
         declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
         binds (filter #(= :binding (:kind %)) arguments)
         configuration (field-assertions source arguments)
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
                               [(second source-path) expression])) binds)]
-    {:arguments arguments
-     :blockers blockers
-     :proposed (when (empty? blockers)
-                 (cond-> (dissoc source :args)
-                   (seq declarations) (assoc :input declarations)
-                   (or (seq bindings) (and (contains? source :args) (empty? declarations)))
-                   (assoc :bind bindings)
-                   (seq configuration) (assoc :configure configuration)))}))
+    (cond-> (dissoc source :args)
+      (seq declarations) (assoc :input declarations)
+      (or (seq bindings) (and (contains? source :args) (empty? declarations)))
+      (assoc :bind bindings)
+      (seq configuration) (assoc :configure configuration))))
+
+
+(defn- composed-plan
+  [source definition context rows]
+  (let [{:keys [arguments aliases blockers]} (local-arguments source definition context rows)
+        blockers (vec (distinct (concat blockers (inherited-blockers source definition context arguments rows))))]
+    {:arguments arguments :blockers blockers
+     :proposed (when (empty? blockers) (composed-source source arguments aliases))}))
 
 
 (declare ^:private lower-inlines)
@@ -563,10 +567,11 @@
   [definition parsed]
   (let [traces (or (:list-builders parsed) {})
         certified (set (map :row (vals (:scoped-inputs parsed))))
+        forwarded (into #{} (comp (filter :source-names) (map :row)) (vals (:scoped-inputs parsed)))
         bindings (mapv #(if (contains? certified %)
                           (migration/legacy-binding (assoc % :scope-path []))
                           (rename/legacy-binding (:declaration-records parsed) %))
-                       (ordinary-bindings (:bindings parsed) traces))]
+                       (remove forwarded (ordinary-bindings (:bindings parsed) traces)))]
     (assoc (authored-meaning definition parsed bindings)
            :list-builders traces
            :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
@@ -717,3 +722,35 @@
     (assoc plan :definitions definitions
            :blockers (vec (mapcat :blockers definitions))
            :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions))))))
+
+
+(defn rewrite-forwarded-field
+  "Verify one authored forwarded field against the exact scoped projection
+   certified by the checked snapshot. The legacy FK becomes an explicit
+   projection row. The local field and its membership keep their original IDs.
+   This returns offline rows and a proposed form, leaving the source untouched."
+  [context {:keys [source legacy] :as entry} field
+   {:keys [source-names public-path row address edges] :as certificate}]
+  (let [{:keys [owner-id field-id source-path target-address projection-id target-fn-id]}
+        (forward/verify-forwarded-field context entry field)
+        binding-arguments (:arguments legacy)
+        proposed (composed-source source binding-arguments (keep :rename binding-arguments))]
+    (when-not (and (= [field] source-names) (vector? public-path) (= 2 (count public-path))
+                   (= field (peek public-path)) (= target-address address)
+                   (= "projection" (:expression-kind row)) (= projection-id (:id row))
+                   (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
+                   (= [target-fn-id] (mapv :target-fn-id edges)))
+      (throw (ex-info "Forwarded field differs from its checked projection"
+                      {:type :input/source-verification :code :forwarded-certificate-mismatch})))
+    (let [candidate (-> entry
+                        (assoc :status :supported :blockers []
+                               :proposed (assoc-in proposed [:bind public-path] [:project source-names]))
+                        (update-in [:legacy :records]
+                                   (fn [records]
+                                     (mapv #(cond-> % (and (= :slot (:kind %)) (= field-id (:id %)))
+                                                    (dissoc :source-slot-id)) records)))
+                        (update-in [:legacy :arguments]
+                                   (fn [arguments]
+                                     (mapv #(cond-> % (= source-path (:source-path %))
+                                                    (assoc :scope-certificate certificate)) arguments))))]
+      (first (:definitions (verify-module {:definitions [candidate]} context))))))

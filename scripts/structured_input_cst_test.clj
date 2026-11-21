@@ -629,5 +629,22 @@
              (reason #(cst/plan-verified-module text entries (constantly []))))))))
 
 
+(deftest certified-forwarding-is-inserted-without-reprinting-the-authored-fields
+  (let [text (str "{:namespace \"demo.main\" :fns [{:name :response :parent :base\r\n"
+                  " :args {:left :encoder ; reference comment\r\n"
+                  "        :data ; field comment\r\n        {:type :text}}}]}\r\n")
+        forwarding {[:left :data] [:project [:data]]}
+        operation {:op :partition-composed-args :definition :response :path [:args]
+                   :declarations [:data] :operators {:left :wrap-ref} :forwarded-bindings forwarding}
+        patch (cst/plan text {:namespace "demo.main" :operations [operation]})
+        target (:target-text patch)
+        rewritten (first (:fns (edn/read-string target)))]
+    (is (= {:data {:type :text}} (:input rewritten)))
+    (is (= (assoc forwarding :left [:ref :encoder]) (:bind rewritten)))
+    (is (str/includes? target "; reference comment\r\n"))
+    (is (str/includes? target "; field comment\r\n"))
+    (is (= {:status :already-applied :text target} (cst/apply-text patch target)))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

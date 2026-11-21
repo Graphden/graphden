@@ -59,20 +59,28 @@
 (defn- checked-snapshot
   [{:keys [owner-id target-fn-id field-id target-address]}]
   (let [[[_ [edge]] [target-id]] target-address
-        reference-slot (ids/slot-id (ids/fn-id "fixture" :combine) :left)
+        parent (ids/fn-id "fixture" :combine)
+        reference-slot (ids/slot-id parent :left)
+        sibling-slot (ids/slot-id parent :right)
         declaring-id (ids/fn-id "fixture" :encode)
         local-type (random-uuid)
+        parent-type (random-uuid)
         remote-type (random-uuid)
         declaring-type (random-uuid)
-        text (get (ids/primitive-fn-ids) :text)]
+        primitive-ids (ids/primitive-fn-ids)
+        text (:text primitive-ids)
+        any-type (:any primitive-ids)]
     (context/build-context
-      {:fns {owner-id {:id owner-id :input-type-fn-id local-type}
+      {:fns {owner-id {:id owner-id :input-type-fn-id local-type :parent-ids [parent]}
+             parent {:id parent :input-type-fn-id parent-type}
              target-fn-id {:id target-fn-id :input-type-fn-id remote-type :parent-ids [declaring-id]}
              declaring-id {:id declaring-id :input-type-fn-id declaring-type}}
-       :members {local-type [{:slot-id reference-slot :position 0} {:slot-id field-id :position 1}]
+       :members {local-type [{:slot-id field-id :position 0}]
+                 parent-type [{:slot-id reference-slot :position 0} {:slot-id sibling-slot :position 1}]
                  remote-type []
                  declaring-type [{:slot-id target-id :position 0}]}
-       :fields {reference-slot {:id reference-slot :name "left" :required true :type-fn-id text}
+       :fields {reference-slot {:id reference-slot :name "left" :required false :type-fn-id any-type}
+                sibling-slot {:id sibling-slot :name "right" :required false :type-fn-id any-type}
                 field-id {:id field-id :name "data" :required false :type-fn-id text}
                 target-id {:id target-id :name "data" :required true :type-fn-id text}}
        :signatures {target-fn-id {:args {:data :text} :return :text :effects #{}}}
@@ -111,7 +119,7 @@
         graph (analyze snapshot owner-id)
         local (get-in graph [:public-input :bindings])
         reader-context {:scope [owner-id []] :contract (get-in graph [:scopes [] :declared-contract])
-                        :declaration-records [{:kind :fn :id owner-id}]
+                        :declaration-records [{:kind :fn :id owner-id :parent-ids (:owner-parents certificate)}]
                         :scoped-inputs {public-path certificate}}
         bind {public-path [:project [:data]]}
         parsed (scoped-source/parse-bindings reader-context local bind)]
@@ -121,3 +129,18 @@
           (scoped-source/parse-bindings reader-context local {public-path [:project [:left]]})))
     (is (thrown? clojure.lang.ExceptionInfo
           (scoped-source/parse-bindings (dissoc reader-context :scoped-inputs) local bind)))))
+
+
+(deftest verified-owner-keeps-its-authored-input-and-serializes-the-forwarding
+  (let [[prepared entry] (fixture {:left :encode-body :data {:type :text}})
+        {:keys [field-id projection-id] :as proof} (forward/verify-forwarded-field prepared entry :data)
+        certificate (scope/verify-forwarded-projection (checked-snapshot proof) proof analyze)
+        migrated (source/rewrite-forwarded-field prepared entry :data certificate)]
+    (is (= :authored-source-equivalent (:verification migrated)) (:blockers migrated))
+    (is (= {:data {:type :text}} (get-in migrated [:proposed :input])))
+    (is (= [:project [:data]] (get-in migrated [:proposed :bind [:left :data]])))
+    (is (= field-id (some #(when (= :data (:name %)) (:id %)) (get-in migrated [:v2 :contract :fields]))))
+    (is (= #{projection-id} (into #{} (keep #(when (= "projection" (:expression-kind %)) (:id %)))
+                                  (get-in migrated [:v2 :bindings]))))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (source/rewrite-forwarded-field prepared entry :data (assoc-in certificate [:row :id] (random-uuid)))))))

@@ -265,10 +265,15 @@
 
 
 (defn- partition-composed-edit
-  [source starts loc {:keys [definition path declarations position-inputs operators]}]
+  [source starts loc {:keys [definition path declarations position-inputs operators forwarded-bindings]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
                  (not-any? #(key-loc loc %) [:input :bind :configure])
                  (vector? declarations) (= (count declarations) (count (set declarations)))
+                 (or (nil? forwarded-bindings) (map? forwarded-bindings))
+                 (every? (fn [[target expression]]
+                           (and (vector? target) (= 2 (count target)) (every? simple-keyword? target)
+                                (= [:project [(peek target)]] expression)
+                                (some #{(peek target)} declarations))) forwarded-bindings)
                  (map? operators) (not-any? (set declarations) (keys operators)))
     (refuse :invalid-field-partition {:definition definition}))
   (let [args (value-at loc path)
@@ -297,7 +302,9 @@
         ;; original slot positions when the smaller :input becomes an array map.
         ordered (if (= declarations (vec (keys (into {} own-chunks))))
                   (map second own-chunks) (map by-field declarations))
-        binds (remove (comp owns? first) chunks)
+        binds (concat (map second (remove (comp owns? first) chunks))
+                      (map (fn [[target expression]] (str " " (pr-str target) " " (pr-str expression)))
+                           (sort-by (comp pr-str key) forwarded-bindings)))
         configs (keep :configuration spans)]
     (when-not (and (= :map (z/tag args)) (= (set (keys by-field)) (into owns? (keys operators))))
       (refuse :invalid-field-partition {:definition definition}))
@@ -307,7 +314,7 @@
                  (when input? (str "{" (str/join ordered) (when (and (seq declarations) (seq position-inputs)) " ")
                                    (str/join " " extra-fields) "}"))
                  (when (and input? (seq binds)) " :bind ")
-                 (when (seq binds) (str "{" (str/join (map second binds)) "}"))
+                 (when (seq binds) (str "{" (str/join binds) "}"))
                  (when (seq configs) (str " :configure {" (str/join " " configs) "}")))}))
 
 
@@ -514,6 +521,17 @@
     :else (argument-operation source argument)))
 
 
+(defn- forwarded-bindings
+  [fields]
+  (into {} (keep (fn [{:keys [source-path scope-certificate]}]
+                   (when-let [{:keys [public-path row source-names]} scope-certificate]
+                     (when-not (and (= [(peek source-path)] source-names) (vector? public-path)
+                                    (= 2 (count public-path)) (= (peek public-path) (peek source-path))
+                                    (= "projection" (:expression-kind row)) (uuid? (:id row)))
+                       (refuse :planner-ledger-mismatch {:path source-path}))
+                     [public-path [:project source-names]]))) fields))
+
+
 (defn entry-operations
   "Bridge one SUPPORTED graphden.input.source/plan-module entry to CST operations.
    The semantic planner owns reference resolution. Ref spellings are retained;
@@ -545,7 +563,8 @@
             alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
             position-inputs (positions/declarations arguments)
             declarations (merge declarations alias-input position-inputs)
-            bindings (into {} (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
+            forwarded (forwarded-bindings fields)
+            bindings (into forwarded (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
             scopes (keep (fn [{:keys [scope-certificate source-path origin]}]
                            (when-let [{:keys [public-path row]} scope-certificate]
                              (when-not (and (= source-path (:source-path scope-certificate)) (= (:id row) (:binding-id origin))
@@ -562,6 +581,7 @@
                        (vector? arguments) (= (count paths) (count (set paths)))
                        (= (count arguments) (+ (count fields) (count binds)))
                        (= (set paths) (set (for [field (keys (:args source))] [:args field])))
+                       (= (+ (count forwarded) (count binds)) (count bindings))
                        (every? #(= (:spec %) (get-in source (:source-path %))) fields)
                        (= proposed (cond-> (dissoc source :args)
                                      (seq declarations) (assoc :input declarations)
@@ -580,6 +600,7 @@
           [{:op :partition-composed-args :definition (:name source) :path [:args]
             :declarations (vec (remove (set (keys position-inputs)) (keys declarations)))
             :position-inputs position-inputs
+            :forwarded-bindings forwarded
             :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
           :else (into (into (rename :rename-bind) scopes) operations)))
 

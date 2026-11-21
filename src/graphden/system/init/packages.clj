@@ -15,15 +15,16 @@
     [integrant.core :as ig]))
 
 
-(defmethod ig/init-key :app/packages [_ {:keys [package-names extra-package-names primitive-input]}]
+(defmethod ig/init-key :app/packages [_ {:keys [package-names extra-package-names] :as config}]
   ;; `:extra-package-names` is the addon fns-channel seam (docs/TENANCY_SEAM.md
   ;; § Packages channel): the tenancy addon appends its own fns-package(s) — e.g.
   ;; the org-admin UI — via the manifest WITHOUT restating the core list,
   ;; so they load only when the addon is active.
   (let [names (vec (concat package-names extra-package-names
-                           (manifest/package-names (manifest/read-manifest))))]
+                           (manifest/package-names (manifest/read-manifest))))
+        opts (into {} (remove (comp nil? val)) (select-keys config [:primitive-input :primitive-inputs]))]
     (log/info "Loading packages:" names)
-    (let [packages (if primitive-input (pkg/load-packages names {:primitive-input primitive-input}) (pkg/load-packages names))]
+    (let [packages (if (seq opts) (pkg/load-packages names opts) (pkg/load-packages names))]
       (log/info "Packages loaded:" (count (:packages packages)) "packages,"
                 (count (:base-fn-defs packages)) "base-fns,"
                 (count (:fn-defs packages)) "fn-defs")

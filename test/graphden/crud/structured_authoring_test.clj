@@ -20,6 +20,7 @@
     [graphden.test-infra.golden-app :as golden]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as resolution]
     [integrant.core :as ig]
     [org.httpkit.client :as http]
     [org.httpkit.server :as server]))
@@ -379,4 +380,74 @@
         (exercise-callable-field! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))
+      (finally (stop)))))
+
+
+(def ^:private optional-parent (ids/fn-id "optionalinput.structured" :optional-label))
+
+
+(defn- exercise-optional!
+  [origin token storage]
+  (let [created (extend-native origin token "optional-label-child" optional-parent)
+        _ (is (<= 200 (:status created) 299) (pr-str created))
+        child (:id (first (sp/query-entities storage :fn {:name "optional-label-child"})))
+        execute! (fn [args]
+                   (let [response (request origin token :post "/api/execute"
+                                           {:content-type "application/json"
+                                            :body (json/generate-string {:fn-id child :args args :timeout-ms 20000})})]
+                     (json/parse-string (:body response) true)))
+        apply! (fn [command-data]
+                 (let [basis (command origin token "preview" command-data)]
+                   (is (true? (:ok basis)) (pr-str basis))
+                   (command origin token "apply" (merge command-data (select-keys basis [:expected-state :expected-version])))))]
+    (when child
+      (let [view (subtree origin token child)
+            field (first (:fields view))]
+        (is (false? (:required-now? field)) (pr-str view))
+        (is (= ["label"] (:bind-path field)))
+        (is (empty? (:occupied view))))
+      (is (= "automatic" (:result (execute! {}))))
+      (is (= "explicit nil" (:result (execute! {:label nil}))))
+      (is (= "wire" (:result (execute! {:label "wire"}))))
+      (is (contains? #{"failed" "rejected"} (:status (execute! {:label 17}))))
+      (let [binding (apply! {:fn-id child :action "bind" :path ["label"] :value nil})
+            _ (is (true? (:ok binding)) (pr-str binding))]
+        (when-let [id (some-> (:binding-id binding) parse-uuid)]
+          (is (= {:value nil :value-present true}
+                 (select-keys (sp/read-entity storage :input-binding id) [:value :value-present])))
+          (is (= "explicit nil" (:result (execute! {}))))
+          (is (= "invalid-structured-arguments" (get-in (execute! {:label "occupied"}) [:error-data :reason])))
+          (is (true? (:ok (apply! {:fn-id child :binding-id id :action "remove"}))))
+          (is (= "automatic" (:result (execute! {})))))))))
+
+
+(deftest optional-field-remains-bindable-after-defaulted-run
+  (let [storage (:storage golden/*bootstrap*)
+        pin {:fn-id optional-parent :module ["optionalinput" "structured"]
+             :abi-fn-id (ids/fn-id "optionalinput.native" :render-nullable-label)
+             :sha256 "12b784c5cbec2c467ebcebfe18eb22babaf5fe7d6eb210689e0557ebcf4d8319"}
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "optionalinput"] :primitive-input pin})
+        sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
+        {:keys [base-fns]} (sync!)
+        input (migration/derived-id :input-type optional-parent)
+        slot (ids/slot-id optional-parent :label)
+        member (migration/derived-id :membership optional-parent (ids/fn-slot-id optional-parent slot))
+        versions #(resolution/resolve-version-ids (vs/unwrap storage) %1 %2 (vs/current-branch-id storage))
+        snapshot #(hash-map :owners (versions :fn [optional-parent input]) :membership (versions :fn-slot [member])
+                            :field (select-keys (sp/read-entity storage :slot slot) [:id :type-fn-id :required]))
+        before (snapshot)
+        token (str (random-uuid))
+        ctx (exec/create-context {:storage storage :base-fns base-fns :auth-provider (auth/single-token-provider token)})
+        _ (executor/rebuild! ctx)
+        router (router/create-router ctx "_app-ring-response")
+        handler (bound-fn [req] (update (router/dispatch router req) :headers update-keys name))
+        stop (server/run-server handler {:ip "127.0.0.1" :port 0})]
+    (try
+      (is (= #{optional-parent input} (set (keys (:owners before)))))
+      (is (= #{member} (set (keys (:membership before)))))
+      (is (= {:id slot :type-fn-id (ids/fn-id "core.refinements" :nullable-text) :required false} (:field before)))
+      (is (= {:value "automatic"} (:input-default (sp/read-entity storage :fn-slot member))))
+      (exercise-optional! (str "http://127.0.0.1:" (:local-port (meta stop))) token storage)
+      (sync!)
+      (is (= before (snapshot)))
       (finally (stop)))))

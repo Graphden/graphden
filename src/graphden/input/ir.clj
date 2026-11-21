@@ -85,7 +85,7 @@
                                                             (comp (filter :required)
                                                                   (map #(vector scope (conj path (:id %)))))
                                                             (:fields node))}
-                     :else {:op :supplied :type (:type node)})]
+                     :else (assoc (select-keys node [:default]) :op :supplied))]
     (into {address (assoc expression :type (:type node))}
           (when (= :record (:op expression))
             (mapcat (fn [field]
@@ -162,6 +162,7 @@
                              :always)]
                   (doseq [source sources] (visit source))
                   (vswap! rules conj (cond-> {:address address :kind kind :sources sources}
+                                       (contains? expression :default) (assoc :default-present? true)
                                        (= :supplied-record kind)
                                        (assoc :required-fields (:required-fields expression)))))))]
       (doseq [address (sort-by pr-str (keys expressions))] (visit address))
@@ -172,11 +173,11 @@
   "Return address presence without forcing any field or reference."
   ([program supplied] (present-addresses program supplied {}))
   ([program supplied inherited]
-   (reduce (fn [presence {:keys [address kind sources]}]
+   (reduce (fn [presence {:keys [address kind sources default-present?]}]
              (assoc presence address
                     (case kind
                       :always true
-                      :supplied (contains? supplied address)
+                      :supplied (or (true? default-present?) (contains? supplied address))
                       :supplied-record (or (contains? supplied address) (boolean (some presence sources)))
                       :any-present (boolean (some presence sources)))))
            inherited

@@ -1,0 +1,5 @@
+{:name "optionalinput"
+ :version "1.0.0"
+ :description "Optional nullable text with a declarative fallback."
+ :dependencies ["core"]
+ :modules ["native" "structured"]}

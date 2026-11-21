@@ -110,3 +110,18 @@
     (is (= diagnostic
            (code #(primitive/prepare-literal-root (update-in composed-module [:fns 1] merge patch)
                                                   composed-root visible))))))
+
+
+(deftest optional-default-retains-an-unoccupied-typed-membership
+  (let [spec {:type [:union :null :text] :default nil :required false}
+        prepare #(primitive/prepare (assoc-in module [:fns 0 :input] {:label %}) root)
+        prepared (prepare spec)
+        member (first (filter :input-default (:declaration-records prepared)))
+        slot (ids/slot-id root :label)]
+    (is (= [(:input-type-id prepared) slot {:value nil}]
+           ((juxt :fn-id :slot-id :input-default) member)))
+    (is (= (ids/fn-id "core.refinements" :nullable-text) (get-in prepared [:contract :fields 0 :type-id])))
+    (is (empty? (:bindings prepared)))
+    (doseq [invalid [(assoc spec :required true) (dissoc spec :required)
+                     (assoc spec :default false) (assoc spec :type [:union :null :int])]]
+      (is (= :staged-primitive-type-unsupported (code #(prepare invalid)))))))

@@ -61,6 +61,8 @@
     (throw (ex-info "Structured merge provenance is owned by the branch writer" {:type :authz/forbidden})))
   (when (and (not *offline?*)
              (or (contains? offline-entities entity)
+                 (and (#{:fn-slot :fn-slot-version} entity) (some? (:input-default data))
+                      (not-any? #{(:fn-id data)} (vals *package-input-types*)))
                  (and (contains? #{:fn :fn-version} entity)
                       (some? (:input-type-fn-id data))
                       (not= (:input-type-fn-id data)

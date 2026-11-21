@@ -1,0 +1,3 @@
+{:input-format 2
+ :namespace "inputfixture.numeric"
+ :fns [{:name :fixture-floor :input {:number :numeric} :return-type :int}]}

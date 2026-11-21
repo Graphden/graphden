@@ -51,6 +51,7 @@
     [clojure.tools.reader.reader-types :as treader-types]
     [graphden.input.format :as input-format]
     [graphden.packages.loaded :as loaded]
+    [graphden.packages.primitive-input :as primitive]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]))
@@ -410,7 +411,7 @@
   (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule
                 taint-propagate? lazy-seq-args compile-time-value?]}
         (impl-entry->parts impl-entry)]
-    (cond-> {:args (normalize-args (:args fn-def))
+    (cond-> {:args (normalize-args (or (:input fn-def) (:args fn-def)))
              :return-type (:return-type fn-def)
              :impl impl}
       (:description fn-def) (assoc :description (:description fn-def))
@@ -498,11 +499,14 @@
                                        base-def (when impl-entry
                                                   (fn-def->base-fn-def fn-def impl-entry))]]
                              (if (:impl base-def)
-                               [fn-name (assoc base-def :namespace ns-path)]
-                               (do
-                                 (log/warn "No impl found for base fn:" fn-name
-                                           "in" package-name "/" module-name)
-                                 nil))))
+                               [fn-name (cond-> (assoc base-def :namespace ns-path)
+                                          (:primitive module-source) (vary-meta assoc ::primitive/source (:primitive module-source)))]
+                               (if (:primitive module-source)
+                                 (throw (ex-info "Package primitive implementation missing" {:type :package-error/primitive-admission}))
+                                 (do
+                                   (log/warn "No impl found for base fn:" fn-name
+                                             "in" package-name "/" module-name)
+                                   nil)))))
 
         ;; Attach namespace to fn-defs
         fn-defs-with-ns (mapv #(if ns-path
@@ -532,11 +536,13 @@
   "Read and validate every module before any implementation is evaluated.
    The snapshot is local to one load call and is also the source consumed by
    processing, so a later resource change cannot bypass this format check."
-  [package-name pkg-meta]
+  [package-name pkg-meta admission]
   {:package-name package-name
    :meta pkg-meta
    :modules (mapv (fn [module-name]
-                    [module-name (load-module-fns package-name module-name)])
+                    [module-name (if (= [package-name module-name] (:module admission))
+                                   (primitive/read-module package-name module-name admission)
+                                   (load-module-fns package-name module-name))])
                   (:modules pkg-meta))})
 
 
@@ -669,30 +675,15 @@
   (:ordered (resolve-package-set package-names)))
 
 
-(defn load-packages
-  "Loads multiple packages in dependency order.
-
-   Arguments:
-   - package-names: seq of package names to load (e.g., [\"core\" \"web\" \"app\"])
-
-   Returns:
-   {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
-    :fn-defs [{:name :foo :parent :bar :args {...}} ...]
-    :packages [{:name \"core\" :version \"1.0.0\" ...} ...]
-    :base-fn-counts {\"core\" 120 ...}
-    :seeded-services [{:package-name \"app\"
-                       :service-name :default
-                       :fn-name :web-server
-                       :enabled? true
-                       :restart-policy :always
-                       :cardinality :per-pod
-                       :description \"…\"} …]}"
-  [package-names]
+(defn- load-packages*
+  [package-names primitive-input]
   (let [{:keys [ordered metas]} (resolve-package-set package-names)
         _ (log/info "Loading packages in order:" ordered)
         ;; Eager preflight of the complete resolved closure. In particular a
         ;; late v2/unknown-format module cannot follow an earlier impl effect.
-        sources (mapv #(snapshot-package-source % (get metas %)) ordered)
+        sources (mapv #(snapshot-package-source % (get metas %) primitive-input) ordered)
+        _ (when (and primitive-input (not-any? (fn [package] (some (comp :primitive second) (:modules package))) sources))
+            (throw (ex-info "Admitted primitive module missing" {:type :package-error/primitive-admission})))
         results (mapv load-single-package sources)
         ;; Single pass over results to build all aggregations
         combined (reduce (fn [acc result]
@@ -741,10 +732,40 @@
     ;; the loaded-package roster (packages.loaded) — recorded HERE, not in
     ;; the init-key, so every loader use (boot, the test golden bootstrap)
     ;; leaves the same read model behind
+    (when primitive-input
+      (let [definitions (:base-fn-defs combined)]
+        (primitive/check-implementations! (primitive/declarations definitions) definitions {})))
     (loaded/install! combined)
     (log/info "Loaded" (count (:base-fn-defs combined)) "base functions,"
               (count (:fn-defs combined)) "fn-defs")
     combined))
+
+
+(defn load-packages
+  "Loads multiple packages in dependency order.
+
+   Arguments:
+   - package-names: seq of package names to load (e.g., [\"core\" \"web\" \"app\"])
+
+   The optional internal :primitive-input selects one [package module] with an
+   externally pinned :sha256, :fn-id and independent :abi-fn-id. Every other
+   module follows the ordinary source preflight.
+
+   Returns:
+   {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
+    :fn-defs [{:name :foo :parent :bar :args {...}} ...]
+    :packages [{:name \"core\" :version \"1.0.0\" ...} ...]
+    :base-fn-counts {\"core\" 120 ...}
+    :seeded-services [{:package-name \"app\"
+                       :service-name :default
+                       :fn-name :web-server
+                       :enabled? true
+                       :restart-policy :always
+                       :cardinality :per-pod
+                       :description \"…\"} …]}"
+  ([package-names] (load-packages* package-names nil))
+  ([package-names {:keys [primitive-input]}]
+   (load-packages* package-names primitive-input)))
 
 
 ;; =============================================================================

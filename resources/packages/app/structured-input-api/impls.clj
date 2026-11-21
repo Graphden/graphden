@@ -11,5 +11,12 @@
   (input-http/dispatch ctx phase request))
 
 
+(defbase _structured-input-mcp-command
+  [request command]
+  (runtime/record-effect! :db)
+  (input-http/mcp-dispatch ctx request command))
+
+
 (def impls
-  {:_structured-input-command {:impl _structured-input-command :taint-propagate? true}})
+  {:_structured-input-command {:impl _structured-input-command :taint-propagate? true}
+   :_structured-input-mcp-command {:impl _structured-input-mcp-command :taint-propagate? true}})

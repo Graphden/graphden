@@ -92,13 +92,13 @@ Opens the semantic graph writer transaction before acquiring the structured bind
 :PROPERTIES:
 :CUSTOM_ID: crud/dispatch
 :FILE: src/graphden/crud/structured_input_http.clj
-:LINE: 29
+:LINE: 33
 :MINS: 2.0
 :END:
 
 The graph route fixes the phase and supplies the authenticated request context. A direct child of a boot-certified package input inherits its immutable fields. Each named write requires fresh source and branch authorization. Bind, edit and remove have separate preview bases, and stale or unavailable commands receive value-free errors.
 
-- source :: [[file:../../../src/graphden/crud/structured_input_http.clj::(defn dispatch][src/graphden/crud/structured_input_http.clj:29]]
+- source :: [[file:../../../src/graphden/crud/structured_input_http.clj::(defn dispatch][src/graphden/crud/structured_input_http.clj:33]]
 - see also :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/with-plan][with-plan]]
 
 * 8. create-entity

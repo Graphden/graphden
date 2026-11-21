@@ -62,7 +62,7 @@
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 2 :method "tools/list"})]
     (is (= #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"
              "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
-             "diff-branch"}
+             "diff-branch" "configure-input"}
            (into #{} (map :name) (get-in rpc [:result :tools]))))
     (testing "every tool carries an object inputSchema"
       (doseq [t (get-in rpc [:result :tools])]

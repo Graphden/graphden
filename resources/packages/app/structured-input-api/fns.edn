@@ -7,6 +7,12 @@
    :return-type :keyword-map
    :effects #{:db}}
 
+  {:name :_structured-input-mcp-command
+   :description "Run a structured input command on an explicitly selected working branch."
+   :args {:request {:type :ring-request-shape} :command {:type :keyword-map}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   {:name :_structured-input-preview-handler
    :lambda-params [:request]
    :parent :json-envelope-response

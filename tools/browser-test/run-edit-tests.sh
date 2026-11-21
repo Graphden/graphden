@@ -51,6 +51,21 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 
+# Use separate runner invocations for exact phase ordering, retry and leak
+# verdicts, while the surrounding e2e-stack keeps its executor and databases.
+if [ -n "${GRAPHDEN_E2E_FOLLOWUP_FILES:-}" ]; then
+  if [ -z "${GRAPHDEN_E2E_ONLY_FILES:-}" ] || [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then
+    echo "adjacent browser waves require a selected first wave" >&2
+    exit 2
+  fi
+  FOLLOWUP_FILES="$GRAPHDEN_E2E_FOLLOWUP_FILES"
+  unset GRAPHDEN_E2E_FOLLOWUP_FILES
+  started=$SECONDS
+  bash ./run-edit-tests.sh || exit "$?"
+  printf '\n>>> automatic related browser files (same stack, manual wave took %ss)\n' "$((SECONDS - started))"
+  GRAPHDEN_E2E_ONLY_FILES="$FOLLOWUP_FILES" exec bash ./run-edit-tests.sh
+fi
+
 # Resolve the test list once so adding new files only takes a glob.
 #
 # EVERY *.test.js in this directory is `edit-`-prefixed and runs here. That is

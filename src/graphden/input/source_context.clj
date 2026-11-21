@@ -127,13 +127,13 @@
 
 
 (defn- field-specs
-  [{list-type :list :keys [args type refine parent parents]}]
+  [{list-type :list :keys [args type refine parent parents] :as definition}]
   (cond
     (or parent parents) (into {} (filter (comp types/own-slot-declaration? val)) args)
     type type
     list-type {:items :sequence}
     refine {:value (:base refine)}
-    :else args))
+    :else (get definition :input args)))
 
 
 (defn- declared-input

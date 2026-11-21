@@ -382,7 +382,9 @@
 (deftest separate-write-instants-and-fork-position-edits-preserve-rename-history
   (with-storage [base (base-storage)]
     (let [main (vs/wrap-with-versioning base)
-          _ (install-retry-pause! main)
+          _ (binding [tenancy/*current-principal* {:authenticated? true :user-id "package-author"
+                                                   :user {:display-name "Package author"}}]
+              (install-retry-pause! main))
           owner (record-ids/fn-id "core.concurrency" :_retry-pause)
           field (record-ids/slot-id (record-ids/fn-id "core.concurrency" :sleep) :ms)
           alias-id (record-ids/slot-id owner :delay-ms)
@@ -390,7 +392,9 @@
           member-id (record-ids/fn-slot-id owner alias-id)
           copied (migration/derived-id :membership owner member-id)
           fork (vs/switch-branch main (:id (vs/create-branch! main "reorder")))
-          _ (sp/update-entity fork :fn-slot member-id {:position 1})
+          _ (binding [tenancy/*current-principal* {:authenticated? true :user-id "fork-editor"
+                                                   :user {:display-name "Fork editor"}}]
+              (sp/update-entity fork :fn-slot member-id {:position 1}))
           source (offline/snapshot base)
           [binding-version] (filter #(= binding-id (:binding-id %)) (:binding-version source))
           [birth edit] (sort-by :change-revision (filter #(= member-id (:fn-slot-id %)) (:fn-slot-version source)))
@@ -401,6 +405,8 @@
           artifact (-> source offline/artifact offline/encode offline/decode)]
       (is (= (select-keys birth [:change-id :change-revision]) (select-keys binding-version [:change-id :change-revision])))
       (is (not= (:created-at birth) (:created-at binding-version)))
+      (is (= [["package-author" "Package author"] ["fork-editor" "Fork editor"]]
+             (mapv (juxt :author-id :author-label) [birth edit])))
       (is (empty? (get-in artifact [:plan :exceptions])) (pr-str (get-in artifact [:plan :exceptions])))
       (is (= {:status :applied} (offline/apply! base artifact)))
       (is (= {:status :already-applied} (offline/apply! base artifact)))

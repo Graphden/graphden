@@ -44,7 +44,7 @@ async function installRunSurface(page) {
       await window.gdMountRunPane(id);
     };
   `});
-  for (const file of ['web/runtime/graphden-forms.js', editor + 'editor-literal-types.js',
+  for (const file of ['web/runtime/graphden-popover.js', 'web/runtime/graphden-forms.js', editor + 'editor-literal-types.js',
     editor + 'editor-value-form.js', editor + 'editor-execute-result.js', editor + 'editor-execute-inputs.js',
     editor + 'editor-execute-history.js', editor + 'editor-execute.js']) {
     await page.addScriptTag({path: path.join(resources, file)});

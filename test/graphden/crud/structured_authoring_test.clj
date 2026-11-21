@@ -26,7 +26,12 @@
     [org.httpkit.server :as server]))
 
 
-(use-fixtures :once setup/ensure-build-hashes-fixture (golden/fixture (ns-name *ns*)))
+(def ^:private app-packages ["core" "web" "app" "registry" "mcp"])
+
+
+(use-fixtures :once
+  setup/ensure-build-hashes-fixture
+  (golden/fixture (ns-name *ns*) app-packages))
 
 
 (defn- request
@@ -362,9 +367,11 @@
   (let [response (request origin token :post "/mcp"
                           {:content-type "application/json"
                            :body (json/generate-string {:jsonrpc "2.0" :id 71 :method "tools/call"
-                                                        :params {:name "configure-input" :arguments args}})})
-        rpc (json/parse-string (:body response) true)]
-    (or (:error rpc) (some-> (get-in rpc [:result :content 0 :text]) (json/parse-string true)))))
+                                                        :params {:name "configure-input" :arguments args}})})]
+    (when (is (= 200 (:status response)) "POST /mcp serves the optional MCP router")
+      (let [rpc (json/parse-string (:body response) true)]
+        (is (= 71 (:id rpc)))
+        (or (:error rpc) (some-> (get-in rpc [:result :content 0 :text]) (json/parse-string true)))))))
 
 
 (defn- exercise-mcp-input!
@@ -403,7 +410,7 @@
 
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "closedinputfixture" "mcp"]
+        packages (ig/init-key :app/packages {:package-names (into app-packages ["lessons" "reftext" "closedinputfixture"])
                                              :primitive-inputs [lesson/admission uppercase-admission closed/admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))

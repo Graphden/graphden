@@ -49,6 +49,28 @@
          (code #(primitive/prepare (update module :fns conj (first (:fns module))) root)))))
 
 
+(deftest pinned-record-abi-retains-closed-callable-fields-and-scalar-results
+  (let [callback [:fn {:string :text} :text #{}]
+        contract {:payload {:item :text :callback callback} :actor {:id :uuid}}
+        input (update-vals contract #(hash-map :type % :required true))
+        declaration {:name :transform :input input :return-type :text}
+        source {:namespace "fixture" :input-format 2 :fns [declaration]}
+        id (ids/fn-id "fixture" :transform)
+        compiled (primitive/prepare source id contract)
+        payload (some #(when (= :payload (:name %)) %) (get-in compiled [:contract :fields]))
+        field (some #(when (= :callback (:name %)) %) (:fields payload))
+        effectful (assoc-in contract [:payload :callback 3] #{:db})
+        effectful-input (update-vals effectful #(hash-map :type % :required true))]
+    (is (= contract (get-in compiled [:contract :type])))
+    (is (= callback (:type field)))
+    (is (uuid? (:type-id field)))
+    (is (= :staged-primitive-type-unsupported (code #(primitive/prepare source id))))
+    (is (= :staged-primitive-type-unsupported
+           (code #(primitive/prepare (assoc-in source [:fns 0 :input] effectful-input) id effectful))))
+    (is (= :staged-primitive-type-unsupported
+           (code #(primitive/prepare (assoc-in source [:fns 0 :return-type] callback) id contract))))))
+
+
 (def ^:private composed-module
   {:input-format 2 :namespace "fixture"
    :fns [{:name :subtract :input (array-map :left :int :right :int) :return-type :int}

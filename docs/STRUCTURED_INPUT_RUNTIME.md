@@ -179,6 +179,25 @@ normalize its slot/ref/sequence/HOF inputs into the same IR, finish deferred
 closure lifetimes and consumption obligations, and remove the parallel lowering
 paths before runtime migration can be considered complete.
 
+## Fixture lesson
+
+The loopback lesson fixture binds `profile.name` through the authenticated
+structured-input command routes. The graph subtree then gives the lesson
+the remaining `id` and `email` fields. Run uses `compile-named` on the
+branch's authorized read snapshot, with an explicit pure fixture
+implementation and an invocation-local registry. The normal execute guard
+and named-input checks still apply. The lesson is available from tests.
+
+```sh
+GD_STRUCTURED_INPUT_PLAYWRIGHT=1 bb wt test :integration \
+  --focus graphden.crud.structured-input-lesson-test
+```
+
+The browser invocation requires the worktree's Playwright installation and
+Chromium. Set `GD_LESSON_CHROMIUM` to use an existing Chromium binary.
+Without the Playwright flag the same test verifies the Ring and PostgreSQL
+path directly.
+
 ## Browser plans
 
 `graphden.input.browser/export-closed` lowers the same checked IR as the JVM

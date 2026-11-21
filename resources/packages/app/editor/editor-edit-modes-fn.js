@@ -143,6 +143,7 @@ function enterExtendEditMode(fn, anchorEl, opts) {
   if (!fn) return;
   let pendingName = '';
   let pendingNsId = null;
+  let pendingExactId = null;
   let nsChooser = null;
   // The binding / list item this card is on the canvas THROUGH — set
   // only at a use-site (see the header above). Its owner is the fn whose
@@ -150,6 +151,8 @@ function enterExtendEditMode(fn, anchorEl, opts) {
   const useSiteArg = opts?.useSiteArg || null;
   const siteOwner = useSiteArg ? lookups?.fnMap?.get(useSiteArg['fn-id']) : null;
   const siteSlot = useSiteArg?.name ? ':' + useSiteArg.name : 'the slot';
+  const lessonTarget = !useSiteArg && typeof _tourStructuredExtend === 'function'
+    ? _tourStructuredExtend(fn) : null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: useSiteArg
@@ -169,7 +172,8 @@ function enterExtendEditMode(fn, anchorEl, opts) {
       input.type = 'text';
       input.className = 'arg-value-edit-input';
       input.placeholder = 'New fn name';
-      nsChooser = buildNsChooser(extendDefaultNsId(fn), 'Namespace for the new fn');
+      nsChooser = buildNsChooser(lessonTarget ? lessonTarget['namespace-id'] : extendDefaultNsId(fn),
+        'Namespace for the new fn');
       root.insertBefore(nsChooser.sub, root.firstChild);
       root.insertBefore(nsChooser.row, root.firstChild);
       root.insertBefore(input, root.firstChild);
@@ -179,6 +183,9 @@ function enterExtendEditMode(fn, anchorEl, opts) {
     async doSave(input) {
       const newName = (input.value || '').trim();
       if (!newName) return false;
+      if (lessonTarget && (newName !== lessonTarget.name || _tourStructuredExtend(fn) !== lessonTarget)) {
+        return {ok: false, error: 'Use the lesson’s sample name on its branch.'};
+      }
       const opKey = 'extend:' + fn.id + ':' + newName;
       if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return false;
       pendingName = newName;
@@ -190,11 +197,17 @@ function enterExtendEditMode(fn, anchorEl, opts) {
         pendingNsId = nsId || null;
         const fields = { name: newName, 'parent-ids': fn.id, 'namespace-id': nsId };
         const receipt = typeof gdTourBeginEntityCreation === 'function'
-          ? gdTourBeginEntityCreation('fn', newName, {'namespace-id': nsId || null}) : null;
+          ? gdTourBeginEntityCreation('fn', newName, {'namespace-id': nsId || null,
+            ...(lessonTarget ? {'parent-id': fn.id} : {})}) : null;
+        if (lessonTarget && !receipt) return {ok: false, error: 'Use the root namespace on the lesson branch.'};
         try {
           const r = await postEntity('fn', fields);
           if (!(r && r.status >= 200 && r.status < 300)) return false;
-          if (typeof gdTourRecordEntityCreation === 'function') gdTourRecordEntityCreation(receipt, r);
+          const recorded = typeof gdTourRecordEntityCreation === 'function' && gdTourRecordEntityCreation(receipt, r);
+          if (lessonTarget) {
+            if (!recorded) return {ok: false, error: 'Could not confirm sample creation. End the lesson and retry on a fresh branch.'};
+            pendingExactId = r.headers.get('X-Graphden-Created-Id');
+          }
           if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
           if (!useSiteArg) {
             if (typeof gdUndoRecordCreatedFn === 'function') {
@@ -254,6 +267,13 @@ function enterExtendEditMode(fn, anchorEl, opts) {
       const opKey = 'extend-finalise:' + fn.id;
       const finalise = async () => {
         if (typeof initGraph === 'function') await initGraph();
+        if (lessonTarget) {
+          if (_tourStructuredExtend(fn) === lessonTarget && pendingExactId
+              && await window.ensureSubtreeFor?.(pendingExactId) && _tourStructuredExtend(fn) === lessonTarget) {
+            selectFn(pendingExactId);
+          }
+          return;
+        }
         if (pendingName && typeof selectJustCreatedFn === 'function') {
           await selectJustCreatedFn(pendingName);
         }

@@ -462,6 +462,17 @@
       (is (= 1 (count (re-seq (re-pattern expected-comment) target)))))))
 
 
+(deftest simultaneous-renames-keep-each-pin-and-comment
+  (let [text "{:namespace \"demo.main\" :fns [{:name :sink :args {:a {:type :int} :b {:type :text}} :return-type :any} {:name :aliases :parent :sink :args {:a {:as :n :type ; number pin\r\n :int} :b {:as ; name route\r\n :label :type :text}}}]}"
+        target (migrate-child text)
+        rewritten (peek (:fns (edn/read-string target)))]
+    (is (= {:n {:type :int :required false} :label {:type :text :required false}} (:input rewritten)))
+    (is (= {:a [:project [:n]] :b [:project [:label]]} (:bind rewritten)))
+    (is (= {[:a] {:type :int} [:b] {:type :text}} (:configure rewritten)))
+    (doseq [comment ["; number pin\r\n" "; name route\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern comment) target)))))))
+
+
 (deftest original-concurrency-module-replays-renames-and-stable-binding-ids
   (let [text (slurp "resources/packages/core/concurrency/fns.edn")
         {module-ns :namespace :keys [fns]} (edn/read-string text)

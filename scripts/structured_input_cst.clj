@@ -403,6 +403,32 @@
       (assoc span :after after))))
 
 
+(defn- projection-declaration-edit
+  [source starts loc {:keys [definition path input fields position-inputs]}]
+  (when-not (and (map? input) (vector? fields) (seq fields) (= (count fields) (count input))
+                 (every? #(and (vector? %) (= 2 (count %)) (every? simple-keyword? %)) fields)
+                 (= (set (keys input)) (set (map second fields)))
+                 (or (key-loc loc :parent) (key-loc loc :parents)) (not (key-loc loc :input)))
+    (refuse :invalid-projection-declaration {:definition definition}))
+  (let [projections (mapv (fn [[field exposed]]
+                            (let [spec (get input exposed)
+                                  target (value-at loc [:args field])
+                                  pin (:configuration (projection-leaf source starts target))]
+                              (when-not (and (map? spec) (= #{:type :required} (set (keys spec)))
+                                             (format/projection-input-type? (:type spec)) (false? (:required spec))
+                                             (= (cond-> {:as exposed} pin (assoc :type (:type spec))) (z/sexpr target)))
+                                (refuse :invalid-projection-declaration {:definition definition}))
+                              {:field field :exposed exposed :pin pin}))
+                          fields)
+        declarations (into (mapv (fn [{:keys [exposed]}] [exposed (get input exposed)]) projections) position-inputs)
+        declared (str/join " " (map (fn [[name spec]] (str name " " (pr-str spec))) declarations))
+        pins (keep (fn [{:keys [field pin]}] (when pin (str (pr-str [field]) " " pin))) projections)]
+    (assoc (rename-edit source starts loc definition path :bind)
+           :after (str ":input {" declared "}"
+                       (when (seq pins) (str " :configure {" (str/join " " pins) "}"))
+                       " :bind"))))
+
+
 (defn- operation-edit
   [source starts definitions {:keys [op definition path] :as operation}]
   (when-not (and (keyword? definition) (vector? path) (seq path))
@@ -432,19 +458,7 @@
         (rename-edit source starts loc definition path :input))
 
       :declare-projection-input
-      (let [input (:input operation)
-            [exposed spec] (first input)
-            field (:field operation)
-            target (value-at loc [:args field])
-            pin (:configuration (projection-leaf source starts target))]
-        (when-not (and (= 1 (count input)) (simple-keyword? exposed)
-                       (map? spec) (= #{:type :required} (set (keys spec))) (format/projection-input-type? (:type spec))
-                       (false? (:required spec)) (= (cond-> {:as exposed} pin (assoc :type (:type spec))) (z/sexpr target))
-                       (or (key-loc loc :parent) (key-loc loc :parents)) (not (key-loc loc :input)))
-          (refuse :invalid-projection-declaration {:definition definition}))
-        (assoc (rename-edit source starts loc definition path :bind) :after (str ":input {" exposed " {:type " (pr-str (:type spec)) " :required false}"
-                                                                                 (str/join (map (fn [[name decl]] (str " " name " " (pr-str decl))) (:position-inputs operation))) "}"
-                                                                                 (when pin (str " :configure {[" field "] " pin "}")) " :bind")))
+      (projection-declaration-edit source starts loc operation)
 
       :rename-bind
       (do
@@ -591,10 +605,12 @@
         (cond
           (seq alias-entries)
           (do
-            (when-not (and (= 1 (count alias-entries)) (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
+            (when-not (and (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
               (refuse :unsupported-projection-mix {}))
             (into [{:op :declare-projection-input :definition (:name source) :path [:args]
-                    :input alias-input :position-inputs position-inputs :field (second (:source-path (first alias-entries)))}] operations))
+                    :input alias-input :position-inputs position-inputs
+                    :fields (mapv (fn [{:keys [source-path rename]}] [(second source-path) (:alias rename)]) alias-entries)}]
+                  operations))
 
           (or (seq fields) (seq configuration) (seq position-inputs))
           [{:op :partition-composed-args :definition (:name source) :path [:args]

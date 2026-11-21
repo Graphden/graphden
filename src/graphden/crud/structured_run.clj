@@ -54,18 +54,19 @@
 
 (defn rejection
   [error]
-  (case (:type (ex-data error))
-    :authz/forbidden
-    {:ok false :status :rejected :http-status 403 :error "Forbidden" :error-data {:reason :forbidden}}
-    :input/invalid-run-arguments
-    {:ok false :status :rejected :http-status 400 :error "Invalid structured arguments"
-     :error-data {:reason :invalid-structured-arguments :code (:code (ex-data error))}}
-    (:input/unresolved-contract :input/compile-rejected :input/invalid-binding :input/invalid-row
-                                :types/unsupported-validator :types/check-failed :browser-plan/unsupported
-                                :storage-error/candidate-limit :storage-error/bounded-query-unsupported)
-    {:ok false :status :rejected :http-status 400 :error "Structured input is unavailable"
-     :error-data {:reason :structured-input-unavailable}}
-    (throw error)))
+  (let [{:keys [type code]} (ex-data error)]
+    (cond
+      (= :authz/forbidden type)
+      {:ok false :status :rejected :http-status 403 :error "Forbidden" :error-data {:reason :forbidden}}
+      (and (= :input/compile-rejected type) (#{:unknown-input-field :record-input-required} code))
+      {:ok false :status :rejected :http-status 400 :error "Invalid structured arguments"
+       :error-data {:reason :invalid-structured-arguments :code code}}
+      (contains? #{:input/unresolved-contract :input/compile-rejected :input/invalid-binding :input/invalid-row
+                   :types/unsupported-validator :types/check-failed :browser-plan/unsupported
+                   :storage-error/candidate-limit :storage-error/bounded-query-unsupported} type)
+      {:ok false :status :rejected :http-status 400 :error "Structured input is unavailable"
+       :error-data {:reason :structured-input-unavailable}}
+      :else (throw error))))
 
 
 (defn runnable-analysis
@@ -97,13 +98,7 @@
       (let [frozen (view/collect storage root authorize!)
             {:keys [invoke surface] :as prepared} (prepare ctx frozen root)
             graph-hash (source-hash frozen)]
-        (try
-          (arguments/route-values surface args)
-          (catch clojure.lang.ExceptionInfo error
-            (let [{:keys [type code]} (ex-data error)]
-              (if (and (= :input/compile-rejected type) (#{:unknown-input-field :record-input-required} code))
-                (throw (ex-info "Invalid structured arguments" {:type :input/invalid-run-arguments :code code}))
-                (throw error)))))
+        (arguments/route-values surface args)
         (assoc (dissoc prepared :analysis :surface) :fn-version-id (lookup/resolve-fn-version-id (assoc ctx :storage storage) root)
                :graph-hash graph-hash
                :invoke (executor/named-input-closure

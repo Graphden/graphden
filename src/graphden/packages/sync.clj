@@ -340,15 +340,11 @@
          ;; Include parser-emitted anonymous type rows, using the writer's
          ;; actual identities after any existing-row remap. Only trusted
          ;; package bootstrap does this; tenant sync-bundle! never does.
-         (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written))))
-       {:ns-id-map ns-id-map
-        :all-name->id all-name->id
-        :base-fns (with-meta base-fns-map
-                    {::owned/native-signatures
-                     (into {} (keep (fn [[name definition]]
-                                      (let [id (records/fn-id (:namespace definition) name)]
-                                        (when-let [signature (registry-core/rich-type-of-id id)]
-                                          [id signature])))) base-fn-defs)})}))))
+         (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written)))
+         {:ns-id-map ns-id-map
+          :all-name->id all-name->id
+          :base-fns (vary-meta base-fns-map assoc ::owned/native-signatures
+                               (::registry-core/registered-signatures (meta written)))})))))
 
 
 (defn- ancestor-parents

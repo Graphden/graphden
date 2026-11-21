@@ -80,7 +80,11 @@
                      (:fields node) {:op :record :fields
                                      (mapv (fn [field]
                                              [(:name field) [scope (conj path (:id field))]])
-                                           (:fields node))}
+                                           (:fields node))
+                                     :required-fields (into []
+                                                            (comp (filter :required)
+                                                                  (map #(vector scope (conj path (:id %)))))
+                                                            (:fields node))}
                      :else {:op :supplied :type (:type node)})]
     (into {address (assoc expression :type (:type node))}
           (when (= :record (:op expression))
@@ -139,7 +143,7 @@
 (defn presence-program
   "Return field presence rules in dependency order, excluding value reads.
    Both execution targets distinguish an absent field from a present nil."
-  [{:keys [expressions root-scope]}]
+  [{:keys [expressions root-scope record-inputs]}]
   (let [seen (volatile! #{})
         rules (volatile! [])]
     (letfn [(visit
@@ -151,10 +155,15 @@
                       kind (case (:op expression)
                              :supplied :supplied
                              :read :any-present
-                             :record (if (= address [root-scope []]) :always :any-present)
+                             :record (cond
+                                       (= address [root-scope []]) :always
+                                       (contains? record-inputs address) :supplied-record
+                                       :else :any-present)
                              :always)]
                   (doseq [source sources] (visit source))
-                  (vswap! rules conj {:address address :kind kind :sources sources}))))]
+                  (vswap! rules conj (cond-> {:address address :kind kind :sources sources}
+                                       (= :supplied-record kind)
+                                       (assoc :required-fields (:required-fields expression)))))))]
       (doseq [address (sort-by pr-str (keys expressions))] (visit address))
       @rules)))
 
@@ -168,6 +177,7 @@
                     (case kind
                       :always true
                       :supplied (contains? supplied address)
+                      :supplied-record (or (contains? supplied address) (boolean (some presence sources)))
                       :any-present (boolean (some presence sources)))))
            inherited
            program)))
@@ -239,14 +249,29 @@
           (reject! :cross-frame-expression {:address address}))))
     (into {} (map (fn [[frame scopes]]
                     (let [rules (get by-frame frame)
-                          parameters (into #{} (comp (filter #(= :supplied (:kind %))) (map :address)) rules)
+                          inputs-by-kind (group-by :kind rules)
+                          parameters (into #{} (map :address) (:supplied inputs-by-kind))
+                          records (into #{} (map :address) (:supplied-record inputs-by-kind))
                           sites (get callbacks frame)]
                       (when (and sites (not= parameters (set (map :address sites))))
                         (reject! :unrouted-callback-input {:scope frame}))
                       [frame {:scopes scopes :presence-program rules :parameters parameters
+                              :record-inputs records
                               :required-addresses (into (set (get required frame))
                                                         (comp (filter :required?) (map :address)) sites)}])))
           (group-by owner (keys scopes)))))
+
+
+(defn- public-record-inputs
+  [analysis expressions]
+  (let [root (get-in analysis [:public-input :root])
+        records (into #{} (keep (fn [{:keys [kind fields address]}]
+                                  (when (and (= :input-field kind) (some? fields))
+                                    address)))
+                      (tree-seq #(contains? % :fields) :fields root))]
+    (when-not (every? #(= :record (get-in expressions [% :op])) records)
+      (reject! :public-record-not-lowered {}))
+    records))
 
 
 (defn lower-checked
@@ -281,7 +306,8 @@
         (reject! :input-route-not-lowered {:address address})))
     (references! expressions)
     (let [closures (closure-plans analysis expressions routes)
-          program (presence-program {:expressions expressions :root-scope root})
+          record-inputs (public-record-inputs analysis expressions)
+          program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})
           layouts (frame-layouts root scopes expressions closures program (:required-addresses analysis))]
       {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
        :closures closures :frame-layouts layouts :presence-program program

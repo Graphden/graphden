@@ -17,8 +17,9 @@
 (defn compile-checked
   "Return the executor's ordinary (fn [address-values ctx]) closure. Supply
    frozen :context and explicit :implementations (see ir/lower-checked).
-   This fixture API accepts leaf addresses, not public authoring names or
-   arbitrary whole-record parameters. It does not bypass execute's guards.
+   This fixture API accepts leaf addresses and empty maps at checked record
+   addresses. The named adapter routes public input. Execute still applies
+   its authorization and cancellation guards.
    Primitive field-read obligations use the existing validator. Supported
    closures retain a synchronous invocation lifetime. Container obligations
    and list builders require separate lowering."

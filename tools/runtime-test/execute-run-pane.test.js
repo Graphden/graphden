@@ -157,6 +157,7 @@ function boot({ effects = false } = {}) {
       {kind: 'input-field', name: 'profile', required: true, 'required-now?': true, fields: [
         leaf('id', 'int', true), leaf('active', 'bool'), leaf('extra', ['union', 'null', 'text']), leaf('name', 'text'),
       ]},
+      {kind: 'input-field', name: 'config', required: true, 'required-now?': true, fields: []},
     ]};
     const [installing, install] = t.hold();
     t.ctx.ensureSubtreeFor = () => installing;
@@ -188,7 +189,7 @@ function boot({ effects = false } = {}) {
     assert(name.value === '', 'included optional text may be explicitly empty');
     run.click();
     await t.flush();
-    assert(JSON.stringify(t.posts[0]?.args) === '{"profile":{"id":42,"active":false,"extra":null,"name":""}}',
+    assert(JSON.stringify(t.posts[0]?.args) === '{"profile":{"id":42,"active":false,"extra":null,"name":""},"config":{}}',
       'structured values are serialized without losing presence');
     t.ctx.__releasePost();
     await t.flush();
@@ -198,7 +199,7 @@ function boot({ effects = false } = {}) {
     extra.value = '';
     run.click();
     await t.flush();
-    assert(JSON.stringify(t.posts[1]?.args) === '{"profile":{"id":42}}', 'unticked and blank optional fields are omitted');
+    assert(JSON.stringify(t.posts[1]?.args) === '{"profile":{"id":42},"config":{}}', 'unticked and blank optional fields are omitted');
     t.ctx.__releasePost();
     await t.flush();
     descriptor = {...descriptor};

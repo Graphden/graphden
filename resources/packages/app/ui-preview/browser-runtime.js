@@ -434,8 +434,10 @@
       tick();
       const field = byKey.get(key);
       if (!field) throw new Error('Unknown graph input field');
-      if (field.fields) routeStructured(field.fields, value, slots, tick, remaining, false);
-      else {
+      if (field.fields) {
+        routeStructured(field.fields, value, slots, tick, remaining, false);
+        if (field.slot) slots.set(field.slot, null);
+      } else {
         encodeValue(value, remaining, 0);
         slots.set(field.slot, value);
       }
@@ -447,11 +449,17 @@
     for (const rule of input.presence) {
       tick();
       if (rule.kind === 'always' || (rule.kind === 'supplied' && slots.has(rule.id))
+          || (rule.kind === 'supplied-record' && (slots.has(rule.id) || rule.sources.some(hasSource)))
           || (rule.kind === 'any-present' && rule.sources.some(hasSource))) {
         present.add(rule.id);
       }
     }
     for (const id of input.required) if (!present.has(id)) throw new Error('Missing graph input field');
+    for (const rule of input.presence) {
+      if (slots.has(rule.id) && rule['required-fields']?.some((id) => !present.has(id))) {
+        throw new Error('Missing graph input field');
+      }
+    }
     return present;
   }
   function matchesPrimitiveInput(value, type) {

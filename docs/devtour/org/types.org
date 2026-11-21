@@ -7,7 +7,7 @@ Type expressions, compatibility, inference, and secret markings.
 
 after: executor
 
-[[file:index.org][index]] · ~131 min
+[[file:index.org][index]] · ~132 min
 
 * 1. bind-input
 :PROPERTIES:
@@ -211,13 +211,13 @@ Builds an offline graph of evaluated reference uses. Each use has a binding-ID s
 :PROPERTIES:
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
-:LINE: 202
+:LINE: 207
 :MINS: 1.0
 :END:
 
 Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. A checked callback runs in a fresh local frame with its enclosing cells still visible. Source authorization precedes export.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:202]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:207]]
 - see also :: [[file:types.org::#types/export-named][export-named]]
 - same file :: [[file:types.org::#types/export-named][export-named]]
 
@@ -225,13 +225,13 @@ Lowers the checked input IR to browser format 2 for closed pure graphs. A field 
 :PROPERTIES:
 :CUSTOM_ID: types/export-named
 :FILE: src/graphden/input/browser.clj
-:LINE: 210
-:MINS: 1.0
+:LINE: 215
+:MINS: 1.1
 :END:
 
-Includes checked named residual routes and the wire type for each supported supplied field. Browser and JVM both defer validation until the field is read. Lists validate their elements and opaque dictionaries validate keys and values as a whole field. Absent fields stay outside the record, including when an explicit nil is allowed.
+Includes checked named residual routes and the wire type for each supported supplied field. Browser and JVM both defer validation until the field is read. Lists validate their elements and opaque dictionaries validate keys and values as a whole field. Absent fields stay outside the record, including when an explicit nil is allowed. A supplied empty record is present. Supplying an optional record also activates its required fields.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:210]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:215]]
 - same file :: [[file:types.org::#types/export-closed][export-closed]]
 - referenced from :: [[file:types.org::#types/export-closed][export-closed]]
 
@@ -266,13 +266,13 @@ Matches a frozen stored declaration to the host's native implementation by UUID.
 :PROPERTIES:
 :CUSTOM_ID: types/compile-stored
 :FILE: src/graphden/input/compile.clj
-:LINE: 55
+:LINE: 56
 :MINS: 1.3
 :END:
 
 Runs the structured-input checker on an authorized stored snapshot and prepares a named invocation closure for the ordinary executor. The caller supplies the trusted implementations alongside their frozen signatures and owns the execution authorization boundary.
 
-- source :: [[file:../../../src/graphden/input/compile.clj::(defn compile-stored][src/graphden/input/compile.clj:55]]
+- source :: [[file:../../../src/graphden/input/compile.clj::(defn compile-stored][src/graphden/input/compile.clj:56]]
 - see also :: [[file:types.org::#types/resolve-closure][resolve-closure]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 
 * 21. primitives

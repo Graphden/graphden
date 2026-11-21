@@ -99,4 +99,32 @@ assert.throws(() => runCallback(opaqueMap, {items: new Map([['ref', 'data']])}),
 const escaped = runCallback(scopedFn('entry', 'entry', 'const', {value: structuredCallback}));
 assert.throws(() => graph.invoke(escaped, false), /outside its invocation/);
 assert.throws(() => escaped.invoke(false), /outside its invocation/);
+function runRecordInput(supplied, requiredFields, required = ['config']) {
+  const label = {kind: 'supplied', slot: 'label', type: 'text'};
+  const config = {...field('config', record({...field('label', label), present: 'label'})), present: 'config'};
+  return graph.createRuntime({
+    format: 2, primitiveAbi: 1, entries: {view: 'entry'},
+    inputs: {entry: {structured: {
+      fields: [{name: 'config', slot: 'config', fields: [
+        {name: 'label', slot: 'label', key: graph.encode(graph.keyword('label'))},
+      ]}],
+      presence: [
+        {id: 'label', kind: 'supplied', sources: []},
+        {id: 'config', kind: 'supplied-record', sources: ['label'], 'required-fields': requiredFields},
+      ],
+      required,
+    }}},
+    primitives: [{id: 'const', op: 'const'}],
+    functions: [scopedFn('entry', 'entry', 'const', {value: record(config)})],
+  }).run('view', supplied);
+}
+const configKey = graph.keyword('config');
+const emptyConfig = {config: new Map()};
+assert.throws(() => runRecordInput({}, []), /Missing graph input field/);
+assert.deepEqual([...runRecordInput(emptyConfig, []).get(configKey).keys()], []);
+assert.deepEqual([...runRecordInput({}, [], []).keys()], []);
+assert.throws(() => runRecordInput(emptyConfig, ['label'], []), /Missing graph input field/);
+assert.equal(runRecordInput({config: new Map([[graph.keyword('label'), 'Ada']])}, ['label'], [])
+  .get(configKey).get(graph.keyword('label')), 'Ada');
+
 console.log('PASS deferred browser record fields, presence, and version admission');

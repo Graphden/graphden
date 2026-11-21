@@ -825,7 +825,9 @@
      :say "Includes checked named residual routes and the wire type for each supported supplied
            field. Browser and JVM both defer validation until the field is read. Lists validate
            their elements and opaque dictionaries validate keys and values as a whole field.
-           Absent fields stay outside the record, including when an explicit nil is allowed."}
+           Absent fields stay outside the record, including when an explicit nil is allowed.
+           A supplied empty record is present. Supplying an optional record also activates
+           its required fields."}
     {:ns graphden.input.signatures :defn infer-use
      :say "Feeds canonical scoped input facts through the existing type-rule engine using explicit
            implementation argument paths. Frozen registry views preserve rule lookup isolation;

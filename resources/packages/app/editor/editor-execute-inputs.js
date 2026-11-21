@@ -124,7 +124,6 @@ function structuredRunGroup(fields, host, path = []) {
         if (result.error) return result;
         if (Object.hasOwn(result, 'value')) pairs.push([field.name, result.value]);
       }
-      if (path.length && !pairs.length) return {};
       return {value: Object.fromEntries(pairs)};
     },
   };

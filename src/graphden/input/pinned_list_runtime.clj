@@ -21,12 +21,12 @@
 
 
 (defn checked-declarations
-  [list-module root signature impl]
-  (let [by-kind (group-by :kind (:records list-module))
+  [list-module root signature impl operands]
+  (let [by-kind (group-by :kind (distinct (concat (:records list-module) (mapcat :records (vals operands)))))
         index #(into {} (map (juxt :id identity)) (get by-kind %))
         ctx (context/build-context {:fns (index :fn) :fields (index :slot) :bindings (index :input-binding)
                                     :members (group-by :fn-id (:fn-slot by-kind))})
-        trusted (assoc (implementations list-module) root {:signature signature :impl impl})
+        trusted (assoc (merge (implementations list-module) operands) root {:signature signature :impl impl})
         options {:implementations (stored/resolve-closure ctx root trusted)
                  :check-expression check/check-input-binding :infer-signature check/infer-input-signature}]
     (doseq [{:keys [fn-id]} (:definitions list-module)]

@@ -5,6 +5,7 @@
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.auth.provider :as auth]
+    [graphden.crud.structured-run :as run]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.interface :as exec]
     [graphden.input.list-builder :as list-builder]
@@ -45,10 +46,10 @@
     (is (zero? @loads))))
 
 
-(defn- post-run
-  [storage base-fns]
+(defn- run-api
+  [storage base-fns guard]
   (let [token (str (random-uuid))
-        ctx (exec/create-context {:storage storage :base-fns base-fns
+        ctx (exec/create-context {:storage storage :base-fns base-fns :execute-guard guard
                                   :auth-provider (auth/single-token-provider token)})
         _ (runtime/rebuild! ctx)
         app (router/create-router ctx "_app-ring-response")
@@ -58,7 +59,12 @@
                                                               "authorization" (str "Bearer " token)}
                                                     :body (json/generate-string {:fn-id id :args args :timeout-ms 30000})})]
                  (json/parse-string (:body response) true)))]
-    post))
+    {:post post :ctx ctx}))
+
+
+(defn- post-run
+  [storage base-fns]
+  (:post (run-api storage base-fns nil)))
 
 
 (deftest pinned-classpath-declaration-syncs-and-executes
@@ -160,3 +166,47 @@
     (is (= :closed-list-continuation
            (try (pinned/prepare (assoc-in source [:fns 1 :bind :nums 1 :tail] :closed) base pin) nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
+
+
+(deftest independently-pinned-list-references-preserve-demand-and-policy
+  (let [base (ids/fn-id "listrefs.consumer" :first-parsed)
+        first-of-two (ids/fn-id "listrefs.consumer" :first-of-two)
+        spare (ids/fn-id "listrefs.consumer" :first-with-spare)
+        target (ids/fn-id "listoperand.parsing" :integer)
+        consumer {:module ["listrefs" "consumer"] :fn-id base :abi-fn-id (ids/fn-id "listrefs.native" :first-integer)
+                  :list-contract {:items [:list :int]} :sha256 "9e6005ca09af2ab25faccf5764343970dd1b87f28575c36fe78445976b0b2736"}
+        operand {:module ["listoperand" "parsing"] :fn-id target :abi-fn-id (ids/fn-id "core.system" :parse-int)
+                 :sha256 "500a4461aa0f4fc7addee9264b31d795b41c1e56f812344bdb3d2727fb838378"}
+        _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"primitive admission failed"
+                (loader/load-packages ["listrefs"] {:primitive-input consumer})))
+        storage (:storage golden/*bootstrap*)
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "listrefs" "listoperand"]
+                                             :primitive-inputs [consumer operand]})
+        sync! (fn []
+                (let [info (ig/init-key :exec/base-fns {:storage storage :packages packages})]
+                  (ig/init-key :exec/fn-entities {:storage storage :packages packages :base-fns info})
+                  (:base-fns info)))
+        denied (atom nil)
+        guard (fn [_ id] (when (= id @denied) (throw (ex-info "Denied" {:type :authz/forbidden}))))
+        {:keys [post ctx]} (run-api storage (sync!) guard)
+        {:keys [builder-id binding-id]} (list-builder/origin first-of-two (ids/slot-id base :items))
+        item-ids (mapv #(ids/binding-list-item-id binding-id %) [0 1])
+        bindings (fn [] (resolution/resolve-version-ids (vs/unwrap storage) :input-binding item-ids (vs/current-branch-id storage)))
+        before (bindings)
+        args {:items {:item-0 {:s "37"} :item-1 {:s "invalid"}}}
+        spare-args {:items {:item-1 {:s "invalid"}}}]
+    (is (= (set item-ids) (set (keys before))))
+    (doseq [[position id] (map-indexed vector item-ids)]
+      (let [row (sp/read-entity storage :input-binding id)]
+        (is (= [builder-id target [(str (ids/slot-id builder-id (str "item-" position)))]]
+               [(:fn-id row) (:ref-fn-id row) (mapv str (:target-path row))]))))
+    (let [result (post first-of-two args)] (is (= 37 (:result result)) (pr-str result)))
+    (let [result (post spare spare-args)] (is (= 7 (:result result)) (pr-str result)))
+    (let [malformed (post first-of-two (assoc-in args [:items :item-0 :s] "invalid"))]
+      (is (some? (:error malformed)) (pr-str malformed)))
+    (let [{:keys [invoke]} (run/plan ctx spare spare-args)]
+      (reset! denied target)
+      (is (= "forbidden" (get-in (post spare spare-args) [:error-data :reason])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Denied" (invoke spare-args ctx))))
+    (sync!)
+    (is (= before (bindings)))))

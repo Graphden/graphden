@@ -1,0 +1,3 @@
+{:input-format 2
+ :namespace "listoperand.parsing"
+ :fns [{:name :integer :input {:s {:type :text :required true}} :return-type :int}]}

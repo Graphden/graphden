@@ -704,6 +704,8 @@
                                           [package-name module]))]
               (when-not (= (set (keys admissions)) admitted-modules)
                 (throw (ex-info "Admitted primitive module missing" {:type :package-error/primitive-admission})))))
+        _ (when (seq admissions)
+            (primitive/check-list-references! (for [package sources [_ module] (:modules package) :when (:primitive module)] (:primitive module))))
         results (mapv load-single-package sources)
         ;; Single pass over results to build all aggregations
         combined (reduce (fn [acc result]

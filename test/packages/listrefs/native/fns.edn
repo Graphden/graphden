@@ -1,0 +1,2 @@
+{:namespace "listrefs.native"
+ :fns [{:name :first-integer :args {:items {:type [:list :int] :required true}} :return-type :int}]}

@@ -21,7 +21,9 @@
     (and (every? #{:name :parent :bind :description} (keys definition))
          (simple-keyword? (:parent definition)) (= #{field} (set (keys (:bind definition))))
          (vector? form) (= :list-builder (first form))
-         (every? #(and (vector? %) (= :value (first %))) (get-in form [1 :items])))))
+         (every? #(and (vector? %) (or (= :value (first %))
+                                       (and (= :ref (first %)) (qualified-keyword? (second %)))))
+                 (get-in form [1 :items])))))
 
 
 (defn- parse-one
@@ -37,13 +39,16 @@
                            :definition-by-id (into {} (map (fn [{:keys [authored parsed]}] [(:fn-id parsed) authored])) (vals entries))
                            :records-of #(get-in entries [(:name %) :rows]))
         binding-id (ids/binding-id id slot)
+        refs (into {} (keep (fn [[op ref]]
+                              (when (= :ref op) [ref (ids/fn-id (namespace ref) (keyword (name ref)))])))
+                   (get-in definition [:bind field 1 :items]))
         context (assoc (source-context/declaration-context environment authored rows
                                                            (if parent [{:fn-id id :slot-id slot :id binding-id}] []))
-                       :list-history {[slot] (get-in parent [:trace :fragments] [])})
+                       :name->id refs :list-history {[slot] (get-in parent [:trace :fragments] [])})
         parsed (first (:definitions (module/parse-module-v2 (assoc source :fns [definition]) {:context-for (constantly context)})))
         trace (get-in parsed [:list-builders [slot]])]
     (when (and parent (nil? trace)) (reject!))
-    {:authored authored :parsed parsed :rows rows :trace trace}))
+    {:authored authored :parsed parsed :rows rows :trace trace :refs refs}))
 
 
 (defn- retain-list-type
@@ -89,4 +94,5 @@
                             (mapcat list-records/authored-records traces)))
           rows (into [{:kind :fn :id list-id :parent-ids [] :element-fn-id (ids/primitive-fn-id element)}]
                      (map (partial retain-list-type slot list-id (set (keys generated)))) records)]
-      {:definitions definitions :records rows :generated generated :list-type-id list-id})))
+      {:definitions definitions :records rows :generated generated :list-type-id list-id
+       :refs (into {} (mapcat :refs) (vals entries))})))

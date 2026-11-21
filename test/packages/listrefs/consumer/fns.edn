@@ -1,0 +1,8 @@
+{:input-format 2
+ :namespace "listrefs.consumer"
+ :fns [{:name :first-parsed :input {:items {:type [:list :int] :required true}} :return-type :int}
+       {:name :first-of-two :parent :first-parsed
+        :bind {:items [:list-builder {:items [[:ref :listoperand.parsing/integer] [:ref :listoperand.parsing/integer]]
+                                      :tail :closed}]}}
+       {:name :first-with-spare :parent :first-parsed
+        :bind {:items [:list-builder {:items [[:value 7] [:ref :listoperand.parsing/integer]] :tail :closed}]}}]}

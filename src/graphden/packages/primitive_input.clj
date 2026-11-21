@@ -80,6 +80,21 @@
          :primitive receipt}))))
 
 
+(defn check-list-references!
+  "Before any implementation runs, resolve each qualified operand against a
+   separate pure primitive receipt in this exact set of pinned module bytes."
+  [receipts]
+  (let [sources (mapv require-receipt! receipts)
+        by-id (group-by (comp :fn-id :parsed) sources)]
+    (doseq [{:keys [list-module]} sources
+            [spelling id] (:refs list-module)]
+      (let [[target & others] (get by-id id)]
+        (when-not (and target (empty? others) (nil? (:list-module target))
+                       (= (namespace spelling) (get-in target [:module :namespace]))
+                       (= (keyword (name spelling)) (get-in target [:parsed :source :name])))
+          (reject!))))))
+
+
 (defn literal-descendant?
   "Recognize a child that will be written with its boot-owned parent."
   [definition]
@@ -127,30 +142,45 @@
         (reject!)))))
 
 
+(defn- operand-proofs
+  [list-module impls signatures admitted-by-id]
+  (into {}
+        (map (fn [target]
+               (let [dep (get-in admitted-by-id [target :parsed])
+                     signature (get signatures target)
+                     impl (get impls (:name signature))]
+                 (when-not (and (= target (:fn-id dep) (:fn-id signature)) (owned/owned-impl? target impl))
+                   (reject!))
+                 [target {:records (:declaration-records dep) :signature signature :impl impl}])))
+        (vals (:refs list-module))))
+
+
 (defn checked-records
   "Validate the independently registered package ABI and exact native function
    identity. Both entries must come from the current registration."
-  [{:keys [parsed abi-fn-id module children list-module]} impls signatures]
-  (let [id (:fn-id parsed)
-        signature (get signatures id)
-        witness (get signatures abi-fn-id)
-        impl (get impls (:name signature))
-        abi-keys [:args :return :effects :return-type-rule :slot-types-rule :nav-types-rule
-                  :taint-propagate? :lazy-seq-args :lambda-params :compile-time-value?]]
-    (when-not (and (owned/owned-impl? id impl) (owned/owned-impl? abi-fn-id impl)
-                   (identical? impl (get impls (:name witness)))
-                   (= #{} (:effects witness)) (set? (:execution witness)) (contains? (:execution witness) :jvm-server)
-                   (= (:args signature) (into {} (map (juxt :name :type)) (get-in parsed [:contract :fields])))
-                   (= (:return signature) (get-in parsed [:source :return-type]))
-                   (= (select-keys signature abi-keys) (select-keys witness abi-keys)))
-      (reject!))
-    (if list-module
-      ((requiring-resolve 'graphden.input.pinned-list-runtime/checked-declarations) list-module id signature impl)
-      (do
-        (doseq [{owner :fn-id} children]
-          (let [{:keys [context options]} (snapshot/freeze-literal-root module owner signatures #{id owner})
-                result (analysis/analyze-effective-input context owner options)]
-            (when-not (= :checked (:status result)) (reject!))))
-        (into (:declaration-records parsed)
-              (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
-              children)))))
+  ([source impls signatures] (checked-records source impls signatures {}))
+  ([{:keys [parsed abi-fn-id module children list-module]} impls signatures admitted-by-id]
+   (let [id (:fn-id parsed)
+         signature (get signatures id)
+         witness (get signatures abi-fn-id)
+         impl (get impls (:name signature))
+         abi-keys [:args :return :effects :return-type-rule :slot-types-rule :nav-types-rule
+                   :taint-propagate? :lazy-seq-args :lambda-params :compile-time-value?]]
+     (when-not (and (owned/owned-impl? id impl) (owned/owned-impl? abi-fn-id impl)
+                    (identical? impl (get impls (:name witness)))
+                    (= #{} (:effects witness)) (set? (:execution witness)) (contains? (:execution witness) :jvm-server)
+                    (= (:args signature) (into {} (map (juxt :name :type)) (get-in parsed [:contract :fields])))
+                    (= (:return signature) (get-in parsed [:source :return-type]))
+                    (= (select-keys signature abi-keys) (select-keys witness abi-keys)))
+       (reject!))
+     (if list-module
+       ((requiring-resolve 'graphden.input.pinned-list-runtime/checked-declarations)
+        list-module id signature impl (operand-proofs list-module impls signatures admitted-by-id))
+       (do
+         (doseq [{owner :fn-id} children]
+           (let [{:keys [context options]} (snapshot/freeze-literal-root module owner signatures #{id owner})
+                 result (analysis/analyze-effective-input context owner options)]
+             (when-not (= :checked (:status result)) (reject!))))
+         (into (:declaration-records parsed)
+               (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
+               children))))))

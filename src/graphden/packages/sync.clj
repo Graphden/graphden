@@ -292,6 +292,7 @@
   (if (empty? primitives)
     (registry/sync-defs-to-storage! storage definitions ns-id-map all-name->id)
     (let [admitted (mapcat (fn [{:keys [parsed children]}] (cons parsed children)) (vals primitives))
+          by-id (into {} (map (juxt (comp :fn-id :parsed) identity)) (vals primitives))
           list-modules (keep :list-module (vals primitives))
           list-rows (mapcat :records list-modules)
           bindings (distinct (concat (mapcat :bindings admitted) (filter #(= :input-binding (:kind %)) list-rows)))]
@@ -301,7 +302,7 @@
                            (let [written (registry-core/sync-defs-to-storage!
                                            storage definitions ns-id-map all-name->id
                                            (fn [signatures]
-                                             (update-vals primitives #(primitive/checked-records % impls signatures))))]
+                                             (update-vals primitives #(primitive/checked-records % impls signatures by-id))))]
                              (doseq [{:keys [fn-id id] :as row} (sort-by (comp count :scope-path) bindings)]
                                ;; JSONB stores path UUIDs as strings. Send that
                                ;; same representation to the version diff.

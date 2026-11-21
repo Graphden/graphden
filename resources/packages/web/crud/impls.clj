@@ -310,7 +310,7 @@
    :fn-unread-bindings      fn-unread-bindings
    :strip-hidden-impl {:impl strip-hidden-impl :taint-propagate? true}
    :fn-impl-visible? fn-impl-visible?
-   :structured-input-contract structured-input-contract
+   :structured-input-contract {:impl structured-input-contract :taint-propagate? true}
    :all-rich-types all-rich-types
    :fn-names-with-tag fn-names-with-tag
    :query-ref-many-owners query-ref-many-owners

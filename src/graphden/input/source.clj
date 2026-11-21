@@ -724,17 +724,35 @@
            :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions))))))
 
 
+(defn- forwarded-candidate
+  [{:keys [source legacy] :as entry} field-id]
+  (let [arguments (:arguments legacy)]
+    (-> entry
+        (assoc :status :supported :blockers [] :proposed (composed-source source arguments (keep :rename arguments)))
+        (update-in [:legacy :records]
+                   (fn [records]
+                     (mapv #(cond-> % (and (= :slot (:kind %)) (= field-id (:id %)))
+                                    (dissoc :source-slot-id)) records))))))
+
+
+(defn forwarded-field-baseline
+  "Build the offline owner declaration with both addresses still free.
+   The structural proof identifies the only implicit link omitted from these rows."
+  [context entry field]
+  (let [{:keys [field-id] :as proof} (forward/verify-forwarded-field context entry field)
+        candidate (forwarded-candidate entry field-id)]
+    {:proof proof :entry (first (:definitions (verify-module {:definitions [candidate]} context)))}))
+
+
 (defn rewrite-forwarded-field
   "Verify one authored forwarded field against the exact scoped projection
    certified by the checked snapshot. The legacy FK becomes an explicit
    projection row. The local field and its membership keep their original IDs.
    This returns offline rows and a proposed form, leaving the source untouched."
-  [context {:keys [source legacy] :as entry} field
+  [context entry field
    {:keys [source-names public-path row address edges] :as certificate}]
   (let [{:keys [owner-id field-id source-path target-address projection-id target-fn-id]}
-        (forward/verify-forwarded-field context entry field)
-        binding-arguments (:arguments legacy)
-        proposed (composed-source source binding-arguments (keep :rename binding-arguments))]
+        (forward/verify-forwarded-field context entry field)]
     (when-not (and (= [field] source-names) (vector? public-path) (= 2 (count public-path))
                    (= field (peek public-path)) (= target-address address)
                    (= "projection" (:expression-kind row)) (= projection-id (:id row))
@@ -742,13 +760,8 @@
                    (= [target-fn-id] (mapv :target-fn-id edges)))
       (throw (ex-info "Forwarded field differs from its checked projection"
                       {:type :input/source-verification :code :forwarded-certificate-mismatch})))
-    (let [candidate (-> entry
-                        (assoc :status :supported :blockers []
-                               :proposed (assoc-in proposed [:bind public-path] [:project source-names]))
-                        (update-in [:legacy :records]
-                                   (fn [records]
-                                     (mapv #(cond-> % (and (= :slot (:kind %)) (= field-id (:id %)))
-                                                    (dissoc :source-slot-id)) records)))
+    (let [candidate (-> (forwarded-candidate entry field-id)
+                        (assoc-in [:proposed :bind public-path] [:project source-names])
                         (update-in [:legacy :arguments]
                                    (fn [arguments]
                                      (mapv #(cond-> % (= source-path (:source-path %))

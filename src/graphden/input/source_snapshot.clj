@@ -150,7 +150,7 @@
 
 (defn- closure-entries
   [package id resolve-named]
-  (let [{:keys [verification blockers v2]} (plan-entry package id)]
+  (let [{:keys [verification blockers v2]} (or (get-in package [:closure-baselines id]) (plan-entry package id))]
     (when-not (= :authored-source-equivalent verification)
       (throw (ex-info "Unverified dependency in source closure"
                       {:type :input/source-snapshot :code :unverified-source-declaration
@@ -439,3 +439,19 @@
                                      :proposed (assoc-in proposed [:bind public-path] (:expression arg)))
                         (assoc-in [:legacy :arguments] arguments))]
       (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))
+
+
+(defn migrate-forwarded-field
+  "Freeze both free addresses, then verify the exact scoped projection and
+   write it into the source proposal. Require the stock type checker and the
+   same implementation registry evidence used by other source certificates."
+  [{:keys [prepared] :as package} owner field roots]
+  (let [original (plan-entry package owner)
+        {:keys [proof entry]} (source/forwarded-field-baseline prepared original field)]
+    (when-not (= :authored-source-equivalent (:verification entry))
+      (reject! :unverified-forwarded-baseline owner))
+    (let [baseline (assoc package :closure-baselines {owner entry})
+          {:keys [context options]} (freeze-closure baseline [owner] roots)
+          certificate (scope/verify-forwarded-projection context proof
+                                                         #(analysis/analyze-effective-input %1 %2 options))]
+      (source/rewrite-forwarded-field prepared original field certificate))))

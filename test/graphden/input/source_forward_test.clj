@@ -134,8 +134,11 @@
 (deftest verified-owner-keeps-its-authored-input-and-serializes-the-forwarding
   (let [[prepared entry] (fixture {:left :encode-body :data {:type :text}})
         {:keys [field-id projection-id] :as proof} (forward/verify-forwarded-field prepared entry :data)
+        baseline (:entry (source/forwarded-field-baseline prepared entry :data))
         certificate (scope/verify-forwarded-projection (checked-snapshot proof) proof analyze)
         migrated (source/rewrite-forwarded-field prepared entry :data certificate)]
+    (is (= :authored-source-equivalent (:verification baseline)) (:blockers baseline))
+    (is (= {:left [:ref :fixture/encode-body]} (get-in baseline [:proposed :bind])))
     (is (= :authored-source-equivalent (:verification migrated)) (:blockers migrated))
     (is (= {:data {:type :text}} (get-in migrated [:proposed :input])))
     (is (= [:project [:data]] (get-in migrated [:proposed :bind [:left :data]])))

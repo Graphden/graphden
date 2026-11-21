@@ -49,7 +49,7 @@
         (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
                                                         (filter #(= :get (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
-                                                        (filter #(= :shipped-asset (:name %)) (sources "system"))
+                                                        (filter #(#{:shipped-asset :to-json-string} (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
@@ -97,6 +97,27 @@
     (is (= [field] (:target-path row)))
     (is (= :blocked (:status (reread #(assoc-in % [:proposed :bind path] [:value nil])))))
     (is (= :blocked (:status (reread #(assoc-in % [:proposed :bind :value] [:value "other"])))))))
+
+
+(deftest forwarded-field-is-verified-with-shipped-implementation-signatures
+  (let [codec (some #(when (= :to-json-string (:name %)) %) (sources "system"))
+        body {:namespace "fixture" :name :body :parent :core.system/to-json-string}
+        host {:namespace "fixture" :name :json-field :parent :core.strings/_csv-escape-cell
+              :args {:value :body :data {:type :jsonb :description "Forwarded JSON input."}}}
+        originals (into strings [codec body host])
+        package (snapshot/package-index (parse/prepare-module originals {} {}) originals)
+        owner (ids/fn-id "fixture" :json-field)
+        migrated (snapshot/migrate-forwarded-field package owner :data @roots)
+        path [:value :data]
+        certificate (get-in migrated [:v2 :scoped-inputs path])
+        local-slot (ids/slot-id owner :data)
+        target-slot (ids/slot-id (ids/fn-id "core.system" :to-json-string) :data)]
+    (is (= :authored-source-equivalent (:verification migrated)) (:blockers migrated))
+    (is (= [:project [:data]] (get-in migrated [:proposed :bind path])))
+    (is (= [local-slot] (get-in certificate [:row :projection-path])))
+    (is (= [target-slot] (get-in certificate [:row :target-path])))
+    (is (= :implementation-signature-required
+           (:code (failure #(snapshot/migrate-forwarded-field package owner :data (dissoc @roots (ids/fn-id "core.system" :to-json-string)))))))))
 
 
 (deftest scoped-path-crosses-two-references-and-an-inherited-declaration

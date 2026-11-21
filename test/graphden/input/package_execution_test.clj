@@ -115,7 +115,7 @@
 
 
 (defn- staged-gcd
-  [bytes checksum]
+  [payload checksum]
   (let [module-ns "mathx.ops"
         root (ids/fn-id module-ns :gcd-with-12)
         parent (ids/fn-id module-ns :gcd)
@@ -123,7 +123,7 @@
         _ (registry/record-rich-types! parent :gcd base)
         frozen (execution/compile-staged-literal-root root (:by-id @registry/*rich-types-override*)
                                                       {parent (:impl base)}
-                                                      {:bytes bytes :sha256 checksum :visible-fn-ids #{root parent}})]
+                                                      {:bytes payload :sha256 checksum :visible-fn-ids #{root parent}})]
     (assoc frozen :execute #(executor/execute {:compiled-registry (atom {root (:invoke frozen)})} root %))))
 
 
@@ -167,6 +167,38 @@
     (let [changed (assoc module :fns [])]
       (is (= :staged-module-ledger-mismatch
              (rejection-code #(run (staged-options legacy changed #{root floor}))))))))
+
+
+(deftest shipped-json-handler-executes-from-verified-scoped-source
+  (let [originals (vec (concat
+                         (declarations "packages/core/collections/fns.edn" #{:assoc})
+                         (declarations "packages/core/refinements/fns.edn" #{:http-status :text-map})
+                         (declarations "packages/core/system/fns.edn"
+                                       #{:ring-response-shape :ring-response :_ring-response--w-status
+                                         :_ring-response--w-headers :to-json-string})
+                         (declarations "packages/web/response/fns.edn" #{:json-content-type :ok-response :json-ok-response})
+                         (declarations "packages/web/crud-routes/fns.edn" #{:json-handler :_json-handler-body})))
+        root (ids/fn-id "web.crud" :json-handler)
+        parents (mapv (partial ids/fn-id "web.response") [:ok-response :json-content-type])
+        prepare-staged
+        (fn [package owner roots implementations]
+          (let [certified (-> package (snapshot/with-migrated-bindings parents roots)
+                              (snapshot/with-migrated-forwarding owner :data roots))
+                {:keys [source proposed]} (get-in certified [:closure-baselines owner])
+                legacy {:namespace "web.crud" :fns [(dissoc source :namespace :source-file)]}
+                staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace :source-file)])
+                options (staged-options legacy staged (set (keys (:declarations certified))))]
+            (is (= [:project [:data]] (get-in proposed [:bind [:body :data]])))
+            (execution/compile-staged-module certified owner roots implementations options)))
+        {:keys [canonical legacy analysis]} (runtimes originals root prepare-staged)]
+    (is (= :checked (:status analysis)))
+    (doseq [value [{:ok true} [1 false "data"] "value"]]
+      (let [args {:data value}
+            result (canonical args)]
+        (is (= 200 (:status result)))
+        (is (= "application/json" (get-in result [:headers "Content-Type"])))
+        (is (= (legacy args) result))))
+    (is (= :unknown-input-field (rejection-code #(canonical {:body {:data "occupied"}}))))))
 
 
 (deftest prepared-package-rename-executes-through-both-compilers

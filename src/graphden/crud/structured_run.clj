@@ -15,12 +15,12 @@
 
 (defn- trusted-roots
   [ctx frozen]
-  (let [bases (:base-fns ctx)
-        signatures (::owned/native-signatures (meta bases))]
+  (let [base-implementations (:base-fns ctx)
+        signatures (::owned/native-signatures (meta base-implementations))]
     (into {}
           (keep (fn [[id {:keys [name]}]]
                   (when-let [signature (get signatures id)]
-                    (let [impl (get bases (keyword name))]
+                    (let [impl (get base-implementations (keyword name))]
                       (when (owned/owned-impl? id impl)
                         [id {:impl impl :signature signature}])))))
           (:fns frozen))))

@@ -146,7 +146,7 @@
   (let [storage (request/require-storage ctx)
         row (lookup/resolve-fn storage parsed)]
     (when-let [cache (::eager/call-cache ctx)]
-      (.put ^java.util.HashMap cache ::resolved-row
+      (java.util.HashMap/.put cache ::resolved-row
             [row storage (tc/current-org) tc/*current-principal*]))
     row))
 
@@ -155,7 +155,7 @@
   [ctx row]
   (let [storage (request/require-storage ctx)
         [resolved origin org principal] (when-let [cache (::eager/call-cache ctx)]
-                                          (.remove ^java.util.HashMap cache ::resolved-row))]
+                                          (java.util.HashMap/.remove cache ::resolved-row))]
     (when-let [id (:id row)]
       (if (and (identical? row resolved) (identical? storage origin)
                (= org (tc/current-org)) (= principal tc/*current-principal*))

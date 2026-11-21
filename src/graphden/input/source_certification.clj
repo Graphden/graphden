@@ -30,8 +30,9 @@
       (let [{:keys [type code fn-id] :as data} (ex-data failure)]
         (when-not (#{"input" "types"} (some-> type namespace))
           (throw failure))
-        {:blocked (assoc (select-keys data [:fn-id :blockers])
-                         :code (or code type))
+        {:blocked (cond-> (assoc (select-keys data [:fn-id :blockers])
+                                 :code (or code type))
+                    (keyword? (:reason data)) (assoc :reason (:reason data)))
          :dependency (when (and (= :unverified-source-declaration code) (not= fn-id id))
                        fn-id)}))))
 

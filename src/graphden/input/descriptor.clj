@@ -4,6 +4,7 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.core :as input]
+    [graphden.input.field-default :as field-default]
     [graphden.input.format :as format]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.types :as records]
@@ -30,8 +31,9 @@
 (defn- field-rows
   [{:keys [fields members]} type-id]
   (mapv (fn [membership]
-          (or (get fields (:slot-id membership))
-              (context/reject! :missing-field {:type-id type-id :field-id (:slot-id membership)})))
+          (if-let [field (get fields (:slot-id membership))]
+            (cond-> field (some? (:input-default membership)) (assoc :input-default (:input-default membership)))
+            (context/reject! :missing-field {:type-id type-id :field-id (:slot-id membership)})))
         (sort-by (juxt :position (comp str :id)) (get members type-id))))
 
 
@@ -134,6 +136,8 @@
               (when-not (= (get rich name) (:type child))
                 (context/reject! :field-type-mismatch {:type-id type-id :field-id (:id field)}))
               (merge child (select-keys field [:description])
+                     (when-some [envelope (:input-default field)]
+                       {:default (field-default/read-envelope field (:type child) envelope)})
                      {:id (:id field) :name name
                       :required (if (contains? field :required)
                                   (boolean (:required field))

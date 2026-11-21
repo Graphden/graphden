@@ -1,6 +1,7 @@
 (ns graphden.input.source-primitive
   "Prepare an independent format-2 primitive declaration for offline execution."
   (:require
+    [graphden.input.field-default :as field-default]
     [graphden.input.format :as format]
     [graphden.input.module :as module]
     [graphden.input.source-context :as source-context]
@@ -25,8 +26,10 @@
 (defn- field-spec?
   [spec]
   (if (map? spec)
-    (and (every? #{:type :description :required} (keys spec))
-         (leaf-type? (:type spec))
+    (and (every? #{:type :description :required :default} (keys spec))
+         (if (contains? spec :default)
+           (field-default/supported? (:required spec) (:type spec) (:default spec))
+           (leaf-type? (:type spec)))
          (or (nil? (:description spec)) (string? (:description spec)))
          (or (not (contains? spec :required)) (boolean? (:required spec))))
     (leaf-type? spec)))
@@ -90,8 +93,20 @@
 
 (defn- base-context
   [environment authored]
-  (let [rows (module/unique-records (parse/base-declaration-records authored (:input authored) {}))]
-    (source-context/declaration-context environment authored rows [])))
+  (let [owner (ids/fn-id (:namespace authored) (:name authored))
+        defaults (into {} (keep (fn [[field spec]]
+                                  (when (and (map? spec) (contains? spec :default))
+                                    [(ids/slot-id owner field) {:value (:default spec)}]))) (:input authored))
+        rows (module/unique-records (parse/base-declaration-records authored (:input authored) {}))
+        rows (mapv #(if (and (= :slot (:kind %)) (contains? defaults (:id %)))
+                      (assoc % :type-fn-id field-default/nullable-text-id) %) rows)
+        ctx (source-context/declaration-context environment authored rows [])]
+    (update ctx :declaration-records
+            (fn [records]
+              (mapv (fn [{:keys [kind fn-id slot-id] :as row}]
+                      (if (and (= :fn-slot kind) (= (:input-type-id ctx) fn-id) (contains? defaults slot-id))
+                        (assoc row :input-default (get defaults slot-id))
+                        row)) records)))))
 
 
 (defn prepare
@@ -144,6 +159,8 @@
                    (contains? visible-fn-ids parent-id))
       (reject! :staged-function-not-visible))
     (require-primitive! parent)
+    (when (some #(and (map? %) (contains? % :default)) (vals (:input parent)))
+      (reject! :staged-literal-parent-default-unsupported))
     (when-not (contains? (:input parent) field)
       (reject! :staged-literal-field-unknown))
     (let [parent-source (assoc parent :namespace module-ns)

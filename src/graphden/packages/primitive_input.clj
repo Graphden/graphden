@@ -154,6 +154,10 @@
           (let [{:keys [context options]} (snapshot/freeze-literal-root module owner signatures #{id owner})
                 result (analysis/analyze-effective-input context owner options)]
             (when-not (= :checked (:status result)) (reject!))))
-        (into (:declaration-records parsed)
+        ;; Explicitly clear removed defaults when resync updates existing rows.
+        (into (mapv (fn [row]
+                      (if (and (= :fn-slot (:kind row)) (= (:input-type-id parsed) (:fn-id row)))
+                        (merge {:input-default nil} row)
+                        row)) (:declaration-records parsed))
               (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
               children)))))

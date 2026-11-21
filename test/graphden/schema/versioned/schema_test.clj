@@ -155,7 +155,7 @@
              :return-type-fn-id :anonymous-hash :expects-effects
              :lambda-params}
            (vds/version-data-fields :fn)))
-    (is (= #{:fn-id :slot-id :position} (vds/version-data-fields :fn-slot)))
+    (is (= #{:fn-id :slot-id :position :input-default} (vds/version-data-fields :fn-slot)))
     (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id
              :type-override-fn-id :description :list-append :list-closed
              :terminal :required :resolver-fn-id}

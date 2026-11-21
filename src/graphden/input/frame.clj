@@ -67,11 +67,11 @@
 
 (defn- resolve-expression
   [frame address ctx]
-  (let [{:keys [op value source fields scope target-id]} (get-in frame [:ir :expressions address])]
+  (let [{:keys [op value source fields scope target-id default]} (get-in frame [:ir :expressions address])]
     (case op
       :literal value
       :closure (lexical-callable frame address target-id ctx)
-      :supplied (get-in frame [:supplied address])
+      :supplied (get (:supplied frame) address default)
       :read @(get-in frame [:cells source])
       :record (input/record-view
                 (into {} (keep (fn [[name child]]

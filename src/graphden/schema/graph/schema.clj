@@ -487,6 +487,8 @@
    :slot-id {:uuid fn-slot-slot-id-field-uuid
              :type :ref
              :ref-entity :slot}
+   :input-default {:uuid #uuid "b42bcb3c-22b3-49f3-b329-2f38c931ff47"
+                   :type :jsonb :nullable? true}
    :position {:uuid fn-slot-position-field-uuid
               :type :int}
    ;; Tenant owner (§3.0 B2). NULL ≡ public.

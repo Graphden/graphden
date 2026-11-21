@@ -105,7 +105,8 @@
 
 (defn assert-public-input!
   [entity data]
-  (when (and (#{:fn :fn-version} entity) (contains? data :input-type-fn-id))
+  (when (or (and (#{:fn :fn-version} entity) (contains? data :input-type-fn-id))
+            (and (#{:fn-slot :fn-slot-version} entity) (contains? data :input-default)))
     (deny!)))
 
 

@@ -175,6 +175,8 @@
     (ir/reject! :browser-visibility-policy-required {}))
   (let [{:keys [root-scope expressions scopes parameters frame-layouts] :as plan}
         (ir/lower-checked analysis options)]
+    (when (some #(contains? % :default) (vals expressions))
+      (ir/reject! :browser-field-default-unsupported {}))
     (when (and closed?
                (or (seq parameters)
                    (let [{:keys [record-inputs required-addresses]} (get frame-layouts root-scope)]

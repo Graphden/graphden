@@ -651,7 +651,8 @@
    :fn-slot {:identity-fields #{:org-id}
              :uuids {:fn-id fn-slot-version-fn-id-field-uuid
                      :slot-id fn-slot-version-slot-id-field-uuid
-                     :position fn-slot-version-position-field-uuid}
+                     :position fn-slot-version-position-field-uuid
+                     :input-default #uuid "bb8e2ba4-4d4a-48e0-bb5c-641ca6d6b061"}
              ;; Bounded source reads find candidates by owner on ANY version.
              ;; Demoted refs need explicit indexes on the version table.
              :tweaks {:fn-id {:indexed? true}}}

@@ -6,6 +6,7 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.interface :as exec]
     [graphden.input.migration :as migration]
+    [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
@@ -14,18 +15,22 @@
     [graphden.test-infra.golden-app :as golden]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
-    [integrant.core :as ig]))
+    [integrant.core :as ig]
+    [org.httpkit.client :as http]
+    [org.httpkit.server :as server]))
 
 
 (use-fixtures :once (golden/fixture (ns-name *ns*)))
 
 
 (defn- request
-  [app token method uri params]
-  (router/dispatch app (merge {:request-method method :uri uri :headers {"authorization" (str "Bearer " token)}}
-                              (if-let [content (:content-type params)]
-                                {:headers {"authorization" (str "Bearer " token) "content-type" content} :body (:body params)}
-                                params))))
+  [origin token method uri {:keys [content-type query-string body]}]
+  (let [response @(http/request {:method method :url (str origin uri (when query-string (str "?" query-string)))
+                                 :headers (cond-> {"authorization" (str "Bearer " token)}
+                                            content-type (assoc "content-type" content-type))
+                                 :body body :timeout 30000})]
+    (when-let [error (:error response)] (throw error))
+    response))
 
 
 (defn- extend-native
@@ -48,18 +53,11 @@
           (:fns (json/parse-string (:body response) true)))))
 
 
-(deftest ordinary-extend-and-named-input-commands
-  (let [storage (:storage golden/*bootstrap*)
-        parent lesson/root
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons"]
-                                             :primitive-input lesson/admission})
-        {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
-        input (migration/derived-id :input-type parent)
+(defn- exercise-commands!
+  [app token storage seams]
+  (let [parent lesson/root
         v1 (ids/fn-id "core.arithmetic" :ceil)
-        token (str (random-uuid))
-        ctx (exec/create-context {:storage storage :base-fns base-fns :auth-provider (auth/single-token-provider token)})
-        _ (executor/rebuild! ctx)
-        app (router/create-router ctx "_app-ring-response")
+        input (migration/derived-id :input-type parent)
         created (extend-native app token "writable-profile-child" parent)
         old (extend-native app token "legacy-ceil-child" v1)
         child (:id (first (sp/query-entities storage :fn {:name "writable-profile-child"})))
@@ -85,7 +83,7 @@
             binding-id (:binding-id bound)]
         (when binding-id
           (let [id (parse-uuid binding-id)
-                row (sp/read-entity storage :input-binding id)
+                row (rows/normalize (sp/read-entity storage :input-binding id))
                 profile (ids/slot-id parent :profile)
                 record (:type-fn-id (sp/read-entity storage :slot profile))
                 edit {:fn-id child :binding-id binding-id :action "edit" :value "Bea"}
@@ -113,12 +111,15 @@
                                 {:content-type "application/x-www-form-urlencoded" :body (str "fn-id=" child)})) 400))
       (is (= 401 (:status (request app "unauthorized" :post "/api/structured-input/preview"
                                    {:content-type "application/json" :body (json/generate-string action)}))))
-      (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
-        (tenancy/install-browser-source-policy!
-          (fn [_] (fn [row & _] (when (= input (:id row)) (throw (ex-info "Denied" {:type :authz/forbidden}))))))
-        (is (= 403 (:http (command app token "preview" action))))
-        (is (nil? (subtree app token child)))
-        (is (>= (:status (extend-native app token "closed-profile-child" parent)) 400)))
+      (let [initial @seams]
+        (try
+          (binding [tenancy/*seams-override* seams]
+            (tenancy/install-browser-source-policy!
+              (fn [_] (fn [row & _] (when (= input (:id row)) (throw (ex-info "Denied" {:type :authz/forbidden})))))))
+          (is (= 403 (:http (command app token "preview" action))))
+          (is (nil? (subtree app token child)))
+          (is (>= (:status (extend-native app token "closed-profile-child" parent)) 400))
+          (finally (reset! seams initial))))
       (is (empty? (sp/query-entities storage :fn {:name "closed-profile-child"})))
       (let [branch (vs/current-branch-id storage)]
         (sp/update-entity storage :branch branch {:require-merge? true})
@@ -126,3 +127,22 @@
           (is (not (:extend-available (subtree app token parent))))
           (is (>= (:http (command app token "preview" action)) 400))
           (finally (sp/update-entity storage :branch branch {:require-merge? false})))))))
+
+
+(deftest ordinary-extend-and-named-input-commands
+  (let [storage (:storage golden/*bootstrap*)
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons"]
+                                             :primitive-input lesson/admission})
+        {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
+        token (str (random-uuid))
+        ctx (exec/create-context {:storage storage :base-fns base-fns :auth-provider (auth/single-token-provider token)})
+        _ (executor/rebuild! ctx)
+        app (router/create-router ctx "_app-ring-response")
+        seams (atom (tenancy/seams-isolation-seed))
+        handler (bound-fn [req]
+                  (binding [tenancy/*seams-override* seams]
+                    (update (router/dispatch app req) :headers update-keys name)))
+        stop (server/run-server handler {:ip "127.0.0.1" :port 0})]
+    (try
+      (exercise-commands! (str "http://127.0.0.1:" (:local-port (meta stop))) token storage seams)
+      (finally (stop)))))

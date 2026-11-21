@@ -12,8 +12,8 @@
 
 
 (defn- read-error
-  [bytes checksum]
-  (try (staged/read-pinned bytes checksum)
+  [payload checksum]
+  (try (staged/read-pinned payload checksum)
        (catch clojure.lang.ExceptionInfo failure (ex-data failure))))
 
 

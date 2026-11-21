@@ -68,7 +68,7 @@
   [{:keys [originals] :as package} legacy staged]
   (format/require-legacy! legacy "<original staged module>")
   (format/require-v2! staged)
-  (let [namespace (:namespace legacy)
+  (let [module-ns (:namespace legacy)
         original (:fns legacy)
         proposed (:fns staged)
         expected-header (assoc (dissoc legacy :fns) :input-format 2)]
@@ -82,7 +82,7 @@
                      (= names (mapv :name proposed)))
         (reject! :staged-module-ledger-mismatch nil)))
     (let [by-id (into {} (map (fn [definition draft]
-                                (let [source (assoc definition :namespace namespace)
+                                (let [source (assoc definition :namespace module-ns)
                                       id (definition-id source)
                                       [indexed & more] (get originals id)]
                                   (when-not (and indexed (empty? more)

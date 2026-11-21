@@ -40,10 +40,10 @@
    Only a root from the staged module can be compiled here. Dependencies
    outside the module still come from the caller's visible prepared package.
    No registration, package loading, or storage changes occur."
-  [package root roots implementations {:keys [legacy-module bytes sha256 visible-fn-ids]}]
+  [package root roots implementations {payload :bytes :keys [legacy-module sha256 visible-fn-ids]}]
   (when-not (and (set? visible-fn-ids) (contains? visible-fn-ids root))
     (ir/reject! :staged-function-not-visible {}))
-  (let [module (staged/read-pinned bytes sha256)
+  (let [module (staged/read-pinned payload sha256)
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)
       (ir/reject! :staged-root-required {}))

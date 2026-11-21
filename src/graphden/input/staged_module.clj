@@ -10,6 +10,8 @@
     (java.nio
       ByteBuffer)
     (java.nio.charset
+      Charset
+      CharsetDecoder
       StandardCharsets)
     (java.security
       MessageDigest)))
@@ -24,15 +26,16 @@
 (defn read-pinned
   "Verify an externally supplied SHA-256 before reading exactly one UTF-8
    EDN form. Never retain bytes or reader exceptions in diagnostics."
-  [bytes expected-sha256]
-  (when-not (bytes? bytes)
+  [payload expected-sha256]
+  (when-not (bytes? payload)
     (reject! :staged-module-bytes-required))
-  (let [bytes (aclone ^bytes bytes)
-        checksum (hex/encode (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") bytes))]
+  (let [snapshot (aclone ^bytes payload)
+        checksum (hex/encode (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") snapshot))]
     (when-not (= checksum expected-sha256)
       (reject! :staged-module-checksum-mismatch))
     (try
-      (let [text (str (.decode (.newDecoder StandardCharsets/UTF_8) (ByteBuffer/wrap bytes)))]
+      (let [decoder (Charset/.newDecoder StandardCharsets/UTF_8)
+            text (str (CharsetDecoder/.decode decoder (ByteBuffer/wrap snapshot)))]
         (with-open [reader (PushbackReader. (StringReader. text))]
           (let [eof (Object.)
                 options {:readers {} :eof eof}

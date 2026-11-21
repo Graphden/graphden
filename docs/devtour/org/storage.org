@@ -236,7 +236,7 @@ Prepares bounded session-incarnation evidence before owning a repeatable-read tr
 :CUSTOM_ID: storage/PostgresStorage
 :FILE: src/graphden/storage/postgres/core.clj
 :LINE: 155
-:MINS: 14.1
+:MINS: 14.2
 :END:
 
 Implements the storage [[file:glossary.org::#term/protocol][protocols]] for PostgreSQL, mostly by delegating each method to a helper. Its ~ExecutionGraph~ implementation selects the optimized PostgreSQL resolver rather than the generic traversal. Read the [[file:glossary.org::#term/protocol][protocol]] headings to distinguish lifecycle, row operations, constraints, and graph resolution.

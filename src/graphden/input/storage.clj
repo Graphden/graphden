@@ -18,10 +18,9 @@
   (uniqueness/xact-lock! (tx/datasource storage) ["structured-input-bindings"]))
 
 
-(defn with-binding-writer!
+(defn with-binding-transaction!
   "Run a structured binding operation on the decorated writer connection."
   [storage operation]
-  (access/assert-write! :input-binding {})
   (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage)))
     (throw (ex-info "Input writes require a versioned branch"
                     {:type :input/version-required})))
@@ -35,6 +34,21 @@
                        (resolution/call-with-fresh-memos #(operation storage)))))
 
 
+(defn with-binding-writer!
+  [storage operation]
+  (access/assert-write! :input-binding {})
+  (with-binding-transaction! storage operation))
+
+
+(defn current-binding!
+  "Read the expected winner inside the caller's authorized binding transaction."
+  [storage id expected-version]
+  (let [current (resolution/resolve-version (vs/unwrap storage) :input-binding id (vs/current-branch-id storage))]
+    (when-not (and (= expected-version (:id current)) (not (resolution/tombstone? current)))
+      (throw (ex-info "Input binding changed since it was read" {:type :input/stale-version})))
+    current))
+
+
 (defn with-current-binding!
   "Run an operation with the live branch winner under the owned graph writer
    transaction and structured binding lock. The callback receives decorated
@@ -44,14 +58,7 @@
     (throw (ex-info "Input edits require a version precondition"
                     {:type :input/version-required})))
   (with-binding-writer! storage
-    (fn [storage]
-      (let [current (resolution/resolve-version (vs/unwrap storage) :input-binding id
-                                                (vs/current-branch-id storage))]
-        (when-not (and (= expected-version (:id current))
-                       (not (resolution/tombstone? current)))
-          (throw (ex-info "Input binding changed since it was read"
-                          {:type :input/stale-version})))
-        (operation storage current)))))
+    (fn [storage] (operation storage (current-binding! storage id expected-version)))))
 
 
 (defn replace-binding!

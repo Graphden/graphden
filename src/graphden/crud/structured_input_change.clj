@@ -4,6 +4,7 @@
     [graphden.crud.request :as request]
     [graphden.crud.structured-input :as structured]
     [graphden.crud.structured-input-bind :as bind]
+    [graphden.input.access :as access]
     [graphden.input.storage :as input-storage]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
@@ -59,9 +60,8 @@
 
 
 (defn- plan
-  [storage action {:keys [fn-id binding-id expected-state] :as command} version]
-  (let [ctx (bind/writable-context storage fn-id)
-        row (own-literal ctx fn-id binding-id)
+  [ctx storage action {:keys [fn-id binding-id expected-state] :as command} version]
+  (let [row (own-literal ctx fn-id binding-id)
         _ (writer/assert-write-authorized! storage :input-binding {} binding-id)
         basis (bind/preview-basis storage ctx (-> command (dissoc :expected-version) (assoc :action action)))]
     (when (and version (not= expected-state basis))
@@ -81,16 +81,17 @@
     (bind/with-input-write storage
                            (fn [snapshot]
                              (merge {:ok true :action action :fn-id fn-id :binding-id binding-id}
-                                    (select-keys (plan snapshot action command nil) [:expected-state :expected-version]))))))
+                                    (select-keys (plan (bind/writable-context ctx snapshot fn-id) snapshot action command nil) [:expected-state :expected-version]))))))
 
 
 (defn- apply-plan!
-  [storage action {:keys [binding-id value] :as command} version]
-  (let [{:keys [owner]} (plan storage action command (:id version))
-        result (case action
-                 :edit (sp/update-entity storage :input-binding binding-id {:value value})
-                 :remove (binding [vs/*tombstone-delete?* true]
-                           (sp/delete-entity storage :input-binding binding-id)))]
+  [frozen storage action {:keys [fn-id binding-id value] :as command} version]
+  (let [{:keys [owner]} (plan frozen storage action command (:id version))
+        result (access/with-binding-write fn-id binding-id
+                                          #(case action
+                                             :edit (sp/update-entity storage :input-binding binding-id {:value value})
+                                             :remove (binding [vs/*tombstone-delete?* true]
+                                                       (sp/delete-entity storage :input-binding binding-id))))]
     (when-not result
       (reject! :input/write-refused "The input binding was not changed"))
     owner))
@@ -103,8 +104,12 @@
     (fn []
       (let [storage (request/require-storage ctx)
             {:keys [fn-id binding-id expected-version] :as command} (normalize-command action :apply request)
-            owner (binding [vs/*enforce-require-merge?* true]
-                    (input-storage/with-current-binding! storage binding-id expected-version
-                                                         #(apply-plan! %1 action command %2)))]
+            owner (bind/with-input-write storage
+                                         (fn [snapshot]
+                                           (let [frozen (bind/writable-context ctx snapshot fn-id)]
+                                             (own-literal frozen fn-id binding-id)
+                                             (writer/assert-write-authorized! snapshot :input-binding {} binding-id)
+                                             (apply-plan! frozen snapshot action command
+                                                          (input-storage/current-binding! snapshot binding-id expected-version)))))]
         (bind/publish! ctx storage owner
                        {:ok true :committed true :action action :fn-id fn-id :binding-id binding-id})))))

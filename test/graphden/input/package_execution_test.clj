@@ -32,25 +32,27 @@
 
 
 (def ^:private loaded (delay (:base-fn-defs (loader/load-packages ["core"]))))
+(def ^:private mathx-loaded (delay (:base-fn-defs (loader/load-packages ["core" "mathx"]))))
 
 
 (defn- runtimes
   ([source root] (runtimes source root execution/compile-package))
-  ([source root compile-package]
+  ([source root compile-package] (runtimes source root compile-package @loaded))
+  ([source root compile-package base-fn-defs]
    (let [prepared (parse/prepare-module source {} {})
          records (group-by :kind (parse/parse-prepared-module prepared))
          graph {:fns (:fn records) :slots (:slot records) :fn-slots (:fn-slot records)
                 :bindings (:binding records) :list-items (:binding-list-item records)}
-         base-declarations (filter #(contains? @loaded (:name %)) source)
+         base-declarations (filter #(contains? base-fn-defs (:name %)) source)
          _ (doseq [{:keys [name] module-ns :namespace} base-declarations]
-             (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded name)))
+             (registry/record-rich-types! (ids/fn-id module-ns name) name (get base-fn-defs name)))
          roots (:by-id @registry/*rich-types-override*)
          implementations (into {} (map (fn [{:keys [name] module-ns :namespace}]
-                                         [(ids/fn-id module-ns name) (:impl (get @loaded name))])) base-declarations)
+                                         [(ids/fn-id module-ns name) (:impl (get base-fn-defs name))])) base-declarations)
          canonical (compile-package (snapshot/package-index prepared source)
                                     root roots implementations)
          legacy (eager/compile-all (assoc (lookups/build-lookups graph)
-                                          :base-fns (registry/compute-base-fns-map @loaded)))
+                                          :base-fns (registry/compute-base-fns-map base-fn-defs)))
          invoke (fn [compiled args]
                   (executor/execute {:compiled-registry (atom compiled)
                                      :graph-cache (atom graph) :base-fns {}}
@@ -93,6 +95,32 @@
     (is (= :checked (:status analysis)))
     (is (= -3 (execute {:number -2.5})))
     (is (= :unknown-input-field (rejection-code #(execute {:value 1}))))))
+
+
+(defn- staged-gcd
+  [bytes checksum]
+  (let [module-ns "mathx.ops"
+        root (ids/fn-id module-ns :gcd-with-12)
+        parent (ids/fn-id module-ns :gcd)
+        base (get @mathx-loaded :gcd)
+        _ (registry/record-rich-types! parent :gcd base)
+        frozen (execution/compile-staged-literal-root root (:by-id @registry/*rich-types-override*)
+                                                      {parent (:impl base)}
+                                                      {:bytes bytes :sha256 checksum :visible-fn-ids #{root parent}})]
+    (assoc frozen :execute #(executor/execute {:compiled-registry (atom {root (:invoke frozen)})} root %))))
+
+
+(deftest staged-composed-root-keeps-only-its-residual-field
+  (let [module {:input-format 2 :namespace "mathx.ops"
+                :fns [{:name :gcd :input {:a :int :b :int} :return-type :int :effects #{}}
+                      {:name :gcd-with-12 :parent :gcd :bind {:a [:value 12]}}]}
+        text (pr-str module)
+        {:keys [analysis execute]} (staged-gcd (String/.getBytes text StandardCharsets/UTF_8)
+                                               (ids/digest-hex "SHA-256" text))]
+    (is (= :checked (:status analysis)))
+    (is (= #{[:b]} (set (keys (get-in analysis [:public-input :routes])))))
+    (is (= 6 (execute {:b 18})))
+    (is (= :unknown-input-field (rejection-code #(execute {:a 9 :b 18}))))))
 
 
 (deftest staged-module-replays-byte-derived-bindings-before-execution

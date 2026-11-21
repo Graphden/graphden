@@ -271,14 +271,26 @@
     {:context ctx :options (implementation-options ctx entries roots)}))
 
 
+(defn- freeze-source-declarations
+  [declarations roots]
+  (let [entries (into {} (map (fn [{:keys [fn-id declaration-records] :as declaration}]
+                                (let [owner (some #(when (and (= :fn (:kind %)) (= fn-id (:id %))) %)
+                                                  declaration-records)]
+                                  [fn-id (assoc declaration :owner owner)]))) declarations)
+        ctx (verified-context {:markers (shapes/markers-snapshot)} entries {})]
+    {:context ctx :options (implementation-options ctx entries roots)}))
+
+
 (defn freeze-primitive
   "Freeze a staged primitive without a legacy original or dependency context."
   [module root roots]
-  (let [{:keys [declaration-records] :as declaration} (primitive/prepare module root)
-        owner (some #(when (and (= :fn (:kind %)) (= root (:id %))) %) declaration-records)
-        entries {root (assoc declaration :owner owner)}
-        ctx (verified-context {:markers (shapes/markers-snapshot)} entries {})]
-    {:context ctx :options (implementation-options ctx entries roots)}))
+  (freeze-source-declarations [(primitive/prepare module root)] roots))
+
+
+(defn freeze-literal-root
+  "Freeze a composed root and its visible primitive parent from one v2 file."
+  [module root roots visible-fn-ids]
+  (freeze-source-declarations (primitive/prepare-literal-root module root visible-fn-ids) roots))
 
 
 (defn- source-binding

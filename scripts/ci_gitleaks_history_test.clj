@@ -104,9 +104,9 @@
             scans (atom 0)
             published (atom [])]
         (with-redefs [history/inputs (fn [& _]
-                                      (let [snapshot (first @observations)]
-                                        (swap! observations subvec 1)
-                                        snapshot))
+                                       (let [snapshot (first @observations)]
+                                         (swap! observations subvec 1)
+                                         snapshot))
                       history/read-cache (constantly proof)
                       history/run-gitleaks! (fn [& _] (swap! scans inc))
                       history/write-cache! (fn [_ value] (swap! published conj (dissoc value :schema :result)))]

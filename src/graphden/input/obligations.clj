@@ -19,6 +19,18 @@
      :kind kind :trigger trigger :expected-type (or expected-type (:type node))}))
 
 
+(defn- retain-obligation
+  [by-id {:keys [id expected-type] :as incoming}]
+  (if-let [prior (get by-id id)]
+    (cond
+      (or (= expected-type (:expected-type prior)) (= :any expected-type)) by-id
+      (= :any (:expected-type prior)) (assoc by-id id incoming)
+      ;; A single read can require multiple checks. Their intersection needs
+      ;; an explicit representation before it can be passed to the compiler.
+      :else (context/reject! :conflicting-runtime-obligations (select-keys incoming [:address :kind :trigger])))
+    (assoc by-id id incoming)))
+
+
 (defn separate
   "Checked means the supported analysis is complete. Deferred value validation
    remains an explicit obligation with a field-read or container boundary;
@@ -26,7 +38,7 @@
   [graph]
   (let [runtime? #(contains? runtime-codes (:code %))
         obligations (->> (:diagnostics graph) (filter runtime?) (map #(obligation graph %))
-                         (reduce #(assoc %1 (:id %2) %2) {}) vals
+                         (reduce retain-obligation {}) vals
                          (sort-by (juxt (comp context/address-sort-key :address) :kind :trigger)) vec)
         diagnostics (filterv (complement runtime?) (:diagnostics graph))
         by-scope (group-by (comp second :scope) obligations)]

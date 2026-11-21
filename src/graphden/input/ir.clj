@@ -27,6 +27,9 @@
   (let [obligations (distinct (concat (:obligations analysis)
                                       (mapcat :obligations (vals (:scopes analysis)))))]
     (doseq [{:keys [address kind trigger expected-type]} obligations]
+      (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type)
+                 (= :supplied (get-in expressions [address :op])))
+        (reject! :supplied-callable-validation-required {:address address :kind kind :trigger trigger}))
       (when-not (and (= :value-type kind) (= :field-read trigger)
                      (if-let [closure (get closures address)]
                        (= expected-type (:type closure))

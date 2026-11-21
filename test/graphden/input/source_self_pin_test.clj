@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
+    [graphden.input.compile :as compile]
     [graphden.input.rows :as rows]
     [graphden.input.source :as source]
     [graphden.input.source-package-fixtures :as fixtures]
@@ -11,26 +12,33 @@
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
-    [graphden.types.check :as check]))
+    [graphden.types.check :as check]
+    [graphden.types.validator :as validator]))
 
 
-(deftest generic-callable-self-pin-describes-a-free-inherited-field
+(defn- self-pin-fixture
+  []
   (let [originals (fixtures/declarations "packages/core/collections/fns.edn" #{:assoc :assoc-fn})
         prepared (parse/prepare-module originals {} {})
         source-plan (source/verify-module (source/plan-module originals prepared) prepared)
         entry (some #(when (= :assoc-fn (get-in % [:source :name])) %) (:definitions source-plan))
         owner (:identity entry)
         base (ids/fn-id "core.collections" :assoc)
+        roots (binding [registry/*rich-types-override* (atom {:by-name {} :by-id {}})]
+                (registry/record-rich-types! base :assoc (get @fixtures/web-base-definitions :assoc))
+                (:by-id @registry/*rich-types-override*))
+        package (snapshot/package-index prepared originals)
+        {:keys [context entries]} (snapshot/freeze-declarations package [owner])]
+    {:owner owner :base base :entry entry :roots roots :package package :prepared prepared :context context :entries entries}))
+
+
+(deftest generic-callable-self-pin-describes-a-free-inherited-field
+  (let [{:keys [owner base entry roots package context prepared]} (self-pin-fixture)
         slot (ids/slot-id base :value)
         id (ids/binding-id owner slot)
         scheme (get-in entry [:source :args :value :type])
         [legacy] (filter #(= :binding (:kind %)) (get-in entry [:legacy :records]))
         [row] (get-in entry [:v2 :bindings])
-        roots (binding [registry/*rich-types-override* (atom {:by-name {} :by-id {}})]
-                (registry/record-rich-types! base :assoc (get @fixtures/web-base-definitions :assoc))
-                (:by-id @registry/*rich-types-override*))
-        package (snapshot/package-index prepared originals)
-        {:keys [context]} (snapshot/freeze-declarations package [owner])
         checked (analysis/analyze-input context owner {:check-expression check/check-input-binding})
         address [[owner []] [slot]]
         scoped-type (variables/type-in-scope [owner []] scheme)
@@ -73,3 +81,28 @@
       (is (not (rich/exact-self-pin? original (assoc field :id (ids/slot-id owner :value)) config records)))
       (is (not (rich/exact-self-pin? original field (assoc-in config [:row :expression-kind] "value") records)))
       (is (not (rich/exact-self-pin? original field config (dissoc records (:type-override-fn-id row))))))))
+
+
+(deftest effective-self-pin-preserves-the-field-read-and-rejects-an-external-callable
+  (let [{:keys [owner base entry roots context entries]} (self-pin-fixture)
+        address [[owner []] [(ids/slot-id base :value)]]
+        scheme (variables/type-in-scope [owner []] (get-in entry [:source :args :value :type]))
+        ;; Exercise the downstream compiler independently of package admission
+        ;; with the same frozen field paths and registry signatures it receives.
+        options (#'snapshot/implementation-options context entries roots)
+        graph (analysis/analyze-effective-input context owner options)
+        reads (filterv #(= address (:address %)) (:obligations graph))
+        implementations (update-vals (:implementations options) #(assoc % :impl (:impl (get @fixtures/web-base-definitions :assoc))))
+        compile-error (try (compile/compile-checked graph {:context context :implementations implementations})
+                           nil
+                           (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+    (is (= :checked (:status graph)))
+    (is (= [[scheme :value-type :field-read]] (mapv (juxt :expected-type :kind :trigger) reads)))
+    (is (every? (set (get-in graph [:scopes [] :obligations])) reads))
+    (is (= {} (get-in graph [:scopes [] :metadata-proofs (get-in entry [:v2 :bindings 0 :id]) :substitution])))
+    (is (= {:type :input/compile-rejected :code :supplied-callable-validation-required
+            :address address :kind :value-type :trigger :field-read} compile-error))
+    (is (= :types/unsupported-validator
+           (try (validator/build scheme)
+                nil
+                (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))

@@ -419,6 +419,14 @@ Production activation requires resolving packages, imports and visibility
 from version-2 source and selecting its compiler in the loader. Import,
 storage migration and registration are separate operations.
 
+`compile-staged-primitive` prepares one independent root directly from the
+pinned version-2 file. It derives the declaration and field UUIDs from the
+authored name and input fields through the shared storage row emitter. The
+caller supplies the visible root, frozen signature and implementation. This
+path accepts scalar primitive input and output declarations. Inheritance,
+binding expressions, configuration and richer types require additional
+preparation and report explicit blockers.
+
 ## Focused verification
 
 ```sh

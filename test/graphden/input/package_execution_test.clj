@@ -72,6 +72,29 @@
      :sha256 (ids/digest-hex "SHA-256" text) :visible-fn-ids visible}))
 
 
+(defn- staged-floor
+  [payload checksum]
+  (let [module-ns "core.arithmetic"
+        root (ids/fn-id module-ns :floor)
+        base (get @loaded :floor)
+        _ (registry/record-rich-types! root :floor base)
+        frozen (execution/compile-staged-primitive root (:by-id @registry/*rich-types-override*)
+                                                   {root (:impl base)}
+                                                   {:bytes payload :sha256 checksum :visible-fn-ids #{root}})]
+    (assoc frozen :execute #(executor/execute {:compiled-registry (atom {root (:invoke frozen)})} root %))))
+
+
+(deftest staged-primitive-executes-without-legacy-preparation
+  (let [module {:input-format 2 :namespace "core.arithmetic"
+                :fns [{:name :floor :input {:number :numeric} :return-type :int}]}
+        text (pr-str module)
+        {:keys [analysis execute]} (staged-floor (String/.getBytes text StandardCharsets/UTF_8)
+                                                 (ids/digest-hex "SHA-256" text))]
+    (is (= :checked (:status analysis)))
+    (is (= -3 (execute {:number -2.5})))
+    (is (= :unknown-input-field (rejection-code #(execute {:value 1}))))))
+
+
 (deftest staged-module-replays-byte-derived-bindings-before-execution
   (let [module-ns "offline.fixture"
         name :fixed-floor

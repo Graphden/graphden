@@ -11,6 +11,7 @@
     [graphden.input.source :as source]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-named-types :as named-types]
+    [graphden.input.source-primitive :as primitive]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.input.source-scope :as scope]
@@ -317,6 +318,16 @@
   (let [resolve-named (named-types/lookup package (partial plan-entry package))
         entries (closure package function-ids resolve-named)
         ctx (verified-context package entries resolve-named)]
+    {:context ctx :options (implementation-options ctx entries roots)}))
+
+
+(defn freeze-primitive
+  "Freeze a staged primitive without a legacy original or dependency context."
+  [module root roots]
+  (let [{:keys [declaration-records] :as declaration} (primitive/prepare module root)
+        owner (some #(when (and (= :fn (:kind %)) (= root (:id %))) %) declaration-records)
+        entries {root (assoc declaration :owner owner)}
+        ctx (verified-context {:markers (shapes/markers-snapshot)} entries {})]
     {:context ctx :options (implementation-options ctx entries roots)}))
 
 

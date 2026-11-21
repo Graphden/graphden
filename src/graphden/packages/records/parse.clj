@@ -118,10 +118,9 @@
 
 
 (defn- parse-base-fn
-  "A fn-def with `:args` declaration and an impl is a base-fn. The
-   args become slot/fn-slot rows."
-  [{:keys [args return-type description]
-    fn-name :name ns-id :namespace} name->id]
+  "Emit a base function and the storage identities of its declared fields."
+  [{:keys [return-type description]
+    fn-name :name ns-id :namespace} fields name->id]
   (let [own-id (ids/fn-id ns-id fn-name)
         ;; A base-fn ALWAYS carries a return-type-fn-id — it is THE
         ;; structural discriminator vs a record-type (which has none).
@@ -138,7 +137,7 @@
                 :anonymous-hash nil
                 :constraint nil
                 :description description}
-        slots-records (emit-composite-records own-id (or args {}) name->id)
+        slots-records (emit-composite-records own-id (or fields {}) name->id)
         return-rows (inline-record-rows-for-return-type return-type name->id)]
     (into [own-fn] (concat slots-records return-rows))))
 
@@ -838,6 +837,12 @@
         (update 0 assoc :branch-local? (boolean (:branch-local? fn-def))))))
 
 
+(defn base-declaration-records
+  "Emit exact base declaration rows from a prepared identity and its fields."
+  [definition fields name->id]
+  (attach-fn-meta (parse-base-fn definition fields name->id) definition))
+
+
 (defn parse-fn-def
   "Dispatches on EDN entry shape; returns vector of records.
 
@@ -906,7 +911,7 @@
              :constraint (let [canonical (types/fn-type-declaration ft)]
                            (if (= 2 (count ft)) (pop canonical) canonical))
              :description description}])
-         :else             (parse-base-fn fn-def name->id))
+         :else             (parse-base-fn fn-def (:args fn-def) name->id))
        (attach-fn-meta fn-def))))
 
 

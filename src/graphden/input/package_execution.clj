@@ -33,6 +33,12 @@
   (compile-frozen (snapshot/freeze-closure package [root] roots) root implementations))
 
 
+(defn- require-visible-root!
+  [root visible-fn-ids]
+  (when-not (and (set? visible-fn-ids) (contains? visible-fn-ids root))
+    (ir/reject! :staged-function-not-visible {})))
+
+
 (defn compile-staged-module
   "Offline replay of one staged module against original package preparation.
    Supply the trusted legacy module and package index, the staged bytes and
@@ -41,8 +47,7 @@
    outside the module still come from the caller's visible prepared package.
    No registration, package loading, or storage changes occur."
   [package root roots implementations {payload :bytes :keys [legacy-module sha256 visible-fn-ids]}]
-  (when-not (and (set? visible-fn-ids) (contains? visible-fn-ids root))
-    (ir/reject! :staged-function-not-visible {}))
+  (require-visible-root! root visible-fn-ids)
   (let [module (staged/read-pinned payload sha256)
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)
@@ -56,3 +61,16 @@
         (ir/reject! :staged-function-not-visible {}))
       (assoc (compile-frozen frozen root implementations)
              :staged-source {:sha256 sha256 :namespace (:namespace module)}))))
+
+
+(defn compile-staged-primitive
+  "Read a staged file and compile one visible, independent primitive root.
+   Supply the expected receipt checksum and the package's frozen signatures
+   and implementations. Declaration and field identities come from the v2
+   source alone. Roots requiring bindings or dependency preparation are blocked."
+  [root roots implementations {payload :bytes :keys [sha256 visible-fn-ids]}]
+  (require-visible-root! root visible-fn-ids)
+  (let [module (staged/read-pinned payload sha256)
+        frozen (snapshot/freeze-primitive module root roots)]
+    (assoc (compile-frozen frozen root implementations)
+           :staged-source {:sha256 sha256 :namespace (:namespace module)})))

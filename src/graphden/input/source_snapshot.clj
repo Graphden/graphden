@@ -334,13 +334,13 @@
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
   (let [{:keys [context entries]} (freeze-declarations package function-ids)]
-    ;; The narrowed field and the inherited implementation can require two
-    ;; independent validations at the same read. Execution currently indexes
-    ;; that boundary by address alone and can lose the callable obligation.
+    ;; The checker retains the narrowed callable at its field-read boundary.
+    ;; An external function has no verified invocation signature. Executable
+    ;; admission needs a proved graph closure or a suitable runtime validator.
     (doseq [[id {:keys [configurations]}] entries
             {:keys [row]} (vals configurations)
             :when row]
-      (throw (ex-info "Field read must retain the callable self-pin obligation"
+      (throw (ex-info "Execution requires proof of the callable field-read contract"
                       {:type :input/source-snapshot :code :callable-self-pin-obligation-required :fn-id id
                        :binding-id (:id row) :target-path (:target-path row) :type-override-fn-id (:type-override-fn-id row)})))
     {:context context :options (implementation-options context entries roots)}))

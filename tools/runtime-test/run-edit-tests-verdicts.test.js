@@ -157,6 +157,25 @@ console.log(' browser phases retain final passes in the current full-roster jour
     'declared skip never becomes pass credit', r.receipt);
 }
 
+console.log(' adjacent waves share their host and preserve first-wave failure');
+{
+  const tests = {'edit-primary.test.js': ['pass'], 'edit-related.test.js': ['pass'], 'edit-later.test.js': ['pass']};
+  const waves = {GRAPHDEN_E2E_ONLY_FILES: 'edit-primary.test.js', GRAPHDEN_E2E_FOLLOWUP_FILES: 'edit-related.test.js'};
+  const prior = '{:schema 1 :kind "browser" :sha "@SHA@" '
+    + ':roster ["edit-primary.test.js" "edit-related.test.js" "edit-later.test.js"] '
+    + ':status {"edit-primary.test.js" :pending "edit-related.test.js" :failed "edit-later.test.js" :pending}}';
+  const green = runSuite(tests, {...waves, STUB_RESUME: prior});
+  const order = [...green.out.matchAll(/─── (edit-.*?\.test\.js) ───/g)].map(match => match[1]);
+  assert(green.code === 0 && order.join(',') === 'edit-primary.test.js,edit-related.test.js',
+    'the previously red related file stays behind the manual wave', green.out);
+  assert(/"edit-primary.test.js" :passed/.test(green.receipt) && /"edit-related.test.js" :passed/.test(green.receipt),
+    'both phases retain their own per-file verification receipts', green.receipt);
+  assert(green.attempts('edit-later.test.js') === 0, 'the rest of the roster stays pending', green.out);
+  const red = runSuite({...tests, 'edit-primary.test.js': ['fail:first wave']}, waves);
+  assert(red.code !== 0 && red.attempts('edit-primary.test.js') === 2 && red.attempts('edit-related.test.js') === 0,
+    'the same primary failure keeps the related wave pending', red.out);
+}
+
 console.log(' two REAL races in one run stay distinct diagnostics, not host jitter');
 
 console.log(' browser phases partition the full file roster');

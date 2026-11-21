@@ -80,6 +80,9 @@ bb() {
       echo ci >> "$TEST_LOG"
       [ "${FAIL_CI:-0}" != 1 ] ;;
     test-e2e)
+      if [ -n "${BROWSER_ROSTER_LOG:-}" ]; then
+        printf 'only=%s followup=%s\n' "${GRAPHDEN_E2E_ONLY_FILES:-}" "${GRAPHDEN_E2E_FOLLOWUP_FILES:-}" >> "$BROWSER_ROSTER_LOG"
+      fi
       if [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ]; then echo e2e-early >> "$TEST_LOG"
       elif [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then echo e2e-rest >> "$TEST_LOG"
       else echo e2e >> "$TEST_LOG"; fi
@@ -208,8 +211,11 @@ assert_events 'expect,ci,verify,uber,build,image,e2e-early'
 unset FAIL_E2E
 WTQ_FIRST_TESTS=integration:graphden.editor.root-migration-integration-test,browser:edit-ui-components-selective.test.js
 WTQ_REPORT_TS=forced-cross-suite-integration-first
+BROWSER_ROSTER_LOG="$TEST_DIR/adjacent-browser-roster"
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,headroom,e2e-early,integration-early,integration-rest,headroom,e2e-rest'
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,integration-early,integration-rest,headroom,e2e-rest'
+grep -Fxq 'only=edit-ui-components-selective.test.js followup=edit-other.test.js' "$BROWSER_ROSTER_LOG"
+unset BROWSER_ROSTER_LOG
 unset WTQ_FIRST_TESTS
 unset TEST_PRIORITY_INTEGRATION TEST_PRIORITY_BROWSER
 

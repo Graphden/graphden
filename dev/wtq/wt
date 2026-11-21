@@ -1553,8 +1553,14 @@ run_gate_stage() {
   case "$stage" in
     ci) run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" ;;
     priority)
-      local wave wave_integration wave_browser kind integration_ran=0
+      local wave wave_integration wave_browser kind integration_ran=0 followup_browser=""
       local -a wave_order=(integration browser)
+      # Adjacent browser waves keep both verdicts and share the isolated
+      # stack. A manual integration wave between them must keep its place.
+      if [ -n "$MANUAL_BROWSER" ] && [ -n "$AUTO_BROWSER" ] &&
+         { [ "$manual_stage" != e2e ] || [ -z "$MANUAL_INTEGRATION" ]; }; then
+        followup_browser="$AUTO_BROWSER"
+      fi
       for wave in manual automatic; do
         if [ "$wave" = manual ]; then
           wave_integration="$MANUAL_INTEGRATION"
@@ -1565,6 +1571,7 @@ run_gate_stage() {
         else
           wave_integration="$AUTO_INTEGRATION"
           wave_browser="$AUTO_BROWSER"
+          [ -z "$followup_browser" ] || wave_browser=""
           # Browser files often expose UI regressions much faster than the
           # broad related integration roster. Preserve manual priorities,
           # then run both automatic suites once with browser first.
@@ -1601,6 +1608,7 @@ run_gate_stage() {
                 ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
                     E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" \
                     GRAPHDEN_E2E_PREPARED_ORDER="${PRIORITY_BROWSER:-}" \
+                    GRAPHDEN_E2E_FOLLOWUP_FILES="$followup_browser" \
                     GRAPHDEN_E2E_ONLY_FILES="$wave_browser" bb test-e2e ) \
                   || { echo "FAIL: $wave related browser"; return 1; }
               fi ;;

@@ -26,7 +26,7 @@ async function exercise() {
     assert.equal(documentResponse.status(), 200);
 
     await page.getByPlaceholder('Filter...', {exact: true}).fill(ownerName);
-    await page.locator(`#entity-list .entity-item[data-fn-id="${owner}"]`).click();
+    await page.locator(`#entity-list .entity-item[data-fn-id="${owner}"]:visible`).first().click();
     await page.getByRole('button', {name: 'Remaining inputs', exact: true}).press('Enter');
     await page.getByRole('button', {name: /^profile — Type:/}).press('Space');
     await page.getByRole('button', {name: 'Bind profile.name'}).press('Enter');

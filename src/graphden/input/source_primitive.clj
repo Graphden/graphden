@@ -32,19 +32,32 @@
     (leaf-type? spec)))
 
 
+(defn- exact-record?
+  [input return-type contract]
+  (when (and (map? contract) (= 1 (count contract)))
+    (let [[field shape] (first contract)]
+      (and (simple-keyword? field) (map? shape) (seq shape)
+           (every? simple-keyword? (keys shape)) (every? #{:text} (vals shape))
+           (= input {field {:type shape :required true}})
+           (= return-type shape)))))
+
+
 (defn- require-primitive!
-  [{:keys [input return-type effects] :as source}]
-  (when (some #(contains? source %) [:parent :parents])
-    (reject! :staged-primitive-inheritance-unsupported))
-  (when (some #(contains? source %) [:bind :configure])
-    (reject! :staged-primitive-bindings-unsupported))
-  (when-not (and (every? #{:name :namespace :description :input :return-type :effects} (keys source))
-                 (or (nil? (:description source)) (string? (:description source)))
-                 (or (nil? effects) (and (set? effects) (every? keyword? effects))))
-    (reject! :staged-primitive-declaration-unsupported))
-  (when-not (and (map? input) (every? simple-keyword? (keys input))
-                 (every? field-spec? (vals input)) (leaf-type? return-type))
-    (reject! :staged-primitive-type-unsupported)))
+  ([source] (require-primitive! source nil))
+  ([{:keys [input return-type effects] :as source} record-contract]
+   (when (some #(contains? source %) [:parent :parents])
+     (reject! :staged-primitive-inheritance-unsupported))
+   (when (some #(contains? source %) [:bind :configure])
+     (reject! :staged-primitive-bindings-unsupported))
+   (when-not (and (every? #{:name :namespace :description :input :return-type :effects} (keys source))
+                  (or (nil? (:description source)) (string? (:description source)))
+                  (or (nil? effects) (and (set? effects) (every? keyword? effects))))
+     (reject! :staged-primitive-declaration-unsupported))
+   (when-not (if record-contract
+               (exact-record? input return-type record-contract)
+               (and (map? input) (every? simple-keyword? (keys input))
+                    (every? field-spec? (vals input)) (leaf-type? return-type)))
+     (reject! :staged-primitive-type-unsupported))))
 
 
 (defn- selected-root
@@ -61,19 +74,21 @@
 
 (defn- base-context
   [environment authored]
-  (let [rows (parse/base-declaration-records authored (:input authored) {})]
+  (let [rows (module/unique-records (parse/base-declaration-records authored (:input authored) {}))]
     (source-context/declaration-context environment authored rows [])))
 
 
 (defn prepare
-  "Return one v2 parser-validated primitive definition with exact declaration
-   rows. The selected root has only scalar fields and no bindings or parents."
-  [source root]
-  (let [definition (selected-root source root)]
-    (require-primitive! definition)
-    (let [environment (source-context/environment {:name->id {}})]
-      (first (:definitions (module/parse-module-v2 (assoc source :fns [definition])
-                                                   {:context-for (partial base-context environment)}))))))
+  "Prepare a standalone pure-shape declaration. Scalar fields are the default.
+   A pinned record ABI may admit one required closed record of text leaves and
+   the same result type. The declarations contain no bindings or parents."
+  ([source root] (prepare source root nil))
+  ([source root record-contract]
+   (let [definition (selected-root source root)]
+     (require-primitive! definition record-contract)
+     (let [environment (source-context/environment {:name->id {}})]
+       (first (:definitions (module/parse-module-v2 (assoc source :fns [definition])
+                                                    {:context-for (partial base-context environment)})))))))
 
 
 (defn- scalar-literal?

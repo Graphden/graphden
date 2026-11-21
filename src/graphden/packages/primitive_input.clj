@@ -22,14 +22,14 @@
 
 (defn read-module
   "Preflight exactly the pinned classpath module before any package code runs."
-  [package module {:keys [fn-id abi-fn-id sha256]}]
+  [package module {:keys [fn-id abi-fn-id sha256 record-contract]}]
   (let [path (str "packages/" package "/" module "/fns.edn")
         resource (io/resource path)]
     (when-not (and resource (uuid? fn-id) (uuid? abi-fn-id) (not= fn-id abi-fn-id)) (reject!))
     (let [source (with-open [stream (io/input-stream resource)] (staged/read-pinned (.readAllBytes stream) sha256))]
       (when-not (and (= 1 (count (:fns source))) (every? #{:input-format :namespace :description :fns} (keys source)))
         (reject!))
-      (let [parsed (primitive/prepare source fn-id)
+      (let [parsed (primitive/prepare source fn-id record-contract)
             definition (:source parsed)]
         (when (seq (:effects definition)) (reject!))
         {:ns-path (:namespace source) :ns-description (:description source) :fns [(assoc definition :source-file path)]

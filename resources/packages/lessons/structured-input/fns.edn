@@ -1,0 +1,6 @@
+{:input-format 2
+ :namespace "lessons.structured-input"
+ :fns [{:name :lesson-profile
+        :description "Return a profile with its id, name and email."
+        :input {:profile {:type {:id :text :name :text :email :text} :required true}}
+        :return-type {:id :text :name :text :email :text}}]}

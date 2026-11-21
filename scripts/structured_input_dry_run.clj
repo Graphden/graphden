@@ -182,7 +182,7 @@
 
 
 (defn- prepare-package
-  [package states emit?]
+  [package states {:keys [emit? verify-scopes]}]
   (let [dependencies (visible-definitions package states)
         original (:source-definitions package)
         names (parse/name->id-index {} dependencies)
@@ -199,17 +199,25 @@
           (shapes/register-marker! (:name definition) (:marker definition)))
         (if (duplicate-definition? (concat dependencies original))
           (blocked-state package [(problem package :duplicate-visible-definition)])
-          (let [context (parse/prepare-module original names definitions)
-                planned (source/verify-module (source/plan-module original context) context)
-                verification (list-probe/verify-package (:read-source package) (:definitions planned) context)
-                summaries (mapv #(summarize-definition package verification %) (:definitions planned))]
+          (let [prepared (parse/prepare-module original names definitions)
+                {:keys [context plan certified blocked]} (if verify-scopes
+                                                           (verify-scopes prepared original dependencies)
+                                                           {:context prepared
+                                                            :plan (source/verify-module (source/plan-module original prepared) prepared)})
+                verification (list-probe/verify-package (:read-source package) (:definitions plan) context)
+                summaries (mapv (fn [{id :identity :as entry}]
+                                  (let [diagnostic (get blocked id)]
+                                    (cond-> (summarize-definition package verification entry)
+                                      (contains? certified id) (assoc :scope-certification :verified)
+                                      diagnostic (assoc :scope-certification diagnostic))))
+                                (:definitions plan))]
             (cond-> {:status :prepared
                      :exports (vec (distinct (concat dependencies (qualify-definitions context))))
                      :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
                      :blockers (into (vec (mapcat :blockers summaries))
                                      (map #(assoc % :repository (:repository package) :package (:name package)))
                                      (:blockers verification))}
-              emit? (assoc :module-patches (module-patches package (:definitions planned) context)))))
+              emit? (assoc :module-patches (module-patches package (:definitions plan) context)))))
         (catch Exception error
           (blocked-state package (preparation-errors package all-names error)))))))
 
@@ -226,15 +234,15 @@
 
 
 (defn- package-state
-  [package states emit?]
+  [package states options]
   (let [failed (filter #(not= :prepared (get-in states [% :status])) (:dependencies package))]
     (if (seq failed)
       (blocked-state package [(assoc (problem package :blocked-package-dependency) :dependencies (vec failed))])
-      (prepare-package package states emit?))))
+      (prepare-package package states options))))
 
 
 (defn- plan-packages
-  [packages emit?]
+  [packages options]
   (let [by-name (group-by :name packages)
         indexed (into (sorted-map) (map (juxt :name identity)) packages)
         initial (into {} (keep (fn [[name package]]
@@ -246,7 +254,7 @@
         (let [ready (filter (fn [[_ package]] (every? #(contains? states %) (:dependencies package))) remaining)]
           (if (seq ready)
             (recur (apply dissoc remaining (map first ready))
-                   (reduce (fn [acc [name package]] (assoc acc name (package-state package acc emit?))) states ready))
+                   (reduce (fn [acc [name package]] (assoc acc name (package-state package acc options))) states ready))
             (merge states
                    (into {} (map (fn [[name package]]
                                    [name (blocked-state package
@@ -296,12 +304,12 @@
 
 
 (defn- replay-corpus
-  [repositories expected-manifest emit?]
+  [repositories expected-manifest options]
   (let [manifest (inventory/inventory repositories)]
     (when (and expected-manifest (not= expected-manifest manifest))
       (throw (ex-info "Inventory differs from pinned manifest" {:code :manifest-mismatch})))
     (let [packages (read-packages repositories manifest)
-          states (plan-packages packages emit?)
+          states (plan-packages packages options)
           after (inventory/inventory repositories)]
       (when-not (= manifest after)
         (throw (ex-info "Inventory changed during planning" {:code :source-drift})))
@@ -316,18 +324,23 @@
    The returned report contains no source forms, literals or proposed bodies."
   ([repositories] (dry-run repositories nil))
   ([repositories expected-manifest]
-   (:report (replay-corpus repositories expected-manifest false))))
+   (dry-run repositories expected-manifest {}))
+  ([repositories expected-manifest options]
+   (:report (replay-corpus repositories expected-manifest options))))
 
 
 (defn migration-artifact
   "Produce privately held rewritten source text and sanitized evidence.
    Only fully verified modules carry replacement text; source files stay intact.
    Partial artifacts are for review until the whole corpus and loader pass."
-  [repositories expected-manifest]
-  (assoc (replay-corpus repositories expected-manifest true) :artifact-format 1))
+  ([repositories expected-manifest] (migration-artifact repositories expected-manifest {}))
+  ([repositories expected-manifest options]
+   (assoc (replay-corpus repositories expected-manifest (assoc options :emit? true))
+          :artifact-format 1)))
 
 
-(defn- write-artifact!
+(defn write-artifact!
+  "Publish the private migration artifact at the requested path."
   [file artifact]
   (let [destination (fs/absolutize file)
         temp (fs/create-temp-file {:dir (fs/parent destination) :prefix ".input-migration-"})]

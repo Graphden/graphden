@@ -184,6 +184,14 @@
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :main-opts ["-m" "clj-watson.cli" "scan"]}
 
+  ;; Checked source migration uses the trusted classpath for native signatures.
+  :input-source-migration
+  {:extra-paths ["scripts"]
+   :extra-deps {babashka/fs {:mvn/version "0.5.31"}
+                babashka/process {:mvn/version "0.6.23"}
+                rewrite-clj/rewrite-clj {:mvn/version "1.2.55"}}
+   :main-opts ["-m" "structured-input-checked-migration"]}
+
   ;; Build uberjar
   :build
   {:extra-paths ["scripts"]

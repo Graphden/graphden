@@ -10,6 +10,7 @@
     [graphden.input.compile :as input]
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
+    [graphden.input.source-certification :as certification]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -177,17 +178,23 @@
                                        #{:ring-response-shape :ring-response :_ring-response--w-status
                                          :_ring-response--w-headers :to-json-string})
                          (declarations "packages/web/response/fns.edn" #{:json-content-type :ok-response :json-ok-response})
-                         (declarations "packages/web/crud-routes/fns.edn" #{:json-handler :_json-handler-body})))
+                         (declarations "packages/web/crud/fns.edn" #{:value-kinds})
+                         (declarations "packages/web/crud-routes/fns.edn"
+                                       #{:json-handler :_json-handler-body :value-kinds-handler})))
         root (ids/fn-id "web.crud" :json-handler)
+        descendant (ids/fn-id "web.crud" :value-kinds-handler)
         parents (mapv (partial ids/fn-id "web.response") [:ok-response :json-content-type])
         prepare-staged
         (fn [package owner roots implementations]
-          (let [certified (-> package (snapshot/with-migrated-bindings parents roots)
-                              (snapshot/with-migrated-forwarding owner :data roots))
+          (let [{certified :package ids :certified {:keys [definitions]} :plan}
+                (certification/verify-plan (:prepared package) originals [] roots)
                 {:keys [source proposed]} (get-in certified [:closure-baselines owner])
                 legacy {:namespace "web.crud" :fns [(dissoc source :namespace :source-file)]}
                 staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace :source-file)])
                 options (staged-options legacy staged (set (keys (:declarations certified))))]
+            (is (every? ids (conj parents owner)))
+            (is (= :authored-source-equivalent
+                   (:verification (first (filter #(= descendant (:identity %)) definitions)))))
             (is (= [:project [:data]] (get-in proposed [:bind [:body :data]])))
             (execution/compile-staged-module certified owner roots implementations options)))
         {:keys [canonical legacy analysis]} (runtimes originals root prepare-staged)]

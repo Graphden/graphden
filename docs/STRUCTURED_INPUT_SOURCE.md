@@ -33,6 +33,26 @@ successful dependency context are qualified before contexts are combined, so
 an unrelated package cannot change an existing bare name's meaning. Modules
 within one package are prepared together, allowing forward references.
 
+## Source report with implementation signatures
+
+Run this command from the trusted Graphden checkout to certify single-field
+bindings and unique forwarded fields that need native signatures.
+Pass the trusted package names before the first source repository.
+
+```sh
+clojure -M:dev:input-source-migration \
+  --trusted-package app --repo core . --repo addon /path/to/addon \
+  --artifact /tmp/input-migration.edn > /tmp/input-report.edn
+```
+
+The command loads implementations from the JVM classpath. It reads the
+repositories given to `--repo` as checksum-pinned source data. Each checked
+signature must match the source declaration and its original UUID. The
+planner revisits a blocked candidate when the exact dependency it needs has
+been certified. Inspect `:scope-certification` on each attempted definition
+for a verified result or the remaining proof requirement. The usual source
+report and staging command accept the same artifact format.
+
 ## Semantic source planner
 
 `graphden.input.source/plan-module` accepts original definitions and the

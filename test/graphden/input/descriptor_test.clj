@@ -126,7 +126,9 @@
                                     :members {input [{:slot-id slot :position 0 :input-default {:value nil}}]}})
         read-field #(first (:fields (descriptor/resolve-contract % owner)))]
     (is (= {:default nil} (select-keys (read-field ctx) [:default])))
-    (is (not (contains? (read-field (update-in ctx [:members input 0] dissoc :input-default)) :default)))
+    (let [without (update-in ctx [:members input 0] dissoc :input-default)]
+      (is (not (contains? (read-field without) :default)))
+      (is (not (contains? (read-field (assoc-in without [:fields slot :input-default] {:value "other"})) :default))))
     (doseq [changed [(assoc-in ctx [:fields slot :required] true)
                      (assoc-in ctx [:members input 0 :input-default] {})
                      (assoc-in ctx [:members input 0 :input-default :value] false)

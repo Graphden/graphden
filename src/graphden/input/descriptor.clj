@@ -32,7 +32,7 @@
   [{:keys [fields members]} type-id]
   (mapv (fn [membership]
           (if-let [field (get fields (:slot-id membership))]
-            (cond-> field (some? (:input-default membership)) (assoc :input-default (:input-default membership)))
+            (assoc field :input-default (:input-default membership))
             (context/reject! :missing-field {:type-id type-id :field-id (:slot-id membership)})))
         (sort-by (juxt :position (comp str :id)) (get members type-id))))
 

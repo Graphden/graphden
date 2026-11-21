@@ -72,7 +72,9 @@
   (let [branch (vs/current-branch-id storage)
         base (vs/unwrap storage)
         version-anchors (fn [entity ids]
-                          (let [versions (res/resolve-version-ids base entity (vec ids) branch)]
+                          (let [versions (if (= entity :input-binding)
+                                           (input-storage/binding-versions storage (update-vals bindings :fn-id))
+                                           (res/resolve-version-ids base entity (vec ids) branch))]
                             (when-not (= (count ids) (count versions))
                               (reject! :input/stale-preview "Refresh the structured input before binding"))
                             versions))
@@ -170,9 +172,10 @@
         basis (preview-basis storage ctx command)
         _ (when (and apply? (not= basis (:expected-state command)))
             (reject! :input/stale-preview "Refresh the structured input before binding"))
-        row (checked-row exec-ctx ctx command (random-uuid))]
-    (writer/assert-write-authorized! storage :input-binding row nil)
-    {:basis basis :row row :owner (get-in ctx [:fns fn-id])}))
+        row (checked-row exec-ctx ctx command (random-uuid))
+        proof (input-storage/binding-proof storage :bind row nil)]
+    (input-storage/binding-call storage :check fn-id (:id row) proof #(writer/assert-write-authorized! storage :input-binding row nil))
+    {:basis basis :row row :proof proof :owner (get-in ctx [:fns fn-id])}))
 
 
 (defn with-input-write
@@ -214,8 +217,10 @@
       (let [storage (request/require-storage ctx)
             command (normalize-command request)
             {:keys [binding owner]} (with-plan ctx storage command true
-                                      (fn [snapshot {:keys [row owner]}]
-                                        {:binding (or (access/with-binding-write (:id owner) (:id row) #(sp/create-entity snapshot :input-binding row))
+                                      (fn [snapshot {:keys [row owner proof]}]
+                                        {:binding (or (input-storage/binding-call
+                                                        snapshot :write (:id owner) (:id row) proof
+                                                        #(access/with-binding-write (:id owner) (:id row) (fn [] (sp/create-entity snapshot :input-binding row))))
                                                       (reject! :input/write-refused "The input binding was not written"))
                                          :owner owner}))
             result {:ok true :committed true :fn-id (:id owner) :binding-id (:id binding)}]

@@ -6,6 +6,7 @@
     [graphden.input.authoring-principal :as principal]
     [graphden.input.migration :as migration]
     [graphden.input.read-view :as view]
+    [graphden.input.storage :as input-storage]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as records]
     [graphden.storage.graph-writer :as writer]
@@ -49,6 +50,11 @@
          (same-fields? frozen base input))))
 
 
+(defn- child-call
+  [storage phase child f]
+  (input-storage/authorized-call storage {:operation :extend :phase phase :child child} f))
+
+
 (defn root-extend-offer
   "An authenticated creation offer in the root namespace of this branch.
    The actual Extend rechecks the selected namespace inside its writer."
@@ -57,10 +63,9 @@
              (package-contract? ctx frozen parent))
     (try
       (binding [vs/*enforce-require-merge?* true]
-        (writer/assert-creation-authorized!
-          storage {:id (random-uuid) :namespace-id nil :parent-ids [parent]
-                   :input-type-fn-id (get-in frozen [:fns parent :input-type-fn-id])}
-          (vs/current-branch-id storage)))
+        (let [child {:id (random-uuid) :namespace-id nil :parent-ids [parent]
+                     :input-type-fn-id (get-in frozen [:fns parent :input-type-fn-id])}]
+          (child-call storage :check child #(writer/assert-creation-authorized! storage child (vs/current-branch-id storage)))))
       {:extend-available true :extend-namespace-id nil}
       (catch clojure.lang.ExceptionInfo error
         (case (:type (ex-data error))
@@ -125,9 +130,10 @@
             id (or (:id data) (random-uuid))
             child (assoc data :id id :input-type-fn-id input)]
         (when-not (and (package-contract? ctx frozen parent) (run/runnable-input ctx frozen parent)
-                       (not (owned/owned-fn-id? id)) (nil? (sp/read-entity storage :fn id)))
+                       (not (owned/owned-fn-id? id)) (nil? (sp/read-entity (vs/unwrap storage) :fn id)))
           (deny!))
         (binding [vs/*enforce-require-merge?* true access/*package-input-types* {id input}]
-          (writer/assert-creation-authorized! storage child (vs/current-branch-id storage))
-          (sp/create-entity storage :fn child))))
+          (child-call storage :write child
+                      #(do (writer/assert-creation-authorized! storage child (vs/current-branch-id storage))
+                           (sp/create-entity storage :fn child))))))
     (sp/create-entity storage :fn data)))

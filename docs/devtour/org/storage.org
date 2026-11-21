@@ -52,13 +52,13 @@ Matches the scalar rename to its parent field, alias membership and original bin
 :PROPERTIES:
 :CUSTOM_ID: storage/validate-view!
 :FILE: src/graphden/versioning/storage/input.clj
-:LINE: 91
+:LINE: 96
 :MINS: 2.2
 :END:
 
 Checks scoped field paths and occupied-prefix conflicts among supplied rows, including inherited origins. The offline writer and merge transaction call this validator under locks. It deliberately leaves recursive reference availability, type/HOF classification and execution to later transition stages; it is not the effective remaining-input calculation.
 
-- source :: [[file:../../../src/graphden/versioning/storage/input.clj::(defn validate-view!][src/graphden/versioning/storage/input.clj:91]]
+- source :: [[file:../../../src/graphden/versioning/storage/input.clj::(defn validate-view!][src/graphden/versioning/storage/input.clj:96]]
 - see also :: [[file:types.org::#types/remaining-input][remaining-input]]
 - referenced from :: [[file:storage.org::#storage/apply!][apply!]]
 

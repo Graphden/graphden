@@ -477,10 +477,11 @@
            production writer. Restore refuses to erase changes made after the rehearsal."
      :see [[:storage "validate-view!"]]}
     {:ns graphden.input.migration-renames :defn evidence
-     :say "Matches a legacy scalar rename to its original parent field, alias membership,
-           binding ID and branch versions. Equal primitive slot types and paired history
-           supported by these rows allow the planner to express the rename as a projection.
-           The generated binding versions retain the original binding identity and timestamps."
+     :say "Matches the scalar rename to its parent field, alias membership and original binding ID.
+           With matching primitive types, the planner can preserve paired versions or a single
+           root-transaction creation followed by position edits on the root or a direct fork.
+           The membership keeps its position history and the projection keeps its binding history.
+           Histories that need a merge cutoff or a second binding policy return a diagnostic."
      :see [[:storage "apply!"]]}
     {:ns graphden.versioning.storage.input :defn validate-view!
      :say "Checks scoped field paths and occupied-prefix conflicts among supplied rows, including

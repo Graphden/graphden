@@ -39,13 +39,13 @@ Rehearses an additive migration on a stopped database copy. The artifact preserv
 :PROPERTIES:
 :CUSTOM_ID: storage/evidence
 :FILE: src/graphden/input/migration_renames.clj
-:LINE: 30
-:MINS: 2.8
+:LINE: 71
+:MINS: 3.2
 :END:
 
-Matches a legacy scalar rename to its original parent field, alias membership, binding ID and branch versions. Equal primitive slot types and paired history supported by these rows allow the planner to express the rename as a projection. The generated binding versions retain the original binding identity and timestamps.
+Matches the scalar rename to its parent field, alias membership and original binding ID. With matching primitive types, the planner can preserve paired versions or a single root-transaction creation followed by position edits on the root or a direct fork. The membership keeps its position history and the projection keeps its binding history. Histories that need a merge cutoff or a second binding policy return a diagnostic.
 
-- source :: [[file:../../../src/graphden/input/migration_renames.clj::(defn evidence][src/graphden/input/migration_renames.clj:30]]
+- source :: [[file:../../../src/graphden/input/migration_renames.clj::(defn evidence][src/graphden/input/migration_renames.clj:71]]
 - see also :: [[file:storage.org::#storage/apply!][apply!]]
 
 * 4. validate-view!

@@ -445,6 +445,21 @@
           (:projections graph))))
 
 
+(defn- projection-analysis
+  [ctx owner options]
+  (try
+    {:graph (analysis/analyze-effective-input ctx owner (dissoc options :gap)) :gap (:gap options)}
+    (catch clojure.lang.ExceptionInfo error
+      (let [data (ex-data error)]
+        (if (and (:implementations options) (= :conflicting-runtime-obligations (:code data)))
+          ;; Preserve already verified source routes when signature inference
+          ;; needs an unrepresented intersection of runtime checks. This is
+          ;; an incomplete diagnostic view, never an executable certificate.
+          {:graph (analysis/analyze-effective-input ctx owner (select-keys options [:check-expression]))
+           :gap (select-keys data [:code :address])}
+          (throw error))))))
+
+
 (defn projection-readiness
   "Analyze verified rename rows at each traversed use with the scoped analyzer.
    Keep runtime obligations and missing implementation/signature coverage
@@ -462,12 +477,12 @@
                            {:check-expression (named-types/checked-expression ctx check/check-input-binding)
                             :gap (select-keys (ex-data error) [:code :fn-id])}
                            (throw error))))
-          graph (analysis/analyze-effective-input ctx owner (dissoc options :gap))
+          {:keys [graph gap]} (projection-analysis ctx owner options)
           projections (confirmed-projections owner bindings graph)]
       (cond-> (assoc (select-keys graph [:status :coverage :required-addresses :obligations :diagnostics])
                      :fn-id owner :projections projections)
         (empty? projections) (-> (assoc :status :incomplete) (update :diagnostics conj {:code :no-evaluated-projection}))
-        (:gap options) (-> (assoc :status :incomplete) (update :diagnostics conj (:gap options)))))
+        gap (-> (assoc :status :incomplete) (update :diagnostics conj gap))))
     (catch clojure.lang.ExceptionInfo error
       (let [data (ex-data error)
             code (or (:code data) (when (= :types/check-failed (:type data)) :types/check-failed))]

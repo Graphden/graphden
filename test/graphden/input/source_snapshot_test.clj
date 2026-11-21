@@ -19,6 +19,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.sync :as sync]
+    [graphden.types.check :as check]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
@@ -113,6 +114,64 @@
       (is (= "Extra head elements" (:description child-field)))
       (is (= nil (get-in context [:bindings binding :expression-kind])))
       (is (not (contains? (get-in graph [:public-input :bindings]) [[owner []] [field]]))))))
+
+
+(deftest shipped-html-page-forwarding-preserves-baseline-and-refuses-unproved-tag-typing
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})
+            shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})]
+    (let [core (mapcat sources (:modules (read-package-edn "package.edn")))
+          html-module (edn/read-string (slurp (io/resource "packages/web/html/fns.edn")))
+          html (mapv #(assoc % :namespace (:namespace html-module)) (:fns html-module))
+          definitions (into (vec core) html)
+          declared-ids (set (map #(ids/fn-id (:namespace %) (:name %)) definitions))
+          _ (sync/register-type-aliases! definitions)
+          _ (doseq [[name {:keys [namespace] :as base}] @fixtures/web-base-definitions
+                    :when (contains? declared-ids (ids/fn-id namespace name))]
+              (registry/record-rich-types! (ids/fn-id namespace name) name base))
+          prepared (parse/prepare-module definitions {} {})
+          package (snapshot/package-index prepared definitions)
+          owner (ids/fn-id "web.html" :html-page)
+          fields [:title :head :scripts]
+          original (some #(when (= :html-page (:name %)) %) html)
+          legacy-entry (first (:definitions (source/plan-module [original] prepared)))
+          {:keys [proofs entry]} (source/forwarded-fields-baseline prepared legacy-entry fields)
+          diagnostic (failure #(snapshot/migrate-forwarded-fields package owner fields (:by-id @registry/*rich-types-override*)))
+          callback (some #(when (= :_hiccup-normalize-attr-key (:name %)) %) html)
+          verified-callback (first (:definitions (source/verify-module (source/plan-module [callback] prepared) prepared)))
+          source-links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
+                                         [(:id %) (:source-slot-id %)]))
+                             (get-in legacy-entry [:legacy :records]))]
+      (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+      (is (= (select-keys (:args original) fields) (get-in entry [:proposed :input])))
+      (is (= (set fields) (set (map (comp peek :source-path) proofs))))
+      (is (every? (comp nil? :target-address) proofs))
+      (is (= source-links (into {} (map (juxt :field-id :target-field-id)) proofs)))
+      (is (= :authored-source-equivalent (:verification verified-callback)) (:blockers verified-callback))
+      (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) diagnostic)))
+      (is (= owner (ffirst (:address diagnostic))))
+      (is (= [(ids/slot-id (ids/fn-id "core.logic" :equal?) :a)] (second (:address diagnostic)))))))
+
+
+(deftest frozen-conditional-rule-does-not-read-an-ambient-predicate
+  (let [predicate (random-uuid)
+        target (random-uuid)
+        nullable [:union :null :text]
+        facts {:test {:type :bool :ref predicate}
+               :then {:type nullable :ref target} :else {:type :text}}
+        bases @fixtures/web-base-definitions]
+    (binding [registry/*rich-types-override*
+              (atom {:by-name {} :by-id {predicate {:primary-parent :some? :resolved-bindings {:value {:ref target}}}}})
+              registry/*per-org-rich-override* (atom {})]
+      (let [id (ids/fn-id "core.logic" :if)
+            _ (registry/record-rich-types! id :if (get bases :if))
+            entry (registry/rich-type-of-id id)
+            result (check/infer-input-signature {:fn-id id :root-entry entry :bindings-info facts
+                                                 :argument-effects {} :free-arguments #{}
+                                                 :signature-view {:by-id {} :by-name {}}
+                                                 :declaration {} :static-return nullable})]
+        (is (= :text ((:return-type-rule entry) facts nullable)))
+        (is (= nullable (:return result)))))))
 
 
 (deftest generated-list-parameters-retain-frozen-element-variables
@@ -460,7 +519,7 @@
         result (snapshot/projection-readiness package id @roots)
         [route] (:projections result)]
     (is (= :incomplete (:status result)))
-    (is (= :rule-signature-view-required (-> result :diagnostics last :code)))
+    (is (= :conflicting-runtime-obligations (-> result :diagnostics last :code)))
     (is (false? (get-in result [:coverage :signatures])))
     (is (= (ids/binding-id id field) (:binding-id route)))
     (is (= [[id []] [field]] (:from route)))
@@ -542,7 +601,7 @@
         (is (= [(ids/binding-id owner default-id) "value"] [(:id default-row) (:expression-kind default-row)]))
         (is (nil? default-row)))
       (is (= :incomplete (:status report)) (pr-str (:diagnostics report)))
-      (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
+      (is (some #(= :conflicting-runtime-obligations (:code %)) (:diagnostics report)))
       (is (= (ids/binding-id owner target) (:binding-id route)))
       (is (= [[owner []] [(ids/slot-id owner alias-name)]] (:source route)))
       (is (= (get-in record [:source :type]) body (:actual-type route)))
@@ -579,7 +638,7 @@
         [route] (:projections report)
         field (ids/slot-id (ids/fn-id "core.collections" :get) :coll)]
     (is (= :incomplete (:status report)))
-    (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
+    (is (some #(= :conflicting-runtime-obligations (:code %)) (:diagnostics report)))
     (is (= (ids/binding-id owner field) (:binding-id route)))
     (is (= [[owner []] [(ids/slot-id owner :outcome)]] (:source route)))
     (is (= [:map :keyword :any] (:actual-type route)))

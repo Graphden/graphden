@@ -1,8 +1,10 @@
 (ns graphden.versioning.storage.input
   "Offline v2 resolved-view invariants. The live v1 writer remains unchanged."
   (:require
+    [graphden.input.authority :as authority]
     [graphden.input.rows :as rows]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]
     [graphden.versioning.storage.resolution :as res]))
 
 
@@ -51,6 +53,11 @@
             [(:fn-id row) []] scope)))
 
 
+(defn- valid-reference?
+  [owner target]
+  (and target (or (tenancy/platform-tier? (:org-id target)) (= (:org-id owner) (:org-id target)))))
+
+
 (defn- resolve-path!
   [{:keys [fns fields members] :as view} row scope path]
   (let [owner (get fns (scoped-owner view row scope))
@@ -58,12 +65,11 @@
     (when-not (and input-id (contains? fns input-id))
       (reject! :missing-input-contract))
     (doseq [entity [owner (get fns input-id)]]
-      (when-not (or (nil? (:org-id entity)) (= (:org-id row) (:org-id entity)))
+      (when-not (valid-reference? row entity)
         (reject! :invalid-reference)))
     (reduce (fn [type-id field-id]
               (doseq [entity [(get fns type-id) (get fields field-id)]]
-                (when-not (and entity (or (nil? (:org-id entity))
-                                          (= (:org-id row) (:org-id entity))))
+                (when-not (valid-reference? row entity)
                   (reject! :invalid-reference)))
               (when-not (some #(= field-id (:slot-id %)) (get members type-id))
                 (reject! :unknown-field))
@@ -79,8 +85,7 @@
       (reject! :invalid-owner))
     (doseq [id (keep row [:ref-fn-id :resolver-fn-id :type-override-fn-id])]
       (let [target (get-in view [:fns id])]
-        (when-not (and target (or (nil? (:org-id target))
-                                  (= (:org-id row) (:org-id target))))
+        (when-not (valid-reference? row target)
           (reject! :invalid-reference))))
     (resolve-path! view row (:scope-path row) (:target-path row))
     (when (= "projection" (:expression-kind row))
@@ -113,11 +118,20 @@
     view))
 
 
+(defn validate-candidates!
+  "Check the complete resolved postimage in the writer transaction. The only
+   result is acceptance or rejection. The caller cannot export any rows."
+  [storage branch-id candidates]
+  (let [view (read-view storage branch-id)]
+    (validate-view! (update view :bindings merge (index-by-id candidates)))
+    nil))
+
+
 (defn check-collisions!
   "Check the post-write view under the owner's advisory lock. Called for
    singular/bulk writes and again inside a provisional merge transaction."
   [storage branch-id entity-name candidates]
   (when (and (= :input-binding entity-name) (seq candidates))
-    (let [view (read-view storage branch-id)
-          view (update view :bindings merge (index-by-id candidates))]
-      (validate-view! view))))
+    (if-let [check! (:validate-candidates! (authority/operations storage))]
+      (check! storage branch-id candidates)
+      (validate-candidates! storage branch-id candidates))))

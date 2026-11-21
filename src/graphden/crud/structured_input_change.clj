@@ -12,8 +12,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.util.abort-shield :as shield]
     [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.input :as invariant]
-    [graphden.versioning.storage.resolution :as res]))
+    [graphden.versioning.storage.input :as invariant]))
 
 
 (defn- reject!
@@ -54,11 +53,12 @@
   "A scoped row anywhere on this branch may depend on the use-site UUID.
    Rehearse a non-reference at the same address under the normal invariant
    checker. No storage row or version is written or returned."
-  [storage row]
+  [storage row version]
   (when (= "ref" (:expression-kind row))
     (let [vacant (assoc row :expression-kind nil :ref-fn-id nil)]
       (try
-        (invariant/check-collisions! (vs/unwrap storage) (vs/current-branch-id storage) :input-binding [vacant])
+        (input-storage/authorized-call storage {:operation :detach :owner (:fn-id row) :id (:id row) :version version}
+                                       #(invariant/check-collisions! (vs/unwrap storage) (vs/current-branch-id storage) :input-binding [vacant]))
         nil
         (catch clojure.lang.ExceptionInfo error
           (case (:type (ex-data error))
@@ -99,19 +99,20 @@
         raw (or (:detached-binding base) (get-in base [:bindings binding-id]))
         row (or (structured/own-command-row fn-id raw)
                 (reject! :input/leaf-unavailable "This input binding is unavailable for editing"))
-        _ (writer/assert-write-authorized! storage :input-binding {} binding-id)
+        _ (input-storage/binding-call storage :check fn-id binding-id #(writer/assert-write-authorized! storage :input-binding {} binding-id))
         path (checked-path exec-ctx base action command row)
         ctx (if ref-fn-id (bind/reference-context exec-ctx storage fn-id ref-fn-id) base)
-        version (if expected-version
-                  (input-storage/current-binding! storage binding-id expected-version)
-                  (res/resolve-version (vs/unwrap storage) :input-binding binding-id (vs/current-branch-id storage)))
+        version (get (input-storage/binding-versions storage {binding-id fn-id}) binding-id)
+        _ (when-not (and version (or (nil? expected-version) (= expected-version version)))
+            (reject! :input/stale-version "Refresh the structured input before editing"))
         basis (bind/preview-basis storage (assoc-in ctx [:bindings binding-id] row)
                                   (-> command (dissoc :expected-version) (assoc :action action)))]
     (when (and expected-version (not= expected-state basis))
       (reject! :input/stale-preview "Refresh the structured input before editing"))
-    (check-detachable! storage row)
-    {:owner (get-in ctx [:fns fn-id]) :expected-state basis :expected-version (:id version)
-     :patch (when (= action :edit) (replacement exec-ctx ctx row command path))}))
+    (check-detachable! storage row version)
+    (let [patch (when (= action :edit) (replacement exec-ctx ctx row command path))]
+      {:owner (get-in ctx [:fns fn-id]) :expected-state basis :expected-version version
+       :patch patch :proof (input-storage/binding-proof storage action (merge row patch) version)})))
 
 
 (defn preview
@@ -127,12 +128,14 @@
 
 (defn- apply-plan!
   [ctx storage action {:keys [fn-id binding-id] :as command}]
-  (let [{:keys [owner patch]} (plan ctx storage action command)
-        result (access/with-binding-write fn-id binding-id
-                                          #(case action
-                                             :edit (sp/update-entity storage :input-binding binding-id patch)
-                                             :remove (binding [vs/*tombstone-delete?* true]
-                                                       (sp/delete-entity storage :input-binding binding-id))))]
+  (let [{:keys [owner patch proof]} (plan ctx storage action command)
+        result (input-storage/binding-call storage :write fn-id binding-id proof
+                                           #(access/with-binding-write fn-id binding-id
+                                                                       (fn []
+                                                                         (case action
+                                                                           :edit (sp/update-entity storage :input-binding binding-id patch)
+                                                                           :remove (binding [vs/*tombstone-delete?* true]
+                                                                                     (sp/delete-entity storage :input-binding binding-id))))))]
     (when-not result
       (reject! :input/write-refused "The input binding was not changed"))
     owner))

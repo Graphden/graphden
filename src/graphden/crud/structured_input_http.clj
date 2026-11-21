@@ -16,7 +16,7 @@
                [403 "The structured input operation is unavailable"]
                (:input/stale-preview :input/stale-version)
                [409 "The input changed. Review a fresh preview"]
-               (:input/leaf-unavailable :input/no-change :branch/merge-required)
+               (:input/leaf-unavailable :input/no-change :input/binding-conflict :branch/merge-required)
                [409 "The selected input cannot be changed"]
                (:types/check-failed :input/unproven-bind :input/unresolved-contract :input/invalid-binding)
                [422 "The structured input change could not be verified"]

@@ -1,0 +1,5 @@
+{:namespace "lessons.native"
+ :fns [{:name :profile-value
+        :description "Return the supplied person's profile."
+        :args {:profile {:type {:id :text :name :text :email :text} :required true}}
+        :return-type {:id :text :name :text :email :text}}]}

@@ -7,7 +7,10 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.package-guard :as pkg]
     [graphden.crud.request :as request]
+    [graphden.crud.structured-authoring :as authoring]
     [graphden.crud.structured-input :as structured]
+    [graphden.input.access :as access]
+    [graphden.input.authoring-principal :as principal]
     [graphden.input.migration :as migration]
     [graphden.input.read-view :as read-view]
     [graphden.input.storage :as input-storage]
@@ -62,7 +65,7 @@
                             (when-not (= (count ids) (count versions))
                               (reject! :input/stale-preview "Refresh the structured input before binding"))
                             versions))
-        state [branch (tenancy/current-org) (:user-id tenancy/*current-principal*)
+        state [branch (tenancy/current-org) (:user-id (principal/current))
                (mapv (juxt :id :parent-ids) (sort-by (comp str :id) (vals fns)))
                (update-vals fields #(select-keys % [:name :type-fn-id :required]))
                (version-anchors :fn (keys fns))
@@ -103,16 +106,22 @@
 
 (defn writable-context
   "Reauthorize the root and collect the sources visible on the writer connection."
-  [storage fn-id]
+  [exec-ctx storage fn-id]
   (writer/assert-write-authorized! storage :fn {} fn-id)
   (when-let [reason (pkg/write-rejection storage :fn {:id fn-id})]
     (reject! :authz/forbidden reason))
-  (read-view/collect storage fn-id (tenancy/browser-source-policy storage)))
+  (when-not (or access/*offline?* (and (:authenticated? (principal/current))
+                                       (:input-type-fn-id (sp/read-entity storage :fn fn-id))))
+    (reject! :authz/forbidden "Structured input editing is unavailable"))
+  (let [frozen (read-view/collect storage fn-id (tenancy/browser-source-policy storage))]
+    (when-not (or access/*offline?* (authoring/editable-child? exec-ctx storage frozen fn-id))
+      (reject! :authz/forbidden "Structured input editing is unavailable"))
+    frozen))
 
 
 (defn- owner-plan
-  [storage {:keys [fn-id] :as command} apply?]
-  (let [ctx (writable-context storage fn-id)
+  [exec-ctx storage {:keys [fn-id] :as command} apply?]
+  (let [ctx (writable-context exec-ctx storage fn-id)
         basis (preview-basis storage ctx command)
         _ (when (and apply? (not= basis (:expected-state command)))
             (reject! :input/stale-preview "Refresh the structured input before binding"))
@@ -125,12 +134,12 @@
   "Run a binding preview or create under the ordinary writer and binding lock."
   [storage f]
   (binding [vs/*enforce-require-merge?* true]
-    (input-storage/with-binding-writer! storage f)))
+    (input-storage/with-binding-transaction! storage f)))
 
 
 (defn- with-plan
-  [storage command apply? f]
-  (with-input-write storage #(f % (owner-plan % command apply?))))
+  [exec-ctx storage command apply? f]
+  (with-input-write storage #(f % (owner-plan exec-ctx % command apply?))))
 
 
 (defn publish!
@@ -147,7 +156,7 @@
   "Compute an exact proposal on the current branch without writing any row."
   [ctx request]
   (let [{:keys [fn-id path] :as command} (normalize-command request)]
-    (with-plan (request/require-storage ctx) command false
+    (with-plan ctx (request/require-storage ctx) command false
       (fn [_ {:keys [basis]}] {:ok true :fn-id fn-id :path path :expected-state basis}))))
 
 
@@ -159,9 +168,9 @@
     (fn []
       (let [storage (request/require-storage ctx)
             command (normalize-command request)
-            {:keys [binding owner]} (with-plan storage command true
+            {:keys [binding owner]} (with-plan ctx storage command true
                                       (fn [snapshot {:keys [row owner]}]
-                                        {:binding (or (sp/create-entity snapshot :input-binding row)
+                                        {:binding (or (access/with-binding-write (:id owner) (:id row) #(sp/create-entity snapshot :input-binding row))
                                                       (reject! :input/write-refused "The input binding was not written"))
                                          :owner owner}))
             result {:ok true :committed true :fn-id (:id owner) :binding-id (:id binding)}]

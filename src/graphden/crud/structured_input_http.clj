@@ -1,10 +1,11 @@
 (ns graphden.crud.structured-input-http
-  "Request and response boundary for fixture-gated structured input commands."
+  "Request and response boundary for authorized structured input commands."
   (:require
     [graphden.crud.request :as request]
     [graphden.crud.structured-input-bind :as bind]
     [graphden.crud.structured-input-change :as change]
-    [graphden.input.access :as access]))
+    [graphden.input.access :as access]
+    [graphden.input.authoring-principal :as principal]))
 
 
 (defn- refusal
@@ -26,14 +27,17 @@
 
 
 (defn dispatch
-  "The route supplies the phase. Only the server's offline capability can
-   admit requests to either preview or apply."
+  "The route supplies the phase. Each operation verifies owner, branch and
+   source permissions on its own writer snapshot."
   [ctx phase request]
   (try
-    (access/assert-write! :input-binding {})
+    (when-not (or access/*offline?* (:authenticated? (principal/current)))
+      (throw (ex-info "Structured input editing requires authentication" {:type :authz/forbidden})))
     (let [command (request/read-json-body request)
           input (when (map? command) (dissoc command :action))
           action (:action command)]
+      (when (and input (contains? input :offline?))
+        (throw (ex-info "Storage authority belongs to the server" {:type :authz/forbidden})))
       (case [phase action]
         ["preview" "bind"] (bind/preview ctx input)
         ["apply" "bind"] (bind/bind! ctx input)

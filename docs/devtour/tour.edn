@@ -994,7 +994,8 @@
      :see [[:crud "with-plan"]]}
     {:ns graphden.crud.structured-input-http :defn dispatch
      :say "The graph route fixes the phase and supplies the authenticated request context.
-           The offline capability admits the action. Bind, edit and remove have separate
+           A direct child of a boot-certified package input inherits its immutable fields.
+           Each named write requires fresh source and branch authorization. Bind, edit and remove have separate
            preview bases, and stale or unavailable commands receive value-free errors."
      :see [[:crud "with-current-binding!"] [:crud "with-plan"]]}
     {:ns graphden.crud.entities :defn create-entity

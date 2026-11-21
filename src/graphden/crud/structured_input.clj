@@ -2,6 +2,7 @@
   "Viewer-safe structured input projection for the standard graph subtree."
   (:require
     [graphden.crud.package-guard :as pkg]
+    [graphden.crud.structured-authoring :as authoring]
     [graphden.crud.structured-run :as run]
     [graphden.executor.browser-source :as source]
     [graphden.input.access :as access]
@@ -81,8 +82,8 @@
 
 
 (defn project-analysis
-  "Serialize remaining field names, types and requiredness. The fixture can
-   opt into named bind paths verified by the checked contract."
+  "Serialize remaining field names, types and requiredness. Editable projections
+   include named bind paths verified by the checked contract."
   ([graph] (project-analysis graph false))
   ([graph editable?]
    (when graph
@@ -160,13 +161,14 @@
              (some #(= id (:binding-id %)) (visible-occupied-leaves ctx graph)))))))
 
 
-(defn- fixture-editable?
-  [storage root]
-  (when (and access/*offline?* (vs/versioned-storage? storage)
+(defn- editing-authorized?
+  [exec-ctx storage ctx root]
+  (when (and (or access/*offline?* (authoring/editable-child? exec-ctx storage ctx root)) (vs/versioned-storage? storage)
              (not (pkg/package-owned-fn? storage root)))
     (try
       (binding [vs/*enforce-require-merge?* true]
         (writer/assert-write-authorized! storage :fn {} root)
+        (writer/assert-write-authorized! storage :input-binding {:fn-id root} nil)
         true)
       (catch clojure.lang.ExceptionInfo error
         (case (:type (ex-data error))
@@ -198,7 +200,7 @@
                              (let [ctx (read-view/collect snapshot root authorize!)
                                    runnable (when exec-ctx (run/runnable-input exec-ctx ctx root))
                                    graph (or (:analysis runnable) (analyze ctx root))
-                                   editable? (and editor? (fixture-editable? snapshot root))]
+                                   editable? (and editor? (editing-authorized? exec-ctx snapshot ctx root))]
                                (context/call-with-types
                                  ctx
                                  (fn []
@@ -207,6 +209,7 @@
                                          basis (when runnable? (repeat-basis snapshot runnable (:fields view)))]
                                      (cond-> view
                                        runnable? (assoc :run-available true)
+                                       (and editor? runnable?) (merge (authoring/root-extend-offer exec-ctx snapshot ctx root))
                                        basis (assoc :run-repeat basis)
                                        (and editable? (= :available (:status view)))
                                        (assoc :occupied (occupied-editor-fields snapshot ctx graph)))))))))

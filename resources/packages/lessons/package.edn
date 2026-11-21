@@ -1,0 +1,5 @@
+{:name "lessons"
+ :version "1.0.0"
+ :description "Optional editor lesson functions."
+ :dependencies ["core"]
+ :modules ["native" "structured-input"]}

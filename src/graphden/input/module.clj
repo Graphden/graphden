@@ -80,7 +80,7 @@
   record)
 
 
-(defn- unique-records
+(defn unique-records
   "Shared declaration rows can repeat identically; an identity cannot describe
    two different rows. Binding identities remain global within their table."
   [records]

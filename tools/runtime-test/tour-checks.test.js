@@ -519,6 +519,26 @@ test('result-value verifies the current result, including the values in its rows
   assert(!checkIn(state('["tick"]'), {kind: 'result-value'}), 'a missing expected value does not pass');
 });
 
+test('a named result-value requires the selected execution and compares record fields by name', () => {
+  const pane = '.execute-popover.visible .execute-result-pane';
+  const host = '.execute-popover.visible .execute-result-host';
+  const raw = host + ' .execute-result-raw pre';
+  const fn = {id: 'profile-root', name: 'tutorial-structured-profile'};
+  const check = {kind: 'result-value', name: fn.name, value: {profile: {name: 'Ada', ids: ['42', '7']}}};
+  const state = {selectedFnId: fn.id, lookups: {fnMap: new Map([[fn.id, fn]])},
+    dom: {[pane]: true, [host]: {gdExecutionFnId: fn.id},
+      [raw]: {textContent: '{"profile":{"ids":["42","7"],"name":"Ada"}}'}}};
+  assert(checkIn(state, check), 'field order has no effect on record equality');
+  assert(!checkIn({...state, selectedFnId: 'other'}, check), 'selection must match the named function');
+  state.dom[host].gdExecutionFnId = 'other';
+  assert(!checkIn(state, check), 'another function returning the same record cannot satisfy the check');
+  state.dom[host].gdExecutionFnId = fn.id;
+  state.dom[raw].textContent = '{"profile":{"ids":["7","42"],"name":"Ada"}}';
+  assert(!checkIn(state, check), 'nested array order is significant');
+  state.dom[raw].textContent = '{"profile":{"ids":["42","7"],"name":"Ada","extra":true}}';
+  assert(!checkIn(state, check), 'an extra record field is significant');
+});
+
 test('successful Run checks reject errors and wrong deterministic results', () => {
   const pane = '.execute-popover.visible .execute-result-pane';
   const raw = '.execute-popover.visible .execute-result-host .execute-result-raw pre';

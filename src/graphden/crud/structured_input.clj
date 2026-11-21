@@ -99,19 +99,20 @@
   (context/call-with-types ctx #(project-analysis (analyze ctx root))))
 
 
-(defn own-literal-row
-  "An unscoped literal authored on this owner."
-  [ctx root id]
-  (let [row (some-> (get-in ctx [:bindings id]) rows/normalize)]
-    (when (and (= root (:fn-id row)) (empty? (:scope-path row))
-               (= "value" (:expression-kind row)) (nil? (:resolver-fn-id row)))
-      row)))
+(defn own-command-row
+  "Only an own root expression without configuration can be edited or removed."
+  [root raw]
+  (when (= root (:fn-id raw))
+    (let [row (rows/normalize raw)]
+      (when (and (empty? (:scope-path row)) (contains? #{"value" "ref"} (:expression-kind row))
+                 (not-any? #(some? (get row %)) [:resolver-fn-id :type-override-fn-id :required :terminal :description]))
+        row))))
 
 
 (defn- occupied-leaf
   [ctx root scope address path node declared]
   (let [{:keys [binding-id origin-fn-id expected-type]} (get-in scope [:bindings address])
-        row (when (= root origin-fn-id) (own-literal-row ctx root binding-id))]
+        row (when (= root origin-fn-id) (own-command-row root (get-in ctx [:bindings binding-id])))]
     (when (and row (= (second address) (:target-path row))
                (<= 1 (count path) 64) (nil? (:fields declared))
                (= :checked (get-in scope [:proofs address :status]))
@@ -151,14 +152,10 @@
 
 
 (defn editable-binding?
-  "Recheck that the live preimage still contains this visible own leaf."
-  [ctx root id]
-  (context/call-with-types
-    ctx
-    (fn []
-      (let [graph (analyze ctx root)]
-        (and (checked-projection? graph)
-             (some #(= id (:binding-id %)) (visible-occupied-leaves ctx graph)))))))
+  "Recheck this exact own leaf against an authorized current analysis."
+  [ctx graph id]
+  (and (checked-projection? graph)
+       (some #(= id (:binding-id %)) (visible-occupied-leaves ctx graph))))
 
 
 (defn- editing-authorized?

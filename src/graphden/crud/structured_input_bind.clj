@@ -98,9 +98,8 @@
 
 
 (defn- proposed-row
-  [ctx graph {:keys [fn-id path ref-fn-id value]}]
+  [ctx graph {:keys [fn-id path ref-fn-id value]} id]
   (let [{[scope field-path :as address] :address} (visible-leaf graph path)
-        id (random-uuid)
         form (reduce (fn [form key] {key form}) (if ref-fn-id [:ref ::target] [:value value]) (rseq path))
         bound (surface/bind-input ctx (:public-input graph) form {:name->id {::target ref-fn-id} :binding-id (constantly id)})
         {:keys [binding-id expression]} (get bound address)]
@@ -115,9 +114,10 @@
              {:expression-kind "value" :value (:value expression) :value-present true}))))
 
 
-(defn- checked-row
-  [exec-ctx ctx {:keys [fn-id ref-fn-id] :as command}]
-  (let [row (input/call-with-types ctx #(proposed-row ctx (structured/analyze ctx fn-id) command))
+(defn checked-row
+  "Check the exact prospective row against the open field and its compiled postimage."
+  [exec-ctx ctx {:keys [fn-id ref-fn-id] :as command} id]
+  (let [row (input/call-with-types ctx #(proposed-row ctx (structured/analyze ctx fn-id) command id))
         after (assoc-in ctx [:bindings (:id row)] row)
         graph (if ref-fn-id (:analysis (run/runnable-input exec-ctx after fn-id)) (structured/analyze after fn-id))]
     (when-not (and (= :available (:status (input/call-with-types after #(structured/project-analysis graph))))
@@ -128,7 +128,8 @@
     row))
 
 
-(defn- reference-context
+(defn reference-context
+  "Read an authorized proposed target and owner on the same writer snapshot."
   [exec-ctx storage owner target]
   (when-let [guard (:execute-guard exec-ctx)] (guard exec-ctx target))
   (try
@@ -145,17 +146,20 @@
 
 (defn writable-context
   "Reauthorize the root and collect the sources visible on the writer connection."
-  [exec-ctx storage fn-id]
-  (writer/assert-write-authorized! storage :fn {} fn-id)
-  (when-let [reason (pkg/write-rejection storage :fn {:id fn-id})]
-    (reject! :authz/forbidden reason))
-  (when-not (or access/*offline?* (and (:authenticated? (principal/current))
-                                       (:input-type-fn-id (sp/read-entity storage :fn fn-id))))
-    (reject! :authz/forbidden "Structured input editing is unavailable"))
-  (let [frozen (read-view/collect storage fn-id (tenancy/browser-source-policy storage))]
-    (when-not (or access/*offline?* (authoring/editable-child? exec-ctx storage frozen fn-id))
-      (reject! :authz/forbidden "Structured input editing is unavailable"))
-    frozen))
+  ([exec-ctx storage fn-id] (writable-context exec-ctx storage fn-id nil))
+  ([exec-ctx storage fn-id detached]
+   (writer/assert-write-authorized! storage :fn {} fn-id)
+   (when-let [reason (pkg/write-rejection storage :fn {:id fn-id})]
+     (reject! :authz/forbidden reason))
+   (when-not (or access/*offline?* (and (:authenticated? (principal/current))
+                                        (:input-type-fn-id (sp/read-entity storage :fn fn-id))))
+     (reject! :authz/forbidden "Structured input editing is unavailable"))
+   (let [policy (tenancy/browser-source-policy storage)
+         frozen (if detached (read-view/collect-for-removal storage fn-id detached policy)
+                    (read-view/collect storage fn-id policy))]
+     (when-not (or access/*offline?* (authoring/editable-child? exec-ctx storage frozen fn-id))
+       (reject! :authz/forbidden "Structured input editing is unavailable"))
+     frozen)))
 
 
 (defn- owner-plan
@@ -166,7 +170,7 @@
         basis (preview-basis storage ctx command)
         _ (when (and apply? (not= basis (:expected-state command)))
             (reject! :input/stale-preview "Refresh the structured input before binding"))
-        row (checked-row exec-ctx ctx command)]
+        row (checked-row exec-ctx ctx command (random-uuid))]
     (writer/assert-write-authorized! storage :input-binding row nil)
     {:basis basis :row row :owner (get-in ctx [:fns fn-id])}))
 

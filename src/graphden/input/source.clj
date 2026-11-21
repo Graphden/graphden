@@ -526,7 +526,8 @@
         planning-context (assoc (rename/prepare-context context)
                                 ::records-of (memoize (partial parse-one context))
                                 ::original-of (fn [definition]
-                                                (let [[original & more] (get originals (definition-key definition))]
+                                                (let [[original & more] (or (get originals (definition-key definition))
+                                                                            (get (::originals-by-id context) (:fn-id definition)))]
                                                   (when-not more original)))
                                 ::ref-index (reference-index context)
                                 ::prepared prepared)

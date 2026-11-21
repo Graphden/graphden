@@ -8,6 +8,7 @@
     [graphden.input.list-records :as list-records]
     [graphden.input.rows :as rows]
     [graphden.input.scoped-source :as scoped]
+    [graphden.input.source-rich-types :as rich]
     [graphden.input.syntax :as syntax]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -33,7 +34,8 @@
 (defn- field-configuration?
   [[path spec]]
   (and (vector? path) (= 1 (count path)) (simple-keyword? (first path))
-       (map? spec) (= #{:type} (set (keys spec))) (format/configuration-type? (:type spec))))
+       (map? spec) (= #{:type} (set (keys spec)))
+       (or (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
 
 
 (defn- validate-source!
@@ -144,21 +146,24 @@
              (reject! :unsupported-binding-expression)))))
 
 
-(defn- resolve-configurations
-  [{:keys [contract scope resolve-config-type]} state configuration]
-  (into {}
-        (map (fn [[names {:keys [type]}]]
-               (let [path (:path (input/resolve-address contract scope names))]
-                 (when-not (contains? state [scope path])
-                   (reject! :configuration-requires-bound-field))
-                 (when-not (ifn? resolve-config-type)
-                   (reject! :configuration-type-resolver-required))
-                 (let [resolved (resolve-config-type type)]
-                   (when-not (and (format/configuration-type? (:type resolved))
-                                  (uuid? (:type-override-fn-id resolved)))
-                     (reject! :unresolved-configuration-type))
-                   [names (assoc (select-keys resolved [:type :type-override-fn-id]) :target-path path)]))))
-        configuration))
+(defn- resolve-configuration
+  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id]} state [names {:keys [type]}]]
+  (let [path (:path (input/resolve-address contract scope names))]
+    (if (rich/callable-shape? type)
+      (let [owner (some #(when (= (first scope) (:id %)) %) declaration-records)
+            field (some #(when (= path [(:id %)]) %) (:fields contract))]
+        (when (contains? state [scope path]) (reject! :self-pin-requires-free-field))
+        (when-not (and (= type (:type self-pin)) (= (binding-id scope path) (get-in self-pin [:row :id]))
+                       (rich/exact-self-pin? owner field (assoc self-pin :type type) (group-by :id declaration-records)))
+          (reject! :unverified-callable-self-pin))
+        [names self-pin])
+      (do
+        (when-not (contains? state [scope path]) (reject! :configuration-requires-bound-field))
+        (when-not (ifn? resolve-config-type) (reject! :configuration-type-resolver-required))
+        (let [resolved (resolve-config-type type)]
+          (when-not (and (format/configuration-type? (:type resolved)) (uuid? (:type-override-fn-id resolved)))
+            (reject! :unresolved-configuration-type))
+          [names (assoc (select-keys resolved [:type :type-override-fn-id]) :target-path path)])))))
 
 
 (declare ^:private parse-definition)
@@ -248,12 +253,12 @@
             state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
                                                      (:scope ctx) builders)
             routes (scoped/parse-bindings ctx state bind)
-            configs (resolve-configurations ctx state (:configure source))
+            configs (into {} (map (partial resolve-configuration ctx state)) (:configure source))
             by-path (into {} (map (juxt :target-path identity)) (vals configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
                :expression expression :binding-state (scoped/binding-state state routes)
-               :bindings (into bindings (map :row) (vals routes)) :configurations configs :scoped-inputs routes
+               :bindings (into (into bindings (keep :row) (vals configs)) (map :row) (vals routes)) :configurations configs :scoped-inputs routes
                :inline-definitions inlines :list-builders builders)))))
 
 

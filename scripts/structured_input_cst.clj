@@ -9,6 +9,7 @@
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.source-list :as source-list]
+    [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
     [rewrite-clj.zip :as z]
     [structured-input-inventory :as inventory])
@@ -403,6 +404,26 @@
       (assoc span :after after))))
 
 
+(defn- self-pin-edit
+  [source starts loc {:keys [definition path type]}]
+  (let [[_ field] path
+        args (value-at loc [:args])
+        spec (value-at args [field])
+        original (inventory/read-edn path (z/string args))]
+    (when-not (and (= [:args field] path) (key-loc loc :parent) (not-any? #(key-loc loc %) [:bind :input :configure])
+                   (rich/callable-shape? type) (= {field {:as field :type type}} original))
+      (refuse :self-pin-origin-mismatch {:path path}))
+    (let [key-edit (rename-edit source starts loc definition [:args] :configure)
+          edits [key-edit (node-edit source starts (key-loc args field) #(str "[" % "]"))
+                 (node-edit source starts (key-loc spec :as) (constantly ""))
+                 (node-edit source starts (value-at spec [:as]) (constantly ""))]
+          start (:start key-edit)
+          end (:end (node-edit source starts args identity))
+          before (subs source start end)
+          local (map #(-> % (update :start - start) (update :end - start)) edits)]
+      {:start start :end end :before before :after (patched-text before local)})))
+
+
 (defn- operation-edit
   [source starts definitions {:keys [op definition path] :as operation}]
   (when-not (and (keyword? definition) (vector? path) (seq path))
@@ -410,6 +431,7 @@
   (let [loc (or (get definitions definition)
                 (refuse :missing-definition {:definition definition}))]
     (case op
+      :self-pin (self-pin-edit source starts loc operation)
       :list-builder (list-builder-edit source starts (argument-loc loc path) operation)
       :scope-key
       (let [public-path (:public-path operation)
@@ -532,6 +554,18 @@
                      [public-path [:project source-names]]))) fields))
 
 
+(defn- self-pin-operation
+  [source proposed [argument & more] pin]
+  (let [path (:source-path argument)
+        field (second path)
+        config {[field] {:type (:type pin)}}]
+    (when-not (and (= [:args field] path) (empty? more)
+                   (= {field {:as field :type (:type pin)}} (:args source))
+                   (= proposed (assoc (dissoc source :args) :configure config)))
+      (refuse :planner-ledger-mismatch {:path path}))
+    [{:op :self-pin :definition (:name source) :path path :type (:type pin)}]))
+
+
 (defn entry-operations
   "Bridge one SUPPORTED graphden.input.source/plan-module entry to CST operations.
    The semantic planner owns reference resolution. Ref spellings are retained;
@@ -543,8 +577,11 @@
                  (not-any? #(contains? source %) [:input :bind :configure]))
     (refuse :unsupported-source-entry {}))
   (let [has-args? (contains? source :args)
+        pin (:self-pin (first (:arguments legacy)))
         rename (fn [op] (if has-args? [{:op op :definition (:name source) :path [:args]}] []))]
-    (case kind
+    (case (if (and (= :composed kind) pin) :self-pin kind)
+      :self-pin (self-pin-operation source proposed (:arguments legacy) pin)
+
       :base
       (do
         (when-not (= proposed (cond-> (dissoc source :args) has-args? (assoc :input (:args source))))

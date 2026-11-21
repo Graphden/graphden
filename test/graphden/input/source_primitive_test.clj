@@ -47,3 +47,44 @@
   (is (= :staged-root-required (code #(primitive/prepare module (random-uuid)))))
   (is (= :staged-primitive-module-ledger
          (code #(primitive/prepare (update module :fns conj (first (:fns module))) root)))))
+
+
+(def ^:private composed-module
+  {:input-format 2 :namespace "fixture"
+   :fns [{:name :subtract :input (array-map :left :int :right :int) :return-type :int}
+         {:name :from-12 :parent :subtract :bind {:left [:value 12]}}]})
+
+
+(def ^:private composed-root (ids/fn-id "fixture" :from-12))
+(def ^:private composed-parent (ids/fn-id "fixture" :subtract))
+(def ^:private visible #{composed-root composed-parent})
+
+
+(deftest literal-root-has-the-legacy-binding-and-inherited-field-identities
+  (let [original [{:namespace "fixture" :name :subtract
+                   :args (array-map :left :int :right :int) :return-type :int}
+                  {:namespace "fixture" :name :from-12 :parent :subtract :args {:left 12}}]
+        prepared (parse/prepare-module original {} {})
+        proof (second (:definitions (source/verify-module (source/plan-module original prepared) prepared)))
+        actual (second (primitive/prepare-literal-root composed-module composed-root visible))
+        identity-keys [:fn-id :input-type-id :contract :declaration-records :origin-ledger :bindings]
+        slot (ids/slot-id composed-parent :left)]
+    (is (= :authored-source-equivalent (:verification proof)))
+    (is (= (select-keys (:v2 proof) identity-keys) (select-keys actual identity-keys)))
+    (is (= (ids/binding-id composed-root slot) (get-in actual [:bindings 0 :id])))
+    (is (= [slot] (get-in actual [:bindings 0 :target-path])))))
+
+
+(deftest literal-root-rejects-other-parent-and-binding-shapes
+  (is (= :staged-function-not-visible
+         (code #(primitive/prepare-literal-root composed-module composed-root #{composed-root}))))
+  (doseq [[patch diagnostic] [[{:parent :unknown} :staged-literal-parent-required]
+                              [{:parents [:subtract]} :staged-literal-parent-unsupported]
+                              [{:bind {:unowned [:value 12]}} :staged-literal-field-unknown]
+                              [{:bind {:left [:ref :subtract]}} :staged-literal-binding-unsupported]
+                              [{:bind {:left [:value [12]]}} :staged-literal-binding-unsupported]
+                              [{:bind {:left [:value 12] :right [:value 1]}} :staged-literal-binding-unsupported]
+                              [{:configure {[:left] {:type :int}}} :staged-literal-declaration-unsupported]]]
+    (is (= diagnostic
+           (code #(primitive/prepare-literal-root (update-in composed-module [:fns 1] merge patch)
+                                                  composed-root visible))))))

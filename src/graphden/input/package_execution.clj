@@ -74,3 +74,14 @@
         frozen (snapshot/freeze-primitive module root roots)]
     (assoc (compile-frozen frozen root implementations)
            :staged-source {:sha256 sha256 :namespace (:namespace module)})))
+
+
+(defn compile-staged-literal-root
+  "Compile one visible v2 root with a scalar literal binding and a visible
+   primitive parent declared in the same pinned file."
+  [root roots implementations {:keys [bytes sha256 visible-fn-ids]}]
+  (require-visible-root! root visible-fn-ids)
+  (let [module (staged/read-pinned bytes sha256)
+        frozen (snapshot/freeze-literal-root module root roots visible-fn-ids)]
+    (assoc (compile-frozen frozen root implementations)
+           :staged-source {:sha256 sha256 :namespace (:namespace module)})))

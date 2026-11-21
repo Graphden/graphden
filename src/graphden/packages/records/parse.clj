@@ -843,6 +843,14 @@
   (attach-fn-meta (parse-base-fn definition fields name->id) definition))
 
 
+(defn composed-declaration-record
+  "Emit a composed owner row from resolved parent identities."
+  [{fn-name :name ns-id :namespace :keys [description] :as definition} parent-ids return-type-id]
+  (first (attach-fn-meta [(composed-own-fn (ids/fn-id ns-id fn-name) fn-name ns-id
+                                           parent-ids description return-type-id)]
+                         definition)))
+
+
 (defn parse-fn-def
   "Dispatches on EDN entry shape; returns vector of records.
 

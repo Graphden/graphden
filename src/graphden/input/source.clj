@@ -99,6 +99,21 @@
         (:name->id context)))
 
 
+(defn with-reference-index
+  "Keep the reverse reference index for repeated plans of the same package."
+  [context]
+  (vary-meta context assoc ::reference-index
+             {:names (:name->id context) :refs (ref-index context)}))
+
+
+(defn- reference-index
+  [context]
+  (let [{:keys [names refs]} (::reference-index (meta context))]
+    (if (and refs (identical? names (:name->id context)))
+      refs
+      (ref-index context))))
+
+
 (defn- binding-expression
   [binding names]
   (cond
@@ -513,7 +528,7 @@
                                 ::original-of (fn [definition]
                                                 (let [[original & more] (get originals (definition-key definition))]
                                                   (when-not more original)))
-                                ::ref-index (ref-index context)
+                                ::ref-index (reference-index context)
                                 ::prepared prepared)
         planning-context (assoc planning-context ::inherited-fields (memoize (partial inherited-fields planning-context)))
         definitions
@@ -706,12 +721,12 @@
    Keep the returned v2 rows and contracts private like the source plan.
    Use :counts, :blockers and per-definition :verification for reports."
   [plan context]
-  (let [environment (source-context/environment context)
+  (let [environment (delay (source-context/environment context))
         definitions
         (mapv (fn [{:keys [source status] :as definition}]
                 (if (= :supported status)
                   (try
-                    (verify-definition environment definition)
+                    (verify-definition @environment definition)
                     (catch Exception failure
                       (let [{:keys [type code path]} (ex-data failure)]
                         (-> definition

@@ -41,7 +41,7 @@
   [prepared originals]
   (let [by-id (group-by definition-id originals)
         ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
-    {:prepared (assoc prepared ::rename/ambiguous-type-ids ambiguous)
+    {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous))
      :markers (shapes/markers-snapshot)
      :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
      :originals by-id}))

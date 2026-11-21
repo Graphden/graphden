@@ -219,6 +219,71 @@ function boot({ effects = false } = {}) {
     assert(t.posts.length === 0, 'disabled v2 cannot submit');
   }
 
+  console.log(' structured Repeat restores atomically against a fresh authorized snapshot');
+  {
+    const t = boot();
+    const body = t.doc.createElement('div');
+    t.doc.body.appendChild(body);
+    const basis = {'branch-id': 'branch', 'graph-hash': 'same-source', slots: {profile: 'profile-slot'}};
+    const descriptor = {kind: 'input-record', status: 'available', 'run-available': true, 'run-repeat': basis, fields: [
+      {kind: 'input-field', name: 'profile', required: true, 'required-now?': true, fields: [
+        {kind: 'input-field', name: 'id', type: 'int', required: true, 'required-now?': true},
+        {kind: 'input-field', name: 'active', type: 'bool', required: false, 'required-now?': false},
+      ]},
+    ]};
+    const form = t.ctx.mountStructuredRunInputs(body, descriptor);
+    const input = body.querySelector('input');
+    const dropdown = body.querySelector('select');
+    const row = {id: 'run', 'fn-id': 'A', 'branch-id': 'branch', 'graph-hash': 'same-source', status: 'succeeded',
+      args: [{'slot-id': 'profile-slot', value: {id: 42, active: false}, items: []}]};
+    let saved = row;
+    let fresh = descriptor;
+    let current = true;
+    let historyWait = Promise.resolve();
+    t.ctx.API.api_graph_entities = '/api/graph/entities';
+    t.ctx.authFetch = async url => {
+      if (url.startsWith('/api/graph/entities?')) {
+        return t.res({fns: [{id: 'A', 'structured-input': fresh}]});
+      }
+      await historyWait;
+      return t.res(saved);
+    };
+    const repeat = t.ctx.makeStructuredRepeat('A', descriptor, form, () => current);
+    await repeat('run');
+    assert(input.value === '42' && dropdown.value === 'false', 'exact saved nested values restored');
+    assert(t.posts.length === 0, 'restoring never submits an execution');
+    input.value = '7';
+    for (const drift of [
+      {...row, 'fn-id': 'other'},
+      {...row, 'branch-id': 'other'},
+      {...row, 'graph-hash': 'old'},
+      {...row, status: 'failed'},
+      {...row, 'tainted?': true},
+      {...row, args: [{...row.args[0], 'slot-id': 'unknown-slot'}]},
+      {...row, args: [{...row.args[0], value: {id: 99, occupied: 'private'}}]},
+    ]) {
+      saved = drift;
+      await repeat('run');
+      assert(input.value === '7' && dropdown.value === 'false', 'stale, hidden or invalid history leaves draft unchanged');
+    }
+    saved = row;
+    fresh = {...descriptor, 'run-repeat': {...basis, 'graph-hash': 'new-source'}};
+    await repeat('run');
+    assert(input.value === '7', 'a changed authorized subtree blocks Repeat');
+    fresh = descriptor;
+    const [wait, release] = t.hold();
+    historyWait = wait;
+    const pending = repeat('run');
+    input.value = '8';
+    body.dispatch('input');
+    release();
+    await pending;
+    assert(input.value === '8', 'a new draft edit wins while history is in flight');
+    current = false;
+    await repeat('run');
+    assert(input.value === '8', 'an old pane cannot restore history');
+  }
+
   console.log(' summary Enter keeps native disclosure; text input Enter still submits');
   {
     const t = boot();

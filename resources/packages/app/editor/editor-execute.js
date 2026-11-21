@@ -542,7 +542,7 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
 
   const descriptor = window.gdStructuredInputFor?.(fnId);
   const structured = descriptor != null || lookups?.fnMap?.get(fnId)?.['input-type-fn-id'] != null;
-  const readStructured = structured
+  const structuredForm = structured
     ? mountStructuredRunInputs(el.querySelector('.execute-popover-body'), descriptor) : null;
   // Mount every v1 free-arg's value-form in parallel — sequential await
   // would serialise the N HTTP roundtrips.
@@ -565,10 +565,12 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
   // toggle cannot re-enable Run mid-submit.
   let submitting = false;
   const structuredCurrent = () => !structured || window.gdStructuredInputFor?.(fnId) === descriptor;
+  const repeat = structuredForm ? makeStructuredRepeat(fnId, descriptor, structuredForm,
+    () => el.isConnected && isCurrent() && structuredCurrent()) : null;
   const syncRunEnabled = () => {
     if (!runBtn) return;
     const unconfirmed = !!confirmCb && !confirmCb.checked;
-    runBtn.disabled = submitting || unconfirmed || (structured && (!readStructured || !structuredCurrent()));
+    runBtn.disabled = submitting || unconfirmed || (structured && (!structuredForm || !structuredCurrent()));
     if (confirmCb) runBtn.title = unconfirmed ? 'Confirm side-effects acknowledgement first' : 'Run';
   };
 
@@ -614,7 +616,8 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
     runsHost.appendChild(renderSubmitSpinner('Loading runs…'));
     const panel = await buildHistoryPanel(fnEntity, resultHost, {
       signal: read?.signal,
-      allowRepeat: !structured,
+      allowRepeat: !structured || !!repeat,
+      repeat,
       isCurrent: () => isCurrent() && generation === historyGeneration && (!read || read.current()),
     });
     // A slow fetch may resolve after the tab re-rendered — only land
@@ -640,7 +643,7 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
       syncRunEnabled();
       return;
     }
-    const args = structured ? readStructured?.() : {};
+    const args = structured ? structuredForm?.read() : {};
     if (!args) return;
     if (!structured) {
       for (const a of formHosts) {

@@ -174,6 +174,18 @@
           (throw error))))))
 
 
+(defn- repeat-basis
+  [storage {:keys [free-slots graph-hash]} fields]
+  (let [branch-id (vs/current-branch-id storage)
+        names (mapv :name fields)
+        slots (select-keys free-slots names)
+        ids (vals slots)]
+    (when (and (uuid? branch-id) (string? graph-hash)
+               (= (count names) (count free-slots) (count slots) (count (set ids)))
+               (every? uuid? ids))
+      {:branch-id branch-id :graph-hash graph-hash :slots slots})))
+
+
 (defn read-input
   "Recheck the visible root in the same snapshot as its source permissions
    and v2 closure. Set `editor?` false for a read-only consumer."
@@ -184,16 +196,18 @@
      (source/with-snapshot storage
                            (fn [snapshot authorize!]
                              (let [ctx (read-view/collect snapshot root authorize!)
-                                   runnable (when exec-ctx (run/runnable-analysis exec-ctx ctx root))
-                                   graph (or runnable (analyze ctx root))
+                                   runnable (when exec-ctx (run/runnable-input exec-ctx ctx root))
+                                   graph (or (:analysis runnable) (analyze ctx root))
                                    editable? (and editor? (fixture-editable? snapshot root))]
                                (context/call-with-types
                                  ctx
                                  (fn []
-                                   (let [view (project-analysis graph editable?)]
+                                   (let [view (project-analysis graph editable?)
+                                         runnable? (and runnable (= :available (:status view)))
+                                         basis (when runnable? (repeat-basis snapshot runnable (:fields view)))]
                                      (cond-> view
-                                       (and runnable (= :available (:status view)))
-                                       (assoc :run-available true)
+                                       runnable? (assoc :run-available true)
+                                       basis (assoc :run-repeat basis)
                                        (and editable? (= :available (:status view)))
                                        (assoc :occupied (occupied-editor-fields snapshot ctx graph)))))))))
      (catch clojure.lang.ExceptionInfo error

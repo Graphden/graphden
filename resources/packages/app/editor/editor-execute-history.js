@@ -121,12 +121,14 @@ function setHistorySecretsOnly(on) {
 // Post-swap action wiring — both selectors point at markers the
 // server fragment carries (`data-execution-id` on the row + the
 // Repeat button; `.execute-history-repeat-btn` for the click target).
-function bindHistoryActions(panel, fnEntity, resultHostEl) {
+function bindHistoryActions(panel, fnEntity, resultHostEl, repeat) {
   const onExpand = makeRowExpander(resultHostEl);
   panel.querySelectorAll('.execute-history-repeat-btn').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();   // don't bubble to row-click expand
-      await applyHistoryArgs(fnEntity, btn.getAttribute('data-execution-id'));
+      const id = btn.getAttribute('data-execution-id');
+      if (repeat) await repeat(id);
+      else await applyHistoryArgs(fnEntity, id);
     });
   });
   // "path" button (Debug P2) — only present on rows whose execution
@@ -222,7 +224,7 @@ async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
       for (const button of wrap.querySelectorAll('.execute-history-repeat-btn')) button.remove();
     }
     if (window.htmx?.process) window.htmx.process(wrap);
-    bindHistoryActions(wrap, fnEntity, resultHostEl);
+    bindHistoryActions(wrap, fnEntity, resultHostEl, opts?.repeat);
     // A service fn's panel carries the «catch next request» block —
     // editor-debug.js polls it while a trap is armed.
     if (wrap.querySelector('.gd-run-trap') && typeof gdDebugTrapMounted === 'function') {

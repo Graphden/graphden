@@ -12,6 +12,17 @@
   (is (= {:mode :unresolved :reason :missing-target-return} (reference/classify :text {}))))
 
 
+(deftest value-unions-preserve-the-target-return-and-require-its-signature
+  (let [expected '[:union :null [:map a :any]]
+        target {:return {:body :text}}]
+    (is (= {:mode :value :actual-type {:body :text}} (reference/classify expected target)))
+    (is (= {:mode :unresolved :reason :missing-target-signature} (reference/classify expected nil)))
+    (doseq [arm [:fn-ref [:secret :fn-ref] [:refine :fn-ref [:not= nil]]
+                 :fn [:fn {:item :text} :bool] [:secret [:union :int :fn]] 'a]]
+      (is (= {:mode :unresolved :reason :ambiguous-reference-mode}
+             (reference/classify [:union :null arm] target))))))
+
+
 (deftest callable-producers-keep-construction-inputs-separate-test
   (let [callable [:fn {:message :text} :bool #{} :unknown]
         target {:args {:configuration :text} :return [:secret callable]

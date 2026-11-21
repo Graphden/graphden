@@ -33,6 +33,16 @@
     :else expected))
 
 
+(defn- value-arm?
+  "A concrete union arm whose reference must supply an evaluated value.
+   Markers and refinements preserve the dispatch of their outer value."
+  [arm]
+  (let [base (dispatch-base arm)]
+    (if (types/union-type? base)
+      (every? value-arm? (types/union-members base))
+      (not (or (= :fn-ref base) (types/callable-type? base) (types/type-var? base))))))
+
+
 (defn expected-callable
   "Invocation shape of a callable input, preserving the existing marker
    projection. A refined callable needs its own policy proof, not unwrapping."
@@ -52,7 +62,8 @@
         base (dispatch-base expected)]
     (cond
       (= :fn-ref base) {:mode :identity :actual-type :fn-ref}
-      (types/union-type? base) {:mode :unresolved :reason :ambiguous-reference-mode}
+      (and (types/union-type? base) (not (value-arm? base)))
+      {:mode :unresolved :reason :ambiguous-reference-mode}
       (and (types/callable-type? base) (nil? (expected-callable expected)))
       {:mode :unresolved :reason :refined-callable-policy}
       (nil? target-info) {:mode :unresolved :reason :missing-target-signature}

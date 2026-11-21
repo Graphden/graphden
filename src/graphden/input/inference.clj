@@ -25,7 +25,11 @@
 (defn- scope-dependencies
   [graph]
   (let [edges (projections/value-dependencies graph (:projections graph))
-        targets (into {} (map (juxt :from (comp second :to))) (:dependencies graph))
+        targets (into {} (map (fn [{:keys [from to mode]}]
+                                (when (= :unresolved mode)
+                                  (let [entry (get-in graph [:scopes (second (first from)) :bindings from])]
+                                    (context/reject! :reference-mode-required {:address from :reason (get-in entry [:reference :reason])})))
+                                [from (second to)])) (:dependencies graph))
         reachable (reduce (fn [result address]
                             (assoc result address
                                    (into (if-let [target (get targets address)] #{target} #{})

@@ -47,7 +47,7 @@
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded @loaded-bases]
         (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
-                                                        (filter #(= :get (:name %)) (sources "collections"))
+                                                        (filter #(#{:get :zipmap} (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
                                                         (filter #(#{:shipped-asset :to-json-string} (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
@@ -81,6 +81,20 @@
     (is (= [[host-id [edge]] [field]] (:address certificate)))
     (is (= (ids/binding-id host-id field) (get-in certificate [:row :id])))
     (is (= "checked" (get-in certificate [:row :value])))))
+
+
+(deftest generated-list-parameters-retain-frozen-element-variables
+  (let [base (some #(when (= :zipmap (:name %)) %) (sources "collections"))
+        owner (ids/fn-id "fixture" :directory)
+        definitions [base {:namespace "fixture" :name :directory :parent :zipmap
+                           :args {:keys {:append [{:value :first} {:value :second}] :closed true}
+                                  :vals {:append ["one" 2] :closed true}}}]
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)]
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (empty? (:obligations graph)))
+    (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))))
 
 
 (deftest scoped-bindings-are-certified-together

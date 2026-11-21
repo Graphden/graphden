@@ -4,6 +4,7 @@
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
@@ -41,6 +42,21 @@
               (is (= [42 42] (mapv deref values))))
             (is (= [42 42] (vec values)))))
         (is (= [:source] @calls))))))
+
+
+(deftest frame-list-arguments-do-not-pull-more-than-the-consumer-requests
+  (let [names (mapv #(keyword (str "item-" %)) (range 35))
+        calls (atom [])
+        arguments (into {:tail (runtime/thunk #(do (swap! calls conj :tail) [35]))}
+                        (map-indexed (fn [i name]
+                                       [name (runtime/thunk #(do (swap! calls conj i) i))]))
+                        names)
+        values ((execution/compile-arguments names) arguments {})]
+    (is (empty? @calls))
+    (is (= [0 1] (vec (take 2 values))))
+    (is (= [0 1] @calls))
+    (is (= (vec (range 36)) (vec values)))
+    (is (= (conj (vec (range 35)) :tail) @calls))))
 
 
 (deftest continuation-is-addressed-and-inherited-in-order

@@ -2,6 +2,7 @@
   "Offline JVM execution of a source-verified list construction."
   (:require
     [graphden.executor.compile-eager :as compile]
+    [graphden.executor.runtime :as runtime]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-records :as records]))
 
@@ -25,6 +26,16 @@
 (defn- delayed-literal
   [value]
   (delay value))
+
+
+(defn compile-arguments
+  "Build ordinary list values from the frame's lazy ABI arguments. Pull one
+   operand per demand and resolve the optional continuation after the prefix."
+  [operands]
+  (let [ordered (apply list operands)]
+    (fn [args _ctx]
+      (concat (map (partial runtime/resolve-arg args) ordered)
+              (lazy-seq (seq (runtime/resolve-arg args :tail)))))))
 
 
 (defn compile-construction

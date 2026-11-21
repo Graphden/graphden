@@ -88,6 +88,26 @@
     (assoc frozen :execute #(executor/execute {:compiled-registry (atom {root (:invoke frozen)})} root %))))
 
 
+(deftest checked-polymorphic-list-execution-matches-the-legacy-graph
+  (let [child {:namespace "fixture" :name :directory :parent :zipmap
+               :args {:keys {:append [{:value :first} {:value :second}] :closed true}
+                      :vals {:append ["one" 2] :closed true}}}
+        source (conj (declarations "packages/core/collections/fns.edn" #{:zipmap}) child)
+        root (ids/fn-id "fixture" :directory)
+        base (ids/fn-id "core.collections" :zipmap)
+        prepared (parse/prepare-module source {} {})
+        entry (first (:definitions (source/plan-module [child] prepared)))
+        module {:namespace "fixture" :fns [(dissoc child :namespace)]}
+        staged (assoc module :input-format 2 :fns [(dissoc (:proposed entry) :namespace)])
+        run (fn [visible]
+              (let [options (staged-options module staged visible)]
+                (runtimes source root #(execution/compile-staged-module %1 %2 %3 %4 options))))
+        {:keys [canonical legacy analysis]} (run #{root base})]
+    (is (= :checked (:status analysis)))
+    (is (= {:first "one" :second 2} (legacy {}) (canonical {})))
+    (is (= :staged-function-not-visible (rejection-code #(run #{root}))))))
+
+
 (deftest staged-primitive-executes-without-legacy-preparation
   (let [module {:input-format 2 :namespace "core.arithmetic"
                 :fns [{:name :floor :input {:number :numeric} :return-type :int}]}

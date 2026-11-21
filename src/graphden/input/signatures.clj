@@ -202,7 +202,7 @@
    existing-engine callback. The implementation descriptor is shared with the
    compiler; :impl is never read or invoked. Returned substitutions/proofs must
    join graph checking before this signature can be called checked."
-  [ctx graph scope {:keys [base-fn-id root-entry argument-paths] :as implementation} infer-signature]
+  [ctx graph scope {:keys [base-fn-id root-entry argument-paths generated-list] :as implementation} infer-signature]
   (when-not (and (uuid? base-fn-id) (map? root-entry) (:return root-entry)
                  (fn? infer-signature))
     (context/reject! :signature-provider-required {:scope scope}))
@@ -211,9 +211,10 @@
                      [base-fn-id (conj (second scope) (first scope))]
                      (assoc root-entry :fn-id base-fn-id))
         declaration (get-in ctx [:fns (:fn-id node)])
+        stored-return (when (:return-type-fn-id declaration) (declared-return ctx declaration))
         declaration (cond-> declaration
-                      (:return-type-fn-id declaration)
-                      (assoc :return-type (declared-return ctx declaration)))
+                      (and stored-return (not (:infer-return? generated-list)))
+                      (assoc :return-type stored-return))
         facts (binding-facts graph scope argument-paths)
         result (infer-signature
                  (assoc facts :fn-id (:fn-id node) :root-entry root-entry

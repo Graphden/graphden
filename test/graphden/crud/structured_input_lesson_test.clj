@@ -121,7 +121,11 @@
 
 (defn- exercise-in-browser!
   [handler token root]
-  (let [stop (http/run-server (bound-fn [req] (handler req)) {:ip "127.0.0.1" :port 0})]
+  (let [http-handler (bound-fn [req]
+                       ;; Graphden's Ring response carries keyword header keys.
+                       ;; Match the app's HTTP boundary before handing it to http-kit.
+                       (update (handler req) :headers update-keys name))
+        stop (http/run-server http-handler {:ip "127.0.0.1" :port 0})]
     (try
       (let [origin (str "http://127.0.0.1:" (:local-port (meta stop)))
             builder (ProcessBuilder. ["node" "tools/browser-test/fixtures/structured-input-lesson.js" origin (str root)])

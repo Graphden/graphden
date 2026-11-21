@@ -16,6 +16,7 @@
     [graphden.system.init.packages]
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.browser-loopback :as browser]
+    [graphden.test-infra.closed-input :as closed]
     [graphden.test-infra.golden-app :as golden]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
@@ -301,6 +302,27 @@
       (when (:id row) (exercise-reference-changes! origin token storage seams denied child (:id row))))))
 
 
+(defn- exercise-callable-field!
+  [origin token storage]
+  (let [name "callable-input-authoring"
+        created (extend-native origin token name closed/root)
+        owner (:id (first (sp/query-entities storage :fn {:name name})))
+        action {:fn-id owner :action "bind" :path ["payload" "callback"] :ref-fn-id uppercase}
+        preview (command origin token "preview" action)]
+    (is (<= 200 (:status created) 299))
+    (is (true? (:ok preview)) (pr-str preview))
+    (when (:ok preview)
+      (let [bound (command origin token "apply" (assoc action :expected-state (:expected-state preview)))
+            view (subtree origin token owner)
+            response (request origin token :post "/api/execute"
+                              {:content-type "application/json"
+                               :body (json/generate-string {:fn-id owner :args {:payload {:item "Ada"}} :timeout-ms 20000})})
+            result (json/parse-string (:body response) true)]
+        (is (true? (:committed bound)) (pr-str bound))
+        (is (= ["item"] (mapv :name (get-in view [:fields 0 :fields]))))
+        (is (= "ADA" (:result result)) (pr-str result))))))
+
+
 (defn- exercise-reference-picker!
   [origin handler token storage ctx]
   (let [owner-name "profile-with-picked-reference"
@@ -322,8 +344,8 @@
 
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext"]
-                                             :primitive-inputs [lesson/admission uppercase-admission]})
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "closedinputfixture"]
+                                             :primitive-inputs [lesson/admission uppercase-admission closed/admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
         denied (atom nil)
@@ -340,6 +362,7 @@
       (let [origin (str "http://127.0.0.1:" (:local-port (meta stop)))]
         (exercise-commands! origin token storage seams)
         (exercise-reference! origin token storage seams denied)
+        (exercise-callable-field! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))
       (finally (stop)))))

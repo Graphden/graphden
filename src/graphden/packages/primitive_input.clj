@@ -1,15 +1,29 @@
 (ns graphden.packages.primitive-input
-  "A deployment-supplied checksum admits one pure primitive with an existing native ABI."
+  "A deployment-supplied checksum admits a pure native primitive and verified literal descendants."
   (:require
     [clojure.java.io :as io]
+    [graphden.input.analysis :as analysis]
     [graphden.input.source-primitive :as primitive]
+    [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]))
 
 
+(defprotocol ^:private PrimitiveProof
+
+  (receipt-evidence [receipt expected-seal]))
+
+
 (deftype ^:private PrimitiveReceipt
-  [seal parsed abi-id])
+  [seal parsed abi-id staged children]
+
+  PrimitiveProof
+
+  (receipt-evidence
+    [_ expected-seal]
+    (when (identical? seal expected-seal)
+      {:parsed parsed :abi-fn-id abi-id :module staged :children children})))
 
 
 (defonce ^:private seal (Object.))
@@ -20,32 +34,68 @@
   (throw (ex-info "Package primitive admission failed" {:type :package-error/primitive-admission})))
 
 
+(defn- require-receipt!
+  [receipt]
+  (or (when (instance? PrimitiveReceipt receipt)
+        (receipt-evidence receipt seal))
+      (reject!)))
+
+
+(defn- literal-descendants
+  [{module-ns :namespace :as source} root]
+  (when-not (every? (comp simple-keyword? :name) (:fns source)) (reject!))
+  (let [ids (mapv #(ids/fn-id module-ns (:name %)) (:fns source))
+        visible (set ids)]
+    (when (or (not= (count ids) (count visible)) (not (contains? visible root))) (reject!))
+    (mapv (fn [id]
+            (let [[parent child] (primitive/prepare-literal-root source id visible)]
+              (when-not (= root (:fn-id parent)) (reject!))
+              child))
+          (remove #{root} ids))))
+
+
 (defn read-module
   "Preflight exactly the pinned classpath module before any package code runs."
   [package module {:keys [fn-id abi-fn-id sha256 record-contract]}]
   (let [path (str "packages/" package "/" module "/fns.edn")
         resource (io/resource path)]
     (when-not (and resource (uuid? fn-id) (uuid? abi-fn-id) (not= fn-id abi-fn-id)) (reject!))
-    (let [source (with-open [stream (io/input-stream resource)] (staged/read-pinned (.readAllBytes stream) sha256))]
-      (when-not (and (= 1 (count (:fns source))) (every? #{:input-format :namespace :description :fns} (keys source)))
+    (let [source (with-open [stream (io/input-stream resource)]
+                   (staged/read-pinned (java.io.InputStream/.readAllBytes stream) sha256))]
+      (when-not (every? #{:input-format :namespace :description :fns} (keys source))
         (reject!))
       (let [parsed (primitive/prepare source fn-id record-contract)
-            definition (:source parsed)]
+            definition (:source parsed)
+            children (literal-descendants source fn-id)
+            receipt (PrimitiveReceipt. seal parsed abi-fn-id source children)]
         (when (seq (:effects definition)) (reject!))
-        {:ns-path (:namespace source) :ns-description (:description source) :fns [(assoc definition :source-file path)]
-         :primitive (PrimitiveReceipt. seal parsed abi-fn-id)}))))
+        {:ns-path (:namespace source) :ns-description (:description source)
+         :fns (into [(assoc definition :source-file path)]
+                    (map (fn [child]
+                           (with-meta (assoc (:source child) :source-file path) {::literal-descendant receipt})))
+                    children)
+         :primitive receipt}))))
+
+
+(defn literal-descendant?
+  "Recognize a child that will be written with its boot-owned parent."
+  [definition]
+  (when-let [receipt (::literal-descendant (meta definition))]
+    (let [{:keys [module children]} (require-receipt! receipt)
+          module-ns (:namespace module)]
+      (when-not (some #(= (assoc (:source %) :namespace module-ns) (dissoc definition :source-file))
+                      children)
+        (reject!))
+      true)))
 
 
 (defn- declaration
   "Recover the preflighted rows only for their declared package owner."
   [name definition]
   (when-let [receipt (::source (meta definition))]
-    (when-not (and (instance? PrimitiveReceipt receipt)
-                   (identical? seal (.-seal ^PrimitiveReceipt receipt)))
-      (reject!))
-    (let [parsed (.-parsed ^PrimitiveReceipt receipt)]
+    (let [{:keys [parsed] :as admitted} (require-receipt! receipt)]
       (when-not (= (:fn-id parsed) (ids/fn-id (:namespace definition) name)) (reject!))
-      {:parsed parsed :abi-fn-id (.-abi-id ^PrimitiveReceipt receipt)})))
+      admitted)))
 
 
 (defn declarations
@@ -76,7 +126,7 @@
 (defn checked-records
   "Validate the independently registered package ABI and exact native function
    identity. Both entries must come from the current registration."
-  [{:keys [parsed abi-fn-id]} impls signatures]
+  [{:keys [parsed abi-fn-id module children]} impls signatures]
   (let [id (:fn-id parsed)
         signature (get signatures id)
         witness (get signatures abi-fn-id)
@@ -90,4 +140,10 @@
                    (= (:return signature) (get-in parsed [:source :return-type]))
                    (= (select-keys signature abi-keys) (select-keys witness abi-keys)))
       (reject!))
-    (:declaration-records parsed)))
+    (doseq [{owner :fn-id} children]
+      (let [{:keys [context options]} (snapshot/freeze-literal-root module owner signatures #{id owner})
+            result (analysis/analyze-effective-input context owner options)]
+        (when-not (= :checked (:status result)) (reject!))))
+    (into (:declaration-records parsed)
+          (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
+          children)))

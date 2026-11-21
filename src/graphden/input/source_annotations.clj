@@ -9,9 +9,9 @@
 
 (defn source-form?
   [field spec]
-  (and (simple-keyword? field) (map? spec) (= field (:as spec)) (contains? spec :type)
+  (and (simple-keyword? field) (map? spec) (= field (:as spec))
        (every? #{:as :type :description} (keys spec))
-       (format/configuration-type? (:type spec))
+       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)))
        (or (not (contains? spec :description)) (string? (:description spec)))))
 
 
@@ -29,20 +29,21 @@
             declaring-id (get name->id declaring)
             owner-id (ids/fn-id (:namespace definition) (:name definition))
             slot-id (when (uuid? declaring-id) (ids/slot-id declaring-id key))
-            type-id (records/resolve-type-ref (:type value) name->id)
+            type-id (when (contains? spec :type) (records/resolve-type-ref (:type value) name->id))
             id (when slot-id (ids/binding-id owner-id slot-id))
             matches (filter #(and (= :binding (:kind %)) (= id (:id %))) rows)
-            expected (cond-> {:kind :binding :id id :fn-id owner-id :slot-id slot-id
-                              :value-present false :type-override-fn-id type-id}
+            expected (cond-> {:kind :binding :id id :fn-id owner-id :slot-id slot-id :value-present false}
+                       type-id (assoc :type-override-fn-id type-id)
                        (contains? spec :description) (assoc :description (:description spec)))]
         (when (and (uuid? slot-id) (= field key) (= 1 (count matches))
                    (some #{declaring} (rest (slots/chain-of own-ref defs-by-name)))
-                   (= (:type value) (slots/slot-type-of declaring key defs-by-name))
+                   (or (not (contains? spec :type)) (= (:type value) (slots/slot-type-of declaring key defs-by-name)))
                    (= expected (into {} (remove (comp nil? val)) (first matches))))
-          (cond-> {:type (:type spec) :target-path [slot-id] :type-override-fn-id type-id
+          (cond-> {:target-path [slot-id]
                    :row (-> expected (dissoc :slot-id) (assoc :kind :input-binding
                                                               :scope-path [] :target-path [slot-id]
                                                               :expression-kind nil))}
+            type-id (assoc :type (:type spec) :type-override-fn-id type-id)
             (contains? spec :description) (assoc :description (:description spec))))))))
 
 
@@ -60,8 +61,11 @@
         expected (when (and (uuid? (:id owner)) (uuid? id))
                    (cond-> {:kind :input-binding :id (ids/binding-id (:id owner) id)
                             :fn-id (:id owner) :scope-path [] :target-path [id]
-                            :expression-kind nil :value-present false :type-override-fn-id (:type-id field)}
+                            :expression-kind nil :value-present false}
+                     (contains? annotation :type) (assoc :type-override-fn-id (:type-id field))
                      (contains? annotation :description) (assoc :description (:description annotation))))]
-    (and (uuid? (:id owner)) (uuid? id) (= type (:type field))
-         (= [id] target-path) (= (:type-id field) type-override-fn-id)
+    (and (uuid? (:id owner)) (uuid? id)
+         (or (not (contains? annotation :type)) (= type (:type field)))
+         (= [id] target-path)
+         (= (when (contains? annotation :type) (:type-id field)) type-override-fn-id)
          (= expected row))))

@@ -282,7 +282,7 @@
                  (vector? declarations) (= (count declarations) (count (set declarations)))
                  (or (nil? forwarded-bindings) (map? forwarded-bindings))
                  (every? (fn [[target expression]]
-                           (and (vector? target) (= 2 (count target)) (every? simple-keyword? target)
+                           (and (vector? target) (<= 2 (count target)) (every? simple-keyword? target)
                                 (= [:project [(peek target)]] expression)
                                 (some #{(peek target)} declarations))) forwarded-bindings)
                  (map? operators) (not-any? (set declarations) (keys operators)))
@@ -595,9 +595,11 @@
 (defn- forwarded-bindings
   [fields]
   (into {} (keep (fn [{:keys [source-path scope-certificate]}]
-                   (when-let [{:keys [public-path row source-names]} scope-certificate]
+                   (when-let [{:keys [public-path row source-names edges]} scope-certificate]
                      (when-not (and (= [(peek source-path)] source-names) (vector? public-path)
-                                    (= 2 (count public-path)) (= (peek public-path) (peek source-path))
+                                    (= (inc (count edges)) (count public-path)) (seq edges)
+                                    (= (mapv :binding-id edges) (:scope-path row))
+                                    (= (peek public-path) (peek source-path))
                                     (= "projection" (:expression-kind row)) (uuid? (:id row)))
                        (refuse :planner-ledger-mismatch {:path source-path}))
                      [public-path [:project source-names]]))) fields))

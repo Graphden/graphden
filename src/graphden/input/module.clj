@@ -35,9 +35,9 @@
 (defn- field-configuration?
   [[path spec]]
   (and (vector? path) (= 1 (count path)) (simple-keyword? (first path))
-       (map? spec) (contains? spec :type) (every? #{:type :description} (keys spec))
+       (map? spec) (every? #{:type :description} (keys spec))
        (or (not (contains? spec :description)) (string? (:description spec)))
-       (or (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
+       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
 
 
 (defn- validate-source!
@@ -171,6 +171,7 @@
         [names self-pin])
       :else
       (do
+        (when-not (contains? spec :type) (reject! :unverified-field-annotation))
         (when (contains? spec :description) (reject! :unverified-field-annotation))
         (when-not (contains? state [scope path]) (reject! :configuration-requires-bound-field))
         (when-not (ifn? resolve-config-type) (reject! :configuration-type-resolver-required))

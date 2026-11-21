@@ -78,6 +78,12 @@ scopes still require separate evidence. The CST writer supports an argument
 map containing only these annotations without moving its entries; mixed
 annotation/value maps retain an explicit writer blocker.
 
+A same-name `{:as :field}` with no type also emits an empty legacy binding
+row. Its source-backed `:configure {[:field] {}}` retains that UUID without
+adding a type assertion or occupying the field. Empty configuration without
+matching original source evidence is rejected. Exact metadata-only inline
+configurations use the same frozen row checks as named declarations.
+
 A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
 The reader uses the original namespace, host name, field and normalized
 reference spellings to reproduce each legacy child UUID. The host name of
@@ -211,6 +217,26 @@ projected destination directly, competing inherited bindings and multiple
 implementation roots retain diagnostics. At each reference use, a supplied
 alias carries the consuming binding's original UUID and its scoped address in
 `:source-binding` on the analyzer's projection route.
+
+An owned field's legacy source-slot link can also target a deeper value-reference
+input. All such fields on one owner must be proved and rewritten together. The
+frozen analyzer identifies one occurrence for each destination UUID and checks
+every reference edge, the source/destination types and existing occupancy. The
+local fields keep their UUIDs, positions and authored metadata; explicit scoped
+projections replace only their implicit source-slot links. Repeated destination
+uses, incomplete groups and unsupported reference modes remain blocked.
+
+Rich-field validation obligations remain explicit. A forwarding proof may remove
+a destination's field-read check only when an identical check remains on its
+original source field; other obligations must survive unchanged. This source
+equivalence proof does not establish execution support for those checks.
+
+Audited native type callbacks run with the frozen signature view. A callback
+that introduces a named type records `:graphden.input/type-aliases` in its
+metadata, mapping the returned label to its qualified source declaration.
+For example, the conditional's positive/non-negative literal refinements use
+the `core.refinements` UUIDs. The snapshot verifies those declarations and
+rejects absent or conflicting aliases instead of reading process-wide policy.
 
 A named pin on a union field uses the prepared package's namespace-resolved
 type definitions. The source planner checks finite expansion, marker
@@ -370,7 +396,11 @@ literals and named references at a field of type `[:list T]`, where `T` is
 primitives and their collections. It rebuilds the generated rows,
 takes each argument path from its stored membership, and retains the receiving
 field's exact list type for the tail and return. The existing signature checker
-checks each operand and its referenced function. The analysis reports runtime
+checks each operand and its referenced function. Finite nested list elements
+are retained recursively: `concat.colls` has `[:list [:list :any]]`, so each
+generated operand has `[:list :any]`, while its tail and return keep the outer
+list. Nested type variables and other nested constructors remain unsupported.
+The analysis reports runtime
 obligations for dynamically typed values. Type variables, other named element
 types, positional projections, inline items and inherited chains need additional
 signature evidence.

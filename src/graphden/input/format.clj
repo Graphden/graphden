@@ -200,9 +200,12 @@
                           (or (contains? bind (first path))
                               (let [spelling (get legacy-forms (first path))]
                                 (and (vector? spelling) (= :annotation (first spelling)))))
-                          (map? spec) (contains? spec :type) (every? #{:type :description} (keys spec))
+                          (map? spec) (every? #{:type :description} (keys spec))
+                          (or (contains? spec :type)
+                              (let [spelling (get legacy-forms (first path))]
+                                (and (vector? spelling) (= :annotation (first spelling)))))
                           (or (not (contains? spec :description)) (string? (:description spec)))
-                          (configuration-type? (:type spec))))
+                          (or (not (contains? spec :type)) (configuration-type? (:type spec)))))
                    configure))))
 
 
@@ -236,7 +239,7 @@
   [spelling]
   (and (vector? spelling) (= 2 (count spelling)) (= :annotation (first spelling))
        (vector? (second spelling)) (= (count (second spelling)) (count (set (second spelling))))
-       (contains? #{#{:as :type} #{:as :type :description}} (set (second spelling)))))
+       (contains? #{#{:as} #{:as :description} #{:as :type} #{:as :type :description}} (set (second spelling)))))
 
 
 (defn- original-annotation
@@ -343,7 +346,7 @@
     (let [leaves (mapv (fn [[k raw]]
                          (if (and (not (contains? bind k)) (map? raw) (= k (:as raw))
                                   (= (select-keys raw [:type :description]) (get configure [k]))
-                                  (contains? #{#{:as :type} #{:as :type :description}} (set (keys raw))))
+                                  (contains? #{#{:as} #{:as :description} #{:as :type} #{:as :type :description}} (set (keys raw))))
                            [k ::annotation [:annotation (vec (keys raw))]]
                            (when-let [[form spelling] (migrated-leaf raw (get bind k) (get configure [k]))]
                              [k form spelling])))

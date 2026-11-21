@@ -51,6 +51,20 @@
         (is (= :blocked (:status entry)))))))
 
 
+(deftest same-name-noop-retains-its-empty-binding-row-without-a-type-assertion
+  (let [{:keys [entry context plan]} (fixture {:title {:as :title}})
+        row (first (get-in entry [:v2 :bindings]))
+        owner (:identity entry)
+        field (ids/slot-id (ids/fn-id "fixture" :base) :title)
+        changed (source/verify-module (assoc-in plan [:definitions 1 :proposed :configure [:title] :type] :text) context)]
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= {[:title] {}} (get-in entry [:proposed :configure])))
+    (is (= {:kind :input-binding :id (ids/binding-id owner field) :fn-id owner
+            :scope-path [] :target-path [field] :expression-kind nil :value-present false} row))
+    (is (empty? (get-in entry [:v2 :binding-state])))
+    (is (= :blocked (get-in changed [:definitions 1 :status])))))
+
+
 (deftest annotations-do-not-admit-narrowing-or-extra-policy-test
   (doseq [spec [{:as :title :type :any}
                 {:as :title :type :text :required true}
@@ -62,7 +76,7 @@
 (deftest inline-annotation-spelling-and-argument-order-round-trip-test
   (let [body {:parent :base
               :args (array-map :head (array-map :description "Head" :type [:list :text] :as :head)
-                               :title (array-map :as :title :type :text))}
+                               :title (array-map :as :title))}
         definitions [{:name :base :namespace "fixture" :args {:title :text :head {:type [:list :text]}} :return-type :text}
                      {:name :sink :namespace "fixture" :args {:value :text} :return-type :text}
                      {:name :inline :namespace "fixture" :parent :sink :args {:value body}}]

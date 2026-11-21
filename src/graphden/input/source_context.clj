@@ -279,9 +279,10 @@
                 source
                 (if-let [annotation (when original
                                       (annotations/annotation context original (records-of original) field))]
-                  (let [normalize #(update % :type (fn [type]
-                                                     (rebase/rewrite-type-references
-                                                       type (fn [ref] (parse/normalize-ref ref (:name->id context) (:namespace definition))))))]
+                  (let [normalize #(cond-> % (contains? % :type)
+                                           (update :type (fn [type]
+                                                           (rebase/rewrite-type-references
+                                                             type (fn [ref] (parse/normalize-ref ref (:name->id context) (:namespace definition)))))))]
                     (when-not (= (normalize spec) (normalize (annotations/configuration annotation)))
                       (reject! :unverified-field-annotation [:configure path]))
                     (assoc-in source [:args field] (get-in original [:args field])))

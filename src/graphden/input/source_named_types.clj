@@ -119,19 +119,33 @@
   (filter keyword? (tree-seq (comp seq shapes/child-types) shapes/child-types type)))
 
 
+(defn- rule-aliases
+  [frozen aliases]
+  (reduce-kv (fn [frozen alias qualified]
+               (let [id (get-in frozen [:alias-ids qualified])
+                     prior (get-in frozen [:alias-ids alias])]
+                 (when-not (and (simple-keyword? alias) (qualified-keyword? qualified) (uuid? id)
+                                (or (nil? prior) (= id prior)))
+                   (reject! :rule-type-source-required id))
+                 (-> frozen (assoc-in [:aliases alias] (get-in frozen [:aliases qualified]))
+                     (assoc-in [:alias-ids alias] id))))
+             frozen aliases))
+
+
 (defn evidence
-  [entries resolve-named]
-  (let [forms (mapcat (fn [{:keys [contract source]}] (cons (:return-type source) (map :type (:fields contract)))) (vals entries))]
-    (loop [pending (vec (mapcat nested-type-names forms))
-           seen #{}
-           frozen {:aliases {} :alias-ids {} :fns {} :type-rows {} :type-origins {}}]
-      (if-let [name (peek pending)]
-        (if-let [{:keys [id body row rows origin]} (when-not (contains? seen name) (resolve-named name))]
-          (recur (into (pop pending) (nested-type-names body)) (conj seen name)
-                 (-> frozen (assoc-in [:aliases name] body) (assoc-in [:alias-ids name] id)
-                     (assoc-in [:fns id] row) (assoc-in [:type-rows id] rows) (assoc-in [:type-origins id] origin)))
-          (recur (pop pending) (conj seen name) frozen))
-        frozen))))
+  ([entries resolve-named] (evidence entries resolve-named {}))
+  ([entries resolve-named aliases]
+   (let [forms (mapcat (fn [{:keys [contract source]}] (cons (:return-type source) (map :type (:fields contract)))) (vals entries))]
+     (loop [pending (into (vec (mapcat nested-type-names forms)) (vals aliases))
+            seen #{}
+            frozen {:aliases {} :alias-ids {} :fns {} :type-rows {} :type-origins {}}]
+       (if-let [name (peek pending)]
+         (if-let [{:keys [id body row rows origin]} (when-not (contains? seen name) (resolve-named name))]
+           (recur (into (pop pending) (nested-type-names body)) (conj seen name)
+                  (-> frozen (assoc-in [:aliases name] body) (assoc-in [:alias-ids name] id)
+                      (assoc-in [:fns id] row) (assoc-in [:type-rows id] rows) (assoc-in [:type-origins id] origin)))
+           (recur (pop pending) (conj seen name) frozen))
+         (rule-aliases frozen aliases))))))
 
 
 (defn checked-expression

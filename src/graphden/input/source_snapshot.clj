@@ -140,7 +140,12 @@
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
                    (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
                    (= 1 (count (get-in entry [:owner :parent-ids])))
-                   (every? empty? ((juxt :configurations :scoped-inputs) child)))
+                   (empty? (:scoped-inputs child))
+                   (every? (fn [{:keys [target-path] :as config}]
+                             (annotations/exact? (:owner entry)
+                                                 (some #(when (= [(:id %)] target-path) %) (get-in child [:contract :fields]))
+                                                 config))
+                           (vals (:configurations child))))
       (reject! :unsupported-scope-declaration fn-id))
     (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
     child))
@@ -244,7 +249,7 @@
                    (for [{:keys [owner contract configurations]} (vals entries)
                          {:keys [row type target-path type-override-fn-id] :as config} (vals configurations)
                          :let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
-                         :when (annotations/exact? owner field config)]
+                         :when (and type-override-fn-id (annotations/exact? owner field config))]
                      [[(:id row) type-override-fn-id] type]))
              :markers markers))))
 
@@ -300,9 +305,23 @@
       (reject! :rich-type-source-required (:id owner)))))
 
 
+(defn- rule-type-aliases
+  [entries roots]
+  (reduce (fn [aliases callback]
+            (reduce-kv (fn [aliases alias qualified]
+                         (when (and (contains? aliases alias) (not= qualified (get aliases alias)))
+                           (reject! :conflicting-rule-type-alias nil))
+                         (assoc aliases alias qualified))
+                       aliases (:graphden.input/type-aliases (meta callback) {})))
+          {}
+          (for [id (keys entries)
+                callback (vals (select-keys (get roots id) [:return-type-rule :slot-types-rule :nav-types-rule]))]
+            callback)))
+
+
 (defn- verified-context
-  [package entries resolve-named]
-  (let [named (named-types/evidence entries resolve-named)
+  [package entries resolve-named roots]
+  (let [named (named-types/evidence entries resolve-named (rule-type-aliases entries roots))
         type-rows (into [] (comp (mapcat :declaration-records) (filter #(= :fn (:kind %)))) (vals entries))
         by-type-id (group-by :id type-rows)]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
@@ -323,8 +342,8 @@
                    (= (set (:effects (:source declaration))) (:effects entry))
                    (= args (:args entry)) (= (types/resolve-alias return) (:return entry)))
       (reject! :implementation-signature-required base))
-    ;; Only admit audited callbacks that use their inputs and frozen type
-    ;; policy. Other rules may consult signatures outside this closure.
+    ;; Audited callbacks use only binding facts and frozen type/signature policy.
+    ;; A rule's additional named types must have verified source UUIDs too.
     (when-not (signatures/local-type-rules? entry)
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
@@ -345,10 +364,11 @@
 (defn freeze-declarations
   "Freeze verified input declarations for source analysis without admitting
    an executable implementation or publishing its inferred signature."
-  [package function-ids]
-  (let [resolve-named (named-types/lookup package (partial plan-entry package))
-        entries (closure package function-ids resolve-named)]
-    {:entries entries :context (verified-context package entries resolve-named)}))
+  ([package function-ids] (freeze-declarations package function-ids {}))
+  ([package function-ids roots]
+   (let [resolve-named (named-types/lookup package (partial plan-entry package))
+         entries (closure package function-ids resolve-named)]
+     {:entries entries :context (verified-context package entries resolve-named roots)})))
 
 
 (defn freeze-closure
@@ -358,7 +378,7 @@
    signature view and are rejected here. Include any ref introduced by an overlay in
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
-  (let [{:keys [context entries]} (freeze-declarations package function-ids)]
+  (let [{:keys [context entries]} (freeze-declarations package function-ids roots)]
     ;; The checker retains the narrowed callable at its field-read boundary.
     ;; An external function has no verified invocation signature. Executable
     ;; admission needs a proved graph closure or a suitable runtime validator.
@@ -377,7 +397,7 @@
                                 (let [owner (some #(when (and (= :fn (:kind %)) (= fn-id (:id %))) %)
                                                   declaration-records)]
                                   [fn-id (assoc declaration :owner owner)]))) declarations)
-        ctx (verified-context {:markers (shapes/markers-snapshot)} entries {})]
+        ctx (verified-context {:markers (shapes/markers-snapshot)} entries {} roots)]
     {:context ctx :options (implementation-options ctx entries roots)}))
 
 
@@ -435,7 +455,7 @@
           entries (closure package [owner] resolve-named)
           bindings (mapcat :bindings (vals entries))
           _ (when-not (some #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %))) bindings) (reject! :missing-source-projection owner))
-          ctx (verified-context package entries resolve-named)
+          ctx (verified-context package entries resolve-named roots)
           options (try (implementation-options ctx entries roots)
                        (catch clojure.lang.ExceptionInfo error
                          (if (#{:implementation-signature-required :rule-signature-view-required} (:code (ex-data error)))
@@ -514,20 +534,26 @@
       (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))
 
 
-(defn migrate-forwarded-field
+(defn migrate-forwarded-fields
   "Freeze both free addresses, then verify the exact scoped projection and
    write it into the source proposal. Require the stock type checker and the
    same implementation registry evidence used by other source certificates."
-  [{:keys [prepared] :as package} owner field roots]
+  [{:keys [prepared] :as package} owner fields roots]
   (let [original (plan-entry package owner)
-        {:keys [proof entry]} (source/forwarded-field-baseline prepared original field)]
+        {:keys [proofs entry]} (source/forwarded-fields-baseline prepared original fields)]
     (when-not (= :authored-source-equivalent (:verification entry))
       (reject! :unverified-forwarded-baseline owner))
     (let [baseline (assoc-in package [:closure-baselines owner] entry)
           {:keys [context options]} (freeze-closure baseline [owner] roots)
-          certificate (scope/verify-forwarded-projection context proof
-                                                         #(analysis/analyze-effective-input %1 %2 options))]
-      (source/rewrite-forwarded-field prepared original field certificate))))
+          certificates (scope/verify-forwarded-projections context proofs
+                                                           #(analysis/analyze-effective-input %1 %2 options))]
+      (source/rewrite-forwarded-fields prepared original fields certificates))))
+
+
+(defn migrate-forwarded-field
+  "Single-field convenience form of the atomic forwarding replay."
+  [package owner field roots]
+  (migrate-forwarded-fields package owner [field] roots))
 
 
 (defn with-migrated-bindings
@@ -546,7 +572,8 @@
   "Keep one verified forwarding declaration available to later closures and
    to staged module replay. Bound occurrence evidence is kept in the package."
   [package owner field roots]
-  (let [{:keys [verification] :as result} (migrate-forwarded-field package owner field roots)]
+  (let [fields (if (vector? field) field [field])
+        {:keys [verification] :as result} (migrate-forwarded-fields package owner fields roots)]
     (when-not (= :authored-source-equivalent verification)
       (reject! :unverified-forwarded-declaration owner))
     (-> package

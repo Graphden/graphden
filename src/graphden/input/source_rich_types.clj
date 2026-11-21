@@ -34,10 +34,10 @@
 
 
 (defn collection-return?
-  "Recover a list or map return stored under a legacy primitive identity.
+  "Recover a collection or union return stored under a legacy primitive identity.
    Its frozen rich implementation entry must still match the authored type."
   [type-id type]
-  (and (vector? type) (contains? #{:list :map} (first type))
+  (and (vector? type) (contains? #{:list :map :union} (first type))
        (descriptor/stored-source-type? type type-id)))
 
 

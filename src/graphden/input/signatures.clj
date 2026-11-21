@@ -26,7 +26,8 @@
 
 (defn local-type-rules?
   "A frozen closure can run audited callbacks that use its binding facts and
-   type policy. Other callbacks may look up signatures outside the closure."
+   frozen type/signature policy. Missing signature lookups must remain
+   conservative. Callbacks with other state or I/O dependencies need proof."
   [signature]
   (every? (fn [[rule callback]]
             (or (nil? callback)

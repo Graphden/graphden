@@ -12,6 +12,7 @@
     [graphden.crud.structured-run :as run]
     [graphden.input.access :as access]
     [graphden.input.authoring-principal :as principal]
+    [graphden.input.context :as input]
     [graphden.input.migration :as migration]
     [graphden.input.read-view :as read-view]
     [graphden.input.storage :as input-storage]
@@ -116,10 +117,10 @@
 
 (defn- checked-row
   [exec-ctx ctx {:keys [fn-id ref-fn-id] :as command}]
-  (let [row (proposed-row ctx (structured/analyze ctx fn-id) command)
+  (let [row (input/call-with-types ctx #(proposed-row ctx (structured/analyze ctx fn-id) command))
         after (assoc-in ctx [:bindings (:id row)] row)
         graph (if ref-fn-id (:analysis (run/runnable-input exec-ctx after fn-id)) (structured/analyze after fn-id))]
-    (when-not (and (= :available (:status (structured/project-analysis graph)))
+    (when-not (and (= :available (:status (input/call-with-types after #(structured/project-analysis graph))))
                    (or (nil? ref-fn-id)
                        (some #(and (= (:id row) (:binding-id %)) (= ref-fn-id (:target-fn-id %))
                                    (= :value (:mode %))) (:dependencies graph))))

@@ -79,3 +79,32 @@
     (is (= "forbidden" (get-in (post profile) [:error-data :reason])))
     (sync!)
     (is (= original (versions)))))
+
+
+(deftest pinned-package-boot-keeps-nested-callable-identity-and-contract
+  (let [storage (:storage golden/*bootstrap*)
+        callback [:fn {:string :text} :text #{}]
+        root (ids/fn-id "closedinputfixture.structured" :fixture-closed-apply-text)
+        abi (ids/fn-id "closedinputfixture.native" :closed-apply-text)
+        input (migration/derived-id :input-type root)
+        admission {:module ["closedinputfixture" "structured"] :fn-id root :abi-fn-id abi
+                   :record-contract {:payload {:item :text :callback callback}}
+                   :sha256 "a0e5d0a97c71c37d3220323443b6c0c6ff9158f16b85297bf3b79dbcdaecec40"}
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "closedinputfixture"]
+                                             :primitive-input admission})
+        sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
+        {:keys [base-fns]} (sync!)
+        payload (sp/read-entity storage :slot (ids/slot-id root :payload))
+        record (:type-fn-id payload)
+        field (sp/read-entity storage :slot (ids/slot-id record :callback))
+        callable (:type-fn-id field)
+        versioned-ids [root input record callable]
+        versions #(resolution/resolve-version-ids (vs/unwrap storage) :fn versioned-ids (vs/current-branch-id storage))
+        before (versions)]
+    (is (identical? (:closed-apply-text base-fns) (:fixture-closed-apply-text base-fns)))
+    (is (owned/owned-impl? root (:fixture-closed-apply-text base-fns)))
+    (is (= input (:input-type-fn-id (sp/read-entity storage :fn root))))
+    (is (= callback (:constraint (sp/read-entity storage :fn callable))))
+    (is (= (set versioned-ids) (set (keys before))))
+    (sync!)
+    (is (= before (versions)))))

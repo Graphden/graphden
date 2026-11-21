@@ -6,6 +6,7 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
     [graphden.system.init.packages]
@@ -16,7 +17,7 @@
     [integrant.core :as ig]))
 
 
-(use-fixtures :once (golden/fixture (ns-name *ns*)))
+(use-fixtures :once setup/ensure-build-hashes-fixture (golden/fixture (ns-name *ns*)))
 
 
 (defn- request

@@ -34,7 +34,7 @@
                      (if-let [closure (get closures address)]
                        (= expected-type (:type closure))
                        (contains? #{:any :null :bool :text :int :float :decimal :numeric
-                                    :keyword :uuid :timestamptz :bytes :jsonb} expected-type))
+                                    :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected-type))
                      (contains? expressions address))
         (reject! :runtime-obligations-required {:address address :kind kind :trigger trigger})))
     (let [by-address (group-by :address obligations)]

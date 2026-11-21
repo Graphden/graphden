@@ -330,13 +330,13 @@ Bounds source type expansion before alias resolution or variant/union normalizat
 :PROPERTIES:
 :CUSTOM_ID: types/build
 :FILE: src/graphden/types/validator.clj
-:LINE: 160
+:LINE: 163
 :MINS: 1.5
 :END:
 
 Builds a pure boundary validator from the same supported data declaration used by static checking. Success returns the original value. Failure reports safe path/code diagnostics without rejected contents; unsupported definitions fail construction. The companion checked-type returns the same canonical variant/alias shape used by the ensure-type return rule.
 
-- source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:160]]
+- source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:163]]
 
 * 26. native-execution
 :PROPERTIES:

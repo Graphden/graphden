@@ -52,9 +52,10 @@
 (defn root-extend-offer
   "An authenticated creation offer in the root namespace of this branch.
    The actual Extend rechecks the selected namespace inside its writer."
-  [ctx storage frozen parent]
+  [ctx storage frozen parent runnable?]
   (when (and (:authenticated? (principal/current)) (vs/versioned-storage? storage)
-             (package-contract? ctx frozen parent))
+             (package-contract? ctx frozen parent)
+             (or runnable? (run/authorable-package-root? ctx frozen parent)))
     (try
       (binding [vs/*enforce-require-merge?* true]
         (writer/assert-creation-authorized!
@@ -87,7 +88,7 @@
          (not-any? #(some? (get child %)) [:return-type-fn-id :base-fn-id :element-fn-id :constraint :lambda-params :expects-effects])
          (empty? (get-in frozen [:members owner]))
          (= (:input-type-fn-id child) (get-in frozen [:fns parent :input-type-fn-id]))
-         (package-contract? ctx frozen parent) (run/runnable-input ctx frozen parent)
+         (package-contract? ctx frozen parent) (run/authorable-package-root? ctx frozen parent)
          (no-legacy-bindings? storage owner))))
 
 
@@ -124,7 +125,7 @@
             input (get-in frozen [:fns parent :input-type-fn-id])
             id (or (:id data) (random-uuid))
             child (assoc data :id id :input-type-fn-id input)]
-        (when-not (and (package-contract? ctx frozen parent) (run/runnable-input ctx frozen parent)
+        (when-not (and (package-contract? ctx frozen parent) (run/authorable-package-root? ctx frozen parent)
                        (not (owned/owned-fn-id? id)) (nil? (sp/read-entity storage :fn id)))
           (deny!))
         (binding [vs/*enforce-require-merge?* true access/*package-input-types* {id input}]

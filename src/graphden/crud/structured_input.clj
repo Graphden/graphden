@@ -73,12 +73,19 @@
                                       {:check-expression check/check-input-binding})))
 
 
+(defn verified-callable-reference?
+  [{:keys [compiled-input? closures]} {:keys [from mode]}]
+  (and compiled-input? (= :graph-callable mode) (contains? closures from)))
+
+
 (defn- checked-projection?
   [graph]
   (and (= :checked (:status graph))
        (empty? (:obligations graph))
        (get-in graph [:coverage :recursive-availability])
-       (not-any? #(#{:graph-callable :callable-producer} (:mode %)) (:dependencies graph))))
+       (every? #(or (not (#{:graph-callable :callable-producer} (:mode %)))
+                    (verified-callable-reference? graph %))
+               (:dependencies graph))))
 
 
 (defn project-analysis
@@ -206,7 +213,8 @@
                                          basis (when runnable? (repeat-basis snapshot runnable (:fields view)))]
                                      (cond-> view
                                        runnable? (assoc :run-available true)
-                                       (and editor? runnable?) (merge (authoring/root-extend-offer exec-ctx snapshot ctx root))
+                                       (and exec-ctx editor? (= :available (:status view)))
+                                       (merge (authoring/root-extend-offer exec-ctx snapshot ctx root runnable?))
                                        basis (assoc :run-repeat basis)
                                        (and editable? (= :available (:status view)))
                                        (assoc :occupied (occupied-editor-fields snapshot ctx graph)))))))))

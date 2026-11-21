@@ -123,7 +123,8 @@
     (when-not (and (= :available (:status (input/call-with-types after #(structured/project-analysis graph))))
                    (or (nil? ref-fn-id)
                        (some #(and (= (:id row) (:binding-id %)) (= ref-fn-id (:target-fn-id %))
-                                   (= :value (:mode %))) (:dependencies graph))))
+                                   (or (= :value (:mode %)) (structured/verified-callable-reference? graph %)))
+                             (:dependencies graph))))
       (reject! :input/unproven-bind "The type of this binding could not be verified"))
     row))
 

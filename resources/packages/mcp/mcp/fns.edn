@@ -673,17 +673,21 @@
    :parent :_structured-input-mcp-command
    :args {:command {:ref :_mcp-tool-args :type :keyword-map}}}
 
+  {:name :_mcp-configure-input-error
+   :parent :get
+   :args {:coll :_mcp-configure-input :key {:value :error}
+          :default {:value "The structured input operation is unavailable"}}}
+
   {:name :_mcp-err-configure-input
    :parent :_mcp-err
    :args {:code {:value -32602}
-          :message {:ref {:parent :get
-                          :args {:coll :_mcp-configure-input :key {:value :error}
-                                 :default {:value "The structured input operation is unavailable"}}}
-                    :type :text}}}
+          :message {:ref :_mcp-configure-input-error :type :text}}}
 
   {:name :_mcp-tool-configure-input
    :parent :if
-   :args {:test {:parent :get :args {:coll :_mcp-configure-input :key {:value :ok} :default {:value false}}}
+   :args {:test {:parent :equal?
+                 :args {:a {:parent :get :args {:coll :_mcp-configure-input :key {:value :ok} :default {:value false}}}
+                        :b {:value true}}}
           :then {:parent :_mcp-tool-ok
                  :args {:text {:parent :to-json-string :args {:data :_mcp-configure-input}}}}
           :else :_mcp-err-configure-input}}

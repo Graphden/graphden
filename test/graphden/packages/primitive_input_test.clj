@@ -1,12 +1,15 @@
 (ns ^:integration ^:serial graphden.packages.primitive-input-test
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.interface :as exec]
     [graphden.input.list-builder :as list-builder]
     [graphden.input.migration :as migration]
+    [graphden.input.pinned-list :as pinned]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
@@ -138,3 +141,17 @@
                (mapv (juxt :slot-id :position) members)))))
     (sync!)
     (is (= before (snapshot)))))
+
+
+(deftest pinned-list-admission-requires-the-declared-parent-tail-and-element
+  (let [source (edn/read-string (slurp (io/resource "packages/listfixture/numeric/fns.edn")))
+        base (ids/fn-id (:namespace source) :list-difference)
+        pin {:nums [:list :numeric]}
+        operand [:fns 1 :bind :nums 1 :items 0]]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported pinned list"
+          (pinned/prepare source base {:nums [:list :text]})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unsupported pinned list"
+          (pinned/prepare (assoc-in source operand [:ref :list-difference]) base pin)))
+    (is (= :closed-list-continuation
+           (try (pinned/prepare (assoc-in source [:fns 1 :bind :nums 1 :tail] :closed) base pin) nil
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

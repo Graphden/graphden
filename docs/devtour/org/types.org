@@ -252,13 +252,13 @@ Feeds canonical scoped input facts through the existing type-rule engine using e
 :PROPERTIES:
 :CUSTOM_ID: types/resolve-closure
 :FILE: src/graphden/input/stored_implementations.clj
-:LINE: 42
+:LINE: 45
 :MINS: 1.5
 :END:
 
 Matches a frozen stored declaration to the host's native implementation by UUID. It checks the declared argument and return types and maps each implementation argument name to the original field ID. Only audited rules belonging to that frozen signature participate in checking the closure.
 
-- source :: [[file:../../../src/graphden/input/stored_implementations.clj::(defn resolve-closure][src/graphden/input/stored_implementations.clj:42]]
+- source :: [[file:../../../src/graphden/input/stored_implementations.clj::(defn resolve-closure][src/graphden/input/stored_implementations.clj:45]]
 - see also :: [[file:types.org::#types/infer-use][infer-use]]
 - referenced from :: [[file:types.org::#types/compile-stored][compile-stored]]
 

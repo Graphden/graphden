@@ -89,4 +89,4 @@
                             (mapcat list-records/authored-records traces)))
           rows (into [{:kind :fn :id list-id :parent-ids [] :element-fn-id (ids/primitive-fn-id element)}]
                      (map (partial retain-list-type slot list-id (set (keys generated)))) records)]
-      {:definitions definitions :records rows :generated generated})))
+      {:definitions definitions :records rows :generated generated :list-type-id list-id})))

@@ -10,10 +10,12 @@
 
 
 (defn implementations
-  [{:keys [generated]}]
+  [{:keys [generated list-type-id]}]
   (update-vals generated
-               (fn [{:keys [contract list-implementation input-type-id]}]
-                 {:input-id input-type-id :ordered-fields (mapv (juxt :id :name) (:fields contract))
+               (fn [{:keys [contract list-implementation input-type-id declaration-records]}]
+                 {:input-id input-type-id :return-id list-type-id
+                  :ordered-fields (mapv (juxt :id :name :required) (:fields contract))
+                  :memberships (into #{} (comp (filter #(= :fn-slot (:kind %))) (map (juxt :id :slot-id :position))) declaration-records)
                   :signature (assoc (:root-entry list-implementation) :execution #{:jvm-server})
                   :impl (lists/compile-arguments (get-in list-implementation [:generated-list :operands]))})))
 

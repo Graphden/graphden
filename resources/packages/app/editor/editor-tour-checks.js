@@ -47,6 +47,38 @@ function _tourFnForCheck(check) {
   return created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
 }
 
+function _tourStructuredInputPath(check) {
+  const {path, state} = check;
+  if (!Array.isArray(path) || !path.length || path.length > 64
+      || !path.every(part => typeof part === 'string' && part.length)) return false;
+  const fn = _tourFnForCheck(check);
+  if (!fn || fn.id !== selectedFnId) return false;
+  const input = window.gdStructuredInputFor?.(fn.id);
+  if (input?.status !== 'available' || !Array.isArray(input.fields) || !Array.isArray(input.occupied)) return false;
+
+  const samePath = candidate => Array.isArray(candidate) && candidate.length === path.length
+    && path.every((name, index) => candidate[index] === name);
+  const occupied = input.occupied.filter(field => samePath(field?.path));
+  let remaining = input;
+  for (const name of path) {
+    if (!remaining) break;
+    if (!Array.isArray(remaining.fields)) return false;
+    const matches = remaining.fields.filter(field => field?.name === name);
+    if (matches.length > 1) return false;
+    remaining = matches[0];
+  }
+  if (state === 'remaining') {
+    return !Object.hasOwn(check, 'version-id') && !occupied.length
+      && remaining?.kind === 'input-field' && !Object.hasOwn(remaining, 'fields')
+      && remaining.type != null && samePath(remaining['bind-path']);
+  }
+  if (state !== 'occupied' || remaining || occupied.length !== 1) return false;
+  const field = occupied[0];
+  return field.type != null && typeof field['binding-id'] === 'string' && !!field['binding-id']
+    && typeof field['version-id'] === 'string' && !!field['version-id']
+    && (!Object.hasOwn(check, 'version-id') || field['version-id'] === check['version-id']);
+}
+
 // Rename views and their persisted source bindings share an identity even
 // when their names differ. Missing or cyclic source chains fail closed.
 function _tourCanonicalSlotId(id) {
@@ -302,6 +334,7 @@ function _tourCheckPasses(check) {
                     && String(b.value) === String(check.value));
         });
       }
+      case 'structured-input-path': return _tourStructuredInputPath(check);
       case 'ui-component': return window.gdTourUIComponentCheck?.(check) || false;
       case 'expanded': {
         // "the card of fn `name` is unfolded to at least `depth`" — read

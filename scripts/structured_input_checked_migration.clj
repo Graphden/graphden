@@ -5,17 +5,23 @@
     [graphden.input.source-certification :as certification]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.sync :as sync]
+    [graphden.types.core :as types]
+    [graphden.types.core.shapes :as shapes]
     [structured-input-dry-run :as dry]
     [structured-input-inventory :as inventory]))
 
 
 (defn- trusted-signatures
   [package-names]
-  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
-    (doseq [[name {module-ns :namespace :as base}]
-            (:base-fn-defs (loader/load-packages package-names))]
-      (registry/record-rich-types! (ids/fn-id module-ns name) name base))
-    (:by-id @registry/*rich-types-override*)))
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})
+            shapes/*marker-registry-override* (atom (shapes/markers-snapshot))]
+    (let [{:keys [fn-defs base-fn-defs]} (loader/load-packages package-names)]
+      (sync/register-type-aliases! fn-defs)
+      (doseq [[name {module-ns :namespace :as base}] base-fn-defs]
+        (registry/record-rich-types! (ids/fn-id module-ns name) name base))
+      (:by-id @registry/*rich-types-override*))))
 
 
 (defn- arguments
@@ -55,5 +61,5 @@
       (print (inventory/report-text report)))
     (catch Exception failure
       (binding [*out* *err*]
-        (prn {:code (or (:code (ex-data failure)) :checked-migration-failed)}))
+        (prn {:code (or (:code (ex-data failure)) (:type (ex-data failure)) :checked-migration-failed)}))
       (System/exit 2))))

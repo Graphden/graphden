@@ -124,14 +124,19 @@
         versions #(resolution/resolve-version-ids (vs/unwrap storage) %1 %2 (vs/current-branch-id storage))
         bindings (mapcat (fn [{:keys [binding-id]}]
                            [binding-id (ids/binding-list-item-id binding-id 0) (ids/binding-list-item-id binding-id 1)]) fragments)
+        member-ids (for [{:keys [builder-id]} fragments
+                         role [:item-0 :item-1 :tail]]
+                     (ids/fn-slot-id (migration/derived-id :input-type builder-id) (ids/slot-id builder-id role)))
         snapshot (fn []
-                   {:bindings (versions :input-binding (conj (vec bindings) (ids/binding-id (:builder-id b) (:tail-id b))))
+                   {:memberships (versions :fn-slot member-ids)
+                    :bindings (versions :input-binding (conj (vec bindings) (ids/binding-id (:builder-id b) (:tail-id b))))
                     :owners (versions :fn [base prefix complete (:builder-id a) (:builder-id b)])})
         before (snapshot)]
     (is (= 11 (:result (post complete {}))))
     (is (= 15 (:result (post prefix {:nums {:tail [2]}}))))
     (is (= 7 (:result (post base {:nums [10 3]}))))
     (is (= "invalid-structured-arguments" (get-in (post complete {:nums [0]}) [:error-data :reason])))
+    (is (= (set member-ids) (set (keys (:memberships before)))))
     (is (= 7 (count (:bindings before))))
     (is (= 5 (count (:owners before))))
     (doseq [{:keys [builder-id]} fragments]

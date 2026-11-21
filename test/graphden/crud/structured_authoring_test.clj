@@ -301,15 +301,15 @@
       (when (:id row) (exercise-reference-changes! origin token storage seams denied child (:id row))))))
 
 
-(def ^:private pair-root (ids/fn-id "lessonpair.structured" :lesson-contact-route))
+(def ^:private pair-root (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route))
 
 
 (def ^:private pair-admission
   (let [contact {:name :text :address {:city :text}}]
-    {:module ["lessonpair" "structured"] :fn-id pair-root
-     :abi-fn-id (ids/fn-id "lessonpair.native" :contact-route-native)
+    {:module ["lesson-contact" "structured-input"] :fn-id pair-root
+     :abi-fn-id (ids/fn-id "lesson-contact.native" :contact-route-native)
      :record-contract {:sender contact :recipient contact}
-     :sha256 "e71640f101fa914dfbd44527b9ba3d22f7c9824100afcfe976d675d5d04ca7b1"}))
+     :sha256 "3ac94222a4c8baf5f54e3b9a362859de99211e45172f2e2ca1fd151cf6110c5e"}))
 
 
 (defn- address-routes
@@ -369,7 +369,7 @@
 
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "lessonpair"]
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "lesson-contact"]
                                              :primitive-inputs [lesson/admission uppercase-admission pair-admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))

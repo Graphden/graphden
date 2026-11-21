@@ -1,4 +1,4 @@
-(ns graphden.packages.lessonpair.native.impls
+(ns graphden.packages.lesson-contact.native.impls
   (:require
     [graphden.executor.defbase :refer [defbase]]))
 

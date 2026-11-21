@@ -10,9 +10,8 @@
 // a run session is open — finishing the 2026-08 shell redesign that
 // already retired the Run surface in favour of "▶ action + inspector".
 //
-//   1. Loads a type-aware `/api/value-form` for each free-arg of the
-//      fn (reusing `editor-value-form.js` — same widgets that drive
-//      binding-edit popovers).
+//   1. Mounts the checked residual input tree for v2, or loads a
+//      type-aware `/api/value-form` for each v1 free slot.
 //   2. Shows declared-effects chips when the fn isn't pure.
 //   3. On Run: POSTs `/api/execute`, then either renders the inline
 //      result OR (when the request flipped to async) starts a
@@ -485,17 +484,28 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
   // + rich-types registry + the backend's own free-arg-slot-map.
   let html;
   try {
-    const r = await authFetch('/partials/execute-popover?fn-id='
-                              + encodeURIComponent(fnEntity.id));
+    // Selection can render the inspector before the matching subtree
+    // arrives. Share that read with the canvas and classify only its root.
+    const [r, installed] = await Promise.all([
+      authFetch('/partials/execute-popover?fn-id=' + encodeURIComponent(fnEntity.id)),
+      window.ensureSubtreeFor?.(fnId),
+    ]);
     if (!el.isConnected || !isCurrent()) return;
+    if (installed === false) {
+      el.textContent = 'Could not load the current inputs. Reopen Run to try again.';
+      el.classList.add('visible');
+      return;
+    }
     if (!r.ok) {
       el.textContent = 'Could not load the run form (HTTP ' + r.status + ').';
+      el.classList.add('visible');
       return;
     }
     html = await r.text();
   } catch (e) {
     if (!el.isConnected || !isCurrent()) return;
     el.textContent = 'Could not load the run form: ' + e.message;
+    el.classList.add('visible');
     return;
   }
   // A newer mount (another fn selected, the tab re-rendered) replaced
@@ -530,9 +540,13 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
     else head.appendChild(branchPill);
   }
 
-  // Mount every free-arg's value-form in parallel — sequential await
+  const descriptor = window.gdStructuredInputFor?.(fnId);
+  const structured = descriptor != null || lookups?.fnMap?.get(fnId)?.['input-type-fn-id'] != null;
+  const readStructured = structured
+    ? mountStructuredRunInputs(el.querySelector('.execute-popover-body'), descriptor) : null;
+  // Mount every v1 free-arg's value-form in parallel — sequential await
   // would serialise the N HTTP roundtrips.
-  const hosts = Array.from(el.querySelectorAll('.execute-arg-form[data-slot-id]'));
+  const hosts = structured ? [] : Array.from(el.querySelectorAll('.execute-arg-form[data-slot-id]'));
   const readers = await Promise.all(
     hosts.map((host) => mountArgFormHost(fnEntity, host, isCurrent)),
   );
@@ -550,10 +564,11 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
   // effects) the confirm box is ticked. One place decides, so the confirm
   // toggle cannot re-enable Run mid-submit.
   let submitting = false;
+  const structuredCurrent = () => !structured || window.gdStructuredInputFor?.(fnId) === descriptor;
   const syncRunEnabled = () => {
     if (!runBtn) return;
     const unconfirmed = !!confirmCb && !confirmCb.checked;
-    runBtn.disabled = submitting || unconfirmed;
+    runBtn.disabled = submitting || unconfirmed || (structured && (!readStructured || !structuredCurrent()));
     if (confirmCb) runBtn.title = unconfirmed ? 'Confirm side-effects acknowledgement first' : 'Run';
   };
 
@@ -562,6 +577,7 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
   if (confirmCb && runBtn) {
     confirmCb.addEventListener('change', syncRunEnabled);
   }
+  syncRunEnabled();
 
   // Capture-values second-step control (Debug P3, PHILOSOPHY
   // § Debugging constraint 3): the server emits the checkbox disabled;
@@ -598,6 +614,7 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
     runsHost.appendChild(renderSubmitSpinner('Loading runs…'));
     const panel = await buildHistoryPanel(fnEntity, resultHost, {
       signal: read?.signal,
+      allowRepeat: !structured,
       isCurrent: () => isCurrent() && generation === historyGeneration && (!read || read.current()),
     });
     // A slow fetch may resolve after the tab re-rendered — only land
@@ -617,12 +634,20 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
     e.stopPropagation();
     // `submitting` too: a second click can land before the disabled
     // state is painted, and an effectful fn must not run twice.
-    if (runBtn.disabled || submitting) return;
-    const args = {};
-    for (const a of formHosts) {
-      const v = a.read();
-      if (v !== undefined && v !== null && v !== '') {
-        args[a.slotName] = v;
+    if (runBtn.disabled || submitting || !isCurrent()) return;
+    if (!structuredCurrent()) {
+      resultHost.replaceChildren(renderErrorPane('Inputs changed. Reopen Run to use the current inputs.'));
+      syncRunEnabled();
+      return;
+    }
+    const args = structured ? readStructured?.() : {};
+    if (!args) return;
+    if (!structured) {
+      for (const a of formHosts) {
+        const v = a.read();
+        if (v !== undefined && v !== null && v !== '') {
+          args[a.slotName] = v;
+        }
       }
     }
     submitting = true;

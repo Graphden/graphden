@@ -17,13 +17,8 @@
     [graphden.packages.records.ids :as record-ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
-    [graphden.test-infra.golden-app :as golden]
-    [org.httpkit.server :as http])
-  (:import
-    (java.util
-      Map)
-    (java.util.concurrent
-      TimeUnit)))
+    [graphden.test-infra.browser-loopback :as browser]
+    [graphden.test-infra.golden-app :as golden]))
 
 
 (use-fixtures :once (golden/fixture (ns-name *ns*)))
@@ -127,27 +122,6 @@
       (some #(when (= (str root) (:id %)) (get-in % [:structured-input :fields 0 :fields])) rows))))
 
 
-(defn- exercise-in-browser!
-  [handler token root]
-  (let [http-handler (bound-fn [req]
-                       ;; Graphden's Ring response carries keyword header keys.
-                       ;; Match the app's HTTP boundary before handing it to http-kit.
-                       (update (handler req) :headers update-keys name))
-        stop (http/run-server http-handler {:ip "127.0.0.1" :port 0})]
-    (try
-      (let [origin (str "http://127.0.0.1:" (:local-port (meta stop)))
-            builder (ProcessBuilder. ["node" "tools/browser-test/fixtures/structured-input-lesson.js" origin (str root)])
-            _ (Map/.put (ProcessBuilder/.environment builder) "GD_LESSON_TOKEN" token)
-            process (ProcessBuilder/.start (ProcessBuilder/.inheritIO builder))]
-        (try
-          (is (Process/.waitFor process 45 TimeUnit/SECONDS) "Playwright completed the live fixture")
-          (when-not (Process/.isAlive process)
-            (is (zero? (Process/.exitValue process))))
-          (finally
-            (when (Process/.isAlive process) (Process/.destroyForcibly process)))))
-      (finally (stop)))))
-
-
 (deftest bind-name-then-run-through-the-checked-named-closure-test
   (let [storage (:storage golden/*bootstrap*)
         {:keys [root] :as fixture} (binding [access/*offline?* true] (seed-lesson! storage))
@@ -175,7 +149,7 @@
       (is (= 400 (:status (post handler token "/fixture/run" (assoc run :fn-id (str (random-uuid)))))))
       (is (= 422 (:status (post handler token "/fixture/run" run))))
       (if (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
-        (exercise-in-browser! handler token root)
+        (browser/exercise! handler token "tools/browser-test/fixtures/structured-input-lesson.js" root)
         (bind-name! handler token command))
       (is (= ["id" "email"] (mapv :name (remaining-profile handler token root))))
       (let [result (post handler token "/fixture/run" run)]

@@ -12,6 +12,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
     [graphden.tenancy.context :as tenant]
+    [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.golden-app :as golden]))
 
 
@@ -50,6 +51,20 @@
       [child config])))
 
 
+(defn- browser-handler
+  [app]
+  (fn [{:keys [request-method uri] :as req}]
+    (case [request-method uri]
+      [:get "/"] {:status 200 :headers {"Content-Type" "text/html"} :body "<!doctype html><title>Run fixture</title>"}
+      ([:get "/api/graph/entities"]
+       [:get "/partials/execute-popover"]
+       [:get "/partials/execute-result-effects"]
+       [:post "/api/value-form"]
+       [:post "/api/execute"]
+       [:post "/partials/execute-result-inline"]) (router/dispatch app req)
+      {:status 404})))
+
+
 (deftest ordinary-run-selects-the-stored-input-contract
   (let [{:keys [storage base-fns]} golden/*bootstrap*
         floor (ids/fn-id "core.arithmetic" :floor)
@@ -78,6 +93,8 @@
     (let [projected (view child)] (is (true? (:run-available projected)) (pr-str projected)))
     (is (= -2 (:result (post ceil {:number -2.3}))))
     (is (= -3 (:result (post child {:number -2.3}))))
+    (when (= "1" (System/getenv "GD_STRUCTURED_RUN_PLAYWRIGHT"))
+      (browser/exercise! (browser-handler app) token "tools/browser-test/fixtures/structured-input-run.js" projected-child ceil))
     (is (= {:reason "invalid-structured-arguments" :code "unknown-input-field"}
            (:error-data (post child {:unknown 10}))))
     (let [value {:ref -7.6}

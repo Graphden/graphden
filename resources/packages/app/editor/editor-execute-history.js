@@ -218,6 +218,9 @@ async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
     const html = await r.text();
     if (opts?.isCurrent && !opts.isCurrent()) return wrap;
     wrap.innerHTML = html;
+    if (opts?.allowRepeat === false) {
+      for (const button of wrap.querySelectorAll('.execute-history-repeat-btn')) button.remove();
+    }
     if (window.htmx?.process) window.htmx.process(wrap);
     bindHistoryActions(wrap, fnEntity, resultHostEl);
     // A service fn's panel carries the «catch next request» block —

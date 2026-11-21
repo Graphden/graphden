@@ -253,3 +253,20 @@
     (is (= :incomplete (:status result)))
     (is (some #(= :type-checker-required (:code %)) (:diagnostics result)))
     (is (= :container-materialization (:trigger (first (:obligations result)))))))
+
+
+(deftest nullable-map-checks-bind-record-keys-and-leave-empty-map-parameters-free
+  (let [input {:address [[(random-uuid) []] []] :expression {:kind :type-fact}
+               :expected '[:union :null [:map k :any]] :actual {:status :int}}
+        check #(check/check-input-binding (merge input %))]
+    (is (= {:status :checked :substitution {'k :keyword}}
+           (select-keys (check {}) [:status :substitution])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not fit" (check {:substitution {'k :text}})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not fit" (check {:expected '[:union :null [:map k :text]]})))
+    (is (= :checked (:status (check {:expected [:union {:status :int} [:map :text :any]]}))))
+    (doseq [subst [{} {'k :text}]]
+      (is (= {:status :checked :substitution subst}
+             (select-keys (check {:actual :empty-map :substitution subst :expected '[:union [:map k v] :null]})
+                          [:status :substitution]))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not fit"
+          (check {:actual :empty-map :expected [:union :null {:required :int}]})))))

@@ -687,6 +687,28 @@
     (is (= :blocked (:status (replay changed))))))
 
 
+(deftest callable-rename-preserves-the-parent-signature-and-projection
+  (let [signature '[:fn {:arg a} b]
+        invoke {:name :invoke :namespace "fixture" :args {:func {:type signature} :arg {:type 'a}}
+                :return-type 'b}
+        child {:name :proceed :namespace "fixture" :parent :invoke
+               :args {:func {:as :next-handler} :arg {:ref :request}}}
+        request {:name :request :namespace "fixture" :args {} :return-type :text}
+        ctx (prepared [invoke request child])
+        planned (source/plan-module [child] ctx)
+        replay #(first (:definitions (source/verify-module % ctx)))
+        entry (replay planned)
+        alias-id (ids/slot-id (:identity entry) :next-handler)
+        target-id (ids/slot-id (ids/fn-id "fixture" :invoke) :func)
+        projection (some #(when (= "projection" (:expression-kind %)) %) (get-in entry [:v2 :bindings]))
+        changed (assoc-in planned [:definitions 0 :proposed :input :next-handler :type 2] :any)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:type signature :required false} (get-in entry [:proposed :input :next-handler])))
+    (is (= [:project [:next-handler]] (get-in entry [:proposed :bind :func])))
+    (is (= [[target-id] [alias-id]] ((juxt :target-path :projection-path) projection)))
+    (is (= :blocked (:status (replay changed))))))
+
+
 (deftest pinned-rename-uses-namespace-resolved-type-bodies
   (let [target '[:union :null [:map a :any] [:list :any]]
         lookup {:namespace "core" :name :lookup :args {:coll {:type target}} :return-type :any}

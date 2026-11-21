@@ -340,9 +340,16 @@
 
 
 (defn projection-input-type?
-  "A source-derived field may retain type variables from its parent declaration."
+  "A source-derived field may retain collection or callable type variables
+   from its parent declaration. Callable effects and execution constraints
+   require a separate source witness."
   [type]
-  (collection-type? #(or (keyword? %) (simple-symbol? %)) type))
+  (let [value-type? (partial collection-type? #(or (keyword? %) (simple-symbol? %)))]
+    (or (value-type? type)
+        (and (vector? type) (= 3 (count type)) (= :fn (first type))
+             (fields? (second type))
+             (every? value-type? (vals (second type)))
+             (value-type? (nth type 2))))))
 
 
 (defn require-v2!

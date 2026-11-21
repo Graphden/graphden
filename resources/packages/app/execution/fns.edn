@@ -616,8 +616,8 @@
                     ;; The structured compiler checks the named residual surface.
                     ;; A nested JSON object may itself have a field named ref.
                     {:parent :some? :args {:value {:parent :get :args {:coll :_execute-fn-row
-                                                                      :key {:value :input-type-fn-id}
-                                                                      :default nil}}}} {:value nil}
+                                                                       :key {:value :input-type-fn-id}
+                                                                       :default nil}}}} {:value nil}
                     :_execute-unknown-arg-rej?      :_execute-unknown-arg-err
                     :_execute-malformed-ref-rej?    :_execute-malformed-ref-err
                     {:value true}                   {:value nil}]}

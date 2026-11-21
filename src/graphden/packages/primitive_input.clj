@@ -26,7 +26,7 @@
   (let [path (str "packages/" package "/" module "/fns.edn")
         resource (io/resource path)]
     (when-not (and resource (uuid? fn-id) (uuid? abi-fn-id) (not= fn-id abi-fn-id)) (reject!))
-    (let [source (with-open [stream (io/input-stream resource)] (staged/read-pinned (.readAllBytes stream) sha256))]
+    (let [source (with-open [stream (io/input-stream resource)] (staged/read-pinned (java.io.InputStream/.readAllBytes stream) sha256))]
       (when-not (and (= 1 (count (:fns source))) (every? #{:input-format :namespace :description :fns} (keys source)))
         (reject!))
       (let [parsed (primitive/prepare source fn-id)
@@ -41,11 +41,11 @@
   [name definition]
   (when-let [receipt (::source (meta definition))]
     (when-not (and (instance? PrimitiveReceipt receipt)
-                   (identical? seal (.-seal ^PrimitiveReceipt receipt)))
+                   (identical? seal (PrimitiveReceipt/.-seal receipt)))
       (reject!))
-    (let [parsed (.-parsed ^PrimitiveReceipt receipt)]
+    (let [parsed (PrimitiveReceipt/.-parsed receipt)]
       (when-not (= (:fn-id parsed) (ids/fn-id (:namespace definition) name)) (reject!))
-      {:parsed parsed :abi-fn-id (.-abi-id ^PrimitiveReceipt receipt)})))
+      {:parsed parsed :abi-fn-id (PrimitiveReceipt/.-abi-id receipt)})))
 
 
 (defn declarations

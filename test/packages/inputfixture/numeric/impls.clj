@@ -2,4 +2,5 @@
 
 
 (def impls
-  {:fixture-floor (get graphden.packages.core.arithmetic.impls/impls :floor)})
+  ;; The loader evaluates impl files in dependency order.
+  {:fixture-floor (:floor @(requiring-resolve 'graphden.packages.core.arithmetic.impls/impls))})

@@ -137,6 +137,21 @@
    :sha256 "eb3f5b79f609345850b5888e3a4d6d064c7eea6ef4b5fb9f1beb514a8ff9b93f"})
 
 
+(defn- changed-reference-source!
+  [origin token storage action]
+  (let [name "changeable-uppercase"
+        created (extend-native origin token name uppercase)
+        target (:id (first (sp/query-entities storage :fn {:name name})))
+        proposal (assoc action :ref-fn-id target)
+        before (command origin token "preview" proposal)
+        literal {:fn-id target :action "bind" :path ["string"] :value "changed"}
+        edit (command origin token "preview" literal)]
+    (is (<= 200 (:status created) 299))
+    (is (true? (:ok before)) (pr-str before))
+    (is (true? (:committed (command origin token "apply" (assoc literal :expected-state (:expected-state edit))))))
+    (is (= 409 (:http (command origin token "apply" (assoc proposal :expected-state (:expected-state before))))))))
+
+
 (defn- exercise-reference!
   [origin token storage seams denied]
   (let [name "profile-with-uppercase-name"
@@ -149,6 +164,7 @@
     (is (<= 200 (:status created) 299))
     (is (true? (:ok preview)) (pr-str preview))
     (is (no-binding?))
+    (changed-reference-source! origin token storage action)
     (is (= 400 (:http (command origin token "preview" (assoc action :value nil)))))
     (is (= 403 (:http (command origin token "preview" (assoc action :ref-fn-id (random-uuid))))))
     (is (= 422 (:http (command origin token "preview" (assoc action :ref-fn-id lesson/root)))))

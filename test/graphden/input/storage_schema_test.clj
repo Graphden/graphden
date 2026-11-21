@@ -27,8 +27,10 @@
 
 (deftest public-writers-stay-v1-test
   (doseq [entity [:input-binding :input-binding-version]]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"offline migration"
-          (sp/standard-crud-normalize-data entity {})))
+    (is (= {:type :input/offline-only :entity entity}
+           (try
+             (sp/standard-crud-normalize-data entity {})
+             (catch clojure.lang.ExceptionInfo error (ex-data error)))))
     (is (nil? (request/entity-type-from-string (name entity) #{entity}))))
   (is (thrown? clojure.lang.ExceptionInfo
         (sp/standard-crud-normalize-data :fn {:input-type-fn-id (random-uuid)})))

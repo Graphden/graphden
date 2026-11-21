@@ -26,6 +26,14 @@ async function exercise() {
     });
     page.setDefaultTimeout(15000);
     const step = title => page.locator('#gd-tour-pop .gd-tour-title').filter({hasText: new RegExp('^' + title + '$')});
+    const reach = async title => {
+      await step(title).waitFor();
+      console.log('Lesson 43 reached', title);
+    };
+    const diagnostic = setTimeout(() => {
+      console.error('Lesson 43 browser deadline', {pageErrors, failedResponses, pathname: new URL(page.url()).pathname});
+    }, 52000).unref();
+    browser.on('disconnected', () => clearTimeout(diagnostic));
     const doc = await page.goto(origin + '/?tutorial=43', {waitUntil: 'domcontentloaded'});
     assert.equal(doc.status(), 200, 'the fixture serves the normal editor document');
     try {
@@ -36,11 +44,11 @@ async function exercise() {
       throw error;
     }
     const branch = new URL(page.url()).searchParams.get('branch');
-    await step('Select the template').waitFor();
+    await reach('Select the template');
     await page.getByPlaceholder('Filter...', {exact: true}).fill('lesson-profile');
     // Search and namespace rows can both display the exact same function.
     await page.locator(`#entity-list .entity-item[data-fn-id="${templateId}"]:visible`).first().click();
-    await step('Create your editable sample').waitFor();
+    await reach('Create your editable sample');
 
     const template = page.locator('.node-overlay[data-fn-name="lesson-profile"] .ancestor-line[data-level="0"]');
     await template.locator('button.more-actions-trigger').click();
@@ -49,7 +57,7 @@ async function exercise() {
     await extend.getByPlaceholder('New fn name').fill('tutorial-structured-profile');
     assert.equal(await extend.locator('.extend-ns-select').inputValue(), '');
     await extend.getByRole('button', {name: 'Save', exact: true}).click();
-    await step('Find the name field').waitFor();
+    await reach('Find the name field');
 
     const receipt = await page.evaluate(() => JSON.parse(localStorage.getItem('graphden.tour')));
     const sample = receipt.created.find(row => row.type === 'fn' && row.receipt === 'created');
@@ -59,17 +67,17 @@ async function exercise() {
     await page.getByRole('button', {name: 'Remaining inputs', exact: true}).click();
     await page.getByRole('button', {name: /^profile — Type:/}).press('Space');
     await page.getByRole('button', {name: 'Bind profile.name'}).press('Enter');
-    await step('Bind the name').waitFor();
+    await reach('Bind the name');
     const bind = page.getByRole('dialog', {name: 'Bind profile.name'});
     await bind.getByRole('textbox', {name: 'Value for profile.name'}).fill('Ada');
     await bind.getByRole('button', {name: 'Bind', exact: true}).click();
-    await step('Open Run').waitFor();
+    await reach('Open Run');
 
     await page.reload({waitUntil: 'domcontentloaded'});
-    await step('Open Run').waitFor();
+    await reach('Open Run');
     assert.equal(new URL(page.url()).searchParams.get('branch'), branch);
     await page.locator('.node-overlay[data-fn-name="tutorial-structured-profile"] .ancestor-line[data-level="0"] .fn-run-trigger').click();
-    await step('Supply the rest and run').waitFor();
+    await reach('Supply the rest and run');
     const form = page.getByRole('form', {name: 'Run function'});
     const fields = form.getByRole('group', {name: 'profile'});
     assert.equal(await fields.getByRole('textbox', {name: 'name', exact: true}).count(), 0);
@@ -81,7 +89,7 @@ async function exercise() {
     ]);
     assert.equal(response.request().postDataJSON()['fn-id'], sample.id);
     assert.deepEqual((await response.json()).result, {id: '42', name: 'Ada', email: 'ada@example.test'});
-    await step('Finish the lesson').waitFor();
+    await reach('Finish the lesson');
     await page.getByRole('button', {name: 'Finish', exact: true}).click();
     await page.getByRole('button', {name: 'Delete branch & return', exact: true}).click();
     await page.waitForURL(url => !url.searchParams.has('branch'));

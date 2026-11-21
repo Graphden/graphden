@@ -111,7 +111,7 @@ function structuredRunLeaf(field, host, path) {
   };
 }
 
-function structuredRunGroup(fields, host, path = []) {
+function structuredRunGroup(fields, host, path = [], allowEmpty = false) {
   if (!Array.isArray(fields) || path.length > 64) return null;
   const names = new Set();
   const entries = [];
@@ -128,14 +128,25 @@ function structuredRunGroup(fields, host, path = []) {
       legend.textContent = field.name + (field.required === false ? ' (optional)' : '');
       group.appendChild(legend);
       host.appendChild(group);
-      entry = structuredRunGroup(field.fields, group, fieldPath);
+      entry = structuredRunGroup(field.fields, group, fieldPath,
+        field.kind === 'input-field' && field.required === false && !field['required-now?']);
     } else if (field.kind === 'input-field' && field.type != null) {
       entry = structuredRunLeaf(field, host, fieldPath);
     }
     if (!entry) return null;
     entries.push({field, entry});
   }
-  const supplied = () => entries.some(({entry}) => entry.supplied());
+  let includeEmpty;
+  if (allowEmpty && fields.every(field => !field.required && !field['required-now?'])) {
+    includeEmpty = document.createElement('input');
+    includeEmpty.type = 'checkbox';
+    const label = document.createElement('label');
+    label.className = 'execute-option-label';
+    label.appendChild(includeEmpty);
+    label.appendChild(document.createTextNode('Supply empty ' + path.at(-1)));
+    host.appendChild(label);
+  }
+  const supplied = () => includeEmpty?.checked || entries.some(({entry}) => entry.supplied());
   const requiredNow = entries.some(({field, entry}) => field['required-now?'] === true || entry.requiredNow);
   return {
     supplied,
@@ -152,7 +163,10 @@ function structuredRunGroup(fields, host, path = []) {
         if (!step) return null;
         steps.push(step);
       }
-      return () => { for (const step of steps) step(); };
+      return () => {
+        for (const step of steps) step();
+        if (includeEmpty) includeEmpty.checked = present && Object.keys(value).length === 0;
+      };
     },
     read(required) {
       if (!required && !requiredNow && !supplied()) return {};

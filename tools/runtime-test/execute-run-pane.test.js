@@ -225,18 +225,22 @@ function boot({ effects = false } = {}) {
     const t = boot();
     const body = t.doc.createElement('div');
     t.doc.body.appendChild(body);
-    const basis = {'branch-id': 'branch', 'graph-hash': 'same-source', slots: {profile: 'profile-slot'}};
+    const basis = {'branch-id': 'branch', 'graph-hash': 'same-source', slots: {profile: 'profile-slot', config: 'config-slot'}};
     const descriptor = {kind: 'input-record', status: 'available', 'run-available': true, 'run-repeat': basis, fields: [
       {kind: 'input-field', name: 'profile', required: true, 'required-now?': true, fields: [
         {kind: 'input-field', name: 'id', type: 'int', required: true, 'required-now?': true},
         {kind: 'input-field', name: 'active', type: 'bool', required: false, 'required-now?': false},
       ]},
+      {kind: 'input-field', name: 'config', required: false, 'required-now?': false, fields: []},
     ]};
     const form = t.ctx.mountStructuredRunInputs(body, descriptor);
     const input = body.querySelector('input');
     const dropdown = body.querySelector('select');
+    const includeConfig = body.querySelectorAll('input').at(-1);
+    assert(!Object.hasOwn(form.read() || {}, 'config'), 'untouched optional record is absent');
     const row = {id: 'run', 'fn-id': 'A', 'branch-id': 'branch', 'graph-hash': 'same-source', status: 'succeeded',
-      args: [{'slot-id': 'profile-slot', value: {id: 42, active: false}, items: []}]};
+      args: [{'slot-id': 'profile-slot', value: {id: 42, active: false}, items: []},
+        {'slot-id': 'config-slot', value: {}, items: []}]};
     let saved = row;
     let fresh = descriptor;
     let current = true;
@@ -253,6 +257,10 @@ function boot({ effects = false } = {}) {
     await repeat('run');
     assert(input.value === '42' && dropdown.value === 'false', 'exact saved nested values restored');
     assert(t.posts.length === 0, 'restoring never submits an execution');
+    assert(includeConfig.checked && JSON.stringify(form.read().config) === '{}',
+      'Repeat preserves an explicitly empty optional record');
+    includeConfig.checked = false;
+    assert(!Object.hasOwn(form.read(), 'config'), 'the empty record can be omitted again');
     input.value = '7';
     for (const drift of [
       {...row, 'fn-id': 'other'},

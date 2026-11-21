@@ -592,12 +592,21 @@
 ;; below just composes them.
 ;; -----------------------------------------------------------------------------
 
+(defn- checked-refinement?
+  [expected actual expression]
+  (or (= expected actual)
+      (and (= :value (:kind expression)) (types/refine-type? expected)
+           (types/subtype? actual (types/refine-base expected))
+           (true? (lit/literal-satisfies-refinement?
+                    (:value expression) (types/refine-constraint expected))))))
+
+
 (defn check-input-binding
   "ID-addressed entry to the existing directional binding checker. This does
    not infer a reference mode or publish a signature. The caller supplies the
    actual type after ref/capture classification and scopes the type registry.
-   Gradual/refinement acceptance remains explicit deferred evidence; it is
-   never a portable execution certificate. Error data omits literal payloads."
+   Gradual acceptance and unproved refinements remain explicit deferred
+   evidence. Error data omits literal payloads."
   [{:keys [address expected actual expression substitution]}]
   (if (nil? actual)
     {:status :deferred :reason :missing-actual-type :substitution substitution}
@@ -611,7 +620,9 @@
               ;; gradual acceptances still need evidence at the consumer.
               unresolved? (or (types/type-any? #(or (= :any %) (types/type-var? %)
                                                     (and (= :jsonb %) (not= :jsonb actual expected))) actual)
-                              (types/type-any? #(or (types/refine-type? %) (types/type-var? %)) expected))]
+                              (has-type-var? expected)
+                              (and (types/type-any? types/refine-type? expected)
+                                   (not (checked-refinement? expected actual expression))))]
           {:status (if unresolved? :deferred :checked)
            :substitution next-subst
            :reason (when unresolved? :runtime-type-obligation)})

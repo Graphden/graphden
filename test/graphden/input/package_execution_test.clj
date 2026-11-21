@@ -108,6 +108,16 @@
     (is (= :staged-function-not-visible (rejection-code #(run #{root}))))))
 
 
+(deftest inherited-list-contributors-execute-in-legacy-order
+  (let [prefix {:namespace "fixture" :name :subtotal :parent :sub :args {:nums [100 10]}}
+        suffix {:namespace "fixture" :name :total :parent :subtotal
+                :args {:nums {:append [{:parent :floor :args {:number 2.7}}] :closed true}}}
+        source (into (declarations "packages/core/arithmetic/fns.edn" #{:sub :floor}) [prefix suffix])
+        {:keys [canonical legacy analysis]} (runtimes source (ids/fn-id "fixture" :total))]
+    (is (= :checked (:status analysis)))
+    (is (= 88 (legacy {}) (canonical {})))))
+
+
 (deftest staged-primitive-executes-without-legacy-preparation
   (let [module {:input-format 2 :namespace "core.arithmetic"
                 :fns [{:name :floor :input {:number :numeric} :return-type :int}]}

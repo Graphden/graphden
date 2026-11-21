@@ -24,12 +24,23 @@
                       StandardCharsets/UTF_8)))
 
 
+(defn- local-zipmap-rule?
+  [{:keys [namespace name]} rule callback]
+  (and (= "core.collections" namespace) (= :zipmap name) (= :return-type-rule rule)
+       (let [loaded (find-ns 'graphden.packages.core.collections.impls)
+             trusted (some-> loaded (ns-resolve 'zipmap-return-rule))]
+         (and trusted (bound? trusted) (identical? @trusted callback)))))
+
+
 (defn local-type-rules?
   "A frozen closure can run audited callbacks that use its binding facts and
    type policy. Other callbacks may look up signatures outside the closure."
   [signature]
-  (every? (comp true? :graphden.input/local-type-rule meta)
-          (keep signature [:return-type-rule :slot-types-rule :nav-types-rule])))
+  (every? (fn [[rule callback]]
+            (or (nil? callback)
+                (true? (:graphden.input/local-type-rule (meta callback)))
+                (local-zipmap-rule? signature rule callback)))
+          (select-keys signature [:return-type-rule :slot-types-rule :nav-types-rule])))
 
 
 (defn- names-at

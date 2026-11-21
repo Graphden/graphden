@@ -128,11 +128,12 @@
   (let [[field position] path
         id (:fn-id child)
         entry (owned-declaration child)
-        edge (get edges [field])]
+        edge (get edges (ids/binding-id fn-id field))]
     (when-not (and (uuid? id) (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge))
                    (= (ids/binding-id fn-id field) (:id edge))
                    (case (count path)
-                     1 (and (= 1 (count inline-definitions)) (= id (:ref-fn-id edge)))
+                     1 (and (= 1 (count inline-definitions)) (= id (:ref-fn-id edge))
+                            (empty? (:scope-path edge)) (= [field] (:target-path edge)))
                      2 (list-signature/inline-operand? (get fragments (:ref-fn-id edge)) edge position id)
                      false)
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
@@ -146,7 +147,7 @@
 
 (defn- inline-entries
   [package {:keys [bindings inline-definitions] :as v2} generated]
-  (let [edges (into {} (comp (filter #(empty? (:scope-path %))) (map (juxt :target-path identity))) bindings)
+  (let [edges (into {} (map (juxt :id identity)) bindings)
         fragments (into {} (map (juxt (comp :id :owner) :list-fragment)) generated)]
     (mapv (partial inline-entry package v2 edges fragments) inline-definitions)))
 

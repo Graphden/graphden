@@ -631,7 +631,7 @@ function appendStructuredInputFields(host, path, {inputDescriptor, ancestorTypes
     const row = buildInlineTypeRow(label, type, path + '/input/' + encodeURIComponent(field.name), ancestorTypes,
       {fieldLabel: label, inputDescriptor: field.fields ? field : null, structuredBind});
     const bindPath = field['bind-path'];
-    if (structuredBind && !field.fields && Array.isArray(bindPath) && bindPath.length) {
+    if (structuredBind && Array.isArray(bindPath) && bindPath.length) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'arg-type-chip';
@@ -639,7 +639,7 @@ function appendStructuredInputFields(host, path, {inputDescriptor, ancestorTypes
       button.setAttribute('aria-label', 'Bind ' + bindPath.join('.'));
       button.addEventListener('click', event => {
         event.stopPropagation();
-        if (structuredBind.isCurrent()) openStructuredInputPopover(button, structuredBind, 'bind', {path: bindPath, type});
+        if (structuredBind.isCurrent()) openStructuredInputPopover(button, structuredBind, 'bind', {path: bindPath, type: field.type});
       });
       row.insertBefore(button, row.querySelector('.type-inline-child'));
     }

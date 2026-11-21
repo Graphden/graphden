@@ -302,6 +302,36 @@
       (when (:id row) (exercise-reference-changes! origin token storage seams denied child (:id row))))))
 
 
+(defn- exercise-whole-record!
+  [origin token storage]
+  (let [name "writable-whole-profile"
+        created (extend-native origin token name lesson/root)
+        owner (:id (first (sp/query-entities storage :fn {:name name})))
+        value {:id "23" :name "Ada" :email "ada@example.test"}
+        whole {:fn-id owner :action "bind" :path ["profile"] :value value}
+        leaf (assoc whole :path ["profile" "name"] :value "Ada")]
+    (is (<= 200 (:status created) 299))
+    (is (= ["profile"] (get-in (subtree origin token owner) [:fields 0 :bind-path])))
+    (let [bound (change! origin token whole)
+          binding-id (:binding-id bound)
+          operation {:fn-id owner :binding-id binding-id}
+          result (request origin token :post "/api/execute"
+                          {:content-type "application/json"
+                           :body (json/generate-string {:fn-id owner :args {} :timeout-ms 20000})})]
+      (is (true? (:committed bound)) (pr-str bound))
+      (is (= ["profile"] (get-in (subtree origin token owner) [:occupied 0 :path])))
+      (is (= 409 (:http (command origin token "preview" leaf))))
+      (is (= value (:result (json/parse-string (:body result) true))))
+      (when binding-id
+        (let [edit (assoc operation :action "edit" :value (assoc value :name "Bea"))
+              edited (change! origin token edit)]
+          (is (true? (:committed edited)))
+          (is (= "Bea" (get-in (sp/read-entity storage :input-binding (parse-uuid binding-id)) [:value :name])))
+          (is (true? (:committed (change! origin token (assoc operation :action "remove")))))))
+      (is (true? (:committed (change! origin token leaf))))
+      (is (= 409 (:http (command origin token "preview" whole)))))))
+
+
 (defn- exercise-callable-field!
   [origin token storage]
   (let [template (subtree origin token closed/root)
@@ -366,6 +396,7 @@
         (exercise-commands! origin token storage seams)
         (exercise-reference! origin token storage seams denied)
         (exercise-callable-field! origin token storage)
+        (exercise-whole-record! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))
       (finally (stop)))))

@@ -53,6 +53,25 @@ async function installLesson(page) {
     const resultHost = pane.querySelector('.execute-result-host');
     const output = resultHost.querySelector('pre');
     const lookups = {fnMap: new Map()};
+    let authored;
+    let _tourState;
+    function _tourLesson() { return authored; }
+    function _tourOwnedBranch(state) { return state.sandboxBranch; }
+    function _tourSessionBranch() { return 'fixture-lesson'; }
+    function _tourPrincipalMatches() { return true; }
+    window.installFixtureReceipt = lesson => {
+      authored = lesson;
+      // This fixture begins after sample setup. The real Extend/branch
+      // receipt lifecycle is checked separately.
+      _tourState = {lessonId: '43', sandboxBranch: 'fixture-lesson',
+        sandboxBranchId: 'fixture-branch-id', sandboxBaseBranchId: 'fixture-base-id', created: [
+          {type: 'branch', id: 'fixture-branch-id', name: 'fixture-lesson',
+            'base-branch-id': 'fixture-base-id', receipt: 'created'},
+          {type: 'fn', id: window.lessonRootId, name: 'tutorial-structured-profile',
+            'parent-id': lesson['template-id'], 'namespace-id': null, 'branch-id': 'fixture-branch-id',
+            receipt: 'created'},
+        ]};
+    };
     let selectedFnId;
     let descriptor;
     window.gdStructuredInputFor = id => id === window.lessonRootId ? descriptor : null;
@@ -99,7 +118,7 @@ async function installLesson(page) {
   for (const file of [runtime + 'graphden-popover.js', runtime + 'graphden-forms.js', editor + 'editor-passive-canvas.js',
     editor + 'editor-literal-types.js', editor + 'editor-type-format.js', editor + 'editor-edit-modes.js',
     editor + 'editor-type-expand-render.js', editor + 'editor-overlay-type-expand.js', editor + 'editor-overlay-strips.js',
-    editor + 'editor-tour-checks.js']) {
+    editor + 'editor-tour-checks.js', editor + 'editor-tour-structured-input.js']) {
     await page.addScriptTag({path: path.join(resources, file)});
   }
   await page.evaluate(() => loadGraphData());
@@ -123,9 +142,9 @@ async function exercise() {
       return response.json();
     });
     assert.equal(lesson.id, '43');
-    const [select, findName, bindName, openRun, runResult] = lesson.steps;
+    await page.evaluate(data => window.installFixtureReceipt(data), lesson);
+    const [, , findName, bindName, openRun, runResult] = lesson.steps;
     const checked = step => page.evaluate(check => _tourCheckPasses(check), step.check);
-    assert.equal(await checked(select), true);
     assert.equal(await checked(bindName), false);
     await page.locator(findName.target).waitFor();
     const form = page.getByRole('form', {name: 'Run inputs'});

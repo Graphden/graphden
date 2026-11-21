@@ -1466,10 +1466,13 @@
                                        (uniq/identity-lock-keys entity-name ids))
                                      own-ids)
                              (uniq/identity-lock-keys :slot (keep :slot-id fn-slot-rows))))
-    (doseq [[entity-name rows] own
-            :when (seq rows)]
-      (sp/delete-entities st (:version-entity (get res/entity-config entity-name)) (mapv :id rows)))
-    (purge-versionless-identities! st branch-id own-ids fn-slot-rows)
+    (input-access/with-branch-binding-deletes
+      (:input-binding own-ids) (map :id (:input-binding own))
+      (fn []
+        (doseq [[entity-name rows] own
+                :when (seq rows)]
+          (sp/delete-entities st (:version-entity (get res/entity-config entity-name)) (mapv :id rows)))
+        (purge-versionless-identities! st branch-id own-ids fn-slot-rows)))
     ;; Delete branch-merge records referencing this branch.
     (let [merge-ids (into [] (comp (map :id) (distinct))
                           (concat (sp/query-entities st :branch-merge {:source-branch-id branch-id})

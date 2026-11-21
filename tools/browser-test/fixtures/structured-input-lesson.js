@@ -117,6 +117,7 @@ async function installLesson(page) {
   `});
   for (const file of [runtime + 'graphden-popover.js', runtime + 'graphden-forms.js', editor + 'editor-passive-canvas.js',
     editor + 'editor-literal-types.js', editor + 'editor-type-format.js', editor + 'editor-edit-modes.js',
+    editor + 'editor-edit-structured-input.js',
     editor + 'editor-type-expand-render.js', editor + 'editor-overlay-type-expand.js', editor + 'editor-overlay-strips.js',
     editor + 'editor-tour-checks.js', editor + 'editor-tour-structured-input.js']) {
     await page.addScriptTag({path: path.join(resources, file)});

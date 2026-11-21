@@ -1737,7 +1737,7 @@
            paths for free leaves and checked path and version facts for occupied literals."
      :see [[:editor "recordExpansionFields"] [:crud "read-input"]]}
 
-    {:file "resources/packages/app/editor/editor-edit-modes.js" :defn openStructuredInputPopover
+    {:file "resources/packages/app/editor/editor-edit-structured-input.js" :defn openStructuredInputPopover
      :say "Uses the shared inline edit popover to bind, edit or remove a literal leaf confirmed
            by the current subtree. Edit and removal compare the displayed version with the
            preview. The editor repeats the exact command with its preview basis, then reloads

@@ -13,13 +13,13 @@ after: executor
 :PROPERTIES:
 :CUSTOM_ID: storage/extend-builder
 :FILE: src/graphden/schema/input/schema.clj
-:LINE: 70
+:LINE: 73
 :MINS: 0.8
 :END:
 
 Adds the inactive structured-input storage: stable UUID field paths and a separate input-binding entity. Functions point to existing record-type descriptors through a versioned input-type field. Production continues using v1; generic public access to these entities remains denied. See the [[file:../../../docs/STRUCTURED_INPUT_STORAGE.md][offline storage contract]].
 
-- source :: [[file:../../../src/graphden/schema/input/schema.clj::(defn extend-builder][src/graphden/schema/input/schema.clj:70]]
+- source :: [[file:../../../src/graphden/schema/input/schema.clj::(defn extend-builder][src/graphden/schema/input/schema.clj:73]]
 
 * 2. apply!
 :PROPERTIES:

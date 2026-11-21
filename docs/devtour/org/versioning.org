@@ -7,7 +7,7 @@ Branch-specific reads, conflict detection, and cache refresh.
 
 after: storage
 
-[[file:index.org][index]] · ~105 min
+[[file:index.org][index]] · ~103 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
@@ -130,13 +130,13 @@ Follows ~:base-branch-id~ from a branch to its parent and root, caching the resu
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 747
+:LINE: 750
 :MINS: 1.4
 :END:
 
 Resolves cached version candidates along a branch's ancestry. At each level it considers locally written and merged versions using their effective timestamps. Single-entity and whole-graph resolution share this algorithm.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:747]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:750]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 11. effective-branch-local?
@@ -207,13 +207,13 @@ Repairs references after moving a packaged function between namespaces, which ch
 :PROPERTIES:
 :CUSTOM_ID: versioning/diff-branches
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 505
+:LINE: 516
 :MINS: 4.4
 :END:
 
 Compares the resolved contents of two branches, considering entities visible from either side. This read-only comparison reports their differences without deciding how a merge should resolve conflicts.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:505]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn diff-branches][src/graphden/versioning/storage/merge.clj:516]]
 - same file :: [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 17. diff-branches-view-facts
@@ -232,65 +232,65 @@ Reads branch differences, resolves [[file:glossary.org::#term/slot][slot]] names
 :PROPERTIES:
 :CUSTOM_ID: versioning/detect-conflicts
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 310
+:LINE: 318
 :MINS: 2.3
 :END:
 
 Finds entities changed to different content on both branches after their fork point, excluding [[file:glossary.org::#term/branch-local][branch-local functions]]. Effective timestamps include changes that arrived through earlier merges, not only rows originally written on that branch. These conflicts need resolution before merging.
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:310]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn detect-conflicts][src/graphden/versioning/storage/merge.clj:318]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/merge-branch!][merge-branch!]]
 
 * 19. merge-branch!
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-branch!
 :FILE: src/graphden/versioning/storage/merge.clj
-:LINE: 774
-:MINS: 7.8
+:LINE: 785
+:MINS: 7.9
 :END:
 
 Validates conflicts and approval requirements, then writes a ~branch-merge~ record and any conflict-resolution overrides in one transaction. Resolution makes source versions visible through this record without copying all source rows. The result also reports rows excluded as [[file:glossary.org::#term/branch-local][branch-local]].
 
-- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:774]]
+- source :: [[file:../../../src/graphden/versioning/storage/merge.clj::(defn merge-branch!][src/graphden/versioning/storage/merge.clj:785]]
 - same file :: [[file:versioning.org::#versioning/diff-branches][diff-branches]], [[file:versioning.org::#versioning/detect-conflicts][detect-conflicts]]
 
 * 20. merge-transitively!
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-transitively!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 288
-:MINS: 4.7
+:LINE: 335
+:MINS: 2.6
 :END:
 
 Merges missing ancestor branches before the requested source branch, starting with the oldest required ancestor. Each merge passes the same policy checks as a direct merge. The result lists preliminary merges in ~:merged-first~. See [[file:../../../docs/VERSIONING.md][versioning limits]].
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:288]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:335]]
 - same file :: [[file:versioning.org::#versioning/validate-approval-policy!][validate-approval-policy!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 21. validate-approval-policy!
 :PROPERTIES:
 :CUSTOM_ID: versioning/validate-approval-policy!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 237
+:LINE: 238
 :MINS: 2.7
 :END:
 
 Enforces a target branch's review policy. Required approvals must be distinct, current, bound to this merge target, and from allowed reviewers when ~:approver-ids~ restricts them. Missing valid approvals produce ~:branch/approval-required~ rather than allowing the merge.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:237]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:238]]
 - same file :: [[file:versioning.org::#versioning/merge-transitively!][merge-transitively!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 22. branch-content-stamp
 :PROPERTIES:
 :CUSTOM_ID: versioning/branch-content-stamp
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 141
+:LINE: 142
 :MINS: 1.8
 :END:
 
 Computes a content stamp from the count and latest timestamp of the branch's own [[file:glossary.org::#term/branch-view][version rows]] and the merge records targeting that branch. An approval stores this stamp. Both direct edits and merges into the proposal change it, so an approval no longer counts after either operation changes the proposed content.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn branch-content-stamp][src/graphden/versioning/merge/core.clj:141]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn branch-content-stamp][src/graphden/versioning/merge/core.clj:142]]
 - same file :: [[file:versioning.org::#versioning/merge-transitively!][merge-transitively!]], [[file:versioning.org::#versioning/validate-approval-policy!][validate-approval-policy!]]
 
 * 23. bump!

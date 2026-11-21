@@ -60,12 +60,12 @@
     (context/build-context (assoc view :members (merge empty-members members)))))
 
 
-(defn collect
+(defn collect-roots
   "Read the reachable v2 declaration and binding rows in bounded breadth-first
    batches. The caller supplies an owned read snapshot and its authorizer.
    Every source owner is authorized before any of its relations are loaded."
-  [storage root authorize!]
-  (loop [pending #{root}, view {:fns {} :fields {} :members {} :bindings {}}, remaining max-relations]
+  [storage roots authorize!]
+  (loop [pending (set roots), view {:fns {} :fields {} :members {} :bindings {}}, remaining max-relations]
     (if (empty? pending)
       (freeze view)
       (let [_ (when (> (+ (count pending) (count (:fns view))) max-functions)
@@ -85,3 +85,9 @@
                    (update :members merge (group-by :fn-id members))
                    (update :bindings into (map (juxt :id identity) bindings)))
                remaining)))))
+
+
+(defn collect
+  "Collect one visible root and its dependencies under the shared source budget."
+  [storage root authorize!]
+  (collect-roots storage [root] authorize!))

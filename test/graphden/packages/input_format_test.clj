@@ -6,7 +6,9 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is]]
     [graphden.packages.loaded :as loaded]
-    [graphden.packages.loader :as loader])
+    [graphden.packages.loader :as loader]
+    [graphden.packages.primitive-input :as primitive]
+    [graphden.packages.records.ids :as ids])
   (:import
     (java.nio.file
       Files)))
@@ -148,3 +150,66 @@
             (let [failure (input-format-error #(loader/load-packages ["format-fixture-main"]))]
               (is (= :mixed-input-format (:code failure)))
               (is (zero? @effects)))))))))
+
+
+(deftest valid-pinned-module-publishes-the-authenticated-primitive-receipt
+  (let [owner (ids/fn-id "format.fixture" :checked-echo)
+        abi (ids/fn-id "format.fixture" :echo)
+        source (pr-str {:input-format 2 :namespace "format.fixture"
+                        :fns [{:name :checked-echo :input {:x :int} :return-type :int}]})
+        admission {:module ["format-fixture-main" "checked"]
+                   :fn-id owner :abi-fn-id abi :sha256 (ids/digest-hex "SHA-256" source)}
+        impl (fn [args _ctx] (:x args))]
+    (with-sources {"packages/format-fixture-main/package.edn" (package-source ["early" "checked"] [])
+                   "packages/format-fixture-main/early/fns.edn" early-source
+                   "packages/format-fixture-main/checked/fns.edn" source}
+      (fn [_]
+        (with-redefs-fn {#'loader/load-module-impls (fn [_ module]
+                                                      (case module "early" {:echo impl} "checked" {:checked-echo impl}))}
+          #(let [definitions (:base-fn-defs (loader/load-packages ["format-fixture-main"] {:primitive-input admission}))
+                 receipt (:checked-echo (primitive/declarations definitions))
+                 forged (with-meta (:checked-echo definitions) {::primitive/source (Object.)})]
+             (is (= owner (get-in receipt [:parsed :fn-id])))
+             (is (= abi (:abi-fn-id receipt)))
+             (is (= :package-error/primitive-admission
+                    (:type (input-format-error (fn [] (primitive/declarations {:checked-echo forged}))))))))))))
+
+
+(deftest pins-preflight-all-modules-before-loading-implementations
+  (let [root "format.fixture"
+        abi (ids/fn-id root :echo)
+        make-source (fn [name]
+                      (pr-str {:input-format 2 :namespace root
+                               :fns [{:name name :input {:x :int} :return-type :int}]}))
+        make-pin (fn [module name source]
+                   {:module ["format-fixture-main" module] :fn-id (ids/fn-id root name)
+                    :abi-fn-id abi :sha256 (ids/digest-hex "SHA-256" source)})
+        a (make-source :checked-a)
+        b (make-source :checked-b)
+        left (make-pin "left" :checked-a a)
+        right (make-pin "right" :checked-b b)
+        impl (fn [args _ctx] (:x args))
+        effects (atom 0)]
+    (with-sources {"packages/format-fixture-main/package.edn" (package-source ["early" "left" "right"] [])
+                   "packages/format-fixture-main/early/fns.edn" early-source
+                   "packages/format-fixture-main/left/fns.edn" a
+                   "packages/format-fixture-main/right/fns.edn" b}
+      (fn [_]
+        (with-redefs-fn {#'loader/load-module-impls
+                         (fn [_ module]
+                           (swap! effects inc)
+                           {(case module "early" :echo "left" :checked-a "right" :checked-b) impl})}
+          (fn []
+            (let [load! #(loader/load-packages ["format-fixture-main"] %)
+                  result (load! {:primitive-inputs [left right]})]
+              (is (= #{:checked-a :checked-b} (set (keys (primitive/declarations (:base-fn-defs result))))))
+              (is (= 3 @effects))
+              (reset! effects 0)
+              (doseq [[options expected]
+                      [[{:primitive-inputs [left left]} :package-error/primitive-admission]
+                       [{:primitive-input left :primitive-inputs [right]} :package-error/primitive-admission]
+                       [{:primitive-inputs [left right (assoc right :module ["format-fixture-main" "missing"])]}
+                        :package-error/primitive-admission]
+                       [{:primitive-inputs [left (assoc right :sha256 "wrong")]} :input/staged-module]]]
+                (is (= expected (:type (input-format-error #(load! options)))))
+                (is (zero? @effects))))))))))

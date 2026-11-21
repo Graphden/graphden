@@ -1281,7 +1281,9 @@
   ([storage package-names]
    (bootstrap-from-packages! storage package-names nil))
   ([storage package-names opts]
-   (let [packages (if (:primitive-input opts) (pkg/load-packages package-names opts) (pkg/load-packages package-names))
+   (let [packages (if (or (some? (:primitive-input opts)) (some? (:primitive-inputs opts)))
+                    (pkg/load-packages package-names opts)
+                    (pkg/load-packages package-names))
          base-fns-info (register-base-fns-from-packages! storage packages)
          fns (sync-fn-entities-from-packages! storage packages base-fns-info opts)]
      (assoc base-fns-info :fn-rows fns))))

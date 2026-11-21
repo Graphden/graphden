@@ -63,7 +63,8 @@
           (some (fn [[n d :as entry]] (when (= (:abi-fn-id source) (ids/fn-id (:namespace d) n)) entry))
                 definitions)
           impl (get-in definitions [name :impl])]
-      (when-not (and (fn? impl) (identical? impl (:impl reference))
+      (when-not (and (not (contains? sources reference-name))
+                     (fn? impl) (identical? impl (:impl reference))
                      (identical? impl (get overrides name impl))
                      (identical? impl (get overrides reference-name impl))
                      (= (get-in source [:parsed :source :return-type]) (:return-type reference))

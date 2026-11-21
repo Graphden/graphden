@@ -2,10 +2,12 @@
   "Read-only cross-reference origin verification against a frozen effective-input
    analysis. Derives no routes and changes neither source nor storage."
   (:require
+    [graphden.input.context :as context]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.input.source-rename :as rename]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
 (defn- reject!
@@ -113,11 +115,12 @@
                             :unavailable-reference-input)
         edges (mapv #(checked-edge graph snapshot owner (subvec use-path 0 %)) (range 1 (inc (count use-path))))
         field (get-in arg [:target :field])
+        expected (context/call-with-types snapshot #(types/resolve-alias (get-in arg [:target :type])))
         declaring (only (filter #(= slot (ids/slot-id % field)) (get-in graph [:scopes use-path :declaration-order]))
                         :reference-field-origin-mismatch)]
     (when-not (and (seq edges) (= field (peek (:source-path arg))) (= names (conj (mapv :name edges) field))
                    (= :input-field (:kind route)) (:whole-bindable? route) (= slot (:origin-field-id route))
-                   (migration/same-edn? (get-in arg [:target :type]) (:completion-type route)))
+                   (migration/same-edn? expected (:completion-type route)))
       (reject! :unsupported-reference-use))
     [names address edges declaring]))
 

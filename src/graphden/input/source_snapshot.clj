@@ -289,9 +289,10 @@
                    (= (set (:effects (:source declaration))) (:effects entry))
                    (= args (:args entry)) (= (types/resolve-alias return) (:return entry)))
       (reject! :implementation-signature-required base))
-    ;; Custom rules may consult signatures outside parent/ref edges. A closed
-    ;; rule registry is a separate prerequisite for running them offline.
-    (when (some entry [:return-type-rule :slot-types-rule :nav-types-rule])
+    ;; Only admit audited callbacks that use their inputs and frozen type
+    ;; policy. Other rules may consult signatures outside this closure.
+    (when-not (every? (comp true? :graphden.input/local-type-rule meta)
+                      (keep entry [:return-type-rule :slot-types-rule :nav-types-rule]))
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
      :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}))
@@ -450,8 +451,20 @@
         {:keys [proof entry]} (source/forwarded-field-baseline prepared original field)]
     (when-not (= :authored-source-equivalent (:verification entry))
       (reject! :unverified-forwarded-baseline owner))
-    (let [baseline (assoc package :closure-baselines {owner entry})
+    (let [baseline (assoc-in package [:closure-baselines owner] entry)
           {:keys [context options]} (freeze-closure baseline [owner] roots)
           certificate (scope/verify-forwarded-projection context proof
                                                          #(analysis/analyze-effective-input %1 %2 options))]
       (source/rewrite-forwarded-field prepared original field certificate))))
+
+
+(defn with-migrated-bindings
+  "Certify legacy binding owners in dependency order. Record the exact checked
+   rows so later owners can freeze a closure containing those dependencies."
+  [package owners roots]
+  (reduce (fn [package owner]
+            (let [{:keys [verification] :as result} (migrate-binding package owner roots)]
+              (when-not (= :authored-source-equivalent verification)
+                (reject! :unverified-scoped-declaration owner))
+              (assoc-in package [:closure-baselines owner] result)))
+          package owners))

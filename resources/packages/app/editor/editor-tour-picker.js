@@ -180,6 +180,11 @@ async function gdTourNews() {
 window.gdTourNews = gdTourNews;
 
 const REQUIRE_SIGNALS = {
+  'structured-input-run': {
+    test: lesson => typeof _tourStructuredLessonProved === 'function' && _tourStructuredLessonProved(lesson),
+    phrase: 'a writable lesson branch and structured Run',
+    short: 'structured input lesson support',
+  },
   'api-tokens': {
     test: () => !!window.gdAccount?.id && typeof window.graphdenTenancyActive === 'function'
       && window.graphdenTenancyActive(),
@@ -268,7 +273,7 @@ function _tourRequirement(lesson) {
   if (!need) return { allowed: true };
   const signal = REQUIRE_SIGNALS[need];
   const allowed = signal
-    ? signal.test()
+    ? signal.test(lesson)
     : (typeof window.graphdenHasCap === 'function' && window.graphdenHasCap(need));
   return {
     allowed,
@@ -474,6 +479,8 @@ async function openTutorialMenu() {
 
   const paused = saved?.lessonId
     ? lessons.lessons.find(lesson => lesson.id === saved.lessonId) : null;
+  const parkedStructured = !paused && saved?.lessonId === '43' && _tourPrincipalMatches(saved)
+    && !!_tourOwnedBranch(saved);
   const ended = !!paused && (saved.phase === 'cleanup' || saved.step >= (paused.steps || []).length);
   let resume = null;
   if (paused) {
@@ -489,6 +496,11 @@ async function openTutorialMenu() {
       _tourRestoreSession(saved, true);
     }));
   }
+  if (parkedStructured) pop.appendChild(_tourBtn('End lesson & clean up', 'gd-tour-btn-quiet', () => {
+    if (!current()) return;
+    retire();
+    _tourRestoreSession(saved, true);
+  }));
 
   const filter = document.createElement('input');
   filter.type = 'search';

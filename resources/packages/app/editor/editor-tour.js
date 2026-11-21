@@ -675,13 +675,19 @@ async function _tourFetchLessons() {
   if (typeof httpHostPublications === 'function' && window.gdHttpHostAvailable === null) {
     try { await httpHostPublications(); } catch (_) { window.gdHttpHostAvailable = false; }
   }
-  if (_tourLessons) return _tourLessons;
-  if (!(window.API && API.api_tour)) return null;
+  if (!_tourLessons && !(window.API && API.api_tour)) return null;
+  const ticket = _tourStartTicket(false);
   try {
-    const r = await authFetch(API.api_tour);
-    if (!r.ok) return null;
-    _tourLessons = await r.json();
-    return _tourLessons;
+    if (!_tourLessons) {
+      const r = await authFetch(API.api_tour);
+      if (!r.ok || !_tourStartCurrent(ticket)) return null;
+      const payload = await r.json();
+      if (!_tourStartCurrent(ticket)) return null;
+      _tourLessons = payload;
+    }
+    return typeof _tourScopeStructuredLesson === 'function'
+      ? await _tourScopeStructuredLesson(_tourLessons, () => _tourStartCurrent(ticket))
+      : _tourLessons;
   } catch (_) { return null; }
 }
 
@@ -693,8 +699,10 @@ async function startTutorial(lessonId, resumeStep, resumeCreated, session, ticke
     if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
     return false;
   }
-  const lesson = (lessons.lessons || []).find((l) => l.id === lessonId)
-    || (lessons.lessons || [])[0];
+  const selected = (lessons.lessons || []).find((l) => l.id === lessonId);
+  if (lessonId === '43' && (!selected || typeof _tourStructuredBranchMatches !== 'function'
+      || !_tourStructuredBranchMatches(session))) return false;
+  const lesson = selected || (lessons.lessons || [])[0];
   if (!lesson) return false;
   if (lesson.requires === 'services'
       && !await _tourPrepareServiceLesson(lesson, () => _tourStartCurrent(ticket))) return false;
@@ -753,6 +761,11 @@ async function maybeStartTutorial() {
   if (requested) {
     // A 2-digit id ("01") or bare number ("1") both resolve.
     const id = requested.length === 1 ? '0' + requested : requested;
+    if (id === '43') {
+      const saved = _tourLoadState();
+      if (saved?.lessonId) return saved.lessonId === id && _tourRestoreSession(saved, false, null, ticket);
+      return startTutorialIsolated(id, ticket);
+    }
     return startTutorial(id, null, null, null, ticket);
   }
   // "Start the next lesson" from the end of a branch-isolated run: the

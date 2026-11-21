@@ -6,7 +6,9 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is]]
     [graphden.packages.loaded :as loaded]
-    [graphden.packages.loader :as loader])
+    [graphden.packages.loader :as loader]
+    [graphden.packages.primitive-input :as primitive]
+    [graphden.packages.records.ids :as ids])
   (:import
     (java.nio.file
       Files)))
@@ -148,3 +150,26 @@
             (let [failure (input-format-error #(loader/load-packages ["format-fixture-main"]))]
               (is (= :mixed-input-format (:code failure)))
               (is (zero? @effects)))))))))
+
+
+(deftest valid-pinned-module-publishes-the-authenticated-primitive-receipt
+  (let [owner (ids/fn-id "format.fixture" :checked-echo)
+        abi (ids/fn-id "format.fixture" :echo)
+        source (pr-str {:input-format 2 :namespace "format.fixture"
+                        :fns [{:name :checked-echo :input {:x :int} :return-type :int}]})
+        admission {:module ["format-fixture-main" "checked"]
+                   :fn-id owner :abi-fn-id abi :sha256 (ids/digest-hex "SHA-256" source)}
+        impl (fn [args _ctx] (:x args))]
+    (with-sources {"packages/format-fixture-main/package.edn" (package-source ["early" "checked"] [])
+                   "packages/format-fixture-main/early/fns.edn" early-source
+                   "packages/format-fixture-main/checked/fns.edn" source}
+      (fn [_]
+        (with-redefs-fn {#'loader/load-module-impls (fn [_ module]
+                                                      (case module "early" {:echo impl} "checked" {:checked-echo impl}))}
+          #(let [definitions (:base-fn-defs (loader/load-packages ["format-fixture-main"] {:primitive-input admission}))
+                 receipt (:checked-echo (primitive/declarations definitions))
+                 forged (with-meta (:checked-echo definitions) {::primitive/source (Object.)})]
+             (is (= owner (get-in receipt [:parsed :fn-id])))
+             (is (= abi (:abi-fn-id receipt)))
+             (is (= :package-error/primitive-admission
+                    (:type (input-format-error (fn [] (primitive/declarations {:checked-echo forged}))))))))))))

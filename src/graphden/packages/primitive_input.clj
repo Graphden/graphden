@@ -8,8 +8,20 @@
     [graphden.packages.records.ids :as ids]))
 
 
+(defprotocol ^:private PrimitiveProof
+
+  (receipt-evidence [receipt expected-seal]))
+
+
 (deftype ^:private PrimitiveReceipt
-  [seal parsed abi-id])
+  [seal parsed abi-id]
+
+  PrimitiveProof
+
+  (receipt-evidence
+    [_ expected-seal]
+    (when (identical? seal expected-seal)
+      {:parsed parsed :abi-fn-id abi-id})))
 
 
 (defonce ^:private seal (Object.))
@@ -40,12 +52,11 @@
   "Recover the preflighted rows only for their declared package owner."
   [name definition]
   (when-let [receipt (::source (meta definition))]
-    (when-not (and (instance? PrimitiveReceipt receipt)
-                   (identical? seal (PrimitiveReceipt/.-seal receipt)))
-      (reject!))
-    (let [parsed (PrimitiveReceipt/.-parsed receipt)]
+    (let [{:keys [parsed] :as admitted}
+          (when (instance? PrimitiveReceipt receipt)
+            (receipt-evidence receipt seal))]
       (when-not (= (:fn-id parsed) (ids/fn-id (:namespace definition) name)) (reject!))
-      {:parsed parsed :abi-fn-id (PrimitiveReceipt/.-abi-id receipt)})))
+      admitted)))
 
 
 (defn declarations

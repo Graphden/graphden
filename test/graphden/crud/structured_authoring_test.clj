@@ -129,13 +129,69 @@
           (finally (sp/update-entity storage :branch branch {:require-merge? false})))))))
 
 
+(def ^:private uppercase (ids/fn-id "reftext.upper" :reference-uppercase))
+
+
+(def ^:private uppercase-admission
+  {:module ["reftext" "upper"] :fn-id uppercase :abi-fn-id (ids/fn-id "core.strings" :str-upper)
+   :sha256 "eb3f5b79f609345850b5888e3a4d6d064c7eea6ef4b5fb9f1beb514a8ff9b93f"})
+
+
+(defn- exercise-reference!
+  [origin token storage seams denied]
+  (let [name "profile-with-uppercase-name"
+        created (extend-native origin token name lesson/root)
+        child (:id (first (sp/query-entities storage :fn {:name name})))
+        action {:fn-id child :path ["profile" "name"] :action "bind" :ref-fn-id uppercase}
+        preview (command origin token "preview" action)
+        apply-args (assoc action :expected-state (:expected-state preview))
+        no-binding? #(empty? (sp/query-entities storage :input-binding {:fn-id child}))]
+    (is (<= 200 (:status created) 299))
+    (is (true? (:ok preview)) (pr-str preview))
+    (is (no-binding?))
+    (is (= 400 (:http (command origin token "preview" (assoc action :value nil)))))
+    (is (= 403 (:http (command origin token "preview" (assoc action :ref-fn-id (random-uuid))))))
+    (is (= 422 (:http (command origin token "preview" (assoc action :ref-fn-id lesson/root)))))
+    (reset! denied uppercase)
+    (try (is (= 403 (:http (command origin token "apply" apply-args))))
+         (finally (reset! denied nil)))
+    (let [original @seams]
+      (try
+        (binding [tenancy/*seams-override* seams]
+          (tenancy/install-browser-source-policy!
+            (fn [_] (fn [row & _] (when (= uppercase (:id row)) (throw (ex-info "Denied" {:type :authz/forbidden})))))))
+        (is (= 403 (:http (command origin token "apply" apply-args))))
+        (finally (reset! seams original))))
+    (is (no-binding?))
+    (let [bound (command origin token "apply" apply-args)
+          row (some->> (:binding-id bound) parse-uuid (sp/read-entity storage :input-binding) rows/normalize)
+          profile (ids/slot-id lesson/root :profile)
+          record (:type-fn-id (sp/read-entity storage :slot profile))
+          fields (get-in (subtree origin token child) [:fields 0 :fields])
+          group (some #(when (= "name" (:name %)) %) fields)
+          args {:profile {:id "a" :email "e" :name {:string "Ada"}}}
+          response (request origin token :post "/api/execute"
+                            {:content-type "application/json"
+                             :body (json/generate-string {:fn-id child :args args :timeout-ms 20000})})
+          result (json/parse-string (:body response) true)]
+      (is (true? (:committed bound)) (pr-str bound))
+      (is (= [child [] [profile (ids/slot-id record :name)] "ref" false uppercase]
+             ((juxt :fn-id :scope-path :target-path :expression-kind :value-present :ref-fn-id) row)))
+      (is (= ["reference-inputs" ["string"]] [(:kind group) (mapv :name (:fields group))]))
+      (is (= 409 (:http (command origin token "preview" action))))
+      (is (= 409 (:http (command origin token "apply" apply-args))))
+      (is (= {:id "a" :email "e" :name "ADA"} (:result result)) (pr-str result)))))
+
+
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons"]
-                                             :primitive-input lesson/admission})
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext"]
+                                             :primitive-inputs [lesson/admission uppercase-admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
-        ctx (exec/create-context {:storage storage :base-fns base-fns :auth-provider (auth/single-token-provider token)})
+        denied (atom nil)
+        guard (fn [_ id] (when (= id @denied) (throw (ex-info "Denied" {:type :authz/forbidden}))))
+        ctx (exec/create-context {:storage storage :base-fns base-fns :execute-guard guard :auth-provider (auth/single-token-provider token)})
         _ (executor/rebuild! ctx)
         app (router/create-router ctx "_app-ring-response")
         seams (atom (tenancy/seams-isolation-seed))
@@ -144,5 +200,7 @@
                     (update (router/dispatch app req) :headers update-keys name)))
         stop (server/run-server handler {:ip "127.0.0.1" :port 0})]
     (try
-      (exercise-commands! (str "http://127.0.0.1:" (:local-port (meta stop))) token storage seams)
+      (let [origin (str "http://127.0.0.1:" (:local-port (meta stop)))]
+        (exercise-commands! origin token storage seams)
+        (exercise-reference! origin token storage seams denied))
       (finally (stop)))))

@@ -6,6 +6,11 @@
 (def ^:dynamic *offline?* false)
 
 
+(def ^:dynamic *package-input-types*
+  "Exact owner → input descriptor pairs certified by the native package sync."
+  {})
+
+
 (def offline-entities #{:input-binding :input-binding-version})
 
 
@@ -14,7 +19,9 @@
   (when (and (not *offline?*)
              (or (contains? offline-entities entity)
                  (and (contains? #{:fn :fn-version} entity)
-                      (some? (:input-type-fn-id data)))))
+                      (some? (:input-type-fn-id data))
+                      (not= (:input-type-fn-id data)
+                            (get *package-input-types* (if (= entity :fn) (:id data) (:fn-id data)))))))
     (throw (ex-info "Structured input storage is available only to offline migration"
                     {:type :input/offline-only :entity entity}))))
 

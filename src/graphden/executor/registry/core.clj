@@ -1120,6 +1120,8 @@
   ([storage defs ns-id-map]
    (sync-defs-to-storage! storage defs ns-id-map {}))
   ([storage defs ns-id-map extra-name->id]
+   (sync-defs-to-storage! storage defs ns-id-map extra-name->id nil))
+  ([storage defs ns-id-map extra-name->id checked-declarations]
    (validate-all-defs! defs)
    (let [signatures (into {}
                           (map (fn [[fn-name definition]]
@@ -1127,8 +1129,9 @@
                                        registered (record-rich-types! id fn-name definition)]
                                    [id (get-in registered [:by-id id])])))
                           defs)
-         fn-def-records (mapv def-pair->fn-def-record defs)
-         records-list (records/parse-module fn-def-records extra-name->id)
+         native (when checked-declarations (checked-declarations signatures))
+         fn-def-records (mapv def-pair->fn-def-record (apply dissoc defs (keys native)))
+         records-list (into (records/parse-module fn-def-records extra-name->id) (mapcat val native))
          name->id (composition/write-records! storage records-list ns-id-map)]
      ;; A package boot can retain the exact signature from its registration
      ;; even if another branch publishes a rich type while storage sync runs.

@@ -29,8 +29,10 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
+    [graphden.input.access :as input-access]
     [graphden.packages.loader :as pkg]
     [graphden.packages.owned :as owned]
+    [graphden.packages.primitive-input :as primitive]
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
@@ -280,6 +282,17 @@
                        :offenders (vec offenders)})))))
 
 
+(defn- sync-package-bases!
+  [storage definitions ns-id-map all-name->id impls primitives]
+  (if (empty? primitives)
+    (registry/sync-defs-to-storage! storage definitions ns-id-map all-name->id)
+    (binding [input-access/*package-input-types* (into {} (map (comp (juxt :fn-id :input-type-id) :parsed val)) primitives)]
+      (registry-core/sync-defs-to-storage!
+        storage definitions ns-id-map all-name->id
+        (fn [signatures]
+          (update-vals primitives #(primitive/checked-records % impls signatures)))))))
+
+
 (defn register-base-fns-from-packages!
   "Pure side-effects: sync namespaces, register type-aliases, register
    base-fn impls in the global registry, sync base-fn rows to storage.
@@ -304,6 +317,11 @@
    ;; ns/base-fn row in single batches and must not die as the set grows.
    (binding [sp-config/*max-batch-size* (max sp-config/*max-batch-size* 100000)]
      (let [base-fn-defs (:base-fn-defs packages)
+           primitives (primitive/declarations base-fn-defs)
+           _ (when (seq primitives)
+               (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage)))
+                 (throw (ex-info "Package primitive requires versioned storage" {:type :package-error/primitive-admission})))
+               (primitive/check-implementations! primitives base-fn-defs extra-base-fns))
            ;; Sync namespace entities first (creates ns hierarchy in DB)
            ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
                                            (:ns-descriptions packages))
@@ -336,7 +354,7 @@
        (register-type-aliases! (:fn-defs packages))
        (doseq [[fn-name impl] base-fns-map]
          (exec/register-base-fn! fn-name impl))
-       (let [written (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)]
+       (let [written (sync-package-bases! storage base-fn-defs ns-id-map all-name->id base-fns-map primitives)]
          ;; Include parser-emitted anonymous type rows, using the writer's
          ;; actual identities after any existing-row remap. Only trusted
          ;; package bootstrap does this; tenant sync-bundle! never does.
@@ -1257,7 +1275,7 @@
   ([storage package-names]
    (bootstrap-from-packages! storage package-names nil))
   ([storage package-names opts]
-   (let [packages (pkg/load-packages package-names)
+   (let [packages (if (:primitive-input opts) (pkg/load-packages package-names opts) (pkg/load-packages package-names))
          base-fns-info (register-base-fns-from-packages! storage packages)
          fns (sync-fn-entities-from-packages! storage packages base-fns-info opts)]
      (assoc base-fns-info :fn-rows fns))))

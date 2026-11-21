@@ -103,6 +103,13 @@
        vec))
 
 
+(defn- visible-source-proofs
+  [package states]
+  (let [proofs (keep #(get-in states [% :source-proof]) (:dependencies package))]
+    {:definitions (vec (distinct (mapcat :definitions proofs)))
+     :baselines (reduce into {} (map :baselines proofs))}))
+
+
 (defn- duplicate-definition?
   [definitions]
   (some #(> % 1)
@@ -200,10 +207,10 @@
         (if (duplicate-definition? (concat dependencies original))
           (blocked-state package [(problem package :duplicate-visible-definition)])
           (let [prepared (parse/prepare-module original names definitions)
-                {:keys [context plan certified blocked]} (if verify-scopes
-                                                           (verify-scopes prepared original dependencies)
-                                                           {:context prepared
-                                                            :plan (source/verify-module (source/plan-module original prepared) prepared)})
+                {:keys [context plan certified blocked source-proof]} (if verify-scopes
+                                                                        (verify-scopes prepared original (visible-source-proofs package states))
+                                                                        {:context prepared
+                                                                         :plan (source/verify-module (source/plan-module original prepared) prepared)})
                 verification (list-probe/verify-package (:read-source package) (:definitions plan) context)
                 summaries (mapv (fn [{id :identity :as entry}]
                                   (let [diagnostic (get blocked id)]
@@ -217,7 +224,8 @@
                      :blockers (into (vec (mapcat :blockers summaries))
                                      (map #(assoc % :repository (:repository package) :package (:name package)))
                                      (:blockers verification))}
-              emit? (assoc :module-patches (module-patches package (:definitions plan) context)))))
+              emit? (assoc :module-patches (module-patches package (:definitions plan) context))
+              source-proof (assoc :source-proof source-proof))))
         (catch Exception error
           (blocked-state package (preparation-errors package all-names error)))))))
 
@@ -274,7 +282,7 @@
                                    {:dependencies (if (and (vector? (:dependencies package))
                                                            (every? string? (:dependencies package)))
                                                     (:dependencies package) :unsupported)}
-                                   (dissoc state :exports)))) packages)
+                                   (dissoc state :exports :source-proof :module-patches)))) packages)
         orphan-blockers (vec (for [repository (:repositories manifest)
                                    file (:modules-without-package repository)]
                                {:code :module-without-package :repository (:label repository) :file file}))

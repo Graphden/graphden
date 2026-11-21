@@ -171,23 +171,27 @@
 
 
 (deftest shipped-json-handler-executes-from-verified-scoped-source
-  (let [originals (vec (concat
-                         (declarations "packages/core/collections/fns.edn" #{:assoc})
-                         (declarations "packages/core/refinements/fns.edn" #{:http-status :text-map})
-                         (declarations "packages/core/system/fns.edn"
-                                       #{:ring-response-shape :ring-response :_ring-response--w-status
-                                         :_ring-response--w-headers :to-json-string})
-                         (declarations "packages/web/response/fns.edn" #{:json-content-type :ok-response :json-ok-response})
-                         (declarations "packages/web/crud/fns.edn" #{:value-kinds})
-                         (declarations "packages/web/crud-routes/fns.edn"
-                                       #{:json-handler :_json-handler-body :value-kinds-handler})))
+  (let [core (vec (concat
+                    (declarations "packages/core/collections/fns.edn" #{:assoc})
+                    (declarations "packages/core/refinements/fns.edn" #{:http-status :text-map})
+                    (declarations "packages/core/system/fns.edn"
+                                  #{:ring-response-shape :ring-response :_ring-response--w-status
+                                    :_ring-response--w-headers :to-json-string})))
+        web (vec (concat
+                   (declarations "packages/web/response/fns.edn" #{:json-content-type :ok-response :json-ok-response})
+                   (declarations "packages/web/crud/fns.edn" #{:value-kinds})
+                   (declarations "packages/web/crud-routes/fns.edn"
+                                 #{:json-handler :_json-handler-body :value-kinds-handler})))
+        prepared-core (parse/prepare-module core {} {})
+        prepared-web (parse/prepare-module web (:name->id prepared-core) (:defs-by-name prepared-core))
         root (ids/fn-id "web.crud" :json-handler)
         descendant (ids/fn-id "web.crud" :value-kinds-handler)
         parents (mapv (partial ids/fn-id "web.response") [:ok-response :json-content-type])
         prepare-staged
-        (fn [package owner roots implementations]
-          (let [{certified :package ids :certified {:keys [definitions]} :plan}
-                (certification/verify-plan (:prepared package) originals [] roots)
+        (fn [_ owner roots implementations]
+          (let [{:keys [source-proof]} (certification/verify-plan prepared-core core {} roots)
+                {certified :package ids :certified {:keys [definitions]} :plan}
+                (certification/verify-plan prepared-web web source-proof roots)
                 {:keys [source proposed]} (get-in certified [:closure-baselines owner])
                 legacy {:namespace "web.crud" :fns [(dissoc source :namespace :source-file)]}
                 staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace :source-file)])
@@ -197,7 +201,7 @@
                    (:verification (first (filter #(= descendant (:identity %)) definitions)))))
             (is (= [:project [:data]] (get-in proposed [:bind [:body :data]])))
             (execution/compile-staged-module certified owner roots implementations options)))
-        {:keys [canonical legacy analysis]} (runtimes originals root prepare-staged)]
+        {:keys [canonical legacy analysis]} (runtimes (into core web) root prepare-staged)]
     (is (= :checked (:status analysis)))
     (doseq [value [{:ok true} [1 false "data"] "value"]]
       (let [args {:data value}

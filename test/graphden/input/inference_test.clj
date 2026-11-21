@@ -63,6 +63,16 @@
           (analysis/analyze-effective-input context owner (update options :implementations dissoc owner))))))
 
 
+(deftest ambiguous-reference-reports-its-address-before-signature-ordering
+  (let [{:keys [owner result context options]} (callable-fixture)
+        type-id (get-in context [:fields result :type-fn-id])
+        error (try (analysis/analyze-effective-input
+                     (assoc-in context [:type-bodies type-id] [:union :null :fn-ref]) owner options)
+                   (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+    (is (= {:code :reference-mode-required :address [[owner []] [result]] :reason :ambiguous-reference-mode}
+           (select-keys error [:code :address :reason])))))
+
+
 (deftest explicit-projection-orders-the-source-return-before-its-consumer-test
   (let [[owner target root input left right value a b literal projection variable] (repeatedly 12 random-uuid)
         any (:any (ids/primitive-fn-ids))

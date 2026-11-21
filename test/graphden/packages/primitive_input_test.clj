@@ -8,12 +8,13 @@
     [graphden.input.migration :as migration]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.sync :as sync]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
+    [graphden.system.init.packages]
     [graphden.test-infra.golden-app :as golden]
     [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.resolution :as resolution]))
+    [graphden.versioning.storage.resolution :as resolution]
+    [integrant.core :as ig]))
 
 
 (use-fixtures :once (golden/fixture (ns-name *ns*)))
@@ -41,8 +42,8 @@
 
 (deftest pinned-classpath-declaration-syncs-and-executes
   (let [storage (:storage golden/*bootstrap*)
-        packages (loader/load-packages ["core" "web" "app" "inputfixture"] {:primitive-input admission})
-        sync! #(sync/register-base-fns-from-packages! storage packages)
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "inputfixture"] :primitive-input admission})
+        sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
         {:keys [base-fns]} (sync!)
         input (migration/derived-id :input-type root)
         number-slot (ids/slot-id root :number)
@@ -69,7 +70,8 @@
     (is (= -4 (:result (post floor {:number -3.2}))))
     (is (= "invalid-structured-arguments" (get-in (post root {:unknown 1}) [:error-data :reason])))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"primitive admission failed"
-          (sync/register-base-fns-from-packages! storage packages {:fixture-floor (:ceil base-fns)})))
+          (ig/init-key :exec/base-fns {:storage storage :packages packages
+                                       :extra-base-fns {:fixture-floor (:ceil base-fns)}})))
     (is (= #{root input} (set (keys before))))
     (sync!)
     (is (= before (version)))

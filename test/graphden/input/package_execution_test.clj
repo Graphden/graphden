@@ -106,7 +106,7 @@
                              (input/compile-stored context root trusted)))
         {:keys [canonical legacy analysis]} (runtimes originals owner compile-snapshot)]
     (is (= :checked (:status analysis)))
-    (is (= [[:number]] (mapv key (get-in analysis [:public-input :routes]))))
+    (is (= #{[] [:number]} (set (keys (get-in analysis [:public-input :routes])))))
     (doseq [[argument expected] [[3.2 3] [-1.2 -2] [0 0]]]
       (is (= expected (legacy {:number argument}) (canonical {:number argument}))))
     (is (= :unknown-input-field (rejection-code #(canonical {:value 1}))))))

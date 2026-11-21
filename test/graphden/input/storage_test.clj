@@ -352,7 +352,7 @@
         (is (= {:status :applied} (offline/apply! base artifact)))
         (is (= {:status :already-applied} (offline/apply! base artifact)))
         (is (= {:expression-kind "projection" :projection-path [alias-id] :target-path [field]}
-               (select-keys (sp/read-entity versioned :input-binding (:id binding))
+               (select-keys (rows/normalize (sp/read-entity versioned :input-binding (:id binding)))
                             [:expression-kind :projection-path :target-path])))
         (is (= (:id binding) (:input-binding-id (sp/read-entity base :input-binding-version (:id binding-version)))))
         (is (= {:status :restored} (offline/restore! base artifact)))

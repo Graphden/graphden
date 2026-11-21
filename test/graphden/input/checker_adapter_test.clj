@@ -134,14 +134,19 @@
           (check/check-input-binding input)))))
 
 
-(deftest existing-refinement-rejection-is-sanitized-and-deferred-proof-is-explicit-test
+(deftest checked-refinements-retain-sanitized-errors-and-unproved-obligations
   (let [input {:address [[(random-uuid) []] []]
                :expected [:refine :int [:> 0]] :actual :int
                :expression {:kind :value :value -1}}
         error (try (check/check-input-binding input) (catch clojure.lang.ExceptionInfo e e))]
     (is (= :refinement-violation (:reason (ex-data error))))
     (is (not (contains? (ex-data error) :binding)))
-    (is (= :deferred (:status (check/check-input-binding (assoc input :expression {:kind :value :value 1})))))))
+    (is (= :checked (:status (check/check-input-binding (assoc input :expression {:kind :value :value 1})))))
+    (is (= :checked (:status (check/check-input-binding (assoc input :actual (:expected input)
+                                                               :expression {:kind :type-fact})))))
+    (is (= :deferred
+           (:status (check/check-input-binding (assoc input :expected [:refine :int [:custom-condition]]
+                                                      :expression {:kind :value :value 1})))))))
 
 
 (deftest shared-input-variable-narrows-the-remaining-field-through-real-checker-test

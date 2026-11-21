@@ -20,9 +20,13 @@
 (defn- implementation
   [ctx trusted base]
   (let [{:keys [input-type-fn-id return-type-fn-id name]} (get-in ctx [:fns base])
-        {:keys [signature impl]} (get trusted base)]
-    (when-not (and (uuid? input-type-fn-id) (uuid? return-type-fn-id) (string? name)
-                   (= base (:fn-id signature)) (= (keyword name) (:name signature))
+        {:keys [signature impl ordered-fields input-id return-id memberships]} (get trusted base)]
+    (when-not (and (uuid? input-type-fn-id) (uuid? return-type-fn-id)
+                   (= base (:fn-id signature))
+                   (if ordered-fields
+                     (and (= input-id input-type-fn-id) (= return-id return-type-fn-id)
+                          (= memberships (into #{} (map (juxt :id :slot-id :position)) (get-in ctx [:members input-id]))))
+                     (and (string? name) (= (keyword name) (:name signature))))
                    (map? (:args signature)) (set? (:effects signature)) (fn? impl))
       (context/reject! :implementation-signature-required {:fn-id base}))
     (when-not (signatures/local-type-rules? signature)
@@ -30,7 +34,8 @@
     (let [fields (:fields (descriptor/resolve-contract ctx base))
           args (into {} (map (juxt :name :type)) fields)
           return (:type (descriptor/resolve-descriptor ctx return-type-fn-id))]
-      (when-not (and (= args (update-vals (:args signature) types/resolve-alias))
+      (when-not (and (or (nil? ordered-fields) (= ordered-fields (mapv (juxt :id :name :required) fields)))
+                     (= args (update-vals (:args signature) types/resolve-alias))
                      (= return (types/resolve-alias (:return signature))))
         (context/reject! :implementation-signature-mismatch {:fn-id base}))
       {:base-fn-id base :root-entry signature :impl impl

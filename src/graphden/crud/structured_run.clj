@@ -17,8 +17,9 @@
 (defn- trusted-roots
   [ctx frozen]
   (let [base-implementations (:base-fns ctx)
-        signatures (::owned/native-signatures (meta base-implementations))]
-    (into {}
+        signatures (::owned/native-signatures (meta base-implementations))
+        builders (::owned/list-implementations (meta base-implementations))]
+    (into (into {} (filter (fn [[id _]] (and (get-in frozen [:fns id]) (owned/owned-fn-id? id)))) builders)
           (keep (fn [[id {:keys [name]}]]
                   (when-let [signature (get signatures id)]
                     (let [impl (get base-implementations (keyword name))]

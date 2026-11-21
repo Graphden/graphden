@@ -291,11 +291,24 @@
   [storage definitions ns-id-map all-name->id impls primitives]
   (if (empty? primitives)
     (registry/sync-defs-to-storage! storage definitions ns-id-map all-name->id)
-    (binding [input-access/*package-input-types* (primitive-input-types primitives)]
-      (registry-core/sync-defs-to-storage!
-        storage definitions ns-id-map all-name->id
-        (fn [signatures]
-          (update-vals primitives #(primitive/checked-records % impls signatures)))))))
+    (let [admitted (mapcat (fn [{:keys [parsed children]}] (cons parsed children)) (vals primitives))
+          list-modules (keep :list-module (vals primitives))
+          list-rows (mapcat :records list-modules)
+          bindings (distinct (concat (mapcat :bindings admitted) (filter #(= :input-binding (:kind %)) list-rows)))]
+      (binding [input-access/*package-input-types* (merge (into {} (map (juxt :fn-id :input-type-id)) admitted)
+                                                          (into {} (keep #(when-let [input (:input-type-fn-id %)] [(:id %) input])) list-rows))]
+        (writer/with-write [storage :graph]
+                           (let [written (registry-core/sync-defs-to-storage!
+                                           storage definitions ns-id-map all-name->id
+                                           (fn [signatures]
+                                             (update-vals primitives #(primitive/checked-records % impls signatures))))]
+                             (doseq [{:keys [fn-id id] :as row} (sort-by (comp count :scope-path) bindings)]
+                               ;; JSONB stores path UUIDs as strings. Send that
+                               ;; same representation to the version diff.
+                               (let [data (-> row (dissoc :kind) (update :target-path #(mapv str %)) (update :scope-path #(mapv str %)))]
+                                 (input-access/with-binding-write fn-id id
+                                                                  #(sp/upsert-entities storage :input-binding [data]))))
+                             written))))))
 
 
 (defn register-base-fns-from-packages!
@@ -368,6 +381,8 @@
           :all-name->id all-name->id
           :base-fns (vary-meta base-fns-map assoc
                                ::owned/native-signatures (::registry-core/registered-signatures (meta written))
+                               ::owned/list-implementations (when-let [modules (seq (keep :list-module (vals primitives)))]
+                                                              (into {} (mapcat (requiring-resolve 'graphden.input.pinned-list-runtime/implementations)) modules))
                                ::owned/primitive-input-types (primitive-input-types primitives))})))))
 
 
@@ -1124,7 +1139,8 @@
    (sync-fn-entities-from-packages! storage packages base-fns-info nil))
   ([storage packages base-fns-info
     {:keys [skip-type-check? skip-allowlist-gate?]}]
-   (let [fn-defs (mapv #(assoc % :fn-id (records/fn-id (:namespace %) (:name %)))
+   (let [fn-defs (into [] (comp (remove primitive/literal-descendant?)
+                                (map #(assoc % :fn-id (records/fn-id (:namespace %) (:name %)))))
                        (:fn-defs packages))
          ns-id-map (or (:ns-id-map base-fns-info) {})
          extra-name->id (or (:all-name->id base-fns-info) {})

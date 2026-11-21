@@ -64,13 +64,13 @@ Reads the selected v2 declaration and its reachable owners under one decorated b
 :PROPERTIES:
 :CUSTOM_ID: crud/with-plan
 :FILE: src/graphden/crud/structured_input_bind.clj
-:LINE: 140
+:LINE: 180
 :MINS: 0.8
 :END:
 
 Preview and bind use the same decorated branch writer. It locks structured bindings before capturing a fresh authorized closure. The apply command compares the winning version basis, checks the proposed literal with the analyzer and inserts one row.
 
-- source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:140]]
+- source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:180]]
 - see also :: [[file:crud.org::#crud/read-input][read-input]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/dispatch][dispatch]], [[file:editor.org::#editor/openStructuredInputPopover][openStructuredInputPopover]]
 

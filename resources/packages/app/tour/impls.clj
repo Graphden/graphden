@@ -34,7 +34,6 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.input.authoring-principal :as principal]
-    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.graph-writer :as writer]
     [graphden.util.counters :as counters]
@@ -50,7 +49,7 @@
   []
   (boolean
     (when (and (:authenticated? (principal/current))
-               (get (::owned/primitive-input-types (meta (:base-fns ctx))) profile-template))
+               (get (:graphden.packages.owned/primitive-input-types (meta (:base-fns ctx))) profile-template))
       (cr/record-effect! :db)
       (let [storage (request/require-storage ctx)]
         (try

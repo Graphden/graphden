@@ -476,6 +476,12 @@
            Unsupported semantic forms block the complete artifact; this does not enable a new
            production writer. Restore refuses to erase changes made after the rehearsal."
      :see [[:storage "validate-view!"]]}
+    {:ns graphden.input.migration-renames :defn evidence
+     :say "Matches a legacy scalar rename to its original parent field, alias membership,
+           binding ID and branch versions. Equal primitive slot types and paired history
+           supported by these rows allow the planner to express the rename as a projection.
+           The generated binding versions retain the original binding identity and timestamps."
+     :see [[:storage "apply!"]]}
     {:ns graphden.versioning.storage.input :defn validate-view!
      :say "Checks scoped field paths and occupied-prefix conflicts among supplied rows, including
            inherited origins. The offline writer and merge transaction call this validator under
@@ -756,6 +762,12 @@
            and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich
            declarations and authored bindings with the legacy plan. The report records
            verification per definition. Runtime and residual interface checks follow later."}
+    {:ns graphden.input.source-snapshot :defn migrate-forwarded-field
+     :say "Freezes both endpoints of an authored field passed to a value-producing reference.
+           The checker replays the exact projection and verifies that the original local
+           field remains available. A successful replay supplies a source proposal with
+           the scoped path and its original field identity."
+     :see [[:types "verify-module"] [:types "analyze-effective-input"]]}
     {:file "scripts/structured_input_cst.clj" :defn plan-verified-module
      :say "Builds replacement text only when every definition in a module has a verified source
            plan. Edits retain comments and literal payloads, and repeat verification on the
@@ -808,6 +820,18 @@
            implementation argument paths. Frozen registry views preserve rule lookup isolation;
            implementation functions never run here. Returned substitutions and proofs must join
            graph checking before the inferred signature can be treated as checked."}
+    {:ns graphden.input.stored-implementations :defn resolve-closure
+     :say "Matches a frozen stored declaration to the host's native implementation by UUID.
+           It checks the declared argument and return types and maps each implementation
+           argument name to the original field ID. Only audited rules belonging to that
+           frozen signature participate in checking the closure."
+     :see [[:types "infer-use"]]}
+    {:ns graphden.input.compile :defn compile-stored
+     :say "Runs the structured-input checker on an authorized stored snapshot and prepares
+           a named invocation closure for the ordinary executor. The caller supplies the
+           trusted implementations alongside their frozen signatures and owns the execution
+           authorization boundary."
+     :see [[:types "resolve-closure"] [:types "analyze-effective-input"]]}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

@@ -343,7 +343,12 @@
          (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written))))
        {:ns-id-map ns-id-map
         :all-name->id all-name->id
-        :base-fns base-fns-map}))))
+        :base-fns (with-meta base-fns-map
+                    {::owned/native-signatures
+                     (into {} (keep (fn [[name definition]]
+                                      (let [id (records/fn-id (:namespace definition) name)]
+                                        (when-let [signature (registry-core/rich-type-of-id id)]
+                                          [id signature])))) base-fn-defs)})}))))
 
 
 (defn- ancestor-parents

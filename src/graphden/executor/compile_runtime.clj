@@ -1634,8 +1634,10 @@
             (if (= 1 (count args))
               (fn-id (first (vals args)))
               (fn-id args)))
-          (let [reg (registry ctx)
-                closure (or (get reg fn-id) (throw-not-compiled! ctx fn-id))
+          (let [[prepared-id prepared] (::named-root ctx)
+                closure (if (and prepared (= fn-id prepared-id))
+                          prepared
+                          (or (get (registry ctx) fn-id) (throw-not-compiled! ctx fn-id)))
                 args (or named-args {})
                 ;; The checked structured closure owns its named surface.
                 ;; Legacy readers need the slot-ID companions as well.

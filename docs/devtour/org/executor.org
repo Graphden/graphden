@@ -29,7 +29,7 @@ The executor compiles this description into a callable Clojure function. Referen
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
 :LINE: 1598
-:MINS: 3.8
+:MINS: 3.9
 :END:
 
 Runs a previously compiled [[file:glossary.org::#term/graph-function][graph function]]. It first checks cancellation and any configured execution-permission guard, then binds the [[file:glossary.org::#term/effect][allowed effects]] for the call. The [[file:glossary.org::#term/compiled-registry][compiled registry]] maps function IDs to [[file:glossary.org::#term/closure][closures]]: callable Clojure functions retaining their prepared dependencies. ~execute~ uses the selected closure's input ABI. Legacy closures receive name and slot-ID keys. A structured closure routes the original named input.

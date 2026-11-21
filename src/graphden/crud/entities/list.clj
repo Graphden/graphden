@@ -745,7 +745,7 @@
   (let [subtree (list-scope-subtree (env ctx) root-id)
         root (some #(when (= root-id (:id %)) %) (:fns subtree))]
     (if-let [input (when (:input-type-fn-id root)
-                     (structured-input/read-input (:storage ctx) root-id))]
+                     (structured-input/read-input (:storage ctx) root-id true ctx))]
       (update subtree :fns (fn [fns]
                              (mapv #(cond-> % (= root-id (:id %)) (assoc :structured-input input)) fns)))
       subtree)))

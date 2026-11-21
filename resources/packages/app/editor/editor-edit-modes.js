@@ -603,7 +603,7 @@ function openStructuredInputPopover(anchorEl, target, action, field, draft = {})
       control.value = ref ? ref.name : text;
       control.readOnly = !!ref;
       host.appendChild(control);
-      if (action === 'bind' && typeof openFnPicker === 'function') {
+      if (typeof openFnPicker === 'function') {
         const addButton = (caption, select) => {
           const button = document.createElement('button');
           button.type = 'button';

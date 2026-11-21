@@ -8,6 +8,18 @@ const token = process.env.GD_BROWSER_FIXTURE_TOKEN;
 assert.equal(new URL(origin).hostname, '127.0.0.1');
 assert.ok(owner && ownerName && target && token);
 
+async function applyChange(page, dialog, label) {
+  const applied = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/structured-input/apply');
+  await dialog.getByRole('button', {name: label, exact: true}).click();
+  const response = await applied;
+  const result = await response.json();
+  assert.equal(response.status(), 200, JSON.stringify(result));
+  assert.equal(result.committed, true);
+  await dialog.waitFor({state: 'hidden'});
+  return {body: response.request().postDataJSON(), result};
+}
+
 async function exercise() {
   const browser = await chromium.launch({
     executablePath: process.env.GD_LESSON_CHROMIUM || undefined, args: ['--no-sandbox'],
@@ -51,16 +63,40 @@ async function exercise() {
       await page.screenshot({path: process.env.GD_STRUCTURED_REF_SCREENSHOT});
     }
 
-    const applied = page.waitForResponse(response =>
-      new URL(response.url()).pathname === '/api/structured-input/apply');
-    await dialog.getByRole('button', {name: 'Bind', exact: true}).click();
-    const response = await applied;
-    const body = response.request().postDataJSON();
-    assert.deepEqual(body.path, ['profile', 'name']);
-    assert.equal(body['fn-id'], owner);
-    assert.equal(body['ref-fn-id'], target);
-    assert.equal(Object.hasOwn(body, 'value'), false);
-    assert.equal((await response.json()).committed, true);
+    const bound = await applyChange(page, dialog, 'Bind');
+    assert.deepEqual(bound.body.path, ['profile', 'name']);
+    assert.equal(bound.body['fn-id'], owner);
+    assert.equal(bound.body['ref-fn-id'], target);
+    assert.equal(Object.hasOwn(bound.body, 'value'), false);
+    const binding = bound.result['binding-id'];
+    assert.ok(binding);
+
+    const edit = page.getByRole('button', {name: 'Edit profile.name'});
+    const change = page.getByRole('dialog', {name: 'Edit profile.name'});
+    await edit.press('Enter');
+    await change.getByRole('textbox', {name: 'New value for profile.name'}).fill('Bea');
+    const literal = await applyChange(page, change, 'Save');
+    assert.equal(literal.body['binding-id'], binding);
+    assert.equal(literal.body.value, 'Bea');
+    assert.ok(literal.body['expected-version']);
+    assert.equal(Object.hasOwn(literal.body, 'ref-fn-id'), false);
+
+    await edit.press('Enter');
+    await change.getByRole('button', {name: 'Choose function'}).press('Enter');
+    await filter.fill('reference-uppercase');
+    await page.locator('.fn-picker-row', {hasText: 'reference-uppercase'}).click();
+    const rewritten = await applyChange(page, change, 'Save');
+    assert.equal(rewritten.body['binding-id'], binding);
+    assert.equal(rewritten.body['ref-fn-id'], target);
+    assert.notEqual(rewritten.body['expected-version'], literal.body['expected-version']);
+
+    await page.getByRole('button', {name: 'Remove profile.name'}).press('Enter');
+    const remove = page.getByRole('dialog', {name: 'Remove profile.name'});
+    const removed = await applyChange(page, remove, 'Remove');
+    assert.equal(removed.body['binding-id'], binding);
+    assert.equal(Object.hasOwn(removed.body, 'ref-fn-id'), false);
+    assert.equal(Object.hasOwn(removed.body, 'value'), false);
+    await page.getByRole('button', {name: 'Bind profile.name'}).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

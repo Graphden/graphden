@@ -5,15 +5,19 @@
     [graphden.input.source-snapshot :as snapshot]))
 
 
+(defn- argument-field
+  [{[keyspace field & nested] :source-path}]
+  (when (and (= :args keyspace) (simple-keyword? field) (empty? nested))
+    field))
+
+
 (defn- candidate
-  [{id :identity [blocker & others] :blockers}]
-  (when (and (uuid? id) blocker (empty? others))
-    (let [[keyspace field & nested] (:source-path blocker)]
-      (when (and (= :args keyspace) (simple-keyword? field) (empty? nested))
-        (case (:code blocker)
-          :ref-scope-required [id nil]
-          :field-projection-required [id field]
-          nil)))))
+  [{id :identity [first-blocker & others :as blockers] :blockers}]
+  (when (and (uuid? id) (seq blockers) (every? argument-field blockers))
+    (cond
+      (every? #(= :ref-scope-required (:code %)) blockers) [id nil]
+      (and (empty? others) (= :field-projection-required (:code first-blocker)))
+      [id (argument-field first-blocker)])))
 
 
 (defn- attempt
@@ -33,7 +37,7 @@
 
 
 (defn- certify
-  "From the ordinary source plan, verify supported single-argument rewrites
+  "From the ordinary source plan, verify supported scoped binding rewrites
    using trusted native signatures. A source owner is retried only when the
    exact dependency blocking its closure has since been certified. Cycles
    and unproved owners stay blocked. The returned package contains private

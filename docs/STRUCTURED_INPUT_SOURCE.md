@@ -35,8 +35,8 @@ within one package are prepared together, allowing forward references.
 
 ## Source report with implementation signatures
 
-Run this command from the trusted Graphden checkout to certify single-field
-bindings and unique forwarded fields that need native signatures.
+Run this command from the trusted Graphden checkout to certify binding groups
+and unique forwarded fields that need native signatures.
 Pass the trusted package names before the first source repository.
 
 ```sh

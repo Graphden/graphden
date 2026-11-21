@@ -83,6 +83,28 @@
     (is (= "checked" (get-in certificate [:row :value])))))
 
 
+(deftest scoped-bindings-are-certified-together
+  (let [declarations (into (filterv #(= :str-trim (:name %)) (sources "strings"))
+                           (concat (filter #(= :equal? (:name %)) (sources "logic"))
+                                   (filter #(= :to-json-string (:name %)) (sources "system"))))
+        host {:namespace "fixture" :name :compare-json :parent :equal?
+              :args {:a :str-trim :b :to-json-string :string " \"same\" " :data "same"}}
+        owner (ids/fn-id "fixture" :compare-json)
+        migrate (fn [definition]
+                  (let [originals (conj declarations definition)
+                        package (snapshot/package-index (parse/prepare-module originals {} {}) originals)]
+                    (snapshot/migrate-binding package owner @roots)))
+        result (migrate host)
+        rows (get-in result [:v2 :scoped-inputs])]
+    (is (= :authored-source-equivalent (:verification result)) (pr-str (:blockers result)))
+    (is (= #{[:a :string] [:b :data]} (set (keys rows))))
+    (doseq [[path parent field] [[[:a :string] (ids/fn-id "core.strings" :str-trim) :string]
+                                 [[:b :data] (ids/fn-id "core.system" :to-json-string) :data]]]
+      (is (= (ids/binding-id owner (ids/slot-id parent field)) (get-in rows [path :row :id]))))
+    (is (= :types/check-failed
+           (:type (failure #(migrate (assoc-in host [:args :string] 7))))))))
+
+
 (deftest certified-reference-input-is-written-and-read-by-its-public-path
   (let [package (fixture "checked")
         entry (snapshot/migrate-binding package host-id @roots)

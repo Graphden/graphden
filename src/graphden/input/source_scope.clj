@@ -32,33 +32,46 @@
 
 
 (defn- legacy-origin
-  [{owner-id :identity :keys [legacy blockers kind status]} path snapshot]
-  (when-not (and (= :composed kind) (= :blocked status) (uuid? owner-id)
-                 (= [[path :ref-scope-required]] (mapv (juxt :source-path :code) blockers))
-                 (every? #(and (= :binding (:kind %)) (empty? (:policy %))) (:arguments legacy)))
-    (reject! :unsupported-scope-source))
-  (let [arg (only (filter #(= path (:source-path %)) (:arguments legacy)) :missing-binding-origin)
+  [owner-id arguments bindings path]
+  (let [arg (only (filter #(= path (:source-path %)) arguments) :missing-binding-origin)
         id (get-in arg [:origin :binding-id])
-        bindings (filter #(= :binding (:kind %)) (:records legacy))
         binding (only (filter #(= id (:id %)) bindings) :missing-binding-origin)
         [operator payload] (:expression arg)
         expected-expression (case operator
                               :value (and (:value-present binding) (migration/same-edn? payload (:value binding)))
                               :ref (and (qualified-keyword? payload)
                                         (= (:ref-fn-id binding) (ids/fn-id (namespace payload) (keyword (name payload)))))
-                              false)
-        owner (only (filter #(and (= :fn (:kind %)) (= owner-id (:id %))) (:records legacy)) :missing-owner-declaration)
-        existing (filter #(= owner-id (:fn-id %)) (vals (:bindings snapshot)))]
+                              false)]
     (when-not (and expected-expression (= owner-id (:fn-id binding) (get-in arg [:origin :fn-id]))
                    (= (:slot-id binding) (get-in arg [:origin :slot-id]))
-                   (= (:id binding) (ids/binding-id owner-id (:slot-id binding)))
-                   (= (:parent-ids owner) (get-in snapshot [:fns owner-id :parent-ids]))
-                   (not (contains? (:bindings snapshot) id))
-                   (migration/same-edn? (into {} (map (juxt :id meaning)) (remove #(= id (:id %)) bindings))
-                                        (into {} (map (fn [row] [(:id row) (meaning (rename/legacy-binding (vals (:fields snapshot)) row))]))
-                                              existing)))
+                   (= id (ids/binding-id owner-id (:slot-id binding))))
       (reject! :source-snapshot-mismatch))
-    [arg binding bindings]))
+    [arg binding]))
+
+
+(defn- legacy-omissions
+  [{owner-id :identity :keys [legacy blockers kind status]} paths snapshot]
+  (when-not (and (= :composed kind) (= :blocked status) (uuid? owner-id)
+                 (seq paths) (= (count paths) (count (set paths)) (count blockers))
+                 (= (set (for [path paths] [path :ref-scope-required]))
+                    (set (map (juxt :source-path :code) blockers)))
+                 (every? #(and (= :binding (:kind %)) (empty? (:policy %))) (:arguments legacy)))
+    (reject! :unsupported-scope-source))
+  (let [records (:records legacy)
+        bindings (filter #(= :binding (:kind %)) records)
+        owner (only (filter #(and (= :fn (:kind %)) (= owner-id (:id %))) records)
+                    :missing-owner-declaration)
+        omitted (mapv #(legacy-origin owner-id (:arguments legacy) bindings %) paths)
+        omitted-ids (into #{} (map (comp :id second)) omitted)
+        current (filter #(= owner-id (:fn-id %)) (vals (:bindings snapshot)))]
+    (when-not (and (= (count omitted) (count omitted-ids))
+                   (= (:parent-ids owner) (get-in snapshot [:fns owner-id :parent-ids]))
+                   (not-any? (:bindings snapshot) omitted-ids)
+                   (migration/same-edn? (into {} (map (juxt :id meaning)) (remove #(contains? omitted-ids (:id %)) bindings))
+                                        (into {} (map (fn [row] [(:id row) (meaning (rename/legacy-binding (vals (:fields snapshot)) row))]))
+                                              current)))
+      (reject! :source-snapshot-mismatch))
+    omitted))
 
 
 (defn- checked-graph
@@ -137,50 +150,71 @@
 
 
 (defn- preserves-occupancy?
-  [prior current [[owner use-path] _ :as address] binding]
+  [prior current additions]
   (let [facts [:binding-id :origin-fn-id :expression]
-        child (conj use-path (:id binding))]
+        addresses (set (map :address additions))
+        reference-children
+        (into #{}
+              (keep (fn [{[[owner use-path]] :address :keys [row]}]
+                      (when (:ref-fn-id row) [owner (conj use-path (:id row))])))
+              additions)]
     (and (every? (fn [[key old]]
                    (migration/same-edn? (select-keys old facts) (select-keys (get current key) facts))) prior)
-         (every? (fn [[[_ path :as scope] _ :as key]]
-                   (or (contains? prior key) (= address key)
-                       (and (:ref-fn-id binding) (= owner (first scope))
-                            (= child (take (count child) path)))))
+         (every? (fn [[[owner path] _ :as address]]
+                   (or (contains? prior address) (contains? addresses address)
+                       (some (fn [[root child]]
+                               (and (= owner root) (= child (take (count child) path))))
+                             reference-children)))
                  (keys current)))))
 
 
-(defn verify-binding
-  "Verify one previously blocked value/reference binding through a unique,
-   ordered path of value-producing references. The frozen snapshot contains
-   all other owner bindings and inherited uses. analyze takes [snapshot fn-id]
-   and returns the stage-4 analyze-effective-input result.
+(defn- binding-certificate
+  [snapshot before [arg binding]]
+  (let [owner (:fn-id binding)
+        [public-path address edges declaring] (public-route before snapshot arg binding)]
+    {:snapshot-id (:snapshot-id snapshot) :source-path (:source-path arg) :public-path public-path
+     :address address :edges edges :field-owner declaring
+     :owner-parents (get-in snapshot [:fns owner :parent-ids])
+     :row (scoped-row binding address)}))
 
-   Replay the overlay against a fresh snapshot, checking its binding identity,
-   exact use, expression and the baseline occupancy. The legacy inverse below
-   is local to this proved source occurrence. No general flattening is valid.
-   This certificate is private and does not change the source plan's status."
-  [plan-entry source-path snapshot analyze]
-  (let [[arg binding _] (legacy-origin plan-entry source-path snapshot)
-        owner (:fn-id binding)
-        before (checked-graph analyze snapshot owner)
-        [public-path address edges declaring] (public-route before snapshot arg binding)
-        row (scoped-row binding address)
-        updated (-> snapshot (assoc :snapshot-id (random-uuid)) (assoc-in [:bindings (:id row)] row))
-        after (checked-graph analyze updated owner)
-        added (get-in after [:public-input :bindings address])
+
+(defn- verified-addition?
+  [after binding {:keys [address row]}]
+  (let [added (get-in after [:public-input :bindings address])
         expression (if (:value-present binding)
                      {:kind :value :value (:value binding)}
-                     {:kind :ref :fn-id (:ref-fn-id binding)})
-        prior (get-in before [:public-input :bindings])
-        current (get-in after [:public-input :bindings])]
-    (when-not (and (= address (occurrence after (:slot-id binding)))
-                   (= (:id binding) (:binding-id added)) (= owner (:origin-fn-id added))
-                   (migration/same-edn? expression (:expression added))
-                   (preserves-occupancy? prior current address binding)
-                   (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))
+                     {:kind :ref :fn-id (:ref-fn-id binding)})]
+    (and (= address (occurrence after (:slot-id binding)))
+         (= (:id binding) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
+         (migration/same-edn? expression (:expression added))
+         (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))))
+
+
+(defn verify-bindings
+  "Check a group of legacy bindings whose complete omitted set is known.
+   Resolve all addresses in one frozen baseline. Replay all rows together so
+   interdependent type constraints and occupancy use the completed graph."
+  [{owner :identity :as plan-entry} paths snapshot analyze]
+  (let [omitted (legacy-omissions plan-entry paths snapshot)
+        before (checked-graph analyze snapshot owner)
+        certificates (mapv (partial binding-certificate snapshot before) omitted)
+        additions (into {} (map (juxt :id identity)) (map :row certificates))]
+    (when-not (= (count certificates) (count additions) (count (set (map :address certificates))))
       (reject! :scope-replay-mismatch))
-    {:snapshot-id (:snapshot-id snapshot) :source-path source-path :public-path public-path :address address
-     :edges edges :field-owner declaring :owner-parents (get-in snapshot [:fns owner :parent-ids]) :row row}))
+    (let [updated (-> snapshot (assoc :snapshot-id (random-uuid)) (update :bindings merge additions))
+          after (checked-graph analyze updated owner)
+          prior (get-in before [:public-input :bindings])
+          current (get-in after [:public-input :bindings])]
+      (when-not (and (every? true? (map #(verified-addition? after (second %1) %2) omitted certificates))
+                     (preserves-occupancy? prior current certificates))
+        (reject! :scope-replay-mismatch))
+      certificates)))
+
+
+(defn verify-binding
+  "Check a single omitted binding through a unique ordered reference path."
+  [plan-entry source-path snapshot analyze]
+  (first (verify-bindings plan-entry [source-path] snapshot analyze)))
 
 
 (defn- free-route!
@@ -230,7 +264,7 @@
             added (get current target-address)]
         (when-not (and (= projection-id (:binding-id added)) (= owner-id (:origin-fn-id added))
                        (= {:kind :projection :scope [owner-id []] :path [field-id]} (:expression added))
-                       (preserves-occupancy? prior current target-address row)
+                       (preserves-occupancy? prior current [{:address target-address :row row}])
                        (not (contains? (get-in after [:public-input :routes]) target-names))
                        (= source-names (free-route! after source-address source-type)))
           (reject! :forwarded-replay-mismatch))

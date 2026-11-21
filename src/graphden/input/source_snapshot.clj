@@ -102,12 +102,12 @@
       package)))
 
 
-(defn- omit-argument
-  "Replan the owner without the one flat binding under examination. The
+(defn- omit-arguments
+  "Replan the owner without the flat bindings under examination. The
    prepared package had already resolved names and assigned anonymous IDs.
    Update both lookup paths used by the legacy parser and v2 replay."
-  [{:keys [declarations] :as package} owner field]
-  (let [omit #(update % :args dissoc field)
+  [{:keys [declarations] :as package} owner fields]
+  (let [omit #(update % :args (fn [args] (apply dissoc args fields)))
         baseline (omit (get declarations owner))]
     (-> package
         (update-in [:originals owner] #(mapv omit %))
@@ -412,46 +412,57 @@
 (defn- scope-evidence
   [package owner roots]
   (let [entry (plan-entry package owner)
-        [blocker & others] (:blockers entry)
-        path (:source-path blocker)]
-    (when-not (and (= :ref-scope-required (:code blocker)) (empty? others)
-                   (= 2 (count path)) (= :args (first path)))
+        blockers (:blockers entry)
+        paths (mapv :source-path blockers)]
+    (when-not (and (seq paths) (every? #(= :ref-scope-required (:code %)) blockers)
+                   (every? #(and (= 2 (count %)) (= :args (first %))) paths))
       (reject! :unsupported-scope-source owner))
-    (let [baseline (omit-argument package owner (second path))
+    (let [baseline (omit-arguments package owner (mapv second paths))
           _ (when-not (source-context/has-reference-use? (:prepared baseline) (get-in baseline [:declarations owner]))
               (reject! :missing-reference-use owner))
-          ;; The removed value may itself be a reference. Its declaration
-          ;; must already belong to the frozen closure before overlay replay.
+          ;; The removed values may be references. Their declarations must
+          ;; belong to the frozen closure before the aggregate overlay runs.
           targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))
           {:keys [context options]} (freeze-closure baseline (into [owner] targets) roots)]
       {:entry entry :baseline baseline
-       :certificate (scope/verify-binding entry path context #(analysis/analyze-effective-input %1 %2 options))})))
+       :certificates (scope/verify-bindings entry paths context #(analysis/analyze-effective-input %1 %2 options))})))
 
 
 (defn verify-binding
-  "Certify one flat binding with a single ref-scope blocker in the original
-   plan. Walk verified parent/ref declarations by UUID in a private baseline.
-   roots are frozen registry entries keyed by base function ID, including
-   implementation type rules. The existing signature and directional checkers
-   analyze both snapshots. Returns evidence; does not promote a source plan."
+  "Certify a single legacy flat binding when its native reference use can
+   be identified uniquely. Returns private evidence for source replay."
   [package owner roots]
-  (:certificate (scope-evidence package owner roots)))
+  (let [[certificate & more] (:certificates (scope-evidence package owner roots))]
+    (when (seq more) (reject! :single-scope-source-required owner))
+    certificate))
+
+
+(defn- add-scoped-form
+  [owner proposed {:keys [scope-certificate expression]}]
+  (let [path (:public-path scope-certificate)]
+    (when (contains? (:bind proposed) path)
+      (reject! :unsupported-scope-source owner))
+    (assoc-in proposed [:bind path] expression)))
 
 
 (defn migrate-binding
-  "Write a unique certified reference input as a public path key in :bind. Verify
-   the resulting v2 rows against the original package's legacy authored rows.
-   Missing type evidence, unavailable uses and ambiguous occurrences refuse."
+  "Write the checked reference inputs as explicit public paths in :bind and
+   compare the complete v2 declaration with the original legacy source."
   [package owner roots]
-  (let [{:keys [entry baseline certificate]} (scope-evidence package owner roots)
-        {:keys [source-path public-path]} certificate
-        arguments (mapv #(cond-> % (= source-path (:source-path %)) (assoc :scope-certificate certificate))
+  (let [{:keys [entry baseline certificates]} (scope-evidence package owner roots)
+        by-path (into {} (map (juxt :source-path identity)) certificates)
+        arguments (mapv (fn [{:keys [source-path] :as arg}]
+                          (if-let [certificate (get by-path source-path)]
+                            (assoc arg :scope-certificate certificate)
+                            arg))
                         (get-in entry [:legacy :arguments]))
-        arg (some #(when (:scope-certificate %) %) arguments)
+        scoped (filter :scope-certificate arguments)
         proposed (:proposed (plan-entry baseline owner))]
-    (when-not (and proposed arg (not (contains? (:bind proposed) public-path))) (reject! :unsupported-scope-source owner))
-    (let [candidate (-> entry (assoc :status :supported :blockers []
-                                     :proposed (assoc-in proposed [:bind public-path] (:expression arg)))
+    (when-not (and proposed (= (count scoped) (count certificates)))
+      (reject! :unsupported-scope-source owner))
+    (let [candidate (-> entry
+                        (assoc :status :supported :blockers []
+                               :proposed (reduce (partial add-scoped-form owner) proposed scoped))
                         (assoc-in [:legacy :arguments] arguments))]
       (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))
 

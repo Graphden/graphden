@@ -13,10 +13,11 @@ const resources = path.join(__dirname, '..', '..', '..', 'resources', 'packages'
 const editor = 'app/editor/';
 
 async function installRunSurface(page) {
-  await page.setContent('<!doctype html><html lang="en"><title>Run</title><main id="gd-insp-run-host"></main></html>');
+  await page.setContent('<!doctype html><html lang="en"><title>Run</title><main><div id="gd-insp-run-host"></div><div id="gd-insp-runs"></div></main></html>');
   await page.addStyleTag({path: path.join(resources, editor, 'editor-styles.css')});
   await page.addScriptTag({content: `
-    const API = {api_execute: '/api/execute', api_value_form: '/api/value-form'};
+    const API = {api_execute: '/api/execute', api_execute_id: id => '/api/execute/' + id,
+      api_value_form: '/api/value-form', api_graph_entities: '/api/graph/entities'};
     const authFetch = window.fetch.bind(window);
     const lookups = {fnMap: new Map()};
     const richTypes = {};
@@ -45,7 +46,7 @@ async function installRunSurface(page) {
   `});
   for (const file of ['web/runtime/graphden-forms.js', editor + 'editor-literal-types.js',
     editor + 'editor-value-form.js', editor + 'editor-execute-result.js', editor + 'editor-execute-inputs.js',
-    editor + 'editor-execute.js']) {
+    editor + 'editor-execute-history.js', editor + 'editor-execute.js']) {
     await page.addScriptTag({path: path.join(resources, file)});
   }
 }
@@ -70,7 +71,11 @@ async function exercise() {
     const page = await browser.newPage({extraHTTPHeaders: {Authorization: 'Bearer ' + token}});
     page.setDefaultTimeout(9000);
     const pageErrors = [];
+    let posts = 0;
     page.on('pageerror', error => pageErrors.push(error.message));
+    page.on('request', req => {
+      if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/execute') posts++;
+    });
     await page.goto(origin);
     await installRunSurface(page);
 
@@ -83,14 +88,21 @@ async function exercise() {
     assert.equal(await field.getAttribute('aria-invalid'), 'true');
     assert.equal(await field.evaluate(input => input === document.activeElement), true);
     await field.fill('-7.6');
+    await form.getByText('Run options', {exact: true}).click();
+    await form.locator('.execute-persist-checkbox').check();
     await verifyRun(page, form, {config: {ref: -7.6}}, -8);
+    await field.fill('12');
+    await page.locator('#gd-insp-runs').getByRole('button', {name: 'Repeat', exact: true}).click();
+    await page.waitForFunction(() => document.querySelector('.execute-popover-body [role="status"]')?.textContent === 'Inputs restored.');
+    assert.equal(await field.inputValue(), '-7.6');
+    assert.equal(posts, 1, 'Repeat restores the draft without running it');
 
     await page.evaluate(id => window.openRun(id), slotId);
     const legacyField = form.locator('.execute-arg-form[data-slot-id] [data-form-field]');
     await legacyField.fill('-2.3');
     await verifyRun(page, form, {number: -2.3}, -2);
     assert.deepEqual(pageErrors, []);
-    console.log('Ordinary structured and slot Run passed in Chromium');
+    console.log('Ordinary structured Run and Repeat, and slot Run passed in Chromium');
   } finally {
     await browser.close();
   }

@@ -69,14 +69,6 @@
       :else (throw error))))
 
 
-(defn runnable-analysis
-  [ctx frozen root]
-  (try
-    (when-let [guard (:execute-guard ctx)] (guard ctx root))
-    (:analysis (prepare ctx frozen root))
-    (catch clojure.lang.ExceptionInfo error (rejection error) nil)))
-
-
 (defn- source-hash
   [{:keys [fns fields members bindings]}]
   ;; Compare source identities, field order and semantic values. Storage row
@@ -86,6 +78,16 @@
       [(update-vals fns source-row) (update-vals fields source-row)
        (update-vals members #(->> % (sort-by (juxt :position :slot-id)) (mapv source-row)))
        (update-vals bindings source-row)])))
+
+
+(defn runnable-input
+  "Return an authorized input analysis and Repeat basis from the same frozen source."
+  [ctx frozen root]
+  (try
+    (when-let [guard (:execute-guard ctx)] (guard ctx root))
+    (let [prepared (prepare ctx frozen root)]
+      (assoc (select-keys prepared [:analysis :free-slots]) :graph-hash (source-hash frozen)))
+    (catch clojure.lang.ExceptionInfo error (rejection error) nil)))
 
 
 (defn plan

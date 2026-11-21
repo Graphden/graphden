@@ -54,15 +54,19 @@
 (defn- browser-handler
   [app]
   (fn [{:keys [request-method uri] :as req}]
-    (case [request-method uri]
-      [:get "/"] {:status 200 :headers {"Content-Type" "text/html"} :body "<!doctype html><title>Run fixture</title>"}
-      ([:get "/api/graph/entities"]
-       [:get "/partials/execute-popover"]
-       [:get "/partials/execute-result-effects"]
-       [:post "/api/value-form"]
-       [:post "/api/execute"]
-       [:post "/partials/execute-result-inline"]) (router/dispatch app req)
-      {:status 404})))
+    (if (and (= :get request-method) (re-matches #"/api/execute/[0-9a-f-]+" uri))
+      (router/dispatch app req)
+      (case [request-method uri]
+        [:get "/"] {:status 200 :headers {"Content-Type" "text/html"} :body "<!doctype html><title>Run fixture</title>"}
+        ([:get "/api/graph/entities"]
+         [:get "/partials/execute-popover"]
+         [:get "/partials/execute-history"]
+         [:get "/partials/execute-result"]
+         [:get "/partials/execute-result-effects"]
+         [:post "/api/value-form"]
+         [:post "/api/execute"]
+         [:post "/partials/execute-result-inline"]) (router/dispatch app req)
+        {:status 404}))))
 
 
 (deftest ordinary-run-selects-the-stored-input-contract
@@ -97,13 +101,24 @@
       (browser/exercise! (browser-handler app) token "tools/browser-test/fixtures/structured-input-run.js" projected-child ceil))
     (is (= {:reason "invalid-structured-arguments" :code "unknown-input-field"}
            (:error-data (post child {:unknown 10}))))
-    (let [value {:ref -7.6}
+    (let [basis (:run-repeat (view projected-child))
+          value {:ref -7.6}
           response (post projected-child {:config value} {:persist? true})
           execution-id (some-> (:execution-id response) parse-uuid)
-          rows (when execution-id (sp/query-entities storage :fn-execution-arg {:execution-id execution-id}))]
+          rows (when execution-id (sp/query-entities storage :fn-execution-arg {:execution-id execution-id}))
+          detail (when execution-id
+                   (-> (router/dispatch app {:request-method :get :uri (str "/api/execute/" execution-id)
+                                             :headers {"authorization" (str "Bearer " token)}})
+                       :body (json/parse-string true)))]
       (is (= -8 (:result response)) (pr-str response))
-      (is (= [[config value nil]] (mapv (juxt :slot-id :value :ref-fn-version-id) rows))))
-    (let [{:keys [invoke]} (run/plan ctx child {:number 6.8})
+      (is (= [[config value nil]] (mapv (juxt :slot-id :value :ref-fn-version-id) rows)))
+      (is (= {:config (str config)} (:slots basis)))
+      (is (and (string? (:graph-hash basis)) (= (:graph-hash basis) (:graph-hash detail))))
+      (is (and (string? (:branch-id basis)) (= (:branch-id basis) (:branch-id detail))))
+      (is (= (str projected-child) (:fn-id detail)))
+      (is (= [[(str config) value []]] (mapv (juxt :slot-id :value :items) (:args detail)))))
+    (let [before (get-in (view child) [:run-repeat :graph-hash])
+          {:keys [invoke]} (run/plan ctx child {:number 6.8})
           attempt (fn []
                     (try (invoke {:number 6.8} ctx)
                          (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))]
@@ -113,11 +128,13 @@
         (sp/create-entity storage :input-binding
                           {:fn-id child :scope-path [] :target-path [(ids/slot-id floor :number)]
                            :expression-kind "value" :value-present true :value -4.6}))
-      (is (= :stored-input-changed (attempt))))
+      (is (= :stored-input-changed (attempt)))
+      (is (not= before (get-in (view child) [:run-repeat :graph-hash]))))
     (is (= -5 (:result (post child {}))))
     (is (= -5 (:result (fn-execution/apply-execute ctx {:args {} :timeout-ms 30000} {:id child}))))
     (is (= "rejected" (:status (post child {:number 1}))))
     (reset! denied child)
+    (is (nil? (:run-repeat (view child))))
     (is (= "forbidden" (get-in (post child {:number 2.5}) [:error-data :reason])))
     (reset! denied nil)
     (binding [access/*offline?* true]

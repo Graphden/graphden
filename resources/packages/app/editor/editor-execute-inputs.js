@@ -44,6 +44,7 @@ function structuredRunLeaf(field, host, path) {
   // needs a way to opt back out without submitting that empty value.
   let edited = false;
   let include;
+  let optionalInput;
   if (kind === 'text' && !field['required-now?']) {
     include = document.createElement('input');
     include.type = 'checkbox';
@@ -52,7 +53,7 @@ function structuredRunLeaf(field, host, path) {
     toggle.appendChild(include);
     toggle.appendChild(document.createTextNode('Supply ' + field.name));
     host.insertBefore(toggle, label);
-    const optionalInput = document.createElement('div');
+    optionalInput = document.createElement('div');
     host.insertBefore(optionalInput, label);
     optionalInput.appendChild(label);
     optionalInput.hidden = true;
@@ -70,6 +71,29 @@ function structuredRunLeaf(field, host, path) {
   const fail = (message, target = control) => ({error: path.join('.') + ': ' + message, control: target});
   return {
     supplied,
+    fill(present, value) {
+      let raw = '';
+      if (present) {
+        if (kind === 'json') raw = JSON.stringify(value);
+        else {
+          const matches = kind === 'text' ? typeof value === 'string'
+            : kind === 'bool' ? typeof value === 'boolean'
+            : kind === 'int' ? Number.isSafeInteger(value) : Number.isFinite(value);
+          if (!matches) return null;
+          raw = String(value);
+        }
+      }
+      return () => {
+        control.value = raw;
+        control.removeAttribute('aria-invalid');
+        edited = present;
+        if (include) {
+          include.checked = present;
+          optionalInput.hidden = !present;
+          include.removeAttribute('aria-invalid');
+        }
+      };
+    },
     read(required) {
       control.removeAttribute('aria-invalid');
       include?.removeAttribute('aria-invalid');
@@ -116,6 +140,20 @@ function structuredRunGroup(fields, host, path = []) {
   return {
     supplied,
     requiredNow,
+    fill(present, value) {
+      if (present && (!value || typeof value !== 'object' || Array.isArray(value)
+          || Object.keys(value).some(name => !names.has(name)))) return null;
+      const steps = [];
+      for (const {field, entry} of entries) {
+        const containsField = present && Object.hasOwn(value, field.name);
+        if (!containsField && !Object.hasOwn(field, 'fields')
+            && (field['required-now?'] || (present && field.required))) return null;
+        const step = entry.fill(containsField, containsField ? value[field.name] : undefined);
+        if (!step) return null;
+        steps.push(step);
+      }
+      return () => { for (const step of steps) step(); };
+    },
     read(required) {
       if (!required && !requiredNow && !supplied()) return {};
       const pairs = [];
@@ -140,24 +178,88 @@ function mountStructuredRunInputs(body, descriptor) {
       status.className = 'execute-arg-form-error';
       status.setAttribute('role', 'status');
       body.appendChild(status);
-      body.addEventListener('input', () => { status.textContent = ''; });
+      let revision = 0;
+      body.addEventListener('input', () => {
+        revision++;
+        status.textContent = '';
+      });
       if (!descriptor.fields.length) {
         const note = document.createElement('div');
         note.className = 'execute-no-args-note';
         note.textContent = 'No remaining inputs.';
         body.appendChild(note);
       }
-      return () => {
-        const {value, error, control} = root.read(true);
-        status.textContent = error || '';
-        if (error) {
-          control?.setAttribute('aria-invalid', 'true');
-          control?.focus();
-        }
-        return value;
+      return {
+        revision: () => revision,
+        read() {
+          const {value, error, control} = root.read(true);
+          status.textContent = error || '';
+          if (error) {
+            control?.setAttribute('aria-invalid', 'true');
+            control?.focus();
+          }
+          return value;
+        },
+        restore(args) {
+          const restore = args && root.fill(true, args);
+          status.textContent = restore ? 'Inputs restored.' : 'These inputs no longer match the current form.';
+          if (restore) restore();
+        },
       };
     }
   }
   body.textContent = 'Structured inputs are unavailable for this function.';
   return null;
+}
+
+function structuredHistoryArgs(row, execId, fnId, basis) {
+  if (row?.id !== execId || row['fn-id'] !== fnId || row['branch-id'] !== basis['branch-id']
+      || row['graph-hash'] !== basis['graph-hash'] || row.status !== 'succeeded' || row['tainted?']
+      || !Array.isArray(row.args)) return null;
+  const names = new Map(Object.entries(basis.slots).map(([name, slot]) => [slot, name]));
+  const values = new Map();
+  for (const arg of row.args) {
+    const name = names.get(arg?.['slot-id']);
+    if (!name || values.has(name) || !Object.hasOwn(arg, 'value') || arg['ref-fn-version-id'] != null
+        || !Array.isArray(arg.items) || arg.items.length) return null;
+    values.set(name, arg.value);
+  }
+  return Object.fromEntries(values);
+}
+
+function sameStructuredRepeatBasis(basis, fresh) {
+  if (!fresh || fresh['branch-id'] !== basis['branch-id'] || fresh['graph-hash'] !== basis['graph-hash']
+      || !fresh.slots || typeof fresh.slots !== 'object') return false;
+  const fields = Object.entries(basis.slots);
+  return Object.keys(fresh.slots).length === fields.length
+    && fields.every(([name, id]) => Object.hasOwn(fresh.slots, name) && fresh.slots[name] === id);
+}
+
+function makeStructuredRepeat(fnId, descriptor, form, current) {
+  const basis = descriptor?.['run-repeat'];
+  if (!form || typeof basis?.['branch-id'] !== 'string' || typeof basis['graph-hash'] !== 'string'
+      || !basis.slots || typeof basis.slots !== 'object') return null;
+  let generation = 0;
+  return async execId => {
+    if (!current()) return;
+    const own = ++generation;
+    const draft = form.revision();
+    let args = null;
+    try {
+      const [execution, subtree] = await Promise.all([
+        authFetch(API.api_execute_id(execId), {method: 'GET'}),
+        authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId)),
+      ]);
+      if (execution.ok && subtree.ok) {
+        const row = await execution.json();
+        const {fns} = await subtree.json();
+        const input = fns.find(fn => fn.id === fnId)?.['structured-input'];
+        if (input?.status === 'available' && input['run-available'] === true
+            && sameStructuredRepeatBasis(basis, input['run-repeat'])) {
+          args = structuredHistoryArgs(row, execId, fnId, basis);
+        }
+      }
+    } catch (_) { /* Keep the current draft when verification fails. */ }
+    if (current() && own === generation && draft === form.revision()) form.restore(args);
+  };
 }

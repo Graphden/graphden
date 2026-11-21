@@ -60,17 +60,18 @@
 
 
 (defn- plan
-  [ctx storage action {:keys [fn-id binding-id expected-state] :as command} version]
+  [ctx storage action {:keys [fn-id binding-id expected-state expected-version] :as command}]
   (let [row (own-literal ctx fn-id binding-id)
         _ (writer/assert-write-authorized! storage :input-binding {} binding-id)
+        version (if expected-version
+                  (input-storage/current-binding! storage binding-id expected-version)
+                  (res/resolve-version (vs/unwrap storage) :input-binding binding-id (vs/current-branch-id storage)))
         basis (bind/preview-basis storage ctx (-> command (dissoc :expected-version) (assoc :action action)))]
-    (when (and version (not= expected-state basis))
+    (when (and expected-version (not= expected-state basis))
       (reject! :input/stale-preview "Refresh the structured input before editing"))
     (checked-change! action ctx command row)
     {:owner (get-in ctx [:fns fn-id]) :expected-state basis
-     :expected-version (or version
-                           (:id (res/resolve-version (vs/unwrap storage) :input-binding binding-id
-                                                     (vs/current-branch-id storage))))}))
+     :expected-version (:id version)}))
 
 
 (defn preview
@@ -81,12 +82,12 @@
     (bind/with-input-write storage
                            (fn [snapshot]
                              (merge {:ok true :action action :fn-id fn-id :binding-id binding-id}
-                                    (select-keys (plan (bind/writable-context ctx snapshot fn-id) snapshot action command nil) [:expected-state :expected-version]))))))
+                                    (select-keys (plan (bind/writable-context ctx snapshot fn-id) snapshot action command) [:expected-state :expected-version]))))))
 
 
 (defn- apply-plan!
-  [frozen storage action {:keys [fn-id binding-id value] :as command} version]
-  (let [{:keys [owner]} (plan frozen storage action command (:id version))
+  [frozen storage action {:keys [fn-id binding-id value] :as command}]
+  (let [{:keys [owner]} (plan frozen storage action command)
         result (access/with-binding-write fn-id binding-id
                                           #(case action
                                              :edit (sp/update-entity storage :input-binding binding-id {:value value})
@@ -103,13 +104,9 @@
   (shield/run!
     (fn []
       (let [storage (request/require-storage ctx)
-            {:keys [fn-id binding-id expected-version] :as command} (normalize-command action :apply request)
+            {:keys [fn-id binding-id] :as command} (normalize-command action :apply request)
             owner (bind/with-input-write storage
                                          (fn [snapshot]
-                                           (let [frozen (bind/writable-context ctx snapshot fn-id)]
-                                             (own-literal frozen fn-id binding-id)
-                                             (writer/assert-write-authorized! snapshot :input-binding {} binding-id)
-                                             (apply-plan! frozen snapshot action command
-                                                          (input-storage/current-binding! snapshot binding-id expected-version)))))]
+                                           (apply-plan! (bind/writable-context ctx snapshot fn-id) snapshot action command)))]
         (bind/publish! ctx storage owner
                        {:ok true :committed true :action action :fn-id fn-id :binding-id binding-id})))))

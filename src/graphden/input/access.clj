@@ -37,12 +37,12 @@
 (defn assert-write!
   [entity data]
   (when (and (not *offline?*)
-             (not (command-write? entity data))
              (or (contains? offline-entities entity)
                  (and (contains? #{:fn :fn-version} entity)
                       (some? (:input-type-fn-id data))
                       (not= (:input-type-fn-id data)
-                            (get *package-input-types* (if (= entity :fn) (:id data) (:fn-id data)))))))
+                            (get *package-input-types* (if (= entity :fn) (:id data) (:fn-id data))))))
+             (not (command-write? entity data)))
     (throw (ex-info "Structured input write requires a server-authorized writer"
                     {:type :input/offline-only :entity entity}))))
 

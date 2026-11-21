@@ -5,7 +5,8 @@
     [graphden.input.source-primitive :as primitive]
     [graphden.input.staged-module :as staged]
     [graphden.packages.owned :as owned]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
 (deftype ^:private PrimitiveReceipt
@@ -82,13 +83,15 @@
         signature (get signatures id)
         witness (get signatures abi-fn-id)
         impl (get impls (:name signature))
+        declared-args (into {} (map (juxt :name (comp types/resolve-alias :type))) (get-in parsed [:contract :fields]))
+        declared-return (types/resolve-alias (get-in parsed [:source :return-type]))
         abi-keys [:args :return :effects :return-type-rule :slot-types-rule :nav-types-rule
                   :taint-propagate? :lazy-seq-args :lambda-params :compile-time-value?]]
     (when-not (and (owned/owned-impl? id impl) (owned/owned-impl? abi-fn-id impl)
                    (identical? impl (get impls (:name witness)))
                    (= #{} (:effects witness)) (set? (:execution witness)) (contains? (:execution witness) :jvm-server)
-                   (= (:args signature) (into {} (map (juxt :name :type)) (get-in parsed [:contract :fields])))
-                   (= (:return signature) (get-in parsed [:source :return-type]))
+                   (= (:args signature) declared-args)
+                   (= (:return signature) declared-return)
                    (= (select-keys signature abi-keys) (select-keys witness abi-keys)))
       (reject!))
     (:declaration-records parsed)))

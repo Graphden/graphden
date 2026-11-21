@@ -1,0 +1,5 @@
+{:namespace "runfields.native"
+ :fns [{:name :run-field-transform
+        :args {:payload {:type {:item :text :callback [:fn {:string :text} :text #{}]}
+                         :required true}}
+        :return-type :text}]}

@@ -1,0 +1,5 @@
+{:input-format 2
+ :namespace "reftext.upper"
+ :fns [{:name :reference-uppercase
+        :input {:string :text}
+        :return-type :text}]}

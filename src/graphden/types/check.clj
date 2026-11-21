@@ -607,7 +607,10 @@
                            (check-binding! nil address expected actual (or substitution {}) nil b-form))
               expected (types/resolve next-subst expected)
               actual (types/resolve next-subst actual)
-              unresolved? (or (types/type-any? #(or (= :any %) (= :jsonb %) (types/type-var? %)) actual)
+              ;; An exact JSON value type can be forwarded unchanged. Broader
+              ;; gradual acceptances still need evidence at the consumer.
+              unresolved? (or (types/type-any? #(or (= :any %) (types/type-var? %)
+                                                    (and (= :jsonb %) (not= :jsonb actual expected))) actual)
                               (types/type-any? #(or (types/refine-type? %) (types/type-var? %)) expected))]
           {:status (if unresolved? :deferred :checked)
            :substitution next-subst

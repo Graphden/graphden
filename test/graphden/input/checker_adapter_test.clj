@@ -118,6 +118,14 @@
     (is (= :deferred (:status (check/check-input-binding (assoc input :actual :any)))))))
 
 
+(deftest exact-json-input-does-not-introduce-a-narrowing-obligation
+  (let [input {:address [[(random-uuid) []] [(random-uuid)]]
+               :expected :jsonb :actual :jsonb :expression {:kind :type-fact}}]
+    (is (= :checked (:status (check/check-input-binding input))))
+    (is (= :deferred (:status (check/check-input-binding (assoc input :actual :any)))))
+    (is (= :deferred (:status (check/check-input-binding (assoc input :expected :any)))))))
+
+
 (deftest structured-unification-keeps-concrete-sibling-direction-test
   (let [input {:address [[(random-uuid) []] []]
                :expected {:n :int :value 'a} :actual {:n :numeric :value :text}

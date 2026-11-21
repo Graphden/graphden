@@ -5,6 +5,7 @@
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -168,6 +169,16 @@
      :binding-id (partial migration/binding-origin {:mapping mapping})}))
 
 
+(defn- original-self-pin
+  [source-environment declared id binding-origins]
+  (let [original (get-in source-environment [:definition-by-id id])]
+    (when-let [[field-name] (rich/self-pin-source original)]
+      (let [[binding & more] binding-origins
+            target (some #(when (= field-name (:name %)) %) (get-in declared [:contract :fields]))]
+        (when (and (empty? more) (= (:id target) (:slot-id binding)))
+          (rich/self-pin original field-name ((:records-of source-environment) original) binding (:type target)))))))
+
+
 (defn declaration-context
   "Resolve replayed source declarations and their inherited field membership.
    Input binding identities come exclusively from the frozen legacy ledger."
@@ -180,6 +191,7 @@
       (let [declared (declared-input source-environment entry binding-origins)
             input-id (:input-type-id declared)]
         (-> (merge common declared)
+            (assoc :self-pin (original-self-pin source-environment declared id binding-origins))
             (assoc :name->id (resolved-names source-environment (:namespace definition) binding-origins))
             (assoc :resolve-config-type
                    (fn [type]
@@ -255,7 +267,7 @@
   "Temporary offline compatibility with the existing declaration lowerer.
    The new syntax reader handles :bind separately. Remove this legacy
    lowering adapter when the v2 package loader replaces the v1 loader."
-  [{:keys [context]} definition]
+  [{:keys [context definition-by-id]} definition]
   (let [projections (into {} (keep (fn [[arg form]]
                                      (when (and (simple-keyword? arg) (format/local-projection? form))
                                        [arg (first (second form))])))
@@ -271,6 +283,15 @@
                      (reject! :unsupported-input-declaration [:input]))
                    (assoc source :args (into (apply dissoc declaration (vals projections))
                                              (map (fn [[arg exposed]] [arg (rename-form arg exposed)])) projections)))
+                 source)
+        ;; Preserve the anonymous type declaration emitted by the legacy
+        ;; owner. An unrelated authored shape cannot supply this evidence.
+        original (get definition-by-id (ids/fn-id (:namespace definition) (:name definition)))
+        [field-name spec] (rich/self-pin-source original)
+        source (if (and (:parent source) field-name
+                        (= {[field-name] (select-keys spec [:type])} (:configure definition))
+                        (not-any? #(contains? definition %) [:bind :input]))
+                 (assoc source :args (:args original))
                  source)
         normalized (rebase/rewrite-references
                      source #(parse/normalize-ref % (:name->id context) (:namespace source)))

@@ -252,7 +252,13 @@
         return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
-    (when-not (every? #(exact-projection-pin? type-ids contract bindings %) (vals configurations))
+    (when-not (every? (fn [{:keys [row target-path] :as config}]
+                        (if row
+                          (and (some #{row} bindings)
+                               (rich/exact-self-pin? owner (some #(when (= [(:id %)] target-path) %) (:fields contract))
+                                                     config type-rows))
+                          (exact-projection-pin? type-ids contract bindings config)))
+                      (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
@@ -311,6 +317,15 @@
        :infer-signature check/infer-input-signature})))
 
 
+(defn freeze-declarations
+  "Freeze verified input declarations for source analysis without admitting
+   an executable implementation or publishing its inferred signature."
+  [package function-ids]
+  (let [resolve-named (named-types/lookup package (partial plan-entry package))
+        entries (closure package function-ids resolve-named)]
+    {:entries entries :context (verified-context package entries resolve-named)}))
+
+
 (defn freeze-closure
   "Build the immutable stage-4 context and checker options from the original
    package preparation, verified v2 rows, and frozen rich implementation
@@ -318,10 +333,17 @@
    signature view and are rejected here. Include any ref introduced by an overlay in
    the starting function IDs. A closure or type evidence gap is an error."
   [package function-ids roots]
-  (let [resolve-named (named-types/lookup package (partial plan-entry package))
-        entries (closure package function-ids resolve-named)
-        ctx (verified-context package entries resolve-named)]
-    {:context ctx :options (implementation-options ctx entries roots)}))
+  (let [{:keys [context entries]} (freeze-declarations package function-ids)]
+    ;; The narrowed field and the inherited implementation can require two
+    ;; independent validations at the same read. Execution currently indexes
+    ;; that boundary by address alone and can lose the callable obligation.
+    (doseq [[id {:keys [configurations]}] entries
+            {:keys [row]} (vals configurations)
+            :when row]
+      (throw (ex-info "Field read must retain the callable self-pin obligation"
+                      {:type :input/source-snapshot :code :callable-self-pin-obligation-required :fn-id id
+                       :binding-id (:id row) :target-path (:target-path row) :type-override-fn-id (:type-override-fn-id row)})))
+    {:context context :options (implementation-options context entries roots)}))
 
 
 (defn freeze-primitive

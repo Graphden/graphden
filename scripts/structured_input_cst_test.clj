@@ -646,5 +646,22 @@
     (is (= {:status :already-applied :text target} (cst/apply-text patch target)))))
 
 
+(deftest metadata-only-self-pin-preserves-comments-and-the-original-callable-shape
+  (let [text "{:namespace \"x\" :fns [{:name :put :args {:value :any} :return-type :any}\r\n{:name :put-fn :parent :put :args {:value ; target\r\n {:type [:fn {:arg b} c] :as ; identical name\r\n :value}}}]}"
+        defs (:fns (edn/read-string text))
+        originals (mapv #(assoc % :namespace "x") defs)
+        prepared (parse/prepare-module originals {} {})
+        verified (last (:definitions (source/verify-module (source/plan-module originals prepared) prepared)))
+        patch (cst/plan text {:namespace "x" :operations (cst/entry-operations verified)})
+        target (:text (cst/apply-text patch text))
+        rewritten (last (:fns (edn/read-string target)))]
+    (is (= :authored-source-equivalent (:verification verified)))
+    (is (= '{[:value] {:type [:fn {:arg b} c]}} (:configure rewritten)))
+    (is (not-any? #(contains? rewritten %) [:args :input :bind]))
+    (is (str/includes? target "; target\r\n"))
+    (is (str/includes? target "; identical name\r\n"))
+    (is (= :already-applied (:status (cst/apply-text patch target))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

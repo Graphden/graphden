@@ -12,6 +12,7 @@
     [graphden.input.source-forward :as forward]
     [graphden.input.source-list :as source-list]
     [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -167,6 +168,8 @@
                                       (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename)))
                                          (binding-policy binding)))
                              rename)
+                    pin (when (and (= arg field) (= #{:type-override-fn-id} (set (keys (binding-policy binding)))))
+                          (rich/self-pin definition arg rows binding target-type))
                     inline-body (format/inline-binding-body body)
                     inline-ref (prepared-inline-ref value)
                     inline-id (when (and inline-body (keyword? inline-ref))
@@ -185,6 +188,7 @@
                   (assoc :list-inputs (positions/authored-inputs (:id own) grouped name->id body))
                   builder (merge {:list-builder (dissoc builder :inline-items)}
                                  (source-list/contribution-expression builder body (:namespace source) name->id))
+                  pin (assoc :self-pin pin)
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -198,9 +202,9 @@
 
 (defn- field-assertions
   [definition arguments]
-  (into {} (keep (fn [{:keys [rename source-path]}]
+  (into {} (keep (fn [{:keys [rename self-pin source-path]}]
                    (let [spec (get-in definition source-path)]
-                     (when (or (:pin-id rename) (typed-binding? spec))
+                     (when (or self-pin (:pin-id rename) (typed-binding? spec))
                        [[(second source-path)] (select-keys spec [:type])])))) arguments))
 
 
@@ -238,7 +242,7 @@
   (let [{:keys [source-path origin expression policy target]} entry
         problem #(blocker source % source-path)
         raw (get-in source source-path)
-        typed? (or (get-in entry [:rename :pin-id]) (typed-binding? raw))
+        typed? (or (:self-pin entry) (get-in entry [:rename :pin-id]) (typed-binding? raw))
         inline-body (format/inline-binding-body raw)
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
@@ -271,7 +275,7 @@
       (or (and (contains? policy :type-override-fn-id) (not typed?))
           (some #(contains? policy %) [:required :terminal :description]))
       (conj (problem :binding-metadata-required))
-      (and (= :binding (:kind entry)) (nil? expression)
+      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? expression)
            (not (or (:list-append policy) (:list-closed policy))))
       (conj (problem :non-value-binding-required))
       (and (= :ref (first expression)) (nil? (second expression)))
@@ -293,7 +297,7 @@
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         blockers (concat (when collision? [(blocker source :rename-field-collision [:args])])
-                         (source-argument-blockers source rename-fields)
+                         (source-argument-blockers source (into (set rename-fields) (keep #(when (:self-pin %) (peek (:source-path %)))) arguments))
                          (mapcat #(argument-blockers source % chain) arguments))]
     {:arguments arguments :aliases aliases :blockers blockers}))
 
@@ -351,14 +355,14 @@
   [source arguments aliases]
   (let [declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
         declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
-        binds (filter #(= :binding (:kind %)) arguments)
+        binds (filter #(and (= :binding (:kind %)) (not (:self-pin %))) arguments)
         configuration (field-assertions source arguments)
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
                               [(second source-path) expression])) binds)]
     (cond-> (dissoc source :args)
       (seq declarations) (assoc :input declarations)
-      (or (seq bindings) (and (contains? source :args) (empty? declarations)))
+      (or (seq bindings) (and (contains? source :args) (empty? declarations) (empty? configuration)))
       (assoc :bind bindings)
       (seq configuration) (assoc :configure configuration))))
 

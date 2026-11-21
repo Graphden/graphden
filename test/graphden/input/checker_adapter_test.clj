@@ -229,7 +229,7 @@
               {:fns {owner {:input-type-fn-id root}}
                :type-bodies (if container?
                               {root [:refine {:value :int} [:present :value]]}
-                              {scalar [:refine :int [:> 0]]})
+                              {scalar [:refine :int [:custom-condition]]})
                :members {root [{:slot-id field :position 0}]}
                :fields {field {:id field :name "value" :required true
                                :type-fn-id (if container? integer scalar)}}

@@ -16,6 +16,15 @@
      :graph {:scopes {[] {:configured-contract contract :bindings {}}}}}))
 
 
+(deftest audited-local-rule-is-bound-to-the-captured-callback
+  (let [callback (fn [_ default] default)
+        captured {:return-type-rule callback
+                  :local-type-rule-evidence {:return-type-rule callback}}]
+    (is (signatures/local-type-rules? captured))
+    (is (not (signatures/local-type-rules? (assoc captured :return-type-rule (fn [_ default] default)))))
+    (is (signatures/local-type-rules? {:return-type-rule nil}))))
+
+
 (deftest abi-paths-read-partial-records-without-parsing-literal-data-test
   (let [{:keys [scope record child graph]} (fixture)
         value {:ref :ordinary-data}

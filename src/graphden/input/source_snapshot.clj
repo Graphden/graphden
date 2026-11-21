@@ -41,7 +41,7 @@
   [prepared originals]
   (let [by-id (group-by definition-id originals)
         ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
-    {:prepared (assoc prepared ::rename/ambiguous-type-ids ambiguous)
+    {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous))
      :markers (shapes/markers-snapshot)
      :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
      :originals by-id}))
@@ -54,7 +54,7 @@
     (when-not original (reject! :missing-original-declaration id))
     (when (seq more) (reject! :ambiguous-original-declaration id))
     (when-not (= id (:fn-id definition)) (reject! :missing-prepared-declaration id))
-    (let [context (assoc prepared :fn-defs [definition])
+    (let [context (assoc prepared :fn-defs [definition] ::source/originals-by-id originals)
           certified (get closure-baselines id)
           staged (get staged-proposals id)]
       (if (and certified (nil? staged))
@@ -124,31 +124,42 @@
 (defn- inline-entry
   "The verified parent's round trip compared the child's original body, use-site
    UUID and authored rows. Match its local field or stored list position."
-  [package {:keys [fn-id inline-definitions]} edges fragments [path child]]
+  [package {:keys [fn-id]} edges fragments [path child]]
   (let [[field position] path
         id (:fn-id child)
         entry (owned-declaration child)
-        edge (get edges [field])]
+        edge (get edges (ids/binding-id fn-id field))]
     (when-not (and (uuid? id) (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge))
                    (= (ids/binding-id fn-id field) (:id edge))
                    (case (count path)
-                     1 (and (= 1 (count inline-definitions)) (= id (:ref-fn-id edge)))
+                     1 (and (= id (:ref-fn-id edge))
+                            (empty? (:scope-path edge)) (= [field] (:target-path edge)))
                      2 (list-signature/inline-operand? (get fragments (:ref-fn-id edge)) edge position id)
                      false)
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
                    (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
                    (= 1 (count (get-in entry [:owner :parent-ids])))
-                   (every? empty? ((juxt :inline-definitions :list-builders :configurations :scoped-inputs) child)))
+                   (every? empty? ((juxt :configurations :scoped-inputs) child)))
       (reject! :unsupported-scope-declaration fn-id))
     (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
-    entry))
+    child))
 
 
 (defn- inline-entries
   [package {:keys [bindings inline-definitions] :as v2} generated]
-  (let [edges (into {} (comp (filter #(empty? (:scope-path %))) (map (juxt :target-path identity))) bindings)
+  (let [edges (into {} (map (juxt :id identity)) bindings)
         fragments (into {} (map (juxt (comp :id :owner) :list-fragment)) generated)]
     (mapv (partial inline-entry package v2 edges fragments) inline-definitions)))
+
+
+(defn- verified-entry-tree
+  [package {:keys [fn-id list-builders] :as v2} resolve-named]
+  (let [generated (mapv (partial list-signature/entry fn-id (get-in package [:prepared :name->id]) resolve-named)
+                        (vals list-builders))
+        children (inline-entries package v2 generated)]
+    (into (conj generated (owned-declaration v2))
+          (mapcat #(verified-entry-tree package % resolve-named))
+          children)))
 
 
 (defn- closure-entries
@@ -159,10 +170,7 @@
                       {:type :input/source-snapshot :code :unverified-source-declaration
                        :fn-id id :blockers (mapv :code blockers)})))
     (when-not (:input-type-id v2) (reject! :unsupported-scope-declaration id))
-    (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]) resolve-named)
-                          (vals (:list-builders v2)))]
-      (cond-> (conj generated (owned-declaration v2))
-        (seq (:inline-definitions v2)) (into (inline-entries package v2 generated))))))
+    (verified-entry-tree package v2 resolve-named)))
 
 
 (defn- add-closure-entry
@@ -220,8 +228,14 @@
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
              :type-bodies inputs
-             :source-return-types (into {} (keep (fn [[id {:keys [owner list-implementation]}]]
-                                                   (when list-implementation [[id (:return-type-fn-id owner)] (get-in list-implementation [:root-entry :return])]))) entries)
+             :source-return-types
+             (into {} (keep (fn [[id {:keys [owner source list-implementation]}]]
+                              (let [type-id (:return-type-fn-id owner)
+                                    return (:return-type source)]
+                                (cond
+                                  list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
+                                  (rich/collection-return? type-id return) [[id type-id] return]))))
+                   entries)
              :source-field-types (source-field-types entries) :markers markers))))
 
 
@@ -263,7 +277,7 @@
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
                             (= (get type-ids return) (:return-type-fn-id owner)))
-                       (rich/list-return? (:return-type-fn-id owner) return))
+                       (rich/collection-return? (:return-type-fn-id owner) return))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))

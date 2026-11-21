@@ -100,6 +100,21 @@
         (:name->id context)))
 
 
+(defn with-reference-index
+  "Keep the reverse reference index for repeated plans of the same package."
+  [context]
+  (vary-meta context assoc ::reference-index
+             {:names (:name->id context) :refs (ref-index context)}))
+
+
+(defn- reference-index
+  [context]
+  (let [{:keys [names refs]} (::reference-index (meta context))]
+    (if (and refs (identical? names (:name->id context)))
+      refs
+      (ref-index context))))
+
+
 (defn- binding-expression
   [binding names]
   (cond
@@ -288,11 +303,17 @@
         defs (:defs-by-name context)
         chain (set (slots/chain-of (slots/own-ref definition defs) defs))
         aliases (keep :rename arguments)
-        ;; Mixed own declarations and simultaneous renames have independent
-        ;; slot-position/collision rules. Keep their existing blockers.
-        collision? (when-let [exposed (:alias (first aliases))]
-                     (some #(contains? (:args %) exposed) (cons definition (ancestor-definitions definition context))))
-        rename-fields (when (and (not collision?) (= 1 (count aliases))
+        names (into [] (keep (fn [[arg spec]]
+                               (let [exposed (:as spec)]
+                                 (when (and (simple-keyword? exposed) (not= arg exposed)) exposed))))
+                    (:args source))
+        collision? (when (seq names)
+                     (or (not= (count names) (count (set names)))
+                         (some (fn [ancestor] (some #(contains? (:args ancestor) %) names))
+                               (cons definition (ancestor-definitions definition context)))))
+        ;; Own fields, field changes and metadata require separate row order
+        ;; and compatibility evidence.
+        rename-fields (when (and (seq aliases) (not collision?)
                                  (not-any? #(or (= :declaration (:kind %))
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
@@ -515,9 +536,10 @@
         planning-context (assoc (rename/prepare-context context)
                                 ::records-of (memoize (partial parse-one context))
                                 ::original-of (fn [definition]
-                                                (let [[original & more] (get originals (definition-key definition))]
+                                                (let [[original & more] (or (get originals (definition-key definition))
+                                                                            (get (::originals-by-id context) (:fn-id definition)))]
                                                   (when-not more original)))
-                                ::ref-index (ref-index context)
+                                ::ref-index (reference-index context)
                                 ::prepared prepared)
         planning-context (assoc planning-context ::inherited-fields (memoize (partial inherited-fields planning-context)))
         definitions
@@ -710,12 +732,12 @@
    Keep the returned v2 rows and contracts private like the source plan.
    Use :counts, :blockers and per-definition :verification for reports."
   [plan context]
-  (let [environment (source-context/environment context)
+  (let [environment (delay (source-context/environment context))
         definitions
         (mapv (fn [{:keys [source status] :as definition}]
                 (if (= :supported status)
                   (try
-                    (verify-definition environment definition)
+                    (verify-definition @environment definition)
                     (catch Exception failure
                       (let [{:keys [type code path]} (ex-data failure)]
                         (-> definition

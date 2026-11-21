@@ -32,6 +32,13 @@
                   :path (:projection-path row)}))
 
 
+(defn- literal-type
+  [value]
+  (if (and (vector? value) (empty? value))
+    [:list :never]
+    (literals/classify-literal value)))
+
+
 (defn- classify-entry
   [ctx scope contract row]
   (let [path (:target-path row)
@@ -52,7 +59,7 @@
                               (if (and (contains? (:fns ctx) target) (:return signature))
                                 {:mode :resolved-value :actual-type (:return signature)}
                                 {:mode :unresolved :reason :missing-resolver-signature}))
-                            {:mode :literal :actual-type (literals/classify-literal (:value expression))})
+                            {:mode :literal :actual-type (literal-type (:value expression))})
                    :projection {:mode :unresolved :reason :projection-analysis-required})]
     {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
      :expression expression

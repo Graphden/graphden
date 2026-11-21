@@ -5,6 +5,7 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
     [graphden.input.ir :as ir]
+    [graphden.input.list-execution :as list-execution]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]))
 
@@ -13,8 +14,10 @@
   [{:keys [context options]} root implementations]
   (let [implementations (update-vals
                           (:implementations options)
-                          (fn [{:keys [base-fn-id] :as entry}]
-                            (let [impl (get implementations base-fn-id)]
+                          (fn [{:keys [base-fn-id generated-list] :as entry}]
+                            (let [impl (if generated-list
+                                         (list-execution/compile-arguments (:operands generated-list))
+                                         (get implementations base-fn-id))]
                               (when-not (fn? impl)
                                 (ir/reject! :resolved-implementation-required {:base-fn-id base-fn-id}))
                               (assoc entry :impl impl))))
@@ -54,9 +57,13 @@
       (ir/reject! :staged-root-required {}))
     (let [frozen (snapshot/freeze-closure package [root] roots)
           executable (get-in frozen [:options :implementations])]
-      (when-not (every? (fn [[target-id {:keys [base-fn-id]}]]
-                          (and (contains? visible-fn-ids target-id)
-                               (contains? visible-fn-ids base-fn-id)))
+      (when-not (every? (fn [[target-id {:keys [base-fn-id generated-list]}]]
+                          ;; The verified authored owner grants access to its
+                          ;; generated list, never to its separate operand refs.
+                          (if generated-list
+                            (and (= target-id base-fn-id) (contains? visible-fn-ids (:owner-id generated-list)))
+                            (and (contains? visible-fn-ids target-id)
+                                 (contains? visible-fn-ids base-fn-id))))
                         executable)
         (ir/reject! :staged-function-not-visible {}))
       (assoc (compile-frozen frozen root implementations)

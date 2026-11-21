@@ -47,7 +47,7 @@
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded @loaded-bases]
         (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
-                                                        (filter #(= :get (:name %)) (sources "collections"))
+                                                        (filter #(#{:get :zipmap} (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
                                                         (filter #(#{:shipped-asset :to-json-string} (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
@@ -81,6 +81,20 @@
     (is (= [[host-id [edge]] [field]] (:address certificate)))
     (is (= (ids/binding-id host-id field) (get-in certificate [:row :id])))
     (is (= "checked" (get-in certificate [:row :value])))))
+
+
+(deftest generated-list-parameters-retain-frozen-element-variables
+  (let [base (some #(when (= :zipmap (:name %)) %) (sources "collections"))
+        owner (ids/fn-id "fixture" :directory)
+        definitions [base {:namespace "fixture" :name :directory :parent :zipmap
+                           :args {:keys {:append [{:value :first} {:value :second}] :closed true}
+                                  :vals {:append ["one" 2] :closed true}}}]
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)]
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (empty? (:obligations graph)))
+    (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))))
 
 
 (deftest scoped-bindings-are-certified-together
@@ -252,6 +266,34 @@
            (:code (failure #(snapshot/freeze-closure (assoc-in package [:originals child-id] [host]) [host-id] @roots)))))
     (is (= :missing-original-declaration
            (:code (failure #(snapshot/freeze-closure (update package :originals dissoc base) [host-id] @roots)))))))
+
+
+(deftest multiple-inline-branches-freeze-every-authored-use
+  (let [leaf {:parent :str-upper :args {:string "checked"}}
+        host {:namespace "fixture" :name :inline-comparison :parent :equal?
+              :args {:a {:parent :str-upper :args {:string leaf}}
+                     :b leaf}}
+        equal (some #(when (= :equal? (:name %)) %) (sources "logic"))
+        originals (conj strings equal host)
+        package (snapshot/package-index (parse/prepare-module originals {} {}) originals)
+        owner (ids/fn-id "fixture" :inline-comparison)
+        base (ids/fn-id "core.strings" :str-upper)
+        field (ids/slot-id base :string)
+        left-edge (ids/binding-id owner (ids/slot-id (ids/fn-id "core.logic" :equal?) :a))
+        right-edge (ids/binding-id owner (ids/slot-id (ids/fn-id "core.logic" :equal?) :b))
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        left (get-in context [:bindings left-edge :ref-fn-id])
+        right (get-in context [:bindings right-edge :ref-fn-id])
+        child-edge (ids/binding-id left field)
+        child (get-in context [:bindings child-edge :ref-fn-id])
+        checked (analysis/analyze-effective-input context owner options)]
+    (is (= 3 (count (set [left right child]))))
+    (is (every? uuid? [left right child]))
+    (doseq [id [right child]]
+      (is (= [base] (get-in context [:fns id :parent-ids])))
+      (is (= "checked" (get-in context [:bindings (ids/binding-id id field) :value]))))
+    (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
+    (is (= :text (get-in checked [:scopes [left-edge child-edge] :signature :return])))))
 
 
 (deftest inline-list-leaves-preserve-original-operand-positions

@@ -87,6 +87,7 @@
                                        :extra-base-fns {:fixture-floor (:ceil base-fns)}})))
     (is (= #{root input child child-input} (set (keys before))))
     (is (= #{binding} (set (keys before-binding))))
+    (is (= [(str number-slot)] (:target-path (sp/read-entity storage :input-binding binding))))
     (sync!)
     (is (= before (version)))
     (is (= before-binding (binding-version)))

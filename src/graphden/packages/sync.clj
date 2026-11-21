@@ -300,8 +300,11 @@
                                            (fn [signatures]
                                              (update-vals primitives #(primitive/checked-records % impls signatures))))]
                              (doseq [{:keys [fn-id id] :as row} bindings]
-                               (input-access/with-binding-write fn-id id
-                                                                #(sp/upsert-entities storage :input-binding [(dissoc row :kind)])))
+                               ;; JSONB stores path UUIDs as strings. Send that
+                               ;; same representation to the version diff.
+                               (let [data (-> row (dissoc :kind) (update :target-path #(mapv str %)))]
+                                 (input-access/with-binding-write fn-id id
+                                                                  #(sp/upsert-entities storage :input-binding [data]))))
                              written))))))
 
 

@@ -13,6 +13,9 @@ function _tourReceiptTicket(type, name, fields = {}) {
   if (!_tourState || !_tourPrincipalMatches(_tourState)
       || step?.creates?.type !== type || step.creates.name !== name
       || (step.creates.version && step.creates.version !== fields.version)) return null;
+  if (step.creates['parent-id'] && (fields['parent-id'] !== step.creates['parent-id']
+      || fields['namespace-id'] !== step.creates['namespace-id']
+      || typeof _tourStructuredBranchMatches !== 'function' || !_tourStructuredBranchMatches(_tourState))) return null;
   const token = 'receipt-' + Date.now() + '-' + Math.random().toString(36).slice(2);
   const branchId = (type === 'fn' || type === 'ns') ? _tourReceiptBranch() : null;
   const entry = {type, name, ...fields, ...(branchId ? {'branch-id': branchId} : {}),

@@ -165,6 +165,8 @@
 
 `editor-tour-receipts.js` persists exact successful entity/publication/installation receipts and pending requests before editor mutations. Namespace receipts come from actual installer creates, pins retain their branch UUID, and an unknown reply stays visible for recovery. Its package checks read the current pin from the branch-scoped API and match reference UUIDs inside the recorded materialized namespaces.
 
+`editor-tour-structured-input.js` verifies the structured lesson's current template capability and its saved sample on the exact lesson branch. Setup uses the ordinary Extend form and records its creation receipt before opening the sample.
+
 `editor-tour-app-receipts.js` loads after the shared receipt module. It stages create-only app UUIDs through the ordinary Apps form, confirms the server receipt against the current organization's app list, and removes only matching lesson-owned routes before handler or branch cleanup. Ambiguous replies and changed identities remain visible for retry.
 
 `editor-tour-tokens.js` keeps lesson-owned token UUIDs, scope/expiry receipts and verification outcomes. It checks the current account's masked listing and makes explicit bearer requests to prove a scope refusal and revocation. Bearer values remain in the ordinary Account reveal and local request variables; they never enter the lesson ledger. Cleanup revokes only exact recorded UUIDs after checking their masked metadata and the original principal.

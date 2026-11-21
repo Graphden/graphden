@@ -281,6 +281,7 @@
                   "packages/app/editor/editor-tour-session-graph.js"
                   "packages/app/editor/editor-tour.js"
                   "packages/app/editor/editor-tour-session.js"
+                  "packages/app/editor/editor-tour-structured-input.js"
                   "packages/app/editor/editor-tour-receipts.js"
                   "packages/app/editor/editor-tour-app-receipts.js"
                   "packages/app/editor/editor-tour-tokens.js"

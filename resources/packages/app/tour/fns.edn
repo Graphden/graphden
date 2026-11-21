@@ -114,8 +114,8 @@
 ;;     (`REQUIRE_SIGNALS` in editor-tour-picker.js): `services` = the dedicated
 ;;     plan (or a platform / self-host instance), `org` = organizations exist
 ;;     here, `assets` = a single-tenant instance.
-;; `structured-input-run` is held before serialization until the ordinary
-;; editor can prepare an editable sample and execute its remaining inputs.
+;; `structured-input-run` is omitted before serialization unless the current
+;; viewer has the branch and certified template offers.
 ;;
 ;; ONE ACTION PER RING (from a reader walking lesson 18): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
@@ -3207,34 +3207,50 @@
             {:id "43"
              :slug "structured-input"
              :chapter "Structured input"
-             :version 1
+             :version 2
              :requires "structured-input-run"
+             :template-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"
              :title "Bind part of a record and run with the rest"
              :reads "explains how the declared record, the binding and the values supplied for one run fit together."
              :steps
-             [{:title "Select the sample"
-               :body "Find `tutorial-structured-profile` in the Explorer and select the lesson’s sample. It accepts a profile with three fields and returns that profile."
+             [{:title "Select the template"
+               :body "Find `lesson-profile` in the Explorer and select [[lessons.structured-input/lesson-profile]]. The template accepts a profile and returns all three fields."
                :target "#fn-filter"
-               :check {:kind "selected" :name "tutorial-structured-profile"}}
+               :check {:kind "selected" :name "lesson-profile" :fn-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"}}
+              {:title "Create your editable sample"
+               :body "Click [[⋯]] on lesson-profile and choose [[Extend]]. Name the function `tutorial-structured-profile`, keep the root namespace selected and click [[Save]]. The editor opens the new function on this lesson’s branch."
+               :target ".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-structured-profile"
+                         :parent-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :run? true :path ["profile" "name"] :state "remaining"}}
               {:title "Find the name field"
                :body "Open [[Remaining inputs]], expand [[profile]] and choose [[Bind]] beside name."
                :target ".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .structured-input-strip"
                :targets [".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .structured-input-strip"
                          ".type-inline-host [role=\"button\"][aria-label^=\"profile — Type:\"]"
                          ".type-inline-host [aria-label=\"Bind profile.name\"]"]
-               :check {:kind "dom" :selector ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"}}
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"}}
               {:title "Bind the name"
                :body "Enter `Ada` and click [[Bind]]. The lesson checks the saved binding at profile.name."
                :target ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"
-               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :path ["profile" "name"] :state "occupied"}}
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "occupied"}}
               {:title "Open Run"
                :body "Click [[▶ Run]] on the sample. In the Run form, profile asks for id and email."
                :target ".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
-               :check {:kind "dom" :selector ".execute-popover.visible .execute-run-btn"}}
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "occupied"
+                       :selector ".execute-popover.visible .execute-run-btn"}}
               {:title "Supply the rest and run"
                :body "Enter `42` for id and `ada@example.test` for email. Click [[Run]]. The returned profile must contain all three values, including the saved name."
                :target ".execute-popover.visible .execute-run-btn"
-               :check {:kind "result-value" :name "tutorial-structured-profile"
+               :check {:kind "result-value" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
                        :value {:id "42" :name "Ada" :email "ada@example.test"}}}
               {:title "Finish the lesson"
                :body "The name stays bound on your lesson branch. The id and email were supplied for this run. Click [[Finish]] to close the lesson and clean up its branch."
@@ -3262,29 +3278,39 @@
    :args {:m :_tour-lessons :path {:value [:text :base]} :v :_tour-text-base}}
 
   {:name :_tour-public-lesson?
-   :description "Keep staged structured-input teaching out of the public payload until ordinary Run can execute it."
+   :description "Keep the lessons with a general audience."
    :parent :not
    :args {:value {:parent :equal?
                   :args {:a {:parent :get
                              :args {:coll {:as :item} :key {:value :requires} :default nil}}
                          :b {:value "structured-input-run"}}}}}
+  {:name :_structured-profile-lesson-available?
+   :description "Read the current viewer's branch creation, template Extend and structured Run eligibility."
+   :args {}
+   :return-type :bool
+   :effects #{:db}}
+  {:name :_tour-all-lessons
+   :parent :get-in
+   :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}
   {:name :_tour-payload
    :parent :assoc-in
    :args {:m :_tour-resolved-text
           :path {:value [:lessons]}
-          :v {:parent :filter
-              :args {:pred :_tour-public-lesson?
-                     :coll {:parent :get-in
-                            :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}}}}}
+          :v {:parent :if
+              :args {:test :_structured-profile-lesson-available?
+                     :then :_tour-all-lessons
+                     :else {:parent :filter
+                            :args {:pred :_tour-public-lesson? :coll :_tour-all-lessons}}}}}}
 
   {:name :_tour-json
    :parent :to-json-string
    :args {:data :_tour-payload}}
 
   {:name :tour-lessons-handler
-   :description "GET /api/tour handler — the interactive-tutorial lesson scripts as JSON. Static teaching content, no data reads; open route (the demo's anonymous session must reach it)."
-   :parent :json-ok-response
-   :args {:body :_tour-json}}
+   :description "GET /api/tour handler — graph-authored lessons with viewer-scoped availability. Anonymous sessions receive the general lessons."
+   :parent :ok-response
+   :args {:body :_tour-json
+          :headers {"Content-Type" "application/json" "Cache-Control" "private, no-store"}}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/tour/progress — the funnel.

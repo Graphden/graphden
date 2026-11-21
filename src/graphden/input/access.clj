@@ -34,6 +34,17 @@
     (:edge *merge-edge*)))
 
 
+(def ^:dynamic ^:private *branch-deletes* nil)
+
+
+(defn with-branch-binding-deletes
+  "Admit the exact binding rows collected by the locked branch cascade."
+  [binding-ids version-ids operation]
+  (binding [*branch-deletes* {:input-binding (set binding-ids)
+                              :input-binding-version (set version-ids)}]
+    (operation)))
+
+
 (defn with-binding-write
   [owner id operation]
   (binding [*command* {:owner owner :binding id}] (operation)))
@@ -78,3 +89,10 @@
   (when (contains? offline-entities entity)
     (throw (ex-info "Structured input entities are not public yet"
                     {:type :authz/forbidden :entity entity}))))
+
+
+(defn assert-delete!
+  "Admit named input deletion only for a server command or a locked cascade."
+  [entity id]
+  (when-not (contains? (get *branch-deletes* entity) id)
+    (assert-write! entity {:id id})))

@@ -25,7 +25,7 @@
 
 
 (defn- seed-lesson!
-  [storage]
+  [storage template-id]
   (let [person (:id (sp/create-entity storage :fn {:name "lesson-person-record"}))
         input (:id (sp/create-entity storage :fn {:name "lesson-run-input"}))
         profile (:id (sp/create-entity storage :slot {:name "profile" :type-fn-id person :required true}))
@@ -34,7 +34,9 @@
                                (let [{:keys [id]} (sp/create-entity storage :slot {:name name :type-fn-id text-id :required true})]
                                  {:fn-id person :slot-id id :position position}))
                              ["id" "name" "email"])
-        root (:id (sp/create-entity storage :fn {:name "tutorial-structured-profile" :input-type-fn-id input}))]
+        _ (sp/create-entity storage :fn {:id template-id :name "lesson-profile" :input-type-fn-id input})
+        root (:id (sp/create-entity storage :fn {:name "tutorial-structured-profile"
+                                                 :parent-ids [template-id] :input-type-fn-id input}))]
     (sp/create-entities storage :fn-slot (into [{:fn-id input :slot-id profile :position 0}] members))
     {:root root :profile profile}))
 
@@ -124,13 +126,14 @@
 
 (deftest bind-name-then-run-through-the-checked-named-closure-test
   (let [storage (:storage golden/*bootstrap*)
-        {:keys [root] :as fixture} (binding [access/*offline?* true] (seed-lesson! storage))
+        lesson (some #(when (= "structured-input" (:slug %)) %)
+                     (:lessons (golden/exec-handler :_tour-lessons {})))
+        {:keys [root] :as fixture} (binding [access/*offline?* true]
+                                     (seed-lesson! storage (parse-uuid (:template-id lesson))))
         token (str (random-uuid))
         ctx (exec/create-context {:storage storage :auth-provider (auth/single-token-provider token)})
         _ (executor/rebuild! ctx)
         app (router/create-router ctx "_app-ring-response")
-        lesson (some #(when (= "structured-input" (:slug %)) %)
-                     (:lessons (golden/exec-handler :_tour-lessons {})))
         allow? (atom true)
         handler (lesson-handler (assoc ctx :execute-guard
                                        (fn [_ id]

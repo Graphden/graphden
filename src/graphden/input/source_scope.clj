@@ -178,3 +178,55 @@
       (reject! :scope-replay-mismatch))
     {:snapshot-id (:snapshot-id snapshot) :source-path source-path :public-path public-path :address address
      :edges edges :field-owner declaring :owner-parents (get-in snapshot [:fns owner :parent-ids]) :row row}))
+
+
+(defn- free-route!
+  [graph address type]
+  (let [[names route] (only (filter #(= address (:address (val %))) (get-in graph [:public-input :routes]))
+                            :unavailable-forwarded-input)]
+    (when-not (and (= :input-field (:kind route)) (:whole-bindable? route)
+                   (migration/same-edn? type (:completion-type route)))
+      (reject! :unproved-forwarded-input))
+    names))
+
+
+(defn verify-forwarded-projection
+  "Replay a previously located direct legacy field link in a checked snapshot.
+   Prove both free input addresses before adding the projection. Confirm the
+   result retains the existing occupancy and reads the original local field."
+  [snapshot {:keys [owner-id source-address target-address projection-id
+                    field-id source-type target-type target-fn-id]} analyze]
+  (let [[[root [use-id :as uses]] [target-id :as target-path]] target-address]
+    (when-not (and (= owner-id root) (= source-address [[owner-id []] [field-id]])
+                   (= [use-id] uses) (= [target-id] target-path)
+                   (every? uuid? [owner-id field-id use-id target-id target-fn-id])
+                   (= projection-id (migration/derived-id :forwarded-field owner-id use-id target-id))
+                   (not (contains? (:bindings snapshot) projection-id)))
+      (reject! :unproved-forwarded-identity))
+    (let [before (checked-graph analyze snapshot owner-id)
+          source-names (free-route! before source-address source-type)
+          target-names (free-route! before target-address target-type)
+          edge (checked-edge before snapshot owner-id uses)]
+      (when-not (and (= target-address (occurrence before target-id))
+                     (= target-fn-id (:target-fn-id edge))
+                     (= 1 (count source-names))
+                     (= [(:name edge) (first source-names)] target-names))
+        (reject! :unproved-forwarded-use))
+      (let [row (rows/normalize {:id projection-id :fn-id owner-id
+                                 :org-id (get-in snapshot [:fns owner-id :org-id])
+                                 :scope-path uses :target-path target-path
+                                 :expression-kind "projection" :value-present false
+                                 :projection-scope-path [] :projection-path [field-id]})
+            updated (-> snapshot (assoc :snapshot-id (random-uuid)) (assoc-in [:bindings projection-id] row))
+            after (checked-graph analyze updated owner-id)
+            prior (get-in before [:public-input :bindings])
+            current (get-in after [:public-input :bindings])
+            added (get current target-address)]
+        (when-not (and (= projection-id (:binding-id added)) (= owner-id (:origin-fn-id added))
+                       (= {:kind :projection :scope [owner-id []] :path [field-id]} (:expression added))
+                       (preserves-occupancy? prior current target-address row)
+                       (not (contains? (get-in after [:public-input :routes]) target-names))
+                       (= source-names (free-route! after source-address source-type)))
+          (reject! :forwarded-replay-mismatch))
+        {:snapshot-id (:snapshot-id snapshot) :row row :edge edge
+         :source-names source-names :target-names target-names}))))

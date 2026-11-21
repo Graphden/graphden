@@ -44,7 +44,7 @@
   "Read the expected winner inside the caller's authorized binding transaction."
   [storage id expected-version]
   (let [current (resolution/resolve-version (vs/unwrap storage) :input-binding id (vs/current-branch-id storage))]
-    (when-not (and (= expected-version (:id current)) (not (resolution/tombstone? current)))
+    (when-not (and current (= expected-version (:id current)) (not (resolution/tombstone? current)))
       (throw (ex-info "Input binding changed since it was read" {:type :input/stale-version})))
     current))
 

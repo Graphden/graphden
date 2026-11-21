@@ -168,6 +168,7 @@
     (try
       (binding [vs/*enforce-require-merge?* true]
         (writer/assert-write-authorized! storage :fn {} root)
+        (writer/assert-write-authorized! storage :input-binding {:fn-id root} nil)
         true)
       (catch clojure.lang.ExceptionInfo error
         (case (:type (ex-data error))

@@ -592,6 +592,23 @@
 ;; below just composes them.
 ;; -----------------------------------------------------------------------------
 
+(defn- map-binding-target
+  "A record can only inhabit the map arm of a nullable map. Checking that arm
+   directly lets map/record unification bind its key parameter. The empty-map
+   sentinel proves membership for every key and value type without binding either."
+  [expected actual]
+  (if (or (= :empty-map actual) (and (types/record-type? actual) (seq actual)))
+    (let [members (types/union-members expected)
+          map-type (if (and (= 2 (count members)) (some #{:null} members))
+                     (types/strip-null expected)
+                     expected)]
+      (cond
+        (not (types/map-type? map-type)) expected
+        (= :empty-map actual) :empty-map
+        :else map-type))
+    expected))
+
+
 (defn check-input-binding
   "ID-addressed entry to the existing directional binding checker. This does
    not infer a reference mode or publish a signature. The caller supplies the
@@ -601,7 +618,8 @@
   [{:keys [address expected actual expression substitution]}]
   (if (nil? actual)
     {:status :deferred :reason :missing-actual-type :substitution substitution}
-    (let [b-form (when (= :value (:kind expression)) {:value (:value expression)})]
+    (let [expected (map-binding-target expected actual)
+          b-form (when (= :value (:kind expression)) {:value (:value expression)})]
       (try
         (let [next-subst (binding [*source-info* {}]
                            (check-binding! nil address expected actual (or substitution {}) nil b-form))

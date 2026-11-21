@@ -304,11 +304,14 @@
 
 (defn- exercise-callable-field!
   [origin token storage]
-  (let [name "callable-input-authoring"
+  (let [template (subtree origin token closed/root)
+        name "callable-input-authoring"
         created (extend-native origin token name closed/root)
         owner (:id (first (sp/query-entities storage :fn {:name name})))
         action {:fn-id owner :action "bind" :path ["payload" "callback"] :ref-fn-id uppercase}
         preview (command origin token "preview" action)]
+    (is (true? (:extend-available template)) (pr-str template))
+    (is (nil? (:run-available template)))
     (is (<= 200 (:status created) 299))
     (is (true? (:ok preview)) (pr-str preview))
     (when (:ok preview)

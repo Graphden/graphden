@@ -125,7 +125,7 @@
   [ctx frozen root]
   (try
     (when-let [guard (:execute-guard ctx)] (guard ctx root))
-    (when (empty? (:bindings frozen))
+    (when-not (some #(= root (:fn-id %)) (vals (:bindings frozen)))
       (let [{:keys [analysis]} (compile/analyze-stored frozen root (trusted-roots ctx frozen))
             {:keys [signature configured-contract]} (get-in analysis [:scopes []])]
         (when (and (= :checked (:status analysis)) (= 1 (count (:scopes analysis)))

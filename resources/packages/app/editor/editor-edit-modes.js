@@ -670,9 +670,9 @@ function openStructuredInputPopover(anchorEl, target, action, field, draft = {})
     },
     async onSaved() {
       const restore = document.activeElement === anchorEl;
-      await loadGraphData();
+      const path = fnId + '/structured-input';
+      await loadGraphData({keepExpandedTypePath: path});
       if (restore && document.activeElement === document.body) {
-        const path = fnId + '/structured-input';
         returnFocusTo(document.querySelector('[data-inline-anchor="' + escAttr(path) + '"]'));
       }
       window.gdAnnounce?.({bind: 'Input bound', edit: 'Input binding updated', remove: 'Input binding removed'}[action]);

@@ -606,13 +606,16 @@ async function initGraph({progressive = false, preserveSelection = false} = {}) 
 // editor-secrets.js etc. so the ns-tree / graph pick up the new entries
 // without a full page reload. Kept as a separate fn from `init()` so it
 // doesn't also re-fire the auth / hash navigation work.
-async function loadGraphData() {
+async function loadGraphData({keepExpandedTypePath} = {}) {
   const endRefresh = beginGraphRefresh();
   try {
   const authEpoch = _graphAuthEpoch;
   // Post-mutation refresh: re-fetch the namespace tree (counts can shift on
   // create/delete/rename) AND re-prime the current subtree.
   const prevRoot = _subtreeRootId;
+  const keepExpanded = keepExpandedTypePath
+    ? [...expandedTypePaths].filter(path => path === keepExpandedTypePath || path.startsWith(keepExpandedTypePath + '/'))
+    : [];
   resetGraphCaches();
   const typesEpoch = _subtreeResetEpoch;
   let treeResp;
@@ -654,6 +657,9 @@ async function loadGraphData() {
     }
   }
   if (authEpoch !== _graphAuthEpoch) return;
+  if (prevRoot === selectedFnId && prevRoot === _subtreeRootId) {
+    for (const path of keepExpanded) expandedTypePaths.add(path);
+  }
   repaintExplorer();
 
   // Exactly one render: `selectFnByName` → `selectFn` → `renderGraph`

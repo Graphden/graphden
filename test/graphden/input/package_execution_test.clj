@@ -118,7 +118,8 @@
         {:keys [analysis execute]} (staged-gcd (String/.getBytes text StandardCharsets/UTF_8)
                                                (ids/digest-hex "SHA-256" text))]
     (is (= :checked (:status analysis)))
-    (is (= #{[:b]} (set (keys (get-in analysis [:public-input :routes])))))
+    (is (= #{[] [:b]} (set (keys (get-in analysis [:public-input :routes])))))
+    (is (= {:b :int} (get-in analysis [:public-input :root :type])))
     (is (= 6 (execute {:b 18})))
     (is (= :unknown-input-field (rejection-code #(execute {:a 9 :b 18}))))))
 

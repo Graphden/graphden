@@ -38,7 +38,8 @@ async function exercise() {
     const branch = new URL(page.url()).searchParams.get('branch');
     await step('Select the template').waitFor();
     await page.getByPlaceholder('Filter...', {exact: true}).fill('lesson-profile');
-    await page.locator(`#entity-list .entity-item[data-fn-id="${templateId}"]`).click();
+    // Search and namespace rows can both display the exact same function.
+    await page.locator(`#entity-list .entity-item[data-fn-id="${templateId}"]:visible`).first().click();
     await step('Create your editable sample').waitFor();
 
     const template = page.locator('.node-overlay[data-fn-name="lesson-profile"] .ancestor-line[data-level="0"]');

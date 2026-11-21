@@ -50,34 +50,68 @@
     (into {} (map (juxt :id identity)) (:lessons (response-json response)))))
 
 
-(defn- ordinary-branch-exercise!
-  [app token storage]
-  (let [branch "tutorial-43-lifecycle"
-        branch-id (random-uuid)
-        base-id (vs/current-branch-id storage)
+(defn- with-sandbox
+  [app token base-id branch exercise]
+  (let [branch-id (random-uuid)
         created (request app token :post "/api/branches" nil
                          {:name branch :id branch-id :base-branch-id base-id})]
     (is (= (str branch-id) (get-in (response-json created) [:branch :id])))
     (try
-      (let [extension (request app token :post "/api/entities/fn" branch
-                               (str "name=tutorial-structured-profile&parent-ids=" lesson/root))
-            child (response-header extension "x-graphden-created-id")
-            action {:fn-id child :action "bind" :path ["profile" "name"] :value "Ada"}
-            preview (response-json (request app token :post "/api/structured-input/preview" branch action))
-            bound (response-json (request app token :post "/api/structured-input/apply" branch
-                                          (assoc action :expected-state (:expected-state preview))))
-            run (response-json (request app token :post "/api/execute" branch
-                                        {:fn-id child :args {:profile {:id "42" :email "ada@example.test"}}}))]
-        (is (parse-uuid child))
-        (is (:ok preview))
-        (is (:committed bound))
-        (is (= {:id "42" :name "Ada" :email "ada@example.test"} (:result run)))
-        (is (empty? (sp/query-entities storage :fn {:name "tutorial-structured-profile"}))))
+      (exercise)
       (finally
         (let [response (request app token :delete (str "/api/branches/" branch-id) nil nil)
               deletion (response-json response)]
           (is (<= 200 (:status response) 299))
           (is (true? (:ok deletion)) (pr-str deletion)))))))
+
+
+(defn- bind-sample!
+  [app token branch value]
+  (let [extension (request app token :post "/api/entities/fn" branch
+                           (str "name=tutorial-structured-profile&parent-ids=" lesson/root))
+        child (response-header extension "x-graphden-created-id")
+        action {:fn-id child :action "bind" :path ["profile" "name"] :value value}
+        preview (response-json (request app token :post "/api/structured-input/preview" branch action))
+        bound (response-json (request app token :post "/api/structured-input/apply" branch
+                                      (assoc action :expected-state (:expected-state preview))))]
+    (is (parse-uuid child))
+    (is (:ok preview))
+    (is (:committed bound))
+    {:child child :binding-id (parse-uuid (:binding-id bound))}))
+
+
+(defn- run-sample
+  [app token branch child]
+  (:result (response-json (request app token :post "/api/execute" branch
+                                   {:fn-id child :args {:profile {:id "42" :email "ada@example.test"}}}))))
+
+
+(defn- ordinary-branch-exercise!
+  [app token storage]
+  (let [sandbox "tutorial-43-lifecycle"
+        sibling "tutorial-43-sibling"
+        base-id (vs/current-branch-id storage)
+        raw (vs/unwrap storage)]
+    (with-sandbox app token base-id sibling
+      (fn []
+        (let [{:keys [child binding-id]} (bind-sample! app token sibling "Grace")
+              deleted (with-sandbox app token base-id sandbox
+                        (fn []
+                          (let [sample (bind-sample! app token sandbox "Ada")]
+                            (is (= {:id "42" :name "Ada" :email "ada@example.test"}
+                                   (run-sample app token sandbox (:child sample))))
+                            sample)))]
+          (is (nil? (sp/read-entity raw :fn (parse-uuid (:child deleted)))))
+          (is (nil? (sp/read-entity raw :input-binding (:binding-id deleted))))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"server-authorized writer"
+                (sp/delete-entity raw :input-binding binding-id)))
+          (let [version (:id (first (sp/query-entities raw :input-binding-version {:input-binding-id binding-id})))]
+            (is (uuid? version))
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"server-authorized writer"
+                  (sp/delete-entities raw :input-binding-version [version]))))
+          (is (= {:id "42" :name "Grace" :email "ada@example.test"}
+                 (run-sample app token sibling child)))
+          (is (empty? (sp/query-entities storage :fn {:name "tutorial-structured-profile"}))))))))
 
 
 (deftest anonymous-catalogue-and-owned-structured-lesson-lifecycle-test

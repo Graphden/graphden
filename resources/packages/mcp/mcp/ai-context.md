@@ -150,6 +150,9 @@ shows the free-arg list; an unexpected `else` there is this.
    (closer-fn-wins), so your value is silently ignored: rebind it on the
    fn that actually reads the slot, or drop it. A leaked slot, a missing
    effect or an unread binding all show up before you run anything.
+   When a visible function has a checked structured input, the
+   `structured-input` result shows its remaining nested fields. Each field's
+   `required-now?` flag tells you whether it needs a value before execution.
 3. **`create-branch`** — ALWAYS, before any mutation. Name it for the
    task, e.g. `ai/add-order-total`. `main` is the human's; you work on a
    branch and never touch main.

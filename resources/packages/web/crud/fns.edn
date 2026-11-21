@@ -264,6 +264,12 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
+  {:name :structured-input-contract
+   :description "Remaining named fields and requiredness for a visible structured input."
+   :args {:fn-id {:type :nullable-uuid :description "Function whose input to read."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
   {:name :with-graph-load-memo
    :description "Run one graph body with an epoch-aware branch-load memo. Repeated closure lookups share the branch read; an enclosing memo is reused, otherwise the new memo ends with this call."
    :args {:body {:type [:fn {} a]}}

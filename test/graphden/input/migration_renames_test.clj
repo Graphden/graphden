@@ -53,3 +53,35 @@
       (let [{:keys [exceptions additions]} (migration/plan blocked)]
         (is (some #(= :rename-projection-required (:code %)) exceptions))
         (is (nil? (get-in additions [:input-binding 0 :projection-path])))))))
+
+
+(deftest position-changes-require-an-atomic-live-origin-and-comparable-branch-history
+  (let [source (fixture)
+        binding-id (:id (first (:binding source)))
+        [birth] (:fn-slot-version source)
+        root (:branch-id birth)
+        child (random-uuid)
+        edit (assoc birth :id (random-uuid) :branch-id child :created-at #inst "2026-11-21T00:02:00"
+                    :change-revision 4 :change-id (random-uuid) :position 1)
+        base (-> source
+                 (assoc :branch [{:id root} {:id child :base-branch-id root}])
+                 (assoc-in [:binding-version 0 :created-at] #inst "2026-11-21T00:00:01")
+                 (update :fn-slot-version conj edit))
+        {:keys [exceptions additions]} (migration/plan base)]
+    (is (empty? exceptions))
+    (is (= [(:id (first (:binding-version base)))] (mapv :id (:input-binding-version additions))))
+    (is (empty? (:exceptions (migration/plan (assoc base :branch-merge [{:source-branch-id (random-uuid)
+                                                                         :target-branch-id (random-uuid)}])))))
+    (doseq [[code changed] [[:rename-atomic-origin-required (assoc-in base [:binding-version 0 :change-id] (random-uuid))]
+                            [:rename-atomic-origin-required (assoc-in base [:binding-version 0 :change-revision] nil)]
+                            [:rename-atomic-origin-required (assoc-in base [:binding-version 0 :deleted-at] (:created-at edit))]
+                            [:rename-position-history-required (assoc-in base [:fn-slot-version 1 :deleted-at] (:created-at edit))]
+                            [:rename-position-history-required (assoc-in base [:fn-slot-version 1 :change-revision] 3)]
+                            [:rename-position-history-required (assoc-in base [:fn-slot-version 1 :created-at] (:created-at birth))]
+                            [:rename-branch-origin-required (assoc-in base [:branch 1 :base-branch-id] (random-uuid))]
+                            [:rename-merge-cutoff-required (assoc base :branch-merge [{:source-branch-id child :target-branch-id root}])]
+                            [:rename-binding-history-changed (assoc-in base [:binding-version 0 :value-present] true)]]]
+      (let [{:keys [exceptions additions]} (migration/plan changed)
+            expected {:code code :entity :binding :id binding-id}]
+        (is (some #{expected} exceptions))
+        (is (nil? (get-in additions [:input-binding 0 :projection-path])))))))

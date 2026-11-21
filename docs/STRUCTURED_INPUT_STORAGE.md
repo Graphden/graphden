@@ -90,8 +90,13 @@ For a scalar rename with matching primitive slot types, the plan verifies the
 original parent membership, the alias field, and the legacy binding. When
 their branch histories have matching timestamps and change stamps, it writes
 a projection at each original binding version and preserves every version
-ID. Unpaired history or a binding that also supplies a value or reference
-requires further migration evidence.
+ID. The ordinary writer can also create the alias and binding at different
+instants in one root-branch transaction. The migration requires matching change
+ID, revision and authorship. Later membership-only position edits on that root
+or a direct fork retain their own version rows, timestamps and revisions. The
+binding retains its original version. This case refuses tombstones, changes to
+binding policy, ambiguous ordering and merge cutoffs involving a touched branch.
+A binding that also supplies a value or reference requires further evidence.
 
 Apply regenerates the plan, verifies its source and target checksums, and compares
 the current raw graph snapshot under the ordinary semantic writer lock. Every

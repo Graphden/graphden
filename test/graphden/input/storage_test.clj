@@ -1,6 +1,8 @@
 (ns ^:integration ^#:clj-kondo{:config (quote {:lint-as #:graphden.input.storage-test{with-storage clojure.core/let}})} graphden.input.storage-test
   "Real PostgreSQL checks of offline v2 storage, using the normal decorators."
   (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities.list :as entity-list]
@@ -13,6 +15,7 @@
     [graphden.input.rows :as rows]
     [graphden.input.storage :as input-edit]
     [graphden.packages.records.ids :as record-ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.schema.graph.schema :as graph]
     [graphden.schema.malli.core :as malli]
     [graphden.schema.protocol.protocol :as schema]
@@ -357,6 +360,70 @@
         (is (= (:id binding) (:input-binding-id (sp/read-entity base :input-binding-version (:id binding-version)))))
         (is (= {:status :restored} (offline/restore! base artifact)))
         (is (= (migration/fingerprint source) (migration/fingerprint (offline/snapshot base))))))))
+
+
+(defn- install-retry-pause!
+  [storage]
+  (let [module (edn/read-string (slurp (io/resource "packages/core/concurrency/fns.edn")))
+        defs (into [] (comp (filter #(contains? #{:sleep :_retry-pause} (:name %)))
+                            (map #(assoc % :namespace (:namespace module)))) (:fns module))
+        records (parse/parse-prepared-module (parse/prepare-module defs {} {}))]
+    (tx/in-transaction
+      storage
+      (fn [st]
+        (let [ns-id (:id (sp/create-entity st :ns {:name (:namespace module)}))]
+          (doseq [type [:null :int]]
+            (sp/create-entity st :fn {:id (record-ids/primitive-fn-id type) :name (name type)}))
+          (doseq [{:keys [kind] :as record} records]
+            (sp/create-entity st kind (cond-> (dissoc record :kind)
+                                        (= :fn kind) (assoc :namespace-id ns-id)))))))))
+
+
+(deftest separate-write-instants-and-fork-position-edits-preserve-rename-history
+  (with-storage [base (base-storage)]
+    (let [main (vs/wrap-with-versioning base)
+          _ (install-retry-pause! main)
+          owner (record-ids/fn-id "core.concurrency" :_retry-pause)
+          field (record-ids/slot-id (record-ids/fn-id "core.concurrency" :sleep) :ms)
+          alias-id (record-ids/slot-id owner :delay-ms)
+          binding-id (record-ids/binding-id owner field)
+          member-id (record-ids/fn-slot-id owner alias-id)
+          copied (migration/derived-id :membership owner member-id)
+          fork (vs/switch-branch main (:id (vs/create-branch! main "reorder")))
+          _ (sp/update-entity fork :fn-slot member-id {:position 1})
+          source (offline/snapshot base)
+          [binding-version] (filter #(= binding-id (:binding-id %)) (:binding-version source))
+          [birth edit] (sort-by :change-revision (filter #(= member-id (:fn-slot-id %)) (:fn-slot-version source)))
+          at (fn [storage entity id revision]
+               (get-in (resolution/winning-candidates-at base entity [id] (vs/current-branch-id storage) revision)
+                       [id :version]))
+          history-fields [:change-id :change-revision :branch-id :created-at :deleted-at :author-id :author-label]
+          artifact (-> source offline/artifact offline/encode offline/decode)]
+      (is (= (select-keys birth [:change-id :change-revision]) (select-keys binding-version [:change-id :change-revision])))
+      (is (not= (:created-at birth) (:created-at binding-version)))
+      (is (empty? (get-in artifact [:plan :exceptions])) (pr-str (get-in artifact [:plan :exceptions])))
+      (is (= {:status :applied} (offline/apply! base artifact)))
+      (is (= {:status :already-applied} (offline/apply! base artifact)))
+      (doseq [[view rev pos] [[main (:change-revision birth) 0] [fork (:change-revision birth) 0]
+                              [main (:change-revision edit) 0] [fork (:change-revision edit) 1]]]
+        (let [before (at view :fn-slot member-id rev)
+              after (at view :fn-slot copied rev)
+              binding (rows/normalize (at view :input-binding binding-id rev))]
+          (is (= pos (:position before) (:position after)))
+          (is (= (migration/derived-id :membership-version owner (:id before)) (:id after)))
+          (is (= (select-keys before history-fields) (select-keys after history-fields)))
+          (is (= (select-keys binding-version history-fields) (select-keys binding history-fields)))
+          (is (= [(:id binding-version) "projection" [field] [alias-id]]
+                 ((juxt :id :expression-kind :target-path :projection-path) binding)))))
+      (is (= [(:id binding-version)] (mapv :id (sp/query-entities base :input-binding-version {:input-binding-id binding-id}))))
+      (is (= {:status :restored} (offline/restore! base artifact)))
+      (is (= (migration/fingerprint source) (migration/fingerprint (offline/snapshot base))))
+      (sp/update-entity fork :binding binding-id {:value-present true :value 17})
+      (let [changed (offline/snapshot base)
+            refused (offline/artifact changed)]
+        (is (some #(= :rename-binding-history-changed (:code %)) (get-in refused [:plan :exceptions])))
+        (is (= :input/migration-incomplete (attempt #(offline/apply! base refused))))
+        (is (= (migration/fingerprint changed) (migration/fingerprint (offline/snapshot base))))))))
 
 
 (defn- binding-version

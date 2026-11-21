@@ -35,10 +35,16 @@
   (json/parse-string (:body response) true))
 
 
+(defn- response-header
+  [response header]
+  (some (fn [[k v]] (when (= header (str/lower-case (name k))) v)) (:headers response)))
+
+
 (defn- catalogue
   [app token]
   (let [response (request app token :get "/api/tour" nil nil)]
     (is (= 200 (:status response)))
+    (is (= "private, no-store" (response-header response "cache-control")))
     (into {} (map (juxt :id identity)) (:lessons (response-json response)))))
 
 
@@ -53,7 +59,7 @@
     (try
       (let [extension (request app token :post "/api/entities/fn" branch
                                (str "name=tutorial-structured-profile&parent-ids=" lesson/root))
-            child (some (fn [[k v]] (when (= "x-graphden-created-id" (str/lower-case (name k))) v)) (:headers extension))
+            child (response-header extension "x-graphden-created-id")
             action {:fn-id child :action "bind" :path ["profile" "name"] :value "Ada"}
             preview (response-json (request app token :post "/api/structured-input/preview" branch action))
             bound (response-json (request app token :post "/api/structured-input/apply" branch

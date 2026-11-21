@@ -54,7 +54,7 @@
     (when-not original (reject! :missing-original-declaration id))
     (when (seq more) (reject! :ambiguous-original-declaration id))
     (when-not (= id (:fn-id definition)) (reject! :missing-prepared-declaration id))
-    (let [context (assoc prepared :fn-defs [definition])
+    (let [context (assoc prepared :fn-defs [definition] ::source/originals-by-id originals)
           certified (get closure-baselines id)
           staged (get staged-proposals id)]
       (if (and certified (nil? staged))

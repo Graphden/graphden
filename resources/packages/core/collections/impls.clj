@@ -1059,7 +1059,8 @@
    :flatten {:impl flatten-fn :return-type-rule flatten-return-rule :taint-propagate? true}
    :distinct {:impl distinct-fn :taint-propagate? true}
    :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
-   :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule :taint-propagate? true}
+   :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule :taint-propagate? true}
    :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule :taint-propagate? true}
    :postwalk {:impl postwalk-fn :taint-propagate? true}

@@ -80,7 +80,10 @@
   [prepared originals {:keys [definitions baselines]} roots]
   (let [visible (into originals definitions)
         prepared (shared-forwarding prepared baselines)
-        package (assoc (snapshot/package-index prepared visible) :closure-baselines baselines)
+        package (snapshot/package-index prepared visible)
+        package (-> package
+                    (assoc :closure-baselines baselines)
+                    (update :prepared assoc ::source/originals-by-id (:originals package)))
         initial-context (:prepared package)
         preliminary (source/plan-module originals initial-context)
         {:keys [package certified blocked]} (certify package (:definitions preliminary) roots)

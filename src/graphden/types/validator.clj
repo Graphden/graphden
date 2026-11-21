@@ -50,10 +50,13 @@
 
 (defn- compile-list
   [t path seen]
-  (let [check (compile-type (types/list-elem t) (conj path :element) seen)]
+  (let [element (types/list-elem t)
+        check (when-not (= :any element) (compile-type element (conj path :element) seen))]
     (fn [value p]
       (if (sequential? value)
-        (into [] (mapcat (fn [[i v]] (check v (conj p i)))) (map-indexed vector value))
+        (if check
+          (into [] (mapcat (fn [[i v]] (check v (conj p i)))) (map-indexed vector value))
+          [])
         (error p :type-mismatch)))))
 
 

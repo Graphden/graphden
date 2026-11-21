@@ -19,6 +19,13 @@
     (is (= value ((validator/build t) value)))))
 
 
+(deftest unconstrained-list-validation-does-not-read-its-elements
+  (let [never-read (lazy-seq (throw (ex-info "List was realized" {})))
+        check (validator/build [:list :any])]
+    (is (identical? never-read (check never-read)))
+    (is (thrown? clojure.lang.ExceptionInfo (check {:not-a-list true})))))
+
+
 (deftest declaration-aliases-and-variants-use-the-same-validator
   (types/register-type-alias! :color [:refine :text [:matches "^#[a-fA-F0-9]{6}$"]])
   (types/register-type-alias! :color-record {:color :color})

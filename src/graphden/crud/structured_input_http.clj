@@ -1,11 +1,15 @@
 (ns graphden.crud.structured-input-http
   "Request and response boundary for authorized structured input commands."
   (:require
+    [cheshire.core :as json]
+    [graphden.crud.branches :as branches]
     [graphden.crud.request :as request]
     [graphden.crud.structured-input-bind :as bind]
     [graphden.crud.structured-input-change :as change]
     [graphden.input.access :as access]
-    [graphden.input.authoring-principal :as principal]))
+    [graphden.input.authoring-principal :as principal]
+    [graphden.system.branch-router :as router]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (defn- refusal
@@ -46,3 +50,30 @@
         (refusal :input/invalid-command)))
     (catch clojure.lang.ExceptionInfo error
       (or (refusal (:type (ex-data error))) (throw error)))))
+
+
+(defn mcp-dispatch
+  "Use the regular writer on an explicitly named working branch. A call
+   from a different branch re-enters the authenticated HTTP boundary."
+  [ctx req {:keys [branch phase] :as command}]
+  (if-not (and (:authenticated? (principal/current)) (#{"preview" "apply"} phase))
+    (refusal (if (:authenticated? (principal/current)) :input/invalid-command :authz/forbidden))
+    (let [storage (request/require-storage ctx)
+          {:keys [id base-branch-id]} (branches/resolve-branch-ref (vs/unwrap storage) branch)
+          body (dissoc command :phase :branch)]
+      (cond
+        (nil? base-branch-id) (refusal :authz/forbidden)
+        (= id (vs/current-branch-id storage)) (dispatch ctx phase {:body body})
+        :else
+        (if-let [active (router/current-router)]
+          (let [response (router/dispatch active (-> req
+                                                     (dissoc :query-string :params :query-params)
+                                                     (assoc :request-method :post :uri (str "/api/structured-input/" phase)
+                                                            :body (json/generate-string body))
+                                                     (update :headers assoc "x-graphden-branch" (str id)
+                                                             "content-type" "application/json")))]
+            (or (when (string? (:body response))
+                  (select-keys (json/parse-string (:body response) true)
+                               [:ok :committed :fn-id :binding-id :expected-state :expected-version :error :type]))
+                (refusal :authz/forbidden)))
+          (refusal :authz/forbidden))))))

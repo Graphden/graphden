@@ -30,9 +30,9 @@
 
 
 (defn- request
-  [origin token method uri {:keys [content-type query-string body]}]
+  [origin token method uri {:keys [content-type query-string body headers]}]
   (let [response @(http/request {:method method :url (str origin uri (when query-string (str "?" query-string)))
-                                 :headers (cond-> {"authorization" (str "Bearer " token)}
+                                 :headers (cond-> (assoc headers "authorization" (str "Bearer " token))
                                             content-type (assoc "content-type" content-type))
                                  :body body :timeout 30000})]
     (when-let [error (:error response)] (throw error))
@@ -357,9 +357,53 @@
       (finally (ig/halt-key! :exec/api-routes-js-cache api-cache)))))
 
 
+(defn- mcp-input!
+  [origin token args]
+  (let [response (request origin token :post "/mcp"
+                          {:content-type "application/json"
+                           :body (json/generate-string {:jsonrpc "2.0" :id 71 :method "tools/call"
+                                                        :params {:name "configure-input" :arguments args}})})
+        rpc (json/parse-string (:body response) true)]
+    (or (:error rpc) (some-> (get-in rpc [:result :content 0 :text]) (json/parse-string true)))))
+
+
+(defn- exercise-mcp-input!
+  [origin token storage]
+  (let [branch-name "mcp-structured-input-proof"
+        branch (vs/create-branch! storage branch-name)
+        target (vs/switch-branch storage (:id branch))
+        name "mcp-profile-config"
+        created (request origin token :post "/api/entities/fn"
+                         {:content-type "application/x-www-form-urlencoded"
+                          :headers {"x-graphden-branch" branch-name}
+                          :body (str "name=" name "&parent-ids=" lesson/root)})
+        owner (:id (first (sp/query-entities target :fn {:name name})))
+        bind-args {:branch branch-name :phase "preview" :action "bind"
+                   :fn-id owner :path ["profile" "name"] :value "Ada"}
+        propose #(mcp-input! origin token %)
+        apply! (fn [params]
+                 (let [receipt (propose params)]
+                   (is (true? (:ok receipt)) (pr-str receipt))
+                   (when (:ok receipt)
+                     (propose (merge (assoc params :phase "apply")
+                                     (select-keys receipt [:expected-state :expected-version]))))))]
+    (is (<= 200 (:status created) 299) (pr-str created))
+    (is (= -32602 (:code (propose (assoc bind-args :branch "main")))))
+    (is (nil? (sp/read-entity storage :fn owner)))
+    (let [bound (apply! bind-args)
+          binding-id (:binding-id bound)
+          edit (-> bind-args (dissoc :path) (assoc :action "edit" :binding-id binding-id :value "Bea"))]
+      (is (true? (:committed bound)) (pr-str bound))
+      (when binding-id
+        (is (true? (:committed (apply! edit))))
+        (is (= "Bea" (:value (sp/read-entity target :input-binding (parse-uuid binding-id)))))
+        (is (true? (:committed (apply! (-> edit (dissoc :value) (assoc :action "remove"))))))
+        (is (nil? (sp/read-entity target :input-binding (parse-uuid binding-id))))))))
+
+
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "closedinputfixture"]
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "closedinputfixture" "mcp"]
                                              :primitive-inputs [lesson/admission uppercase-admission closed/admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
@@ -367,10 +411,12 @@
         guard (fn [_ id] (when (= id @denied) (throw (ex-info "Denied" {:type :authz/forbidden}))))
         ctx (exec/create-context {:storage storage :base-fns base-fns :execute-guard guard :auth-provider (auth/single-token-provider token)})
         _ (executor/rebuild! ctx)
-        app (router/create-router ctx "_app-ring-response")
+        app (router/create-router ctx "_app-ring-response" {:optional-handler-fn-names ["_mcp-ring-response"]})
+        router-override (atom app)
         seams (atom (tenancy/seams-isolation-seed))
         handler (bound-fn [req]
-                  (binding [tenancy/*seams-override* seams]
+                  (binding [tenancy/*seams-override* seams
+                            router/*active-router-override* router-override]
                     (update (router/dispatch app req) :headers update-keys name)))
         stop (server/run-server handler {:ip "127.0.0.1" :port 0})]
     (try
@@ -378,6 +424,7 @@
         (exercise-commands! origin token storage seams)
         (exercise-reference! origin token storage seams denied)
         (exercise-callable-field! origin token storage)
+        (exercise-mcp-input! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))
       (finally (stop)))))

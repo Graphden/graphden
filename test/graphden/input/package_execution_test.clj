@@ -7,6 +7,7 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.compile :as input]
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
     [graphden.input.source-snapshot :as snapshot]
@@ -93,6 +94,22 @@
     (is (= :checked (:status analysis)))
     (is (= -3 (execute {:number -2.5})))
     (is (= :unknown-input-field (rejection-code #(execute {:value 1}))))))
+
+
+(deftest stored-input-compiles-a-shipped-native-implementation-through-the-executor
+  (let [originals (conj (declarations "packages/core/arithmetic/fns.edn" #{:floor})
+                        {:name :stored-floor :namespace "fixture" :parent :floor})
+        owner (ids/fn-id "fixture" :stored-floor)
+        compile-snapshot (fn [package root roots implementations]
+                           (let [{:keys [context]} (snapshot/freeze-closure package [root] roots)
+                                 trusted (into {} (map (fn [[id impl]] [id {:signature (get roots id) :impl impl}])) implementations)]
+                             (input/compile-stored context root trusted)))
+        {:keys [canonical legacy analysis]} (runtimes originals owner compile-snapshot)]
+    (is (= :checked (:status analysis)))
+    (is (= [[:number]] (mapv key (get-in analysis [:public-input :routes]))))
+    (doseq [[argument expected] [[3.2 3] [-1.2 -2] [0 0]]]
+      (is (= expected (legacy {:number argument}) (canonical {:number argument}))))
+    (is (= :unknown-input-field (rejection-code #(canonical {:value 1}))))))
 
 
 (deftest staged-module-replays-byte-derived-bindings-before-execution

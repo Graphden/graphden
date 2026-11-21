@@ -4,10 +4,13 @@
   (:require
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as executor]
+    [graphden.input.analysis :as analysis]
     [graphden.input.arguments :as arguments]
     [graphden.input.context :as context]
     [graphden.input.frame :as frame]
     [graphden.input.ir :as ir]
+    [graphden.input.stored-implementations :as stored]
+    [graphden.types.check :as check]
     [graphden.types.validator :as validator]))
 
 
@@ -47,3 +50,16 @@
     (executor/named-input-closure
       (fn [supplied ctx]
         (invoke (arguments/route-values surface supplied) ctx)))))
+
+
+(defn compile-stored
+  "Prepare one authorized branch-resolved input snapshot for named invocation.
+   trusted maps base UUIDs to native implementations and frozen signatures.
+   The returned closure still uses the ordinary executor entrypoint."
+  [ctx owner trusted]
+  (let [implementations (stored/resolve-closure ctx owner trusted)
+        checked (analysis/analyze-effective-input ctx owner {:implementations implementations
+                                                             :check-expression check/check-input-binding
+                                                             :infer-signature check/infer-input-signature})]
+    {:analysis checked
+     :invoke (compile-named checked {:context ctx :implementations implementations})}))

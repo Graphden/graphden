@@ -24,6 +24,14 @@
                       StandardCharsets/UTF_8)))
 
 
+(defn local-type-rules?
+  "A frozen closure can run audited callbacks that use its binding facts and
+   type policy. Other callbacks may look up signatures outside the closure."
+  [signature]
+  (every? (comp true? :graphden.input/local-type-rule meta)
+          (keep signature [:return-type-rule :slot-types-rule :nav-types-rule])))
+
+
 (defn- names-at
   [contract path]
   (mapv (fn [length] (:name (descriptor/node-at contract (subvec path 0 length))))

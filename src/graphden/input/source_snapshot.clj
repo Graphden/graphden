@@ -8,6 +8,7 @@
     [graphden.input.inheritance :as inheritance]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
+    [graphden.input.signatures :as signatures]
     [graphden.input.source :as source]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-named-types :as named-types]
@@ -293,8 +294,7 @@
       (reject! :implementation-signature-required base))
     ;; Only admit audited callbacks that use their inputs and frozen type
     ;; policy. Other rules may consult signatures outside this closure.
-    (when-not (every? (comp true? :graphden.input/local-type-rule meta)
-                      (keep entry [:return-type-rule :slot-types-rule :nav-types-rule]))
+    (when-not (signatures/local-type-rules? entry)
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
      :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}))

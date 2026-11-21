@@ -301,6 +301,53 @@
       (when (:id row) (exercise-reference-changes! origin token storage seams denied child (:id row))))))
 
 
+(def ^:private pair-root (ids/fn-id "lessonpair.structured" :lesson-contact-route))
+
+
+(def ^:private pair-admission
+  (let [contact {:name :text :address {:city :text}}]
+    {:module ["lessonpair" "structured"] :fn-id pair-root
+     :abi-fn-id (ids/fn-id "lessonpair.native" :contact-route-native)
+     :record-contract {:sender contact :recipient contact}
+     :sha256 "e71640f101fa914dfbd44527b9ba3d22f7c9824100afcfe976d675d5d04ca7b1"}))
+
+
+(defn- address-routes
+  [view side]
+  (let [lookup (fn [fields field] (some #(when (= field (:name %)) %) fields))]
+    (-> view :fields (lookup side) :fields (lookup "address") :fields (lookup "city") :bind-path)))
+
+
+(defn- exercise-pair!
+  [origin token storage]
+  (let [name "lesson-paired-contact-route"
+        created (extend-native origin token name pair-root)
+        owner (:id (first (sp/query-entities storage :fn {:name name})))
+        sender ["sender" "address" "city"]
+        recipient ["recipient" "address" "city"]
+        bind! (fn [path value]
+                (let [args {:fn-id owner :action "bind" :path path :value value}
+                      preview (command origin token "preview" args)]
+                  (command origin token "apply" (assoc args :expected-state (:expected-state preview)))))]
+    (is (<= 200 (:status created) 299) (pr-str created))
+    (is (= sender (address-routes (subtree origin token owner) "sender")))
+    (is (= recipient (address-routes (subtree origin token owner) "recipient")))
+    (let [from (bind! sender "London")
+          current (subtree origin token owner)
+          to (bind! recipient "Paris")
+          result (request origin token :post "/api/execute"
+                          {:content-type "application/json"
+                           :body (json/generate-string {:fn-id owner :args {:sender {:name "Ada"} :recipient {:name "Bea"}}
+                                                        :timeout-ms 20000})})]
+      (is (true? (:committed from)) (pr-str from))
+      (is (nil? (address-routes current "sender")))
+      (is (= recipient (address-routes current "recipient")))
+      (is (true? (:committed to)) (pr-str to))
+      (is (not= (:binding-id from) (:binding-id to)))
+      (is (= "Ada in London → Bea in Paris" (:result (json/parse-string (:body result) true)))
+          (pr-str (:body result))))))
+
+
 (defn- exercise-reference-picker!
   [origin handler token storage ctx]
   (let [owner-name "profile-with-picked-reference"
@@ -322,8 +369,8 @@
 
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext"]
-                                             :primitive-inputs [lesson/admission uppercase-admission]})
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "reftext" "lessonpair"]
+                                             :primitive-inputs [lesson/admission uppercase-admission pair-admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
         denied (atom nil)
@@ -340,6 +387,7 @@
       (let [origin (str "http://127.0.0.1:" (:local-port (meta stop)))]
         (exercise-commands! origin token storage seams)
         (exercise-reference! origin token storage seams denied)
+        (exercise-pair! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))
       (finally (stop)))))

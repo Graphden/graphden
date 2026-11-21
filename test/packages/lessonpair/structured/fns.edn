@@ -1,0 +1,7 @@
+{:input-format 2
+ :namespace "lessonpair.structured"
+ :fns [{:name :lesson-contact-route
+        :description "Describe a message route using independent sender and recipient records."
+        :input {:sender {:type {:name :text :address {:city :text}} :required true}
+                :recipient {:type {:name :text :address {:city :text}} :required true}}
+        :return-type :text}]}

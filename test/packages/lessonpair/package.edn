@@ -1,0 +1,5 @@
+{:name "lessonpair"
+ :version "1.0.0"
+ :description "Pinned template for independent nested records in the editor."
+ :dependencies ["core"]
+ :modules ["native" "structured"]}

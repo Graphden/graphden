@@ -11,6 +11,7 @@
     [graphden.input.browser :as browser]
     [graphden.input.compile :as compile]
     [graphden.input.compiler-fixture :as fixture]
+    [graphden.input.obligations :as obligations]
     [graphden.input.runtime :as input]
     [graphden.packages.records.ids :as ids]))
 
@@ -364,6 +365,23 @@
     (is (= :field-read (:trigger (first (:obligations analysis)))))
     (is (= [:execution-error/type-mismatch :execution-error/type-mismatch] (invoke closure)))
     (is (= 1 @calls))))
+
+
+(deftest wider-implementation-obligation-keeps-the-narrow-field-read-validator
+  (let [definitions {:root {:input {:x :text} :return :text}}
+        {:keys [context analysis]} (fixture/model definitions :root)
+        address (fixture/address :root [] :root [:x])
+        field-check {:address address :code :runtime-type-obligation}
+        abi-check (assoc field-check :expected-type :any)
+        implementations (fixture/implementations definitions {:root echo})]
+    (doseq [diagnostics [[field-check abi-check] [abi-check field-check]]]
+      (let [graph (obligations/separate (assoc analysis :diagnostics diagnostics))
+            closure (compile/compile-checked graph {:context context :implementations implementations})]
+        (is (= "valid" (invoke closure {address "valid"} {})))
+        (is (= :execution-error/type-mismatch
+               (try (invoke closure {address 42} {})
+                    nil
+                    (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))))
 
 
 (deftest optional-absence-remains-distinct-from-explicit-nil

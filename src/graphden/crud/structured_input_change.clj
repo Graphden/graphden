@@ -9,8 +9,7 @@
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.util.abort-shield :as shield]
-    [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.resolution :as res]))
+    [graphden.versioning.storage.core :as vs]))
 
 
 (defn- reject!
@@ -62,16 +61,16 @@
 (defn- plan
   [ctx storage action {:keys [fn-id binding-id expected-state expected-version] :as command}]
   (let [row (own-literal ctx fn-id binding-id)
-        _ (writer/assert-write-authorized! storage :input-binding {} binding-id)
-        version (if expected-version
-                  (input-storage/current-binding! storage binding-id expected-version)
-                  (res/resolve-version (vs/unwrap storage) :input-binding binding-id (vs/current-branch-id storage)))
+        _ (input-storage/binding-call storage :check fn-id binding-id #(writer/assert-write-authorized! storage :input-binding {} binding-id))
+        version (get (input-storage/binding-versions storage {binding-id fn-id}) binding-id)
+        _ (when-not (and version (or (nil? expected-version) (= expected-version version)))
+            (reject! :input/stale-version "Refresh the structured input before editing"))
         basis (bind/preview-basis storage ctx (-> command (dissoc :expected-version) (assoc :action action)))]
     (when (and expected-version (not= expected-state basis))
       (reject! :input/stale-preview "Refresh the structured input before editing"))
     (checked-change! action ctx command row)
     {:owner (get-in ctx [:fns fn-id]) :expected-state basis
-     :expected-version (:id version)}))
+     :expected-version version}))
 
 
 (defn preview
@@ -88,11 +87,13 @@
 (defn- apply-plan!
   [frozen storage action {:keys [fn-id binding-id value] :as command}]
   (let [{:keys [owner]} (plan frozen storage action command)
-        result (access/with-binding-write fn-id binding-id
-                                          #(case action
-                                             :edit (sp/update-entity storage :input-binding binding-id {:value value})
-                                             :remove (binding [vs/*tombstone-delete?* true]
-                                                       (sp/delete-entity storage :input-binding binding-id))))]
+        result (input-storage/binding-call storage :write fn-id binding-id
+                                           (fn []
+                                             (access/with-binding-write fn-id binding-id
+                                                                        #(case action
+                                                                           :edit (sp/update-entity storage :input-binding binding-id {:value value})
+                                                                           :remove (binding [vs/*tombstone-delete?* true]
+                                                                                     (sp/delete-entity storage :input-binding binding-id))))))]
     (when-not result
       (reject! :input/write-refused "The input binding was not changed"))
     owner))

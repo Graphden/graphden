@@ -11,11 +11,11 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.read-view :as read-view]
     [graphden.input.rows :as rows]
+    [graphden.input.storage :as input-storage]
     [graphden.storage.graph-writer :as writer]
     [graphden.types.check :as check]
     [graphden.types.core :as types]
-    [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.resolution :as res]))
+    [graphden.versioning.storage.core :as vs]))
 
 
 (defn- signature-view
@@ -143,8 +143,8 @@
 (defn- occupied-editor-fields
   [storage ctx graph]
   (let [fields (visible-occupied-leaves ctx graph)
-        versions (res/resolve-version-ids (vs/unwrap storage) :input-binding
-                                          (mapv :binding-id fields) (vs/current-branch-id storage))]
+        versions (input-storage/binding-versions storage (into {} (map (fn [{:keys [binding-id]}]
+                                                                         [binding-id (get-in ctx [:bindings binding-id :fn-id])])) fields))]
     (into [] (keep (fn [field]
                      (when-let [version (get versions (:binding-id field))]
                        (assoc field :version-id version)))) fields)))
@@ -168,7 +168,7 @@
     (try
       (binding [vs/*enforce-require-merge?* true]
         (writer/assert-write-authorized! storage :fn {} root)
-        (writer/assert-write-authorized! storage :input-binding {:fn-id root} nil)
+        (input-storage/binding-call storage :check root nil #(writer/assert-write-authorized! storage :input-binding {:fn-id root} nil))
         true)
       (catch clojure.lang.ExceptionInfo error
         (case (:type (ex-data error))

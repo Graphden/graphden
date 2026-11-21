@@ -3,8 +3,10 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.input.authority :as authority]
     [graphden.input.context :as context]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (def ^:private max-functions 1024)
@@ -23,7 +25,13 @@
   [storage entity owners remaining]
   (if (empty? owners)
     [[] remaining]
-    (let [rows (sp/query-bounded-entities storage entity {:fn-id (vec owners)} remaining)
+    (let [base (vs/unwrap storage)
+          branch (vs/current-branch-id storage)
+          op (when (= entity :input-binding) (:source-bindings (authority/operations base)))
+          rows (if op
+                 (authority/call base branch {:operation :source :owners owners}
+                                 #(op base branch owners remaining))
+                 (sp/query-bounded-entities storage entity {:fn-id (vec owners)} remaining))
           used (::sp/candidate-count (meta rows) (count rows))]
       [rows (- remaining used)])))
 

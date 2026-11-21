@@ -64,13 +64,13 @@ Reads the selected v2 declaration and its reachable owners under one decorated b
 :PROPERTIES:
 :CUSTOM_ID: crud/with-plan
 :FILE: src/graphden/crud/structured_input_bind.clj
-:LINE: 140
+:LINE: 142
 :MINS: 0.8
 :END:
 
 Preview and bind use the same decorated branch writer. It locks structured bindings before capturing a fresh authorized closure. The apply command compares the winning version basis, checks the proposed literal with the analyzer and inserts one row.
 
-- source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:140]]
+- source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:142]]
 - see also :: [[file:crud.org::#crud/read-input][read-input]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/dispatch][dispatch]], [[file:editor.org::#editor/openStructuredInputPopover][openStructuredInputPopover]]
 
@@ -78,13 +78,13 @@ Preview and bind use the same decorated branch writer. It locks structured bindi
 :PROPERTIES:
 :CUSTOM_ID: crud/with-current-binding!
 :FILE: src/graphden/input/storage.clj
-:LINE: 52
+:LINE: 74
 :MINS: 1.2
 :END:
 
 Opens the semantic graph writer transaction before acquiring the structured binding lock. Resolves the winner for this branch with fresh memos and checks the expected version. A failure rolls back the entire callback and leaves that basis reusable.
 
-- source :: [[file:../../../src/graphden/input/storage.clj::(defn with-current-binding!][src/graphden/input/storage.clj:52]]
+- source :: [[file:../../../src/graphden/input/storage.clj::(defn with-current-binding!][src/graphden/input/storage.clj:74]]
 - see also :: [[file:crud.org::#crud/with-plan][with-plan]]
 - referenced from :: [[file:crud.org::#crud/dispatch][dispatch]]
 

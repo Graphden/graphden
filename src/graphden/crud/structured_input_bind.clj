@@ -61,7 +61,9 @@
   (let [branch (vs/current-branch-id storage)
         base (vs/unwrap storage)
         version-anchors (fn [entity ids]
-                          (let [versions (res/resolve-version-ids base entity (vec ids) branch)]
+                          (let [versions (if (= entity :input-binding)
+                                           (input-storage/binding-versions storage (update-vals bindings :fn-id))
+                                           (res/resolve-version-ids base entity (vec ids) branch))]
                             (when-not (= (count ids) (count versions))
                               (reject! :input/stale-preview "Refresh the structured input before binding"))
                             versions))
@@ -126,7 +128,7 @@
         _ (when (and apply? (not= basis (:expected-state command)))
             (reject! :input/stale-preview "Refresh the structured input before binding"))
         row (checked-row ctx command)]
-    (writer/assert-write-authorized! storage :input-binding row nil)
+    (input-storage/binding-call storage :check fn-id (:id row) #(writer/assert-write-authorized! storage :input-binding row nil))
     {:basis basis :row row :owner (get-in ctx [:fns fn-id])}))
 
 
@@ -170,7 +172,9 @@
             command (normalize-command request)
             {:keys [binding owner]} (with-plan ctx storage command true
                                       (fn [snapshot {:keys [row owner]}]
-                                        {:binding (or (access/with-binding-write (:id owner) (:id row) #(sp/create-entity snapshot :input-binding row))
+                                        {:binding (or (input-storage/binding-call snapshot :write (:id owner) (:id row)
+                                                                                  #(access/with-binding-write (:id owner) (:id row)
+                                                                                                              (fn [] (sp/create-entity snapshot :input-binding row))))
                                                       (reject! :input/write-refused "The input binding was not written"))
                                          :owner owner}))
             result {:ok true :committed true :fn-id (:id owner) :binding-id (:id binding)}]

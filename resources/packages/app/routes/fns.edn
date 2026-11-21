@@ -609,7 +609,7 @@
   ;; --- /api/tour — interactive-tutorial lesson scripts ---
 
   {:name :api-tour
-   :description "GET /api/tour — the interactive in-editor tutorial's lesson scripts as JSON (steps, spotlight targets, completion checks). Static teaching content served from the graph (`app.tour/_tour-lessons`); open route so the anonymous landing-demo session can start a lesson."
+   :description "GET /api/tour — the interactive in-editor tutorial's lesson scripts as JSON, filtered to the viewer's eligibility. The open route also serves the anonymous landing demo."
    :parent :get-route
    :args {:path "/tour" :handler :tour-lessons-handler}}
 

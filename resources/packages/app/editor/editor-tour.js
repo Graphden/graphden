@@ -28,6 +28,7 @@ const TOUR_NEXT_KEY = 'graphden.tour.next';
 const TOUR_TICK_MS = 600;
 
 let _tourLessons = null; // fetched /api/tour payload
+let _tourLessonsScope = null;
 let _tourState = null;   // {lessonId, step, created: [{type,name}]}
 let _tourStartGeneration = 0;
 
@@ -677,6 +678,8 @@ async function _tourFetchLessons() {
   }
   if (!_tourLessons && !(window.API && API.api_tour)) return null;
   const ticket = _tourStartTicket(false);
+  if (_tourLessonsScope && (_tourLessonsScope.authEpoch !== ticket.authEpoch
+      || _tourLessonsScope.branch !== ticket.branch)) _tourLessons = null;
   try {
     if (!_tourLessons) {
       const r = await authFetch(API.api_tour);
@@ -684,6 +687,7 @@ async function _tourFetchLessons() {
       const payload = await r.json();
       if (!_tourStartCurrent(ticket)) return null;
       _tourLessons = payload;
+      _tourLessonsScope = ticket;
     }
     return typeof _tourScopeStructuredLesson === 'function'
       ? await _tourScopeStructuredLesson(_tourLessons, () => _tourStartCurrent(ticket))

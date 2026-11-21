@@ -118,6 +118,18 @@
     (is (= 88 (legacy {}) (canonical {})))))
 
 
+(deftest generated-list-projection-reads-the-authored-outer-field
+  (let [child {:namespace "fixture" :name :greeting :parent :str
+               :args {:parts ["Hello " {:as :person :type :text} "!"]}}
+        source (conj (declarations "packages/core/strings/fns.edn" #{:str}) child)
+        root (ids/fn-id "fixture" :greeting)
+        {:keys [canonical legacy analysis]} (runtimes source root)
+        field (ids/slot-id root :person)]
+    (is (= :checked (:status analysis)))
+    (is (= field (get-in analysis [:public-input :routes [:person] :origin-field-id])))
+    (is (= "Hello Ada!" (legacy {:person "Ada"}) (canonical {:person "Ada"})))))
+
+
 (deftest staged-primitive-executes-without-legacy-preparation
   (let [module {:input-format 2 :namespace "core.arithmetic"
                 :fns [{:name :floor :input {:number :numeric} :return-type :int}]}

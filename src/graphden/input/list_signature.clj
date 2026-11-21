@@ -51,7 +51,7 @@
                      polymorphic?
                      (= :union (:kind (resolve-named element))))))
        (reject! owner-id :list-element-signature)
-       (not-every? #(#{:value :ref} (:kind %)) items) (reject! owner-id :list-operand-signature))
+       (not-every? #(#{:value :ref :projection} (:kind %)) items) (reject! owner-id :list-operand-signature))
      (let [recovered (records/recover-chain (mapv :owner-id fragments) target-id field names records)
            _ (when-not (migration/same-edn? recovered (select-keys trace (keys recovered))) (reject! owner-id :source-fragment-mismatch))
            contribution (records/authored-records (assoc recovered :records records))
@@ -68,6 +68,7 @@
         :input-type-id (:input-type-fn-id owner)
         :contract {:type args :fields fields} :declaration-records declarations
         :bindings (filterv #(and (= builder-id (:fn-id %)) (= :input-binding (:kind %))) contribution)
+        :owner-bindings (filterv #(and (= owner-id (:fn-id %)) (= "projection" (:expression-kind %))) contribution)
         :list-implementation {:base-fn-id builder-id :root-entry root-entry
                               :generated-list {:owner-id owner-id :operands (mapv :name (pop fields))
                                                :infer-return? polymorphic?}

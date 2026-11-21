@@ -50,8 +50,9 @@ repositories given to `--repo` as checksum-pinned source data. Each checked
 signature must match the source declaration and its original UUID. The
 planner revisits a blocked candidate when the exact dependency it needs has
 been certified. Inspect `:scope-certification` on each attempted definition
-for a verified result or the remaining proof requirement. The usual source
-report and staging command accept the same artifact format.
+for a verified result or the remaining proof requirement. Imported definitions
+reuse the proof from their declaring package. The report excludes proposed
+source text. The existing staging command reads the private artifact.
 
 ## Semantic source planner
 

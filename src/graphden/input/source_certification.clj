@@ -63,21 +63,35 @@
         {:package package :certified certified :blocked blocked}))))
 
 
+(defn- shared-forwarding
+  [prepared baselines]
+  (reduce (fn [context entry]
+            (if (some :source-names (vals (get-in entry [:v2 :scoped-inputs])))
+              (source/with-forwarded-parent context entry)
+              context))
+          prepared
+          (vals baselines)))
+
+
 (defn verify-plan
-  "Certify visible scope rewrites, then verify the original package plan
-   in the updated context. Return only the requested package's definitions."
-  [prepared originals dependencies roots]
-  (let [visible (into originals dependencies)
-        package (snapshot/package-index prepared visible)
-        ;; The package preparation lists local definitions in :fn-defs.
-        ;; Imported declarations must also be eligible as proof dependencies.
-        visible-context (assoc (:prepared package) :fn-defs (vals (:declarations package)))
-        preliminary (source/plan-module visible visible-context)
+  "Verify local scope rewrites using source proofs from the declaring packages.
+   An imported declaration keeps its original name resolution and verified
+   rows even when the importing package uses a different reference spelling."
+  [prepared originals {:keys [definitions baselines]} roots]
+  (let [visible (into originals definitions)
+        prepared (shared-forwarding prepared baselines)
+        package (assoc (snapshot/package-index prepared visible) :closure-baselines baselines)
+        initial-context (:prepared package)
+        preliminary (source/plan-module originals initial-context)
         {:keys [package certified blocked]} (certify package (:definitions preliminary) roots)
         context (:prepared package)
-        plan (source/plan-module originals context)
-        entries (mapv #(get (:closure-baselines package) (:identity %) %) (:definitions plan))]
-    {:context context
-     :plan (source/verify-module (assoc plan :definitions entries) context)
-     :certified certified :blocked blocked
-     :package package}))
+        plan (if (= initial-context context)
+               preliminary
+               (source/plan-module originals context))
+        entries (mapv #(get (:closure-baselines package) (:identity %) %) (:definitions plan))
+        verified (source/verify-module (assoc plan :definitions entries) context)
+        local-proofs (into {} (comp (filter #(= :authored-source-equivalent (:verification %)))
+                                    (map (juxt :identity identity)))
+                           (:definitions verified))]
+    {:context context :plan verified :certified certified :blocked blocked :package package
+     :source-proof {:definitions visible :baselines (merge baselines local-proofs)}}))

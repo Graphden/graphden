@@ -256,7 +256,8 @@
             blocked "resources/packages/example/review/fns.edn"]
         (package! root "example" []
                   [["main" "example" [identity-fn
-                                      {:name :reader :args {:deep :any} :return-type :any}]]
+                                      {:name :reader :args {:deep :any} :return-type :any}
+                                      {:name :bound :parent :id :args {:x "staged private literal"}}]]
                    ["review" "example"
                     [{:name :ref-scoped :parent :id :args {:x :reader :deep "private literal"}}]]])
         (let [manifest (inventory/inventory roots)
@@ -270,6 +271,7 @@
           (is (= 2 (:input-format (edn/read-string (:text result)))))
           (is (= :whole-module-proof-required (get-in by-path [blocked :reason])))
           (is (nil? (get-in by-path [blocked :patch])))
+          (is (str/includes? (:text result) "staged private literal"))
           (is (not (str/includes? (pr-str (:report run)) "private literal")))
           (is (= manifest (inventory/inventory roots))))))))
 

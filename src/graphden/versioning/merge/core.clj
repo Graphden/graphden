@@ -30,6 +30,7 @@
   (:require
     [clojure.string :as str]
     [graphden.schema.traits.schema :as vts]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.traits-seed :as traits-seed]
     [graphden.types.diagnostics :as diag]
@@ -285,6 +286,52 @@
                        :target-branch-id (vs/current-branch-id versioned-storage)})))))
 
 
+(defn- apply-merge-plan!
+  [versioned-storage source-branch-id opts gate! atomic-input?]
+  ;; One merge-record memo over the check, the steps and the merge — the
+  ;; `branch_merge` rows the check reads are the ones the merge reads
+  ;; again (each landed record forgets the memo, so a step never reads
+  ;; stale rows).
+  (res/call-with-merges-memo
+    (fn []
+      (let [base (:base-storage versioned-storage)
+            target (vs/current-branch-id versioned-storage)
+            plan (when (or atomic-input? (seq (mrg/untransferable-inherited-entities base source-branch-id target)))
+                   (mrg/inherited-merge-plan base source-branch-id target))
+            ;; The check ran here; the storage layer need not repeat its
+            ;; queries. Sound for the steps too: a step's own inheritance is
+            ;; inside the source's, and the plan lands root-most first.
+            opts (assoc opts :inherited-checked? true)
+            checked-opts (fn [bid]
+                           (assoc opts :trusted-precommit-check!
+                                  (fn [transaction-storage]
+                                    (gate! (assoc versioned-storage
+                                                  :base-storage transaction-storage)
+                                           bid))))]
+        (loop [steps plan
+               done []]
+          (if-let [{:keys [id] :as step} (first steps)]
+            (let [bid (java.util.UUID/fromString id)]
+              (try
+                (gate! versioned-storage bid)
+                (vs/merge-branch! versioned-storage bid (checked-opts bid))
+                (catch clojure.lang.ExceptionInfo e
+                  (when atomic-input?
+                    (throw (ex-info "Structured branch merge was rejected"
+                                    {:type (or (:type (ex-data e)) :merge-conflict)})))
+                  (throw (ex-info (str "While merging \"" (:name step) "\" first (step "
+                                       (inc (count done)) " of " (inc (count plan)) "): "
+                                       (ex-message e))
+                                  (assoc (ex-data e) :step step :merged-first done)
+                                  e))))
+              (recur (rest steps) (conj done step)))
+            (do
+              (gate! versioned-storage source-branch-id)
+              (assoc (vs/merge-branch! versioned-storage source-branch-id
+                                       (checked-opts source-branch-id))
+                     :merged-first done))))))))
+
+
 (defn merge-transitively!
   "Merge `source-branch-id` into the current branch of `versioned-storage`
    CARRYING what the source shows by inheritance. A by-reference merge
@@ -307,47 +354,15 @@
    `:step` and `:merged-first` added; the steps before it are committed,
    exactly as merging the plan one click at a time would leave things,
    and re-running the merge with the conflict resolved picks up where it
-   stopped."
-  [versioned-storage source-branch-id opts gate!]
-  ;; One merge-record memo over the check, the steps and the merge — the
-  ;; `branch_merge` rows the check reads are the ones the merge reads
-  ;; again (each landed record forgets the memo, so a step never reads
-  ;; stale rows).
-  (res/call-with-merges-memo
-    (fn []
-      (let [base (:base-storage versioned-storage)
-            target (vs/current-branch-id versioned-storage)
-            plan (when (seq (mrg/untransferable-inherited-entities base source-branch-id target))
-                   (mrg/inherited-merge-plan base source-branch-id target))
-            ;; The check ran here; the storage layer need not repeat its
-            ;; queries. Sound for the steps too: a step's own inheritance is
-            ;; inside the source's, and the plan lands root-most first.
-            opts (assoc opts :inherited-checked? true)
-            checked-opts (fn [bid]
-                           (assoc opts :trusted-precommit-check!
-                                  (fn [transaction-storage]
-                                    (gate! (assoc versioned-storage
-                                                  :base-storage transaction-storage)
-                                           bid))))]
-        (loop [steps plan
-               done []]
-          (if-let [{:keys [id] :as step} (first steps)]
-            (let [bid (java.util.UUID/fromString id)]
-              (try
-                (gate! versioned-storage bid)
-                (vs/merge-branch! versioned-storage bid (checked-opts bid))
-                (catch clojure.lang.ExceptionInfo e
-                  (throw (ex-info (str "While merging \"" (:name step) "\" first (step "
-                                       (inc (count done)) " of " (inc (count plan)) "): "
-                                       (ex-message e))
-                                  (assoc (ex-data e) :step step :merged-first done)
-                                  e))))
-              (recur (rest steps) (conj done step)))
-            (do
-              (gate! versioned-storage source-branch-id)
-              (assoc (vs/merge-branch! versioned-storage source-branch-id
-                                       (checked-opts source-branch-id))
-                     :merged-first done))))))))
+   stopped. A hosted structured transfer commits or rolls back the complete
+   plan in a single semantic writer transaction."
+  [storage source opts gate!]
+  (let [base (:base-storage storage)
+        transfer? (get-in base [:graphden.input.authority/operations :structured-merge?])]
+    (if (and transfer? (transfer? base source (vs/current-branch-id storage)))
+      (writer/call-with-write base :branch-merge
+                              #(apply-merge-plan! (assoc storage :base-storage %) source opts gate! true))
+      (apply-merge-plan! storage source opts gate! false))))
 
 
 (defn safe-merge-branch!

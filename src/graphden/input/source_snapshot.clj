@@ -124,7 +124,7 @@
 (defn- inline-entry
   "The verified parent's round trip compared the child's original body, use-site
    UUID and authored rows. Match its local field or stored list position."
-  [package {:keys [fn-id inline-definitions]} edges fragments [path child]]
+  [package {:keys [fn-id]} edges fragments [path child]]
   (let [[field position] path
         id (:fn-id child)
         entry (owned-declaration child)
@@ -132,17 +132,17 @@
     (when-not (and (uuid? id) (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge))
                    (= (ids/binding-id fn-id field) (:id edge))
                    (case (count path)
-                     1 (and (= 1 (count inline-definitions)) (= id (:ref-fn-id edge))
+                     1 (and (= id (:ref-fn-id edge))
                             (empty? (:scope-path edge)) (= [field] (:target-path edge)))
                      2 (list-signature/inline-operand? (get fragments (:ref-fn-id edge)) edge position id)
                      false)
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
                    (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
                    (= 1 (count (get-in entry [:owner :parent-ids])))
-                   (every? empty? ((juxt :inline-definitions :list-builders :configurations :scoped-inputs) child)))
+                   (every? empty? ((juxt :configurations :scoped-inputs) child)))
       (reject! :unsupported-scope-declaration fn-id))
     (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
-    entry))
+    child))
 
 
 (defn- inline-entries
@@ -150,6 +150,16 @@
   (let [edges (into {} (map (juxt :id identity)) bindings)
         fragments (into {} (map (juxt (comp :id :owner) :list-fragment)) generated)]
     (mapv (partial inline-entry package v2 edges fragments) inline-definitions)))
+
+
+(defn- verified-entry-tree
+  [package {:keys [fn-id list-builders] :as v2} resolve-named]
+  (let [generated (mapv (partial list-signature/entry fn-id (get-in package [:prepared :name->id]) resolve-named)
+                        (vals list-builders))
+        children (inline-entries package v2 generated)]
+    (into (conj generated (owned-declaration v2))
+          (mapcat #(verified-entry-tree package % resolve-named))
+          children)))
 
 
 (defn- closure-entries
@@ -160,10 +170,7 @@
                       {:type :input/source-snapshot :code :unverified-source-declaration
                        :fn-id id :blockers (mapv :code blockers)})))
     (when-not (:input-type-id v2) (reject! :unsupported-scope-declaration id))
-    (let [generated (mapv (partial list-signature/entry id (get-in package [:prepared :name->id]) resolve-named)
-                          (vals (:list-builders v2)))]
-      (cond-> (conj generated (owned-declaration v2))
-        (seq (:inline-definitions v2)) (into (inline-entries package v2 generated))))))
+    (verified-entry-tree package v2 resolve-named)))
 
 
 (defn- add-closure-entry

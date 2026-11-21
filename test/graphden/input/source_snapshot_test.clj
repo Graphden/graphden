@@ -268,6 +268,34 @@
            (:code (failure #(snapshot/freeze-closure (update package :originals dissoc base) [host-id] @roots)))))))
 
 
+(deftest multiple-inline-branches-freeze-every-authored-use
+  (let [leaf {:parent :str-upper :args {:string "checked"}}
+        host {:namespace "fixture" :name :inline-comparison :parent :equal?
+              :args {:a {:parent :str-upper :args {:string leaf}}
+                     :b leaf}}
+        equal (some #(when (= :equal? (:name %)) %) (sources "logic"))
+        originals (conj strings equal host)
+        package (snapshot/package-index (parse/prepare-module originals {} {}) originals)
+        owner (ids/fn-id "fixture" :inline-comparison)
+        base (ids/fn-id "core.strings" :str-upper)
+        field (ids/slot-id base :string)
+        left-edge (ids/binding-id owner (ids/slot-id (ids/fn-id "core.logic" :equal?) :a))
+        right-edge (ids/binding-id owner (ids/slot-id (ids/fn-id "core.logic" :equal?) :b))
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        left (get-in context [:bindings left-edge :ref-fn-id])
+        right (get-in context [:bindings right-edge :ref-fn-id])
+        child-edge (ids/binding-id left field)
+        child (get-in context [:bindings child-edge :ref-fn-id])
+        checked (analysis/analyze-effective-input context owner options)]
+    (is (= 3 (count (set [left right child]))))
+    (is (every? uuid? [left right child]))
+    (doseq [id [right child]]
+      (is (= [base] (get-in context [:fns id :parent-ids])))
+      (is (= "checked" (get-in context [:bindings (ids/binding-id id field) :value]))))
+    (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
+    (is (= :text (get-in checked [:scopes [left-edge child-edge] :signature :return])))))
+
+
 (deftest inline-list-leaves-preserve-original-operand-positions
   (let [body {:parent :str-upper :args {:string "same"}}
         host {:name :sample :namespace "fixture" :parent :str :args {:parts [body body]}}

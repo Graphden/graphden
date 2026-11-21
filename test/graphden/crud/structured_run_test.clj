@@ -87,8 +87,9 @@
       (is (= -8 (:result response)) (pr-str response))
       (is (= [[config value nil]] (mapv (juxt :slot-id :value :ref-fn-version-id) rows))))
     (let [{:keys [invoke]} (run/plan ctx child {:number 6.8})
-          attempt (fn [] (try (invoke {:number 6.8} ctx)
-                              (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))]
+          attempt (fn []
+                    (try (invoke {:number 6.8} ctx)
+                         (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))]
       (with-redefs [tenant/browser-source-policy (fn [_] #(when (= floor (:id %)) :interface))]
         (is (= :input-source-interface-only (attempt))))
       (binding [access/*offline?* true]

@@ -48,7 +48,7 @@
   (delay
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded @loaded-bases]
-        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(#{:equal? :const :coalesce} (:name %)) (sources "logic"))
+        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(#{:equal? :const :coalesce :assert-some} (:name %)) (sources "logic"))
                                                         (filter #(#{:get :zipmap} (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
                                                         (filter #(#{:shipped-asset :to-json-string :throw} (:name %)) (sources "system"))
@@ -252,6 +252,47 @@
     (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
     (is (= :never (get-in graph [:scopes [] :signature :return])))
     (is (= :any (get-in graph [:public-input :routes [:exception] :completion-type])))))
+
+
+(deftest shipped-nullable-rename-rules-retain-the-legacy-non-null-result
+  (let [base (filterv #(= :assert-some (:name %)) (sources "logic"))
+        aliases (filterv #(#{:nullable-text :nullable-uuid} (:name %)) (sources "refinements"))
+        children (vec (concat (fixtures/declarations "packages/app/lookups/fns.edn" #{:_frbi-id-narrowed})
+                              (fixtures/declarations "packages/app/views/fns.edn" #{:_view-filter-nonnull-text})))
+        definitions (into (into base aliases) children)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owners (mapv #(ids/fn-id (:namespace %) (:name %)) children)
+        {:keys [context options]} (snapshot/freeze-closure package owners @roots)
+        samples {:nullable-uuid (random-uuid) :nullable-text "checked"}
+        impl (:impl (get @loaded-bases :assert-some))]
+    (doseq [[child owner] (map vector children owners)
+            :let [spec (get-in child [:args :value])
+                  sample (get samples (:type spec))
+                  graph (analysis/analyze-effective-input context owner options)
+                  legacy (impl {:value sample} {})]]
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= (literals/classify-literal legacy) (get-in graph [:scopes [] :signature :return])))
+      (is (= sample legacy))
+      (is (empty? (:obligations graph)))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"value is nil"
+        ((:impl (get @loaded-bases :assert-some)) {:value nil} {}))))
+
+
+(deftest shipped-coalesce-rule-is-local-and-preserves-nil-and-false
+  (let [base (some #(when (= :coalesce (:name %)) %) (sources "logic"))
+        cases [[:missing nil 7] [:present "checked" nil] [:falsy false true]]
+        children (mapv (fn [[name value default]]
+                         {:namespace "fixture" :name name :parent :coalesce :args {:value value :default default}}) cases)
+        definitions (into [base] children)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owners (mapv #(ids/fn-id "fixture" (:name %)) children)
+        {:keys [context options]} (snapshot/freeze-closure package owners @roots)
+        impl (:impl (get @loaded-bases :coalesce))]
+    (doseq [[[name value default] owner] (map vector cases owners)
+            :let [graph (analysis/analyze-effective-input context owner options)
+                  legacy (impl {:value value :default default} {})]]
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= (literals/classify-literal legacy) (get-in graph [:scopes [] :signature :return])) name))))
 
 
 (deftest scoped-bindings-are-certified-together

@@ -38,6 +38,18 @@
          (every? (partial known-type? aliases) (types/child-types t)))))
 
 
+(defn- nullable-variable-instance?
+  [target actual]
+  (let [members (when (types/union-type? target) (types/union-members target))]
+    (when (and (= 2 (count members)) (some #{:null} members)
+               (= 1 (count (filter types/type-var? members))))
+      (let [substitution (types/unify target actual)]
+        (when (map? substitution)
+          (let [instantiated (types/resolve substitution target)]
+            (and (not (types/type-any? types/type-var? instantiated))
+                 (types/subtype? actual instantiated))))))))
+
+
 (defn- named-union-pin?
   [snapshot target pin]
   (context/call-with-types
@@ -54,7 +66,8 @@
                (not (types/type-any? types/type-var? actual))
                (= (count vars) (count (distinct vars)))
                (markers/preserved? expected actual)
-               (types/subtype? actual expected)))
+               (or (types/subtype? actual expected)
+                   (nullable-variable-instance? expected actual))))
         (catch clojure.lang.ExceptionInfo _ false)))))
 
 

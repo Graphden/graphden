@@ -1,6 +1,7 @@
 (ns ^:serial graphden.input.source-test
   (:require
     [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.input.migration :as migration]
@@ -765,6 +766,40 @@
       (is (contains? (codes (replay [lookup record other different])) :rename-projection-required))
       (is (contains? (codes (replay [secret-base masked child])) :rename-projection-required))
       (is (contains? (codes (replay [repeated record child])) :rename-projection-required)))))
+
+
+(deftest shipped-nullable-renames-instantiate-only-the-parent-nullable-variable
+  (let [declarations (fn [module names]
+                       (let [{:keys [namespace fns]} (edn/read-string (slurp (io/resource (str "packages/" module "/fns.edn"))))]
+                         (mapv #(assoc % :namespace namespace) (filter #(contains? names (:name %)) fns))))
+        base (declarations "core/logic" #{:assert-some})
+        aliases (declarations "core/refinements" #{:nullable-text :nullable-uuid})
+        children (into (declarations "app/lookups" #{:_frbi-id-narrowed})
+                       (declarations "app/views" #{:_view-filter-nonnull-text}))
+        definitions (into (into base aliases) children)
+        ctx (prepared definitions)
+        report (source/verify-module (source/plan-module children ctx) ctx)]
+    (is (= {:supported 2 :blocked 0} (:counts report)))
+    (doseq [child children
+            :let [entry (result report (:name child))
+                  owner (ids/fn-id (:namespace child) (:name child))
+                  target (ids/slot-id (ids/fn-id "core.logic" :assert-some) :value)
+                  spec (get-in child [:args :value])
+                  [row] (get-in entry [:v2 :bindings])]]
+      (is (= :authored-source-equivalent (:verification entry)))
+      (is (= {:type (:type spec) :required false} (get-in entry [:proposed :input (:as spec)])))
+      (is (= {:type (:type spec)} (get-in entry [:proposed :configure [:value]])))
+      (is (= [(ids/binding-id owner target) [target] [(ids/slot-id owner (:as spec))]]
+             ((juxt :id :target-path :projection-path) row))))
+    (let [child (first children)
+          replay (fn [target-type pin]
+                   (let [ds (into [(assoc-in (first base) [:args :value :type] target-type)] aliases)
+                         ds (conj ds (assoc-in child [:args :value :type] pin))
+                         ctx (prepared ds)]
+                     (first (:definitions (source/verify-module (source/plan-module [(last ds)] ctx) ctx)))))]
+      (is (contains? (codes (replay [:union :null :text] :nullable-uuid)) :rename-projection-required))
+      (is (contains? (codes (replay '[:union :null [:list a]] :nullable-text)) :rename-projection-required))
+      (is (contains? (codes (replay '[:union :null a] :missing-type)) :rename-projection-required)))))
 
 
 (deftest nested-inline-declarations-retain-order-and-all-use-sites

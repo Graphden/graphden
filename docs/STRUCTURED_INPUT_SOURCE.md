@@ -252,8 +252,11 @@ a type variable. An unrelated FK or implementation return remains an error.
 
 A named pin on a union field uses the prepared package's namespace-resolved
 type definitions. The source planner checks finite expansion, marker
-preservation and directional subtyping. The pin must expand to a concrete
-type and the target may carry each type variable once. Unknown references,
+preservation and directional subtyping. For exactly `[:union :null T]` with
+one type variable, the existing unifier may instantiate `T`; the resulting
+closed instance must still accept the named pin by directional subtyping.
+Other generic shapes receive no new inference rule. The pin must expand to a
+concrete type and the target may carry each type variable once. Unknown references,
 recursive aliases and unsupported declaration shapes keep the migration blocked.
 
 `source-snapshot/projection-readiness` returns the analyzer's scoped routes,

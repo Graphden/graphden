@@ -118,6 +118,30 @@
     (is (= 88 (legacy {}) (canonical {})))))
 
 
+(deftest shipped-described-rename-retains-binding-metadata-and-runtime-values
+  (let [source (into (declarations "packages/core/strings/fns.edn" #{:to-str})
+                     (declarations "packages/app/branches/fns.edn" #{:_approval-status-source-ref}))
+        owner (ids/fn-id "app.branches" :_approval-status-source-ref)
+        target (ids/slot-id (ids/fn-id "core.strings" :to-str) :value)
+        alias (ids/slot-id owner :source-branch-id)
+        {:keys [canonical legacy analysis]} (runtimes source owner)
+        configured (some #(when (= target (:id %)) %) (get-in analysis [:scopes [] :configured-contract :fields]))]
+    (is (= :checked (:status analysis)))
+    (is (= "The proposal (source) branch to report on." (:description configured)))
+    (is (= alias (get-in analysis [:public-input :routes [:source-branch-id] :origin-field-id])))
+    (is (= :text (get-in analysis [:scopes [] :signature :return])))
+    (is (= "00112233-4455-6677-8899-aabbccddeeff"
+           (legacy {:source-branch-id #uuid "00112233-4455-6677-8899-aabbccddeeff"})
+           (canonical {:source-branch-id #uuid "00112233-4455-6677-8899-aabbccddeeff"})))))
+
+
+(deftest described-rename-keeps-unrepresented-runtime-intersections-blocked
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:empty?})
+                     (declarations "packages/web/crud-delete/fns.edn" #{:_owner-fn-ids-empty?}))]
+    (is (= :conflicting-runtime-obligations
+           (rejection-code #(runtimes source (ids/fn-id "web.crud" :_owner-fn-ids-empty?)))))))
+
+
 (deftest generated-list-projection-reads-the-authored-outer-field
   (let [child {:namespace "fixture" :name :greeting :parent :str
                :args {:parts ["Hello " {:as :person :type :text} "!"]}}

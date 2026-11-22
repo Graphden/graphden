@@ -716,5 +716,36 @@
       (is (= :already-applied (:status (cst/apply-text patch target)))))))
 
 
+(deftest described-projection-preserves-metadata-comments-and-multiline-bytes
+  (let [description "\"first\r\nline {:as :data :args :data}\""
+        text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:value :any} :return-type :any}\r\n"
+                  "{:name :child :parent :base :args {:value {; alias header\r\n"
+                  " :description " description " ; description tail\r\n"
+                  " :as ; alias spelling\r\n :body :type ; type spelling\r\n :text}}}]}\r\n")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:body {:type :text :required false}} (:input child)))
+    (is (= {:value [:project [:body]]} (:bind child)))
+    (is (= {[:value] {:type :text :description (edn/read-string description)}} (:configure child)))
+    (doseq [bytes [description "; alias header\r\n" "; description tail\r\n" "; alias spelling\r\n" "; type spelling\r\n"]]
+      (is (str/includes? target bytes)))))
+
+
+(deftest inline-description-remains-part-of-the-inline-declaration
+  (let [text "{:namespace \"demo.main\" :fns [{:name :base :args {:value :any} :return-type :any} {:name :child :parent :base :args {:value {:parent :base :description \"Function documentation\"}}}]}"
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= "Function documentation" (get-in child [:bind :value 1 :description])))
+    (is (not (contains? child :configure)))))
+
+
+(deftest description-only-projection-keeps-its-configuration-without-a-pin
+  (let [text "{:namespace \"demo.main\" :fns [{:name :base :args {:value :any} :return-type :any} {:name :child :parent :base :args {:value {:description \"Body\" :as :body}}}]}"
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= {:body {:type :any :required false}} (:input child)))
+    (is (= {[:value] {:description "Body"}} (:configure child)))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

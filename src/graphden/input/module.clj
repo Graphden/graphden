@@ -139,7 +139,7 @@
   (rows/normalize
     (merge {:kind :input-binding :id binding-id :fn-id owner
             :scope-path scope-path :target-path path}
-           (select-keys (get configuration path) [:type-override-fn-id])
+           (select-keys (get configuration path) [:type-override-fn-id :description])
            (case (:kind expression)
              :value {:expression-kind "value" :value-present true :value (:value expression)}
              :projection {:expression-kind "projection" :value-present false
@@ -149,7 +149,7 @@
 
 
 (defn- resolve-configuration
-  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations]} state [names {:keys [type] :as spec}]]
+  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations binding-descriptions]} state [names {:keys [type] :as spec}]]
   (let [path (:path (input/resolve-address contract scope names))]
     (cond
       (and (not (contains? state [scope path])) (get field-annotations names))
@@ -171,14 +171,19 @@
         [names self-pin])
       :else
       (do
-        (when-not (contains? spec :type) (reject! :unverified-field-annotation))
-        (when (contains? spec :description) (reject! :unverified-field-annotation))
+        (when-not (or (contains? spec :type) (contains? spec :description)) (reject! :unverified-field-annotation))
         (when-not (contains? state [scope path]) (reject! :configuration-requires-bound-field))
-        (when-not (ifn? resolve-config-type) (reject! :configuration-type-resolver-required))
-        (let [resolved (resolve-config-type type)]
-          (when-not (and (format/configuration-type? (:type resolved)) (uuid? (:type-override-fn-id resolved)))
+        (when (contains? spec :description)
+          (when-not (= {:description (:description spec) :target-path path :binding-id (binding-id scope path)}
+                       (get binding-descriptions names))
+            (reject! :unverified-field-annotation)))
+        (when (and (contains? spec :type) (not (ifn? resolve-config-type))) (reject! :configuration-type-resolver-required))
+        (let [resolved (when (contains? spec :type) (resolve-config-type type))]
+          (when-not (or (not (contains? spec :type))
+                        (and (format/configuration-type? (:type resolved)) (uuid? (:type-override-fn-id resolved))))
             (reject! :unresolved-configuration-type))
-          [names (assoc (select-keys resolved [:type :type-override-fn-id]) :target-path path)])))))
+          [names (merge (select-keys resolved [:type :type-override-fn-id])
+                        (select-keys spec [:description]) {:target-path path})])))))
 
 
 (declare ^:private parse-definition)

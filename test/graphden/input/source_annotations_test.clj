@@ -51,6 +51,66 @@
         (is (= :blocked (:status entry)))))))
 
 
+(deftest renamed-field-description-stays-on-the-original-binding
+  (let [spec {:as :public-title :type :text :description "Authored title"}
+        {:keys [entry context plan]} (fixture {:title spec})
+        owner (:identity entry)
+        field (ids/slot-id (ids/fn-id "fixture" :base) :title)
+        alias (ids/slot-id owner :public-title)
+        [row] (get-in entry [:v2 :bindings])
+        slot (some #(when (= alias (:id %)) %) (get-in entry [:v2 :declaration-records]))]
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= (dissoc spec :as) (get-in entry [:proposed :configure [:title]])))
+    (is (= {:type :text :required false} (get-in entry [:proposed :input :public-title])))
+    (is (= [:project [:public-title]] (get-in entry [:proposed :bind :title])))
+    (is (= {:id (ids/binding-id owner field) :target-path [field] :projection-path [alias]
+            :expression-kind "projection" :description "Authored title"}
+           (select-keys row [:id :target-path :projection-path :expression-kind :description])))
+    (is (nil? (:description slot)))
+    (doseq [change [#(assoc-in % [:configure [:title] :description] "Edited")
+                    #(update % :configure dissoc [:title])
+                    #(assoc-in % [:configure [:public-title]] (dissoc spec :as))
+                    #(assoc-in % [:input :public-title :description] "Authored title")]]
+      (let [changed (update-in plan [:definitions 1 :proposed] change)
+            result (second (:definitions (source/verify-module changed context)))]
+        (is (= :blocked (:status result)))))))
+
+
+(deftest description-only-rename-retains-the-original-any-slot
+  (let [definitions [{:namespace "fixture" :name :base :args {:value :any} :return-type :any}
+                     {:namespace "fixture" :name :renamed :parent :base
+                      :args {:value {:as :body :description "Body"}}}]
+        context (parse/prepare-module definitions {} {})
+        entry (last (:definitions (source/verify-module (source/plan-module definitions context) context)))]
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= {:body {:type :any :required false}} (get-in entry [:proposed :input])))
+    (is (= {[:value] {:description "Body"}} (get-in entry [:proposed :configure])))
+    (is (= "Body" (get-in entry [:v2 :bindings 0 :description])))))
+
+
+(deftest described-rename-allows-descendants-to-use-the-same-alias-slot
+  (let [definitions [{:namespace "fixture" :name :base :args {:value :text} :return-type :text}
+                     {:namespace "fixture" :name :renamed :parent :base
+                      :args {:value {:as :body :type :text :description "Body documentation"}}}
+                     {:namespace "fixture" :name :child :parent :renamed :args {:body "content"}}]
+        context (parse/prepare-module definitions {} {})
+        report (source/verify-module (source/plan-module definitions context) context)
+        child (last (:definitions report))
+        alias (ids/slot-id (ids/fn-id "fixture" :renamed) :body)]
+    (is (= {:supported 3 :blocked 0} (:counts report)))
+    (is (= :authored-source-equivalent (:verification child)))
+    (is (= [alias] (get-in child [:v2 :bindings 0 :target-path])))
+    (is (= "content" (get-in child [:v2 :bindings 0 :value])))))
+
+
+(deftest described-renames-refuse-unknown-policies-and-nontext-descriptions
+  (doseq [spec [{:as :public-title :description false}
+                {:as :public-title :description nil}
+                {:as :public-title :description "Title" :terminal true}
+                {:as :public-title :description "Title" :required true}]]
+    (is (= :blocked (:status (:entry (fixture {:title spec})))))))
+
+
 (deftest same-name-noop-retains-its-empty-binding-row-without-a-type-assertion
   (let [{:keys [entry context plan]} (fixture {:title {:as :title}})
         row (first (get-in entry [:v2 :bindings]))

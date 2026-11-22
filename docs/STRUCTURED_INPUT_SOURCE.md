@@ -213,6 +213,13 @@ the prepared type expression, including type variables. Supported pins retain
 the original binding UUID and a separate `:configure` assertion. Ambiguous
 names, conflicting pins and occupied ancestor fields remain diagnostics.
 
+An authored `:description` on a scalar rename belongs to its original binding,
+not the new alias slot. The planner keeps it under `:configure` at the original
+destination alongside any type assertion. The reader requires the exact
+source-backed description, target path and binding UUID before adding that
+metadata to the projection row. Changing or moving the description fails the
+source comparison. The CST writer retains its original string bytes and comments.
+
 Descendants may bind the alias slot through a common inheritance root. Each
 declaring ancestor's local projection must account for the stored source-slot
 link. Ancestor rows must occupy distinct slot addresses across the lineage.

@@ -1,8 +1,8 @@
 // Structured lessons use the ordinary branch factory, Extend and its creation receipt.
 // A package can offer the sample for this viewer through the subtree read.
 const structuredLessonSamples = new Map([
-  ['43', {template: 'abd1ff8f-3ae3-57c4-ad64-412ef0689f78', child: 'tutorial-structured-profile'}],
-  ['44', {template: 'b67af3a3-67c3-5237-89cf-62a815d5dfa1', child: 'tutorial-contact-route'}],
+  ['43', {child: 'tutorial-structured-profile'}],
+  ['44', {child: 'tutorial-contact-route'}],
 ]);
 const structuredLessonProofs = new WeakMap();
 
@@ -14,9 +14,9 @@ function _tourStructuredBranchMatches(saved) {
       && row.receipt === 'created');
 }
 
-function _tourStructuredChild(saved, parentId) {
+function _tourStructuredChild(saved, parentId, templateId = _tourLessons?.['structured-templates']?.[saved?.lessonId]) {
   const sample = structuredLessonSamples.get(saved?.lessonId);
-  return sample?.template === parentId && _tourStructuredBranchMatches(saved) && saved.created.find(row =>
+  return sample && templateId && templateId === parentId && _tourStructuredBranchMatches(saved) && saved.created.find(row =>
     row?.type === 'fn' && row.name === sample.child && row.id
     && row['parent-id'] === parentId && row['namespace-id'] === null
     && row['branch-id'] === saved.sandboxBranchId && row.receipt === 'created');
@@ -61,7 +61,7 @@ async function _tourScopeStructuredLesson(payload, current) {
   const lessons = payload?.lessons?.filter(item => structuredLessonSamples.has(item.id));
   if (!lessons?.length) return payload;
   const saved = _tourState || _tourLoadState();
-  const offers = await Promise.all(lessons.map(lesson => _tourStructuredAvailable(lesson, saved, current)));
+  const offers = await Promise.all(lessons.map(lesson => _tourStructuredAvailable(lesson, saved, current, payload['structured-templates']?.[lesson.id])));
   const hidden = new Set();
   lessons.forEach((lesson, index) => {
     if (offers[index] && current()) structuredLessonProofs.set(lesson, _tourStartTicket(false));
@@ -77,14 +77,14 @@ function _tourStructuredLessonProved(lesson) {
   return _tourStartCurrent(structuredLessonProofs.get(lesson));
 }
 
-async function _tourStructuredAvailable(lesson, saved, current) {
+async function _tourStructuredAvailable(lesson, saved, current, templateId) {
   const sample = structuredLessonSamples.get(lesson?.id);
-  if (!sample || lesson['template-id'] !== sample.template || typeof isAuthenticated !== 'function' || !isAuthenticated()
+  if (!sample || !templateId || lesson['template-id'] !== templateId || typeof isAuthenticated !== 'function' || !isAuthenticated()
       || !window.API?.api_graph_entities || !API.api_branches
       || typeof switchToBranch !== 'function') return false;
   const ownsBranch = saved?.lessonId === lesson.id && _tourStructuredBranchMatches(saved);
   if (!ownsBranch && _tourSessionBranch() !== 'main') return false;
-  const child = ownsBranch && _tourStructuredChild(saved, lesson['template-id']);
+  const child = ownsBranch && _tourStructuredChild(saved, lesson['template-id'], templateId);
   if (ownsBranch && !child) {
     const setup = lesson.steps?.findIndex(step => step.creates?.name === sample.child);
     if (setup >= 0 && saved.step > setup) return false;
@@ -113,6 +113,7 @@ async function _tourStructuredAvailable(lesson, saved, current) {
 function _tourStructuredExtend(fn) {
   const target = _tourStep()?.creates;
   const sample = structuredLessonSamples.get(_tourState?.lessonId);
-  return sample?.template === fn.id && _tourStructuredBranchMatches(_tourState) && target?.type === 'fn'
+  return sample && _tourLessons?.['structured-templates']?.[_tourState?.lessonId] === fn.id
+    && _tourStructuredBranchMatches(_tourState) && target?.type === 'fn'
     && target.name === sample.child && target['parent-id'] === fn.id ? target : null;
 }

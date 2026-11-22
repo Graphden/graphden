@@ -10,7 +10,7 @@ const source = fs.readFileSync(path.join(__dirname,
 const template = 'abd1ff8f-3ae3-57c4-ad64-412ef0689f78';
 const lesson = {id: '43', 'template-id': template};
 const legacy = {id: '15'};
-const payload = {lessons: [legacy, lesson]};
+const payload = {lessons: [legacy, lesson], 'structured-templates': {'43': template}};
 const field = name => ({name, kind: 'input-field', type: 'text'});
 const available = fields => ({status: 'available', 'run-available': true,
   fields: [{name: 'profile', fields}]});
@@ -38,7 +38,7 @@ function boot() {
     _tourSessionBranch: () => branch,
     _tourOwnedBranch: state => state?.sandboxBranch,
     _tourBranchStatus: async () => exactBranch ? 'available' : 'missing',
-    _tourState: null, _tourLoadState: () => null,
+    _tourLessons: payload, _tourState: null, _tourLoadState: () => null,
     _tourStep: () => ({creates: {type: 'fn', name: childReceipt.name, 'parent-id': template}}),
     switchToBranch() {},
     authFetch: async url => { reads.push(url); return {ok: true, json: async () => ({fns: [response]})}; },
@@ -105,12 +105,13 @@ async function run() {
   t.ctx._tourState = null;
   t.setBranch('main');
   t.setResponse({id: contactTemplate, 'structured-input': contactInput});
-  const pairedPayload = {lessons: [legacy, contactLesson, lesson]};
+  const pairedPayload = {lessons: [legacy, contactLesson, lesson],
+    'structured-templates': {'43': template, '44': contactTemplate}};
   assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(pairedPayload, () => true)).lessons),
     [legacy, contactLesson], 'one template offer cannot authorize the other lesson');
   const impostor = {...contactLesson, 'template-id': template};
   t.setResponse({id: template, 'structured-input': contactInput});
-  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson({lessons: [legacy, impostor]}, () => true)).lessons),
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson({...pairedPayload, lessons: [legacy, impostor]}, () => true)).lessons),
     [legacy], 'a mismatched template cannot substitute for the known package owner');
   const occupied = side => ({type: 'text', path: [side, 'address', 'city'], 'binding-id': side, 'version-id': side});
   const boundContacts = {...contactInput, fields: contactFields.map(({name}) => ({name, fields: [field('name')]})),

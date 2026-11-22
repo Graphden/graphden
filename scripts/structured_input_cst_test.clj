@@ -469,8 +469,8 @@
     (is (= {:n {:type :int :required false} :label {:type :text :required false}} (:input rewritten)))
     (is (= {:a [:project [:n]] :b [:project [:label]]} (:bind rewritten)))
     (is (= {[:a] {:type :int} [:b] {:type :text}} (:configure rewritten)))
-    (doseq [comment ["; number pin\r\n" "; name route\r\n"]]
-      (is (= 1 (count (re-seq (re-pattern comment) target)))))))
+    (doseq [annotation ["; number pin\r\n" "; name route\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern annotation) target)))))))
 
 
 (deftest original-concurrency-module-replays-renames-and-stable-binding-ids

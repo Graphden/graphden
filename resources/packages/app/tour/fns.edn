@@ -3378,9 +3378,13 @@
                      :else {:parent :filter
                             :args {:pred :_tour-not-contact? :coll :_tour-with-profile-offer}}}}}}
 
+  {:name :_attach-structured-lesson-templates
+   :description "Attach the certified template identities of the offered structured lessons."
+   :args {:payload {:type :keyword-map}}
+   :return-type :keyword-map}
   {:name :_tour-json
    :parent :to-json-string
-   :args {:data :_tour-payload}}
+   :args {:data {:parent :_attach-structured-lesson-templates :args {:payload :_tour-payload}}}}
 
   {:name :tour-lessons-handler
    :description "GET /api/tour handler — graph-authored lessons with viewer-scoped availability. Anonymous sessions receive the general lessons."

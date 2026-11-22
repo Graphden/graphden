@@ -45,10 +45,16 @@
 
 (defn- catalogue
   [app token]
-  (let [response (request app token :get "/api/tour" nil nil)]
+  (let [response (request app token :get "/api/tour" nil nil)
+        payload (response-json response)
+        rows (into {} (map (juxt :id identity)) (:lessons payload))
+        expected (cond-> {}
+                   (contains? rows "43") (assoc :43 (str lesson/root))
+                   (contains? rows "44") (assoc :44 (str contact/root)))]
     (is (= 200 (:status response)))
     (is (= "private, no-store" (response-header response "cache-control")))
-    (into {} (map (juxt :id identity)) (:lessons (response-json response)))))
+    (is (= expected (or (:structured-templates payload) {})))
+    rows))
 
 
 (defn- with-sandbox

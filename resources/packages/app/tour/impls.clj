@@ -67,6 +67,19 @@
                 (throw error)))))))))
 
 
+(defbase attach-structured-lesson-templates
+  "Publish identities for offered lessons matching the registered templates."
+  [payload]
+  (let [templates (into {}
+                        (keep (fn [{:keys [id template-id]}]
+                                (when-some [expected (get structured-lesson-templates id)]
+                                  (when (= template-id (str expected))
+                                    [id template-id]))))
+                        (:lessons payload))]
+    (cond-> payload
+      (seq templates) (assoc :structured-templates templates))))
+
+
 (def ^:private events
   "The three points worth counting. A funnel needs a denominator
    (`started`), a numerator (`finished`) and something in between to
@@ -120,5 +133,6 @@
 
 (def impls
   {:_structured-lesson-available? {:impl structured-lesson-available?}
+   :_attach-structured-lesson-templates {:impl attach-structured-lesson-templates}
    :count-tour-event! {:impl count-tour-event! :taint-propagate? true}
    :count-tour-step! {:impl count-tour-step! :taint-propagate? true}})

@@ -657,7 +657,7 @@ async function loadGraphData({keepExpandedTypePath} = {}) {
     }
   }
   if (authEpoch !== _graphAuthEpoch) return;
-  if (prevRoot === selectedFnId && prevRoot === _subtreeRootId) {
+  if (keepExpanded.length > 0 && prevRoot === selectedFnId && prevRoot === _subtreeRootId) {
     for (const path of keepExpanded) expandedTypePaths.add(path);
   }
   repaintExplorer();

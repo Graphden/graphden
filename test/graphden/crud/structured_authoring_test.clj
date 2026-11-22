@@ -18,6 +18,7 @@
     [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.closed-input :as closed]
     [graphden.test-infra.golden-app :as golden]
+    [graphden.test-infra.lesson-contact :as contact]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as resolution]
@@ -373,6 +374,42 @@
         (is (= "ADA" (:result result)) (pr-str result))))))
 
 
+(defn- address-routes
+  [view side]
+  (let [lookup (fn [fields field] (some #(when (= field (:name %)) %) fields))]
+    (-> view :fields (lookup side) :fields (lookup "address") :fields (lookup "city") :bind-path)))
+
+
+(defn- exercise-pair!
+  [origin token storage]
+  (let [name "lesson-paired-contact-route"
+        created (extend-native origin token name contact/root)
+        owner (:id (first (sp/query-entities storage :fn {:name name})))
+        sender ["sender" "address" "city"]
+        recipient ["recipient" "address" "city"]
+        bind! (fn [path value]
+                (let [args {:fn-id owner :action "bind" :path path :value value}
+                      preview (command origin token "preview" args)]
+                  (command origin token "apply" (assoc args :expected-state (:expected-state preview)))))]
+    (is (<= 200 (:status created) 299) (pr-str created))
+    (is (= sender (address-routes (subtree origin token owner) "sender")))
+    (is (= recipient (address-routes (subtree origin token owner) "recipient")))
+    (let [from (bind! sender "London")
+          current (subtree origin token owner)
+          to (bind! recipient "Paris")
+          result (request origin token :post "/api/execute"
+                          {:content-type "application/json"
+                           :body (json/generate-string {:fn-id owner :args {:sender {:name "Ada"} :recipient {:name "Bea"}}
+                                                        :timeout-ms 20000})})]
+      (is (true? (:committed from)) (pr-str from))
+      (is (nil? (address-routes current "sender")))
+      (is (= recipient (address-routes current "recipient")))
+      (is (true? (:committed to)) (pr-str to))
+      (is (not= (:binding-id from) (:binding-id to)))
+      (is (= "Ada in London → Bea in Paris" (:result (json/parse-string (:body result) true)))
+          (pr-str (:body result))))))
+
+
 (defn- exercise-reference-picker!
   [origin handler token storage ctx]
   (let [owner-name "profile-with-picked-reference"
@@ -440,8 +477,8 @@
 
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names (into app-packages ["lessons" "reftext" "closedinputfixture"])
-                                             :primitive-inputs [lesson/admission uppercase-admission closed/admission]})
+        packages (ig/init-key :app/packages {:package-names (into app-packages ["lessons" "reftext" "closedinputfixture" "lesson-contact"])
+                                             :primitive-inputs [lesson/admission uppercase-admission closed/admission contact/admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
         denied (atom nil)
@@ -463,6 +500,7 @@
         (exercise-callable-field! origin token storage)
         (exercise-mcp-input! origin token storage)
         (exercise-whole-record! origin token storage)
+        (exercise-pair! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))
       (finally (stop)))))

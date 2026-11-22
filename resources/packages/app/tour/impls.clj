@@ -40,29 +40,31 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(def ^:private profile-template
-  (ids/fn-id "lessons.structured-input" :lesson-profile))
+(def ^:private structured-lesson-templates
+  {"43" (ids/fn-id "lessons.structured-input" :lesson-profile)
+   "44" (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route)})
 
 
-(defbase structured-profile-lesson-available?
+(defbase structured-lesson-available?
   "Check the current viewer's branch creation, template Extend and Run offers."
-  []
+  [lesson-id]
   (boolean
-    (when (and (:authenticated? (principal/current))
-               (get (:graphden.packages.owned/primitive-input-types (meta (:base-fns ctx))) profile-template))
-      (cr/record-effect! :db)
-      (let [storage (request/require-storage ctx)]
-        (try
-          (writer/assert-write-authorized! (vs/unwrap storage) :branch
-                                           {:base-branch-id (vs/current-branch-id storage)} nil)
-          (let [{:keys [status run-available extend-available] :as view}
-                (input/read-input storage profile-template true ctx)]
-            (and (= :available status) (true? run-available) (true? extend-available)
-                 (contains? view :extend-namespace-id) (nil? (:extend-namespace-id view))))
-          (catch clojure.lang.ExceptionInfo error
-            (case (:type (ex-data error))
-              (:authz/forbidden :authz/branch-protected :branch/merge-required) false
-              (throw error))))))))
+    (when-let [template (get structured-lesson-templates lesson-id)]
+      (when (and (:authenticated? (principal/current))
+                 (get (:graphden.packages.owned/primitive-input-types (meta (:base-fns ctx))) template))
+        (cr/record-effect! :db)
+        (let [storage (request/require-storage ctx)]
+          (try
+            (writer/assert-write-authorized! (vs/unwrap storage) :branch
+                                             {:base-branch-id (vs/current-branch-id storage)} nil)
+            (let [{:keys [status run-available extend-available] :as view}
+                  (input/read-input storage template true ctx)]
+              (and (= :available status) (true? run-available) (true? extend-available)
+                   (contains? view :extend-namespace-id) (nil? (:extend-namespace-id view))))
+            (catch clojure.lang.ExceptionInfo error
+              (case (:type (ex-data error))
+                (:authz/forbidden :authz/branch-protected :branch/merge-required) false
+                (throw error)))))))))
 
 
 (def ^:private events
@@ -117,6 +119,6 @@
 
 
 (def impls
-  {:_structured-profile-lesson-available? {:impl structured-profile-lesson-available?}
+  {:_structured-lesson-available? {:impl structured-lesson-available?}
    :count-tour-event! {:impl count-tour-event! :taint-propagate? true}
    :count-tour-step! {:impl count-tour-step! :taint-propagate? true}})

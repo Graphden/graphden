@@ -1,0 +1,5 @@
+{:name "lesson-contact"
+ :version "1.0.0"
+ :description "Optional editor lesson for independently bound contact records."
+ :dependencies ["core"]
+ :modules ["native" "structured-input"]}

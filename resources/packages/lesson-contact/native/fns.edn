@@ -1,0 +1,5 @@
+{:namespace "lesson-contact.native"
+ :fns [{:name :contact-route-native
+        :args {:sender {:type {:name :text :address {:city :text}} :required true}
+               :recipient {:type {:name :text :address {:city :text}} :required true}}
+        :return-type :text}]}

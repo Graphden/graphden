@@ -241,7 +241,7 @@
                                     return (:return-type source)]
                                 (cond
                                   list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
-                                  (rich/collection-return? type-id return) [[id type-id] return]))))
+                                  (rich/erased-return? type-id return) [[id type-id] return]))))
                    entries)
              :source-field-types (source-field-types entries)
              :source-binding-types
@@ -293,7 +293,7 @@
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
                             (= (get type-ids return) (:return-type-fn-id owner)))
-                       (rich/collection-return? (:return-type-fn-id owner) return))
+                       (rich/erased-return? (:return-type-fn-id owner) return))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))

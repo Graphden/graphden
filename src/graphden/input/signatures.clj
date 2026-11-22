@@ -211,14 +211,15 @@
                  (fn? infer-signature))
     (context/reject! :signature-provider-required {:scope scope}))
   (let [node (get-in graph [:scopes (second scope)])
+        implementation-scope [base-fn-id (conj (second scope) (first scope))]
         root-entry (variables/signature-in-scope
-                     [base-fn-id (conj (second scope) (first scope))]
+                     implementation-scope
                      (assoc root-entry :fn-id base-fn-id))
         declaration (get-in ctx [:fns (:fn-id node)])
         stored-return (when (:return-type-fn-id declaration) (declared-return ctx declaration))
         declaration (cond-> declaration
                       (and stored-return (not (:infer-return? generated-list)))
-                      (assoc :return-type stored-return))
+                      (assoc :return-type (variables/type-in-scope implementation-scope stored-return)))
         facts (binding-facts graph scope argument-paths)
         result (infer-signature
                  (assoc facts :fn-id (:fn-id node) :root-entry root-entry

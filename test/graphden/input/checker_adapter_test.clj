@@ -55,6 +55,18 @@
     (is (= :deferred (get-in result [:argument-proofs :value :status])))))
 
 
+(deftest declared-generic-return-uses-the-same-argument-substitution
+  (let [facts {:fn-id (random-uuid)
+               :root-entry {:fn-id (random-uuid) :args {:value 'scoped-a} :return 'scoped-a :effects #{}}
+               :declaration {:return-type 'scoped-a}
+               :bindings-info {:value {:type :text :value "literal" :value-present true}}
+               :argument-effects {:value #{}} :free-arguments []
+               :signature-view {:by-id {} :by-name {}}}]
+    (is (= :text (:return (check/infer-input-signature facts))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
+          (check/infer-input-signature (assoc-in facts [:declaration :return-type] :int))))))
+
+
 (deftest wrapped-identity-checks-the-target-id-without-an-execution-dependency-test
   (let [[owner root field edge target identity-type] (repeatedly 6 random-uuid)
         ctx (context/build-context

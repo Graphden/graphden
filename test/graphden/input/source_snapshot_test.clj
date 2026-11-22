@@ -14,6 +14,7 @@
     [graphden.input.source :as source]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-package-fixtures :as fixtures]
+    [graphden.input.source-scope :as scope]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -47,10 +48,10 @@
   (delay
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded @loaded-bases]
-        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
+        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(#{:equal? :const :coalesce} (:name %)) (sources "logic"))
                                                         (filter #(#{:get :zipmap} (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
-                                                        (filter #(#{:shipped-asset :to-json-string} (:name %)) (sources "system"))
+                                                        (filter #(#{:shipped-asset :to-json-string :throw} (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
@@ -136,12 +137,30 @@
           original (some #(when (= :html-page (:name %)) %) html)
           legacy-entry (first (:definitions (source/plan-module [original] prepared)))
           {:keys [proofs entry]} (source/forwarded-fields-baseline prepared legacy-entry fields)
-          diagnostic (failure #(snapshot/migrate-forwarded-fields package owner fields (:by-id @registry/*rich-types-override*)))
+          {:keys [context options]} (snapshot/freeze-closure (assoc-in package [:closure-baselines owner] entry)
+                                                             [owner] (:by-id @registry/*rich-types-override*))
+          original-check (:check-expression options)
+          conflict (atom nil)
+          checked (fn [{:keys [expected actual substitution address] :as request}]
+                    (try (original-check request)
+                         (catch clojure.lang.ExceptionInfo error
+                           (reset! conflict {:address address :expected (types/resolve substitution expected)
+                                             :actual (types/resolve substitution actual)
+                                             :raw-expected expected :raw-actual actual
+                                             :substitution (select-keys substitution
+                                                                        (filter types/type-var?
+                                                                                (tree-seq coll? seq [expected actual])))})
+                           (throw error))))
+          diagnostic (failure #(scope/verify-forwarded-projections
+                                 context proofs (fn [ctx id]
+                                                  (analysis/analyze-effective-input ctx id (assoc options :check-expression checked)))))
           callback (some #(when (= :_hiccup-normalize-attr-key (:name %)) %) html)
           verified-callback (first (:definitions (source/verify-module (source/plan-module [callback] prepared) prepared)))
           source-links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
                                          [(:id %) (:source-slot-id %)]))
                              (get-in legacy-entry [:legacy :records]))]
+      (.mkdirs (io/file "target"))
+      (spit "target/input-html-page-type-conflict.edn" (pr-str @conflict))
       (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
       (is (= (select-keys (:args original) fields) (get-in entry [:proposed :input])))
       (is (= (set fields) (set (map (comp peek :source-path) proofs))))
@@ -150,6 +169,10 @@
       (is (= :authored-source-equivalent (:verification verified-callback)) (:blockers verified-callback))
       (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) diagnostic)))
       (is (= owner (ffirst (:address diagnostic))))
+      (is (= (:address diagnostic) (:address @conflict)))
+      (is (= :keyword (:expected @conflict)))
+      (is (= [:union :keyword :null] (pop (:actual @conflict))))
+      (is (types/type-var? (peek (:actual @conflict))))
       (is (= [(ids/slot-id (ids/fn-id "core.logic" :equal?) :a)] (second (:address diagnostic)))))))
 
 
@@ -186,6 +209,49 @@
     (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
     (is (empty? (:obligations graph)))
     (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))))
+
+
+(deftest shipped-generic-return-retains-per-use-substitutions-and-legacy-values
+  (let [const (some #(when (= :const (:name %)) %) (sources "logic"))
+        zipmap (some #(when (= :zipmap (:name %)) %) (sources "collections"))
+        number {:namespace "fixture" :name :number :parent :const :args {:value 7}}
+        text {:namespace "fixture" :name :text :parent :const :args {:value "seven"}}
+        directory {:namespace "fixture" :name :directory :parent :zipmap
+                   :args {:keys {:append [{:value :number} {:value :text}] :closed true}
+                          :vals {:append [:fixture/number :fixture/text] :closed true}}}
+        definitions [const zipmap number text directory]
+        prepared (parse/prepare-module definitions {} {})
+        package (snapshot/package-index prepared definitions)
+        owner (ids/fn-id "fixture" :directory)
+        base (ids/fn-id "core.logic" :const)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)
+        per-use (into {} (for [[_ scope] (:scopes graph)
+                               :when (contains? #{(ids/fn-id "fixture" :number) (ids/fn-id "fixture" :text)} (:fn-id scope))]
+                           [(:fn-id scope) (get-in scope [:signature :return])]))
+        grouped (group-by :kind (parse/parse-prepared-module prepared))
+        env (lookups/build-lookups {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+                                    :bindings (:binding grouped) :list-items (:binding-list-item grouped)})
+        legacy (eager/compile-all (assoc env :base-fns (registry/compute-base-fns-map @loaded-bases)))]
+    (is (= 'a (get-in context [:source-return-types [base (ids/primitive-fn-id :any)]])))
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (= {(ids/fn-id "fixture" :number) :int (ids/fn-id "fixture" :text) :text} per-use))
+    (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))
+    (is (= {:number 7 :text "seven"} ((legacy owner) {} {})))
+    (is (= :implementation-signature-required
+           (:code (failure #(snapshot/freeze-closure package [owner] (assoc-in @roots [base :return] :any))))))))
+
+
+(deftest shipped-bottom-return-is-frozen-without-executing-the-thrower
+  (let [declaration (some #(when (= :throw (:name %)) %) (sources "system"))
+        id (ids/fn-id "core.system" :throw)
+        package (snapshot/package-index (parse/prepare-module [declaration] {} {}) [declaration])
+        {:keys [context options]} (snapshot/freeze-closure package [id] @roots)
+        graph (analysis/analyze-effective-input context id options)]
+    (is (= :never (get-in context [:source-return-types [id (ids/primitive-fn-id :any)]])))
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (= :never (get-in graph [:scopes [] :signature :return])))
+    (is (= :any (get-in graph [:public-input :routes [:exception] :completion-type])))))
 
 
 (deftest scoped-bindings-are-certified-together

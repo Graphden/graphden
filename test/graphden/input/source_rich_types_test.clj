@@ -29,12 +29,20 @@
 
 
 (deftest collection-return-shape-must-match-the-physical-return-fk
-  (is (rich/collection-return? (ids/primitive-fn-id :sequence) [:list 'b]))
-  (is (rich/collection-return? (ids/primitive-fn-id :jsonb) [:map 'k 'v]))
-  (is (rich/collection-return? (ids/primitive-fn-id :any) [:union [:map 'a :any] [:list :any]]))
-  (is (not (rich/collection-return? (ids/primitive-fn-id :jsonb) [:union [:map 'a :any] [:list :any]])))
-  (is (not (rich/collection-return? (ids/primitive-fn-id :text) [:list 'b])))
-  (is (not (rich/collection-return? (ids/primitive-fn-id :sequence) [:list :unverified-typedef]))))
+  (is (rich/erased-return? (ids/primitive-fn-id :sequence) [:list 'b]))
+  (is (rich/erased-return? (ids/primitive-fn-id :jsonb) [:map 'k 'v]))
+  (is (rich/erased-return? (ids/primitive-fn-id :any) [:union [:map 'a :any] [:list :any]]))
+  (is (not (rich/erased-return? (ids/primitive-fn-id :jsonb) [:union [:map 'a :any] [:list :any]])))
+  (is (not (rich/erased-return? (ids/primitive-fn-id :text) [:list 'b])))
+  (is (not (rich/erased-return? (ids/primitive-fn-id :sequence) [:list :unverified-typedef]))))
+
+
+(deftest scalar-return-evidence-does-not-invent-a-generic-or-bottom-storage-kind
+  (is (rich/erased-return? (ids/primitive-fn-id :any) 'a))
+  (is (rich/erased-return? (ids/primitive-fn-id :any) :never))
+  (is (not (rich/erased-return? (ids/primitive-fn-id :text) 'a)))
+  (is (not (rich/erased-return? (ids/primitive-fn-id :text) :never)))
+  (is (not (rich/erased-return? (ids/primitive-fn-id :any) :unverified-typedef))))
 
 
 (deftest callback-type-dependencies-pin-qualified-source-identities

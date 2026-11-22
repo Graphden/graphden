@@ -23,8 +23,8 @@
    :type-bodies/:signatures and an already namespace-resolved :aliases map.
    A verified source may provide :source-field-types keyed by [field-id type-id]
    for generic field types erased by the legacy storage representation.
-   :source-return-types uses [fn-id type-id] for the same erased collection
-   return on a verified generated list builder. :source-binding-types retains
+   :source-return-types uses [fn-id type-id] for erased generic, bottom and
+   collection returns, including verified list builders. :source-binding-types retains
    exact unchanged annotations keyed by [binding-id type-id]. Named source declarations
    retain their authored form and available file path in :type-origins by UUID.
    Missing aliases never fall back to the process registry. Marker policy is

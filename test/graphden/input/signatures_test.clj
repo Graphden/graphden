@@ -1,7 +1,8 @@
 (ns graphden.input.signatures-test
   (:require
     [clojure.test :refer [deftest is]]
-    [graphden.input.signatures :as signatures]))
+    [graphden.input.signatures :as signatures]
+    [graphden.packages.records.ids :as ids]))
 
 
 (defn- fixture
@@ -104,6 +105,7 @@
 (deftest signature-adapter-receives-frozen-scoped-facts-and-never-the-implementation-test
   (let [{:keys [scope text graph]} (fixture)
         base (random-uuid)
+        any-id (ids/primitive-fn-id :any)
         target-scope [(first scope) [(random-uuid)]]
         graph (-> graph
                   (assoc :root-scope scope)
@@ -111,7 +113,8 @@
                   (assoc-in [:scopes (second target-scope) :signature] {:return :int :effects #{}}))
         seen (atom nil)
         result (signatures/infer-use
-                 {:fns {} :signatures {}} graph scope
+                 {:fns {(first scope) {:id (first scope) :return-type-fn-id any-id}}
+                  :source-return-types {[(first scope) any-id] 'a} :signatures {}} graph scope
                  {:base-fn-id base :root-entry {:name :identity :args {:value 'a} :return 'a}
                   :argument-paths {:value [text]}
                   :impl (fn [& _] (throw (ex-info "must not execute" {})))}
@@ -123,6 +126,7 @@
     (is (= :int (get-in @seen [:signature-view :by-id (signatures/use-id target-scope) :return])))
     (is (= base (get-in @seen [:signature-view :by-name :identity])))
     (is (= (get-in @seen [:root-entry :args :value]) (get-in @seen [:root-entry :return])))
+    (is (= (get-in @seen [:root-entry :return]) (get-in @seen [:declaration :return-type])))
     (is (not= 'a (get-in @seen [:root-entry :return])))
     (is (not (contains? @seen :impl)))
     (is (= 'a (get-in result [:signature-source :root-entry :return])))

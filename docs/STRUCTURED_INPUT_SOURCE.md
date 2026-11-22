@@ -242,6 +242,14 @@ For example, the conditional's positive/non-negative literal refinements use
 the `core.refinements` UUIDs. The snapshot verifies those declarations and
 rejects absent or conflicting aliases instead of reading process-wide policy.
 
+An authored generic scalar or `:never` return can use the legacy `:any` FK
+only when the source form, physical FK and frozen implementation signature
+agree. The snapshot retains this return by function UUID and FK; the ordinary
+checker still checks each use. Return variables share the implementation's
+use scope and argument substitution before the declared-return check. Two
+uses of `const` can therefore return different concrete types without sharing
+a type variable. An unrelated FK or implementation return remains an error.
+
 A named pin on a union field uses the prepared package's namespace-resolved
 type definitions. The source planner checks finite expansion, marker
 preservation and directional subtyping. The pin must expand to a concrete

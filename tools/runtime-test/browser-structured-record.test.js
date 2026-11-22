@@ -71,7 +71,7 @@ const callback = scopedFn('callback', 'callback', 'equal?', {
   b: call('outer'),
 });
 const externalValue = scopedFn('outer', 'entry', 'const', {value: literal(null)});
-function runCallback(entry, supplied = {}) {
+function runCallback(entry, supplied = {}, callbackPlan = callback) {
   return graph.createRuntime({
     format: 2, primitiveAbi: 1, entries: {view: 'entry'},
     inputs: {entry: {structured: {
@@ -80,7 +80,7 @@ function runCallback(entry, supplied = {}) {
       required: [],
     }}},
     primitives: ['map', 'const', 'equal?'].map((op) => ({id: op, op})),
-    functions: [entry, externalValue, callback],
+    functions: [entry, externalValue, callbackPlan],
   }).run('view', supplied);
 }
 const namedMap = scopedFn('entry', 'entry', 'map', {
@@ -90,6 +90,16 @@ const namedMap = scopedFn('entry', 'entry', 'map', {
 const mapped = runCallback(namedMap, {items: [null, false, null]});
 assert.deepEqual([...mapped], [true, false, true]);
 assert.throws(() => runCallback(namedMap, {items: [7]}), /does not match/);
+const suppliedDefault = (fallback) => scopedFn('entry', 'entry', 'const', {
+  value: {kind: 'supplied-default', slot: 'items', fallback, type: {anyOf: ['null', 'text']}},
+});
+assert.equal(runCallback(suppliedDefault(['string', 'Ada'])), 'Ada');
+assert.equal(runCallback(suppliedDefault(['string', 'Ada']), {items: null}), null);
+assert.equal(runCallback(suppliedDefault(['nil'])), null);
+assert.throws(() => runCallback(suppliedDefault({kind: 'call', fn: 'other'})), /Invalid browser field default/);
+assert.throws(() => runCallback(suppliedDefault(['int', 3])), /Invalid browser field default/);
+const localDefault = {...suppliedDefault(['string', 'Ada']), id: 'callback', frame: 'callback'};
+assert.throws(() => [...runCallback(namedMap, {items: [false]}, localDefault)], /Unsupported browser expression/);
 const opaqueMap = scopedFn('entry', 'entry', 'const', {
   value: {kind: 'supplied', slot: 'items', type: {mapOf: ['keyword', 'any']}},
 });

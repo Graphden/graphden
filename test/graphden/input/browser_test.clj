@@ -1,14 +1,24 @@
 (ns graphden.input.browser-test
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.java.shell :as sh]
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.browser-plan :as wire]
+    [graphden.executor.registry.core :as registry]
+    [graphden.input.analysis :as analysis]
     [graphden.input.browser :as browser]
     [graphden.input.compile :as jvm]
     [graphden.input.compiler-fixture :as fixture]
+    [graphden.input.field-default :as field-default]
+    [graphden.input.source-primitive :as primitive]
+    [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
+    [graphden.types.check :as check]
+    [graphden.types.core :as types]))
 
 
 (def ^:private definitions
@@ -250,3 +260,97 @@
     (is (= expected (invoke args nil)))
     (is (= {:value (wire/encode-value expected) :sequence false} result))
     (is (= "Value does not match the required graph input type" (:error invalid)))))
+
+
+(defn- shipped-declaration
+  [module name]
+  (let [source (edn/read-string (slurp (io/resource (str "packages/core/" module "/fns.edn"))))]
+    (assoc (some #(when (= name (:name %)) %) (:fns source)) :namespace (:namespace source))))
+
+
+(defn- default-graph
+  [fallback]
+  (let [outer (shipped-declaration "collections" :assoc)
+        outer-id (ids/fn-id (:namespace outer) :assoc)
+        predicate (shipped-declaration "strings" :str-starts-with?)
+        pred-id (ids/fn-id (:namespace predicate) :str-starts-with?)
+        input (assoc (:args predicate) :string {:required false :type field-default/nullable-text :default fallback})
+        staged {:input-format 2 :namespace (:namespace predicate)
+                :fns [{:name (:name predicate) :input input :return-type (:return-type predicate)}]}
+        parsed (primitive/prepare staged pred-id)
+        union (shipped-declaration "refinements" :nullable-text)
+        rows (group-by :kind (into (:declaration-records parsed) (parse/parse-module [union])))
+        package (snapshot/package-index (parse/prepare-module [outer] {} {}) [outer])
+        ctx (:context (snapshot/freeze-declarations package [outer-id]))
+        child (ids/fn-id "test.input" :starts-with-a)
+        wrapper (ids/fn-id "test.input" :assoc-result)
+        value-row (fn [id base key value]
+                    (let [slot (ids/slot-id base key)]
+                      {:id (ids/binding-id id slot) :fn-id id :scope-path [] :target-path [slot]
+                       :value-present true :expression-kind "value" :value value}))
+        target (ids/slot-id outer-id :value)
+        bindings [(value-row child pred-id :prefix "A") (value-row wrapper outer-id :map {})
+                  (value-row wrapper outer-id :key "answer")
+                  {:id (ids/binding-id wrapper target) :fn-id wrapper :scope-path [] :target-path [target]
+                   :expression-kind "ref" :ref-fn-id child :value-present false}]
+        index (fn [rs] (into {} (map (juxt :id identity)) rs))
+        ctx (-> ctx
+                (update :fns merge (index (:fn rows)))
+                (assoc-in [:fns child] {:id child :parent-ids [pred-id] :input-type-fn-id (:input-type-id parsed)})
+                (assoc-in [:fns wrapper] {:id wrapper :parent-ids [outer-id] :input-type-fn-id (get-in ctx [:fns outer-id :input-type-fn-id])})
+                (update :fields merge (index (:slot rows)))
+                (update :members merge (group-by :fn-id (:fn-slot rows)))
+                (update :bindings merge (index bindings)))
+        trusted (binding [registry/*rich-types-override* (atom {})
+                          types/*type-aliases-override* (atom {:nullable-text field-default/nullable-text})]
+                  (into {} (for [[id name] [[pred-id :str-starts-with?] [outer-id :assoc]]
+                                 :let [raw (get @loaded name)
+                                       registered (registry/record-rich-types! id name raw)]]
+                             [id {:impl (:impl raw) :signature (get-in registered [:by-id id])}])))]
+    {:context ctx :trusted trusted :child child :wrapper wrapper
+     :visible #{outer-id pred-id child wrapper}}))
+
+
+(deftest browser-defaults-use-checked-public-field-presence
+  (doseq [fallback ["Ada" nil]
+          :let [{:keys [context trusted child wrapper visible]} (default-graph fallback)]
+          [root value wrap] [[child identity identity] [wrapper #(hash-map :value %) #(hash-map "answer" %)]]]
+    (let [{:keys [analysis implementations]} (jvm/analyze-stored context root trusted)
+          options {:snapshot-id (:snapshot-id context) :context context :implementations implementations
+                   :allow-fn? #(contains? visible %)}
+          plan (browser/export-named analysis options)
+          inputs [{} (value {:string nil}) (value {:string "Ada"}) (value {:string "Bea"})]
+          expected (mapv wrap [(some? fallback) false true false])
+          invoke (jvm/compile-named analysis options)
+          results (vec (run-browser plan (conj inputs (value {:string false}))))]
+      (is (= :checked (:status analysis)))
+      (is (= expected (mapv #(invoke % nil) inputs)))
+      (is (= (mapv wire/encode-value expected) (mapv :value (pop results))))
+      (is (= "Value does not match the required graph input type" (:error (peek results))))
+      (is (thrown? clojure.lang.ExceptionInfo (invoke (value {:string false}) nil)))
+      (is (= :browser-input-validation-required (rejection analysis options)))
+      (is (= :browser-visibility-denied
+             (try (browser/export-named analysis (assoc options :allow-fn? (constantly false)))
+                  nil
+                  (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
+
+
+(deftest browser-keeps-nested-record-member-defaults-closed
+  (let [source (-> definitions
+                   (assoc-in [:root :input :coll :label] field-default/nullable-text)
+                   (assoc-in [:root :optional] #{[:coll :label]}))
+        {:keys [options]} (checked-model source)
+        field (peek (fixture/field-path :root [:coll :label]))
+        record (fixture/id [:root :type [:coll]])
+        ctx (-> (:context options)
+                (assoc :snapshot-id (random-uuid))
+                (assoc-in [:fns field-default/nullable-text-id] {:constraint field-default/nullable-text})
+                (assoc-in [:fields field :type-fn-id] field-default/nullable-text-id)
+                (update-in [:members record] (fn [rows]
+                                               (mapv #(if (= field (:slot-id %)) (assoc % :input-default {:value "Ada"}) %) rows))))
+        graph (analysis/analyze-effective-input ctx (fixture/id :root) {:check-expression check/check-input-binding})]
+    (is (= :checked (:status graph)))
+    (is (= :browser-field-default-unsupported
+           (try (browser/export-named graph (assoc options :context ctx :snapshot-id (:snapshot-id ctx)))
+                nil
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

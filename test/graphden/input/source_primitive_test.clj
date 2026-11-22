@@ -1,6 +1,9 @@
 (ns graphden.input.source-primitive-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.input.context :as context]
+    [graphden.input.descriptor :as descriptor]
+    [graphden.input.field-default :as field-default]
     [graphden.input.source :as source]
     [graphden.input.source-primitive :as primitive]
     [graphden.packages.records.ids :as ids]
@@ -125,3 +128,42 @@
     (doseq [invalid [(assoc spec :required true) (dissoc spec :required)
                      (assoc spec :default false) (assoc spec :type [:union :null :int])]]
       (is (= :staged-primitive-type-unsupported (code #(prepare invalid)))))))
+
+
+(deftest record-member-defaults-are-relative-to-a-declared-occurrence
+  (let [member {:type field-default/nullable-text :required false}
+        record (fn [child] {:required false :type {:id :text :label child}})
+        shape {:id :text :label field-default/nullable-text}
+        pin {:left shape :right shape}
+        input {:left (record (assoc member :default nil)) :right (record member)}
+        prepare #(primitive/prepare (assoc-in module [:fns 0 :input] %) root pin)
+        parsed (prepare input)
+        rows (group-by :kind (:declaration-records parsed))
+        index #(into {} (map (juxt :id identity)) %)
+        ctx (context/build-context {:fns (assoc (index (:fn rows)) field-default/nullable-text-id {:constraint field-default/nullable-text})
+                                    :fields (index (:slot rows)) :members (group-by :fn-id (:fn-slot rows))})
+        input-id (:input-type-id parsed)
+        left (ids/slot-id root :left)
+        type-id (get-in ctx [:fields left :type-fn-id])
+        target (ids/slot-id type-id :label)
+        defaults (fn [ctx]
+                   (into {} (map (fn [field]
+                                   [(:name field) (select-keys (descriptor/node-at field [target]) [:default])]))
+                         (:fields (descriptor/resolve-contract ctx root))))
+        altered (fn [owner slot envelope]
+                  (update-in ctx [:members owner] (fn [members]
+                                                    (mapv #(if (= slot (:slot-id %)) (assoc % :input-default envelope) %) members))))
+        envelope {:target-path [(str target)] :value "left"}]
+    (is (= input (get-in parsed [:source :input])))
+    (is (= {:left {:default nil} :right {}} (defaults ctx)))
+    (is (= type-id (get-in ctx [:fields (ids/slot-id root :right) :type-fn-id])))
+    (is (= {:left {:default "left"} :right {}} (defaults (altered input-id left envelope))))
+    (doseq [bad [(assoc envelope :target-path [(str (random-uuid))])
+                 (assoc envelope :target-path [(str (ids/slot-id type-id :id))])
+                 (assoc envelope :target-path [(str target) (str target)]) (assoc envelope :value false)
+                 (assoc envelope :extra true)]]
+      (is (= :invalid-field-default (code #(defaults (altered input-id left bad))))))
+    (is (= :invalid-field-default (code #(defaults (altered type-id target envelope)))))
+    (doseq [bad [(assoc member :default [:ref :private]) (assoc member :required true :default "Ada")
+                 (assoc member :type :text :default "Ada")]]
+      (is (= :staged-record-member-default-unsupported (code #(prepare (assoc input :left (record bad)))))))))

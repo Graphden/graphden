@@ -175,8 +175,8 @@
                     (:type (input-format-error (fn [] (primitive/declarations {:checked-echo forged}))))))))))))
 
 
-(deftest pinned-record-member-default-requires-its-own-membership-contract
-  (let [member {:type [:union :null :text] :required false :default "Ada"}
+(deftest unsupported-record-member-default-stops-before-loading-implementations
+  (let [member {:type [:union :null :text] :required false :default false}
         record-type {:id :text :label [:union :null :text]}
         witness (pr-str {:namespace "format.fixture" :fns [{:name :echo :args {:x {:type record-type}} :return-type :text}]})
         source (pr-str {:input-format 2 :namespace "format.fixture"

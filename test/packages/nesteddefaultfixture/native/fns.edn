@@ -1,0 +1,5 @@
+{:namespace "nesteddefaultfixture.native"
+ :fns [{:name :describe-label-pair
+        :args {:left {:type {:id :text :label [:union :null :text]} :required false}
+               :right {:type {:id :text :label [:union :null :text]} :required false}}
+        :return-type :text}]}

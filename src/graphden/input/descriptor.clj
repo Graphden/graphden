@@ -135,9 +135,10 @@
                   child (declared-field-node ctx type-id field (get rich name) seen)]
               (when-not (= (get rich name) (:type child))
                 (context/reject! :field-type-mismatch {:type-id type-id :field-id (:id field)}))
-              (merge child (select-keys field [:description])
-                     (when-some [envelope (:input-default field)]
-                       {:default (field-default/read-envelope field (:type child) envelope)})
+              (merge (if-some [envelope (:input-default field)]
+                       (field-default/apply-envelope field child envelope (= type-id owner (::input-owner ctx)))
+                       child)
+                     (select-keys field [:description])
                      {:id (:id field) :name name
                       :required (if (contains? field :required)
                                   (boolean (:required field))
@@ -171,7 +172,7 @@
    Parent composition and referenced availability are separate analysis steps."
   [ctx fn-id]
   (let [type-id (get-in ctx [:fns fn-id :input-type-fn-id])
-        descriptor (when type-id (resolve-descriptor ctx type-id))]
+        descriptor (when type-id (resolve-descriptor (assoc ctx ::input-owner type-id) type-id))]
     (when-not descriptor (context/reject! :missing-input-contract {:fn-id fn-id}))
     (when (:alternatives descriptor)
       (context/reject! :ambiguous-record-input {:fn-id fn-id :type-id type-id}))

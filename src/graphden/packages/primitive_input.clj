@@ -69,7 +69,11 @@
       (when (and list-contract record-contract) (reject!))
       (let [list-module (when list-contract (lists/prepare source fn-id list-contract))
             parsed (if list-module (first (:definitions list-module)) (primitive/prepare source fn-id record-contract))
-            definition (:source parsed)
+            definition (reduce (fn [source {:keys [name type]}]
+                                 (if (contains? (:occurrence-fields parsed) name)
+                                   (assoc-in source [:input name :type] type)
+                                   source))
+                               (:source parsed) (get-in parsed [:contract :fields]))
             children (if list-module (subvec (:definitions list-module) 1) (literal-descendants source fn-id))
             receipt (PrimitiveReceipt. seal parsed abi-fn-id source children list-module)]
         (when (seq (:effects definition)) (reject!))
@@ -124,6 +128,9 @@
                      (= (get-in source [:parsed :source :return-type]) (:return-type reference))
                      (= (into {} (map (juxt :name :type)) (get-in source [:parsed :contract :fields]))
                         (update-vals (:args reference) :type))
+                     (every? #(= (get-in source [:parsed :source :input % :required])
+                                 (get-in reference [:args % :required]))
+                             (get-in source [:parsed :occurrence-fields]))
                      (empty? (:effects reference)))
         (reject!)))))
 

@@ -457,20 +457,23 @@ parents, configuration, extra declarations and references.
 
 ### Defaults in pinned record inputs
 
-The pinned reader stores an optional nullable-text default on the membership
-of the function’s input type. For example, a top-level `:label` can use
-`{:type [:union :null :text] :required false :default "Ada"}`. Nesting
-that declaration inside a record member produces
-`:staged-record-member-default-unsupported` during package preflight.
+A scalar field can declare `{:type [:union :null :text] :required false
+:default "Ada"}`. The same declaration can appear on one direct member of
+a pinned record input. Other members of that record must have scalar
+primitive types. The operator pin and the independently registered native
+ABI must agree with the record shape.
 
-Inline record declarations with the same authored shape share an anonymous
-type and its memberships across owners. A fallback written to a shared
-membership would be visible to every use of that record. Supporting
-owner-specific defaults requires preserving their ownership through package
-sync. The JVM keeps an omitted optional record absent. Once the caller
-supplies the record, a missing optional member can take its fallback and
-an explicit nil retains its value. The browser exporter rejects nested
-stored defaults with `:browser-field-default-unsupported`.
+The owner’s top-level input membership carries a nested fallback as
+`{:target-path ["<member slot UUID>"] :value "Ada"}`. Two inputs of the
+same record type can supply different fallbacks. A missing envelope leaves
+the member without a default. A path envelope whose `:value` is nil
+supplies an explicit nil fallback. The shared record and its memberships describe the
+fields and their types.
+
+The JVM keeps an omitted optional record absent. When a caller supplies
+the record, its omitted optional member can take its fallback. An explicit
+nil retains its value. The browser exporter rejects nested stored defaults
+with `:browser-field-default-unsupported`.
 
 ## Focused verification
 

@@ -3255,6 +3255,74 @@
               {:title "Finish the lesson"
                :body "The name stays bound on your lesson branch. The id and email were supplied for this run. Click [[Finish]] to close the lesson and clean up its branch."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "44"
+             :slug "independent-contact-records"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "b67af3a3-67c3-5237-89cf-62a815d5dfa1"
+             :title "Bind two independent contact records"
+             :reads "shows why two records with the same shape keep independent field paths."
+             :steps
+             [{:title "Select the contact route template"
+               :body "Find `lesson-contact-route` in the Explorer and select [[lesson-contact.structured-input/lesson-contact-route]]. Both sender and recipient have a name and an address with a city."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-contact-route" :fn-id "b67af3a3-67c3-5237-89cf-62a815d5dfa1"}}
+              {:title "Create your contact route"
+               :body "Click [[⋯]] on the template and choose [[Extend]]. Name the function `tutorial-contact-route`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"lesson-contact-route\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-contact-route\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-contact-route"
+                         :parent-id "b67af3a3-67c3-5237-89cf-62a815d5dfa1" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :run? true :path ["sender" "address" "city"] :state "remaining"}}
+              {:title "Find the sender city"
+               :body "Open [[Remaining inputs]], expand [[sender]] and [[address]], then choose [[Bind]] beside city."
+               :target ".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"sender — Type:\"]"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"address — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind sender.address.city\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["sender" "address" "city"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind sender.address.city\"]"}}
+              {:title "Bind the sender city"
+               :body "Enter `London` and click [[Bind]]. The lesson checks the saved binding at sender.address.city."
+               :target ".arg-value-edit-popover[aria-label=\"Bind sender.address.city\"]"
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["sender" "address" "city"] :state "occupied"}}
+              {:title "Find the recipient city"
+               :body "Open [[Structured inputs]] if it is closed, expand [[recipient]] and [[address]], then choose [[Bind]] beside city."
+               :target ".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"recipient — Type:\"]"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"address — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind recipient.address.city\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["recipient" "address" "city"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind recipient.address.city\"]"}}
+              {:title "Bind the recipient city"
+               :body "Enter `Paris` and click [[Bind]]. The lesson checks the saved binding at recipient.address.city."
+               :target ".arg-value-edit-popover[aria-label=\"Bind recipient.address.city\"]"
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["recipient" "address" "city"] :state "occupied"}}
+              {:title "Open Run"
+               :body "Click [[▶ Run]] on the sample. The form asks for two names, one inside sender and one inside recipient."
+               :target ".node-overlay[data-fn-name=\"tutorial-contact-route\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["recipient" "address" "city"] :state "occupied"
+                       :selector ".execute-popover.visible .execute-run-btn"}}
+              {:title "Run with two names"
+               :body "Enter `Ada` under sender and `Bea` under recipient. Click [[Run]]. The result pairs Ada with London and Bea with Paris."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :value "Ada in London → Bea in Paris"}}
+              {:title "Finish the lesson"
+               :body "Each city belongs to its own path, even though the records share a type. Click [[Finish]] to clean up the lesson branch."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
@@ -3277,30 +3345,38 @@
    :parent :assoc-in
    :args {:m :_tour-lessons :path {:value [:text :base]} :v :_tour-text-base}}
 
-  {:name :_tour-public-lesson?
-   :description "Keep the lessons with a general audience."
-   :parent :not
-   :args {:value {:parent :equal?
-                  :args {:a {:parent :get
-                             :args {:coll {:as :item} :key {:value :requires} :default nil}}
-                         :b {:value "structured-input-run"}}}}}
-  {:name :_structured-profile-lesson-available?
-   :description "Read the current viewer's branch creation, template Extend and structured Run eligibility."
-   :args {}
+  {:name :_structured-lesson-available?
+   :description "Read the current viewer's branch creation, template Extend and structured Run eligibility for a known lesson."
+   :args {:lesson-id {:type :text}}
    :return-type :bool
    :effects #{:db}}
   {:name :_tour-all-lessons
    :parent :get-in
    :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}
+  {:name :_tour-not-profile?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "43"}}}}}
+  {:name :_tour-with-profile-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "43"}}}
+          :then :_tour-all-lessons
+          :else {:parent :filter :args {:pred :_tour-not-profile? :coll :_tour-all-lessons}}}}
+  {:name :_tour-not-contact?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "44"}}}}}
   {:name :_tour-payload
    :parent :assoc-in
    :args {:m :_tour-resolved-text
           :path {:value [:lessons]}
           :v {:parent :if
-              :args {:test :_structured-profile-lesson-available?
-                     :then :_tour-all-lessons
+              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "44"}}}
+                     :then :_tour-with-profile-offer
                      :else {:parent :filter
-                            :args {:pred :_tour-public-lesson? :coll :_tour-all-lessons}}}}}}
+                            :args {:pred :_tour-not-contact? :coll :_tour-with-profile-offer}}}}}}
 
   {:name :_tour-json
    :parent :to-json-string

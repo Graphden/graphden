@@ -149,6 +149,14 @@
    :sha256 "eb3f5b79f609345850b5888e3a4d6d064c7eea6ef4b5fb9f1beb514a8ff9b93f"})
 
 
+(def ^:private profile-ref (ids/fn-id "refprofile.profile" :reference-profile))
+
+
+(def ^:private profile-ref-admission
+  (assoc lesson/admission :module ["refprofile" "profile"] :fn-id profile-ref
+         :sha256 "f9a41154524c291215d2b4aff8e33a3c57e389a74b50cca0c2abd7c0304126fe"))
+
+
 (defn- changed-reference-source!
   [origin token storage action]
   (let [name "changeable-uppercase"
@@ -350,6 +358,67 @@
       (is (= 409 (:http (command origin token "preview" whole)))))))
 
 
+(defn- run-profile
+  [origin token owner args]
+  (let [response (request origin token :post "/api/execute"
+                          {:content-type "application/json"
+                           :body (json/generate-string {:fn-id owner :args args :timeout-ms 20000})})]
+    (is (= 200 (:status response)) (:body response))
+    (:result (json/parse-string (:body response) true))))
+
+
+(defn- exercise-whole-reference!
+  [origin token storage]
+  (let [name "whole-record-reference-owner"
+        created (extend-native origin token name lesson/root)
+        owner (:id (first (sp/query-entities storage :fn {:name name})))
+        action {:fn-id owner :action "bind" :path ["profile"] :ref-fn-id profile-ref}
+        before (subtree origin token owner)
+        leaf {:fn-id owner :action "bind" :path ["profile" "name"] :value "occupied"}
+        leaf-preview (command origin token "preview" leaf)
+        profile {:id "example" :name "Ada" :email "ada@example.test"}
+        group-names (fn [node] (mapv :name (:fields node)))
+        initial (first (:fields before))]
+    (is (<= 200 (:status created) 299))
+    (is (= ["profile"] (:bind-path initial)))
+    (is (= ["id" "name" "email"] (group-names initial)))
+    (is (true? (:ok leaf-preview)))
+    (is (= 422 (:http (command origin token "preview" (assoc action :ref-fn-id uppercase)))))
+    (is (empty? (sp/query-entities storage :input-binding {:fn-id owner})))
+    (let [bound (change! origin token action)
+          id (some-> (:binding-id bound) parse-uuid)
+          view (subtree origin token owner)
+          group (first (:fields view))
+          occupied (first (:occupied view))
+          change {:fn-id owner :binding-id id}]
+      (is (true? (:committed bound)) (pr-str bound))
+      (when id
+        (let [row (rows/normalize (sp/read-entity storage :input-binding id))]
+          (is (= [id owner [] [(ids/slot-id lesson/root :profile)] "ref" profile-ref false]
+                 ((juxt :id :fn-id :scope-path :target-path :expression-kind :ref-fn-id :value-present) row)))))
+      (is (= [["profile"] (str id)] ((juxt :path :binding-id) occupied)))
+      (is (:version-id occupied))
+      (is (= ["reference-inputs" ["profile"] ["id" "name" "email"]]
+             [(:kind group) (group-names group) (group-names (first (:fields group)))]))
+      (is (= 409 (:http (command origin token "preview" leaf))))
+      (is (= 409 (:http (command origin token "apply" (assoc leaf :expected-state (:expected-state leaf-preview))))))
+      (is (= view (subtree origin token owner)))
+      (is (= profile (run-profile origin token owner {:profile {:profile profile}})))
+      (when id
+        (let [literal (assoc profile :name "edited")
+              edited (change! origin token (assoc change :action "edit" :value literal))
+              after (subtree origin token owner)]
+          (is (= [true (str id)] ((juxt :committed :binding-id) edited)))
+          (is (= (str id) (get-in after [:occupied 0 :binding-id])))
+          (is (not= (:version-id occupied) (get-in after [:occupied 0 :version-id])))
+          (is (empty? (:fields after)))
+          (is (= literal (run-profile origin token owner {})))
+          (is (true? (:committed (change! origin token (assoc change :action "remove")))))
+          (is (nil? (sp/read-entity storage :input-binding id)))
+          (is (= before (subtree origin token owner)))
+          (is (= profile (run-profile origin token owner {:profile profile}))))))))
+
+
 (defn- exercise-callable-field!
   [origin token storage]
   (let [template (subtree origin token closed/root)
@@ -419,7 +488,9 @@
     (try
       (is (<= 200 (:status created) 299))
       (browser/exercise! handler token "tools/browser-test/fixtures/structured-reference-bind.js"
-                         owner owner-name uppercase)
+                         owner owner-name uppercase "profile.name" "reference-uppercase")
+      (browser/exercise! handler token "tools/browser-test/fixtures/structured-reference-bind.js"
+                         owner owner-name profile-ref "profile" "reference-profile")
       (let [view (subtree origin token owner)
             fields (get-in view [:fields 0 :fields])
             name-field (some #(when (= "name" (:name %)) %) fields)]
@@ -477,8 +548,8 @@
 
 (deftest ordinary-extend-and-named-input-commands
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names (into app-packages ["lessons" "reftext" "closedinputfixture" "lesson-contact"])
-                                             :primitive-inputs [lesson/admission uppercase-admission closed/admission contact/admission]})
+        packages (ig/init-key :app/packages {:package-names (into app-packages ["lessons" "reftext" "closedinputfixture" "lesson-contact" "refprofile"])
+                                             :primitive-inputs [lesson/admission uppercase-admission closed/admission contact/admission profile-ref-admission]})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
         denied (atom nil)
@@ -500,6 +571,7 @@
         (exercise-callable-field! origin token storage)
         (exercise-mcp-input! origin token storage)
         (exercise-whole-record! origin token storage)
+        (exercise-whole-reference! origin token storage)
         (exercise-pair! origin token storage)
         (when (= "1" (System/getenv "GD_STRUCTURED_INPUT_PLAYWRIGHT"))
           (exercise-reference-picker! origin handler token storage ctx)))

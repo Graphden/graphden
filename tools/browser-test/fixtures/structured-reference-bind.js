@@ -3,10 +3,10 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 
-const [origin, owner, ownerName, target] = process.argv.slice(2);
+const [origin, owner, ownerName, target, label, targetName] = process.argv.slice(2);
 const token = process.env.GD_BROWSER_FIXTURE_TOKEN;
 assert.equal(new URL(origin).hostname, '127.0.0.1');
-assert.ok(owner && ownerName && target && token);
+assert.ok(owner && ownerName && target && token && targetName && ['profile', 'profile.name'].includes(label));
 
 async function applyChange(page, dialog, label) {
   const applied = page.waitForResponse(response =>
@@ -51,11 +51,11 @@ async function exercise() {
     await page.getByPlaceholder('Filter...', {exact: true}).fill(ownerName);
     await page.locator(`#entity-list .entity-item[data-fn-id="${owner}"]:visible`).first().click();
     await page.getByRole('button', {name: 'Remaining inputs', exact: true}).press('Enter');
-    await page.getByRole('button', {name: /^profile — Type:/}).press('Space');
-    await page.getByRole('button', {name: 'Bind profile.name'}).press('Enter');
+    if (label === 'profile.name') await page.getByRole('button', {name: /^profile — Type:/}).press('Space');
+    await page.getByRole('button', {name: 'Bind ' + label, exact: true}).press('Enter');
 
-    const dialog = page.getByRole('dialog', {name: 'Bind profile.name'});
-    const value = dialog.getByRole('textbox', {name: 'Value for profile.name'});
+    const dialog = page.getByRole('dialog', {name: 'Bind ' + label, exact: true});
+    const value = dialog.getByRole('textbox', {name: 'Value for ' + label});
     await value.fill('Keep this draft');
     const choose = dialog.getByRole('button', {name: 'Choose function'});
     await choose.press('Enter');
@@ -65,17 +65,17 @@ async function exercise() {
     assert.equal(await value.inputValue(), 'Keep this draft');
 
     await choose.press('Enter');
-    await filter.fill('reference-uppercase');
-    await page.locator('.fn-picker-row', {hasText: 'reference-uppercase'}).click();
-    const picked = dialog.getByRole('textbox', {name: 'Function for profile.name'});
-    assert.match(await picked.inputValue(), /reference-uppercase$/);
+    await filter.fill(targetName);
+    await page.locator('.fn-picker-row', {hasText: targetName}).click();
+    const picked = dialog.getByRole('textbox', {name: 'Function for ' + label});
+    assert.ok((await picked.inputValue()).endsWith(targetName));
     assert.equal(await picked.getAttribute('readonly'), '');
     if (process.env.GD_STRUCTURED_REF_SCREENSHOT) {
       await page.screenshot({path: process.env.GD_STRUCTURED_REF_SCREENSHOT});
     }
 
     const bound = await applyChange(page, dialog, 'Bind');
-    assert.deepEqual(bound.body.path, ['profile', 'name']);
+    assert.deepEqual(bound.body.path, label.split('.'));
     assert.equal(bound.body['fn-id'], owner);
     assert.equal(bound.body['ref-fn-id'], target);
     assert.equal(Object.hasOwn(bound.body, 'value'), false);
@@ -89,34 +89,36 @@ async function exercise() {
     }, {owner, binding, previous});
 
     await waitForVersion(null);
-    const edit = page.getByRole('button', {name: 'Edit profile.name'});
-    const change = page.getByRole('dialog', {name: 'Edit profile.name'});
+    const edit = page.getByRole('button', {name: 'Edit ' + label});
+    const change = page.getByRole('dialog', {name: 'Edit ' + label});
     await edit.press('Enter');
-    await change.getByRole('textbox', {name: 'New value for profile.name'}).fill('Bea');
+    const editedValue = label === 'profile' ? {id: '23', name: 'Bea', email: 'bea@example.test'} : 'Bea';
+    await change.getByRole('textbox', {name: 'New value for ' + label})
+      .fill(typeof editedValue === 'string' ? editedValue : JSON.stringify(editedValue));
     const literal = await applyChange(page, change, 'Save');
     assert.equal(literal.body['binding-id'], binding);
-    assert.equal(literal.body.value, 'Bea');
+    assert.deepEqual(literal.body.value, editedValue);
     assert.ok(literal.body['expected-version']);
     assert.equal(Object.hasOwn(literal.body, 'ref-fn-id'), false);
 
     await waitForVersion(literal.body['expected-version']);
     await edit.press('Enter');
     await change.getByRole('button', {name: 'Choose function'}).press('Enter');
-    await filter.fill('reference-uppercase');
-    await page.locator('.fn-picker-row', {hasText: 'reference-uppercase'}).click();
+    await filter.fill(targetName);
+    await page.locator('.fn-picker-row', {hasText: targetName}).click();
     const rewritten = await applyChange(page, change, 'Save');
     assert.equal(rewritten.body['binding-id'], binding);
     assert.equal(rewritten.body['ref-fn-id'], target);
     assert.notEqual(rewritten.body['expected-version'], literal.body['expected-version']);
 
     await waitForVersion(rewritten.body['expected-version']);
-    await page.getByRole('button', {name: 'Remove profile.name'}).press('Enter');
-    const remove = page.getByRole('dialog', {name: 'Remove profile.name'});
+    await page.getByRole('button', {name: 'Remove ' + label}).press('Enter');
+    const remove = page.getByRole('dialog', {name: 'Remove ' + label});
     const removed = await applyChange(page, remove, 'Remove');
     assert.equal(removed.body['binding-id'], binding);
     assert.equal(Object.hasOwn(removed.body, 'ref-fn-id'), false);
     assert.equal(Object.hasOwn(removed.body, 'value'), false);
-    await page.getByRole('button', {name: 'Bind profile.name'}).waitFor();
+    await page.getByRole('button', {name: 'Bind ' + label, exact: true}).waitFor();
     assert.deepEqual(errors, []);
   } catch (error) {
     console.error('Editor refresh evidence', {requests: requests.slice(-16), refreshErrors: refreshErrors.slice(-10)});

@@ -45,7 +45,7 @@
 
 
 (def ^:private templates
-  {"43" lesson/root "44" contact/root "45" optional/root})
+  {"43" lesson/root "44" contact/root "45" optional/root "46" lesson/root})
 
 
 (defn- catalogue
@@ -145,10 +145,12 @@
     (is (contains? anonymous "15"))
     (doseq [[id root] templates]
       (is (not (contains? anonymous id)))
-      (is (= (str root) (get-in eligible [id :template-id])))
+      (is (= (str root) (get-in eligible [id :template-id]))))
+    (doseq [root (distinct (vals templates))]
       (reset! denied root)
-      (let [available (catalogue app token)]
-        (is (= (disj (set (keys templates)) id) (set (filter templates (keys available)))))))
+      (let [available (catalogue app token)
+            expected (into #{} (keep (fn [[id template]] (when (not= template root) id))) templates)]
+        (is (= expected (set (filter templates (keys available)))))))
     (reset! denied nil)
     (ordinary-branch-exercise! app token storage)
     (when (or (= "1" browser-lesson) (contains? templates browser-lesson))
@@ -161,4 +163,5 @@
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-structured-profile"})))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-contact-route"})))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-optional-label"})))
+    (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-whole-profile"})))
     (is (not-any? (catalogue app nil) (keys templates)))))

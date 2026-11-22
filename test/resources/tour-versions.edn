@@ -46,5 +46,6 @@
  "types" {:version 1, :steps "cf035f8d069e7cc531e0549c70ca90a9ac0e8877"}
  "users-admin" {:version 1, :steps "7be1e4b9306c3e9aaeb12a9a0f14ab38d0984ad7"}
  "version-history" {:version 3, :steps "bb65ddf8965314bc3fa64413e0821a8b81879564"}
+ "whole-record-binding" {:version 1, :steps "1a3ad4654664bcd42ec1086abd0ccc5f9b86cdc9"}
  "working-across-orgs" {:version 1, :steps "994aa5a41c991aeee76b21bf592fe0da21bd9893"}
  "workspaces" {:version 3, :steps "d4dc6616f846ed882d066673ba2a89049e0fa6e1"}}

@@ -76,7 +76,8 @@ function _tourStructuredInputPath(check) {
   }
   if (state === 'remaining') {
     return !Object.hasOwn(check, 'version-id') && !occupied.length
-      && remaining?.kind === 'input-field' && !Object.hasOwn(remaining, 'fields')
+      && remaining?.kind === 'input-field'
+      && (check['record?'] === true ? Array.isArray(remaining.fields) : !Object.hasOwn(remaining, 'fields'))
       && remaining.type != null && samePath(remaining['bind-path']);
   }
   if (state !== 'occupied' || remaining || occupied.length !== 1) return false;

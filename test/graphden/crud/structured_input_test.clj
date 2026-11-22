@@ -21,7 +21,7 @@
         ctx (-> (context/build-context {:bindings {binding-id row}})
                 (assoc-in [:markers :hidden-fixture] {:hide-result? true}))
         project (fn [candidate view]
-                  (context/call-with-types candidate #(#'structured/visible-occupied-leaves candidate view)))]
+                  (context/call-with-types candidate #(#'structured/visible-occupied-fields candidate view)))]
     (is (= [{:path [:profile :name] :type :text :binding-id binding-id}] (project ctx graph)))
     (testing "secret leaf and ancestor markers, including refined and declared containers"
       (is (empty? (project ctx (-> graph

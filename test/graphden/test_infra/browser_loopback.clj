@@ -32,7 +32,6 @@
       (finally (stop)))))
 
 
-
 (defn exercise!
   [handler token script & args]
   (apply exercise-with-timeout! 60 handler token script args))

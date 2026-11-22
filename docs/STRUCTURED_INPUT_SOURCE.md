@@ -242,6 +242,14 @@ For example, the conditional's positive/non-negative literal refinements use
 the `core.refinements` UUIDs. The snapshot verifies those declarations and
 rejects absent or conflicting aliases instead of reading process-wide policy.
 
+Named list types require source and row evidence too. For `:list T`, the
+snapshot checks the type-only owner, its element FK and its exact implicit
+`:items` slot/membership. The element must resolve through the declaration's
+namespace to a primitive or another verified named type. Executable functions,
+changed memberships and unverified origins are rejected. Compound inline
+elements still require separate evidence; an erased element FK cannot supply
+their authored shape.
+
 An authored generic scalar or `:never` return can use the legacy `:any` FK
 only when the source form, physical FK and frozen implementation signature
 agree. The snapshot retains this return by function UUID and FK; the ordinary

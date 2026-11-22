@@ -4,6 +4,7 @@
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
@@ -25,7 +26,7 @@
 
 (defn- declaration-kind
   [definition]
-  (some #(when (contains? definition %) %) [:union :map :type :refine]))
+  (some #(when (contains? definition %) %) [:union :map :type :refine :list]))
 
 
 (defn- field-membership?
@@ -70,6 +71,20 @@
     [:refine base constraint]))
 
 
+(defn- list-body
+  [id element row children type-id]
+  (let [element-id (when (keyword? element) (type-id element))
+        by-id (into {} (map (juxt :id identity)) children)]
+    (when-not (and (uuid? element-id) (= element-id (:element-fn-id row))
+                   (nil? (:constraint row)) (empty? (:parent-ids row))
+                   (not-any? row [:base-fn-id :return-type-fn-id :input-type-fn-id
+                                  :anonymous-hash :expects-effects :lambda-params])
+                   (= 2 (count children) (count by-id))
+                   (field-membership? by-id id 0 :items (ids/primitive-fn-id :sequence)))
+      (reject! :named-list-evidence-required id))
+    [:list element]))
+
+
 (defn lookup
   "Build a memoized reader of verified named type declarations. Resolve only
    through the package's prepared names, checking the original and row by UUID."
@@ -88,10 +103,14 @@
           (when kind
             (let [{:keys [verification v2 source]} (plan-entry id)
                   form (get-in v2 [:source kind])
+                  normalized-form (if (and (= :list kind) (keyword? form) (not (types/primitive? form)))
+                                    (parse/normalize-ref form name->id (:namespace definition))
+                                    form)
                   [row & children :as rows] (:declaration-records v2)
                   body (case kind
                          :type (record-body id form row children type-id)
                          :refine (refinement-body id form row children)
+                         :list (list-body id normalized-form row children type-id)
                          :union (union-body form id)
                          :map (let [{:keys [key value]} form]
                                 (when-not (every? types/primitive? [key value]) (reject! :named-dictionary-evidence-required id))
@@ -103,13 +122,14 @@
                              (= id (ids/fn-id ns-name declared-name) (:id row)) (= :fn (:kind row))
                              (= ns-name (:namespace source) (:namespace-id row)) (= declared-name (:name source))
                              (= (name declared-name) (:name row))
-                             (migration/same-edn? form (get source kind)) (migration/same-edn? form (get definition kind))
+                             (migration/same-edn? form (get source kind)) (migration/same-edn? normalized-form (get definition kind))
                              (case kind
                                :type (= (vec (keys form)) (vec (keys (:type source))) (vec (keys (:type definition))))
-                               :refine true
+                               (:refine :list) true
                                (and (empty? children) (migration/same-edn? body (:constraint row)))))
                 (reject! (case kind :type :named-record-evidence-required :union :named-union-evidence-required
-                               :map :named-dictionary-evidence-required :refine :named-refinement-evidence-required) id))
+                               :map :named-dictionary-evidence-required :refine :named-refinement-evidence-required
+                               :list :named-list-evidence-required) id))
               {:id id :kind kind :body body :row row :rows rows
                :origin (merge {:namespace ns-name :name declared-name kind form} (select-keys source [:source-file]))})))))))
 

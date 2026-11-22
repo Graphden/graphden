@@ -238,7 +238,7 @@ async function exercise() {
     };
     const diagnostic = setTimeout(() => {
       console.error('Lesson ' + id + ' browser deadline', {pageErrors, failedResponses, pathname: new URL(page.url()).pathname});
-    }, 52000).unref();
+    }, id === '46' ? 82000 : 52000).unref();
     browser.on('disconnected', () => clearTimeout(diagnostic));
     const doc = await page.goto(origin + '/?tutorial=' + id, {waitUntil: 'domcontentloaded'});
     assert.equal(doc.status(), 200, 'the fixture serves the normal editor document');

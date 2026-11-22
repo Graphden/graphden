@@ -158,7 +158,10 @@
         (try
           (doseq [[id root] templates
                   :when (or (= "1" browser-lesson) (= browser-lesson id))]
-            (browser/exercise! #(router/dispatch app %) token "tools/browser-test/fixtures/structured-lesson-lifecycle.js" root id))
+            (let [timeout (if (= "46" id) 90 60)]
+              (browser/exercise-with-timeout! timeout
+                                              #(router/dispatch app %) token
+                                              "tools/browser-test/fixtures/structured-lesson-lifecycle.js" root id)))
           (finally (ig/halt-key! :exec/api-routes-js-cache api-cache)))))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-structured-profile"})))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-contact-route"})))

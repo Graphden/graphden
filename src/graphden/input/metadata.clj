@@ -40,10 +40,13 @@
           override (if (contains? (:source-binding-types ctx) source-key)
                      (do
                        (expansion/assert-finite! witness)
-                       (when-not (and (= type-id (:type-id node))
-                                      (= (:type node) (types/resolve-alias witness)))
-                         (context/reject! :source-annotation-type-mismatch {:binding-id (:id row)}))
-                       node)
+                       (let [unchanged? (and (= type-id (:type-id node)) (= (:type node) (types/resolve-alias witness)))]
+                         (when-not (or unchanged? (descriptor/stored-source-type? witness type-id (:alias-ids ctx)))
+                           (context/reject! :source-annotation-type-mismatch {:binding-id (:id row)}))
+                         (if unchanged?
+                           node
+                           (variables/descriptor-in-scope
+                             scope (descriptor/resolve-descriptor (assoc-in ctx [:type-bodies type-id] witness) type-id)))))
                      (variables/descriptor-in-scope scope (descriptor/resolve-descriptor ctx type-id)))
           expected (types/resolve substitution (:type node))
           actual (:type override)

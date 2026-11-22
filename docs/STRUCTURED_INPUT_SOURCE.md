@@ -250,14 +250,23 @@ use scope and argument substitution before the declared-return check. Two
 uses of `const` can therefore return different concrete types without sharing
 a type variable. An unrelated FK or implementation return remains an error.
 
-A named pin on a union field uses the prepared package's namespace-resolved
-type definitions. The source planner checks finite expansion, marker
-preservation and directional subtyping. For exactly `[:union :null T]` with
-one type variable, the existing unifier may instantiate `T`; the resulting
-closed instance must still accept the named pin by directional subtyping.
-Other generic shapes receive no new inference rule. The pin must expand to a
-concrete type and the target may carry each type variable once. Unknown references,
-recursive aliases and unsupported declaration shapes keep the migration blocked.
+An authored rename pin uses the prepared package's namespace-resolved type
+definitions. The planner checks finite expansion, known source leaves, marker
+preservation and directional subtyping. The existing unifier can instantiate
+the inherited generic contract, for example `[:list a]` to `[:list :uuid]`;
+the result must be closed and still accept the actual pin by subtyping.
+Repeated variables must retain their correlation: a map's keys and values
+cannot independently instantiate the same variable to different types.
+Both named pins and inline collection pins retain their exact source form,
+alias slot UUID, inherited target UUID and physical override FK. Unknown
+references, recursive aliases and unsupported declarations remain blocked.
+
+Frozen analysis records a rich projection pin by its binding UUID and physical
+FK. This keeps an inline list's element type when legacy storage uses the
+shared `:sequence` identity. Only the exact projection row and its authored
+alias type can supply this witness. Metadata restores it for that binding and
+then runs the ordinary subtype/marker checker; runtime obligations and missing
+checker coverage remain explicit.
 
 `source-snapshot/projection-readiness` returns the analyzer's scoped routes,
 binding UUIDs, directional proofs, runtime obligations and signature coverage.

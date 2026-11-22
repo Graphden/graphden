@@ -802,6 +802,33 @@
       (is (contains? (codes (replay '[:union :null a] :missing-type)) :rename-projection-required)))))
 
 
+(deftest closed-collection-pins-preserve-the-shared-generic-contract-and-physical-rows
+  (let [base {:namespace "fixture" :name :collect
+              :args {:xs {:type '[:list a]} :index {:type '[:map k [:list v]]}}
+              :return-type :any}
+        child {:namespace "fixture" :name :typed :parent :collect
+               :args {:xs {:as :items :type [:list :uuid]}
+                      :index {:as :groups :type [:map :text [:list :int]]}}}
+        definitions [base child]
+        ctx (prepared definitions)
+        entry (first (:definitions (source/verify-module (source/plan-module [child] ctx) ctx)))
+        owner (ids/fn-id "fixture" :typed)
+        target (ids/slot-id (ids/fn-id "fixture" :collect) :xs)
+        row (some #(when (= [target] (:target-path %)) %) (get-in entry [:v2 :bindings]))
+        replay (fn [parent pin]
+                 (let [ds [parent (assoc-in child [:args :xs :type] pin)] ctx (prepared ds)]
+                   (first (:definitions (source/verify-module (source/plan-module [(last ds)] ctx) ctx)))))]
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= {:type [:list :uuid] :required false} (get-in entry [:proposed :input :items])))
+    (is (= {:type [:map :text [:list :int]]} (get-in entry [:proposed :configure [:index]])))
+    (is (= [(ids/binding-id owner target) [target] [(ids/slot-id owner :items)] (ids/primitive-fn-id :sequence)]
+           ((juxt :id :target-path :projection-path :type-override-fn-id) row)))
+    (is (contains? (codes (replay (assoc-in base [:args :xs :type] [:list :text]) [:list :uuid])) :rename-projection-required))
+    (is (contains? (codes (replay base [:list :missing-type])) :rename-projection-required))
+    (is (contains? (codes (replay (assoc-in base [:args :xs :type] '[:map a a]) [:map :keyword :text]))
+                   :rename-projection-required))))
+
+
 (deftest nested-inline-declarations-retain-order-and-all-use-sites
   (let [host-base (assoc base :args {:x :any :y :any :z :any})
         inner (array-map :args (array-map :y {:ref :producer} :x {:example [1 2]}) :parent :sink)

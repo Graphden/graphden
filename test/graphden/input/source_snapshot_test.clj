@@ -49,7 +49,7 @@
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded @loaded-bases]
         (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(#{:equal? :const :coalesce :assert-some} (:name %)) (sources "logic"))
-                                                        (filter #(#{:get :zipmap} (:name %)) (sources "collections"))
+                                                        (filter #(#{:get :zipmap :vec} (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
                                                         (filter #(#{:shipped-asset :to-json-string :throw} (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
@@ -276,6 +276,31 @@
       (is (empty? (:obligations graph)))))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"value is nil"
         ((:impl (get @loaded-bases :assert-some)) {:value nil} {}))))
+
+
+(deftest shipped-list-pin-retains-uuid-elements-through-metadata-and-inference
+  (let [base (filterv #(= :vec (:name %)) (sources "collections"))
+        children (vec (fixtures/declarations "packages/app/views/fns.edn" #{:_explorer-uses-all :_explorer-also-all}))
+        definitions (into base children)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owners (mapv #(ids/fn-id (:namespace %) (:name %)) children)
+        target (ids/slot-id (ids/fn-id "core.collections" :vec) :coll)
+        {:keys [context options]} (snapshot/freeze-closure package owners @roots)
+        sample [(random-uuid) (random-uuid)]
+        legacy ((:impl (get @loaded-bases :vec)) {:coll sample} {})]
+    (is (= sample legacy))
+    (doseq [owner owners
+            :let [graph (analysis/analyze-effective-input context owner options)
+                  binding (ids/binding-id owner target)
+                  configured (some #(when (= target (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]]
+      (is (= [:list :uuid] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= [:list :uuid] (:type configured)))
+      (is (= [:list :uuid] (get-in graph [:scopes [] :signature :return])))
+      (is (empty? (:obligations graph)))
+      (let [tampered (assoc-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]] [:list :text])
+            diagnostic (failure #(analysis/analyze-effective-input tampered owner options))]
+        (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) diagnostic)))))))
 
 
 (deftest shipped-coalesce-rule-is-local-and-preserves-nil-and-false

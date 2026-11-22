@@ -25,7 +25,7 @@
    for generic field types erased by the legacy storage representation.
    :source-return-types uses [fn-id type-id] for erased generic, bottom and
    collection returns, including verified list builders. :source-binding-types retains
-   exact unchanged annotations keyed by [binding-id type-id]. Named source declarations
+   exact source annotations and projection pins keyed by [binding-id type-id]. Named source declarations
    retain their authored form and available file path in :type-origins by UUID.
    Missing aliases never fall back to the process registry. Marker policy is
    captured once unless explicitly supplied. :snapshot-id identifies this

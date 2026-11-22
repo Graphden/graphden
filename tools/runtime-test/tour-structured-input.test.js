@@ -7,7 +7,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname,
   '../../resources/packages/app/editor/editor-tour-structured-input.js'), 'utf8');
-const template = 'abd1ff8f-3ae3-57c4-ad64-412ef0689f78';
+const template = 'profile-template';
 const lesson = {id: '43', 'template-id': template};
 const legacy = {id: '15'};
 const payload = {lessons: [legacy, lesson], 'structured-templates': {'43': template}};
@@ -96,7 +96,7 @@ async function run() {
   t.setPrincipal(true);
   assert.deepEqual(Array.from((await scope(() => false)).lessons), [legacy], 'a stale catalogue load cannot advertise the lesson');
 
-  const contactTemplate = 'b67af3a3-67c3-5237-89cf-62a815d5dfa1';
+  const contactTemplate = 'contact-template';
   const contactLesson = {id: '44', 'template-id': contactTemplate};
   const contactFields = ['sender', 'recipient'].map(name => ({
     name, fields: [field('name'), {name: 'address', fields: [field('city')]}],
@@ -118,7 +118,43 @@ async function run() {
     occupied: ['sender', 'recipient'].map(occupied)};
   assert.equal(t.ctx._tourStructuredContacts(boundContacts, true), true);
   assert.equal(t.ctx._tourStructuredContacts({...boundContacts, occupied: [occupied('sender')]}, true), false);
-  console.log('✓ structured tutorials: exact templates, sandbox ownership, independent contact paths and resume');
+  const optionalTemplate = 'optional-template';
+  const optionalLesson = {id: '45', 'template-id': optionalTemplate};
+  const optionalLabel = {...field('label'), type: ['union', 'null', 'text'],
+    required: false, 'required-now?': false};
+  const optionalInput = {...templateInput, fields: [optionalLabel]};
+  const optionalPayload = {lessons: [contactLesson, optionalLesson], 'structured-templates': {'45': optionalTemplate}};
+  const scopeOptional = data => t.ctx._tourScopeStructuredLesson(data, () => true);
+  t.setResponse({id: optionalTemplate, 'structured-input': optionalInput});
+  assert.deepEqual(Array.from((await scopeOptional(optionalPayload)).lessons), [optionalLesson]);
+  const reads = t.reads.length;
+  assert.deepEqual(Array.from((await scopeOptional({lessons: optionalPayload.lessons})).lessons), []);
+  assert.deepEqual(Array.from((await scopeOptional({...optionalPayload, 'structured-templates': {'45': contactTemplate}})).lessons), []);
+  assert.equal(t.reads.length, reads, 'missing and mismatched catalogue proofs fail before a subtree read');
+  assert.equal(t.ctx._tourStructuredOptional({...optionalInput, fields: [{...optionalLabel, required: true}]}, false), false);
+  assert.equal(t.ctx._tourStructuredOptional(optionalInput, true), false, 'free label must retain its Bind offer');
+  const childLabel = {...optionalLabel, 'bind-path': ['label']};
+  assert.equal(t.ctx._tourStructuredOptional({...optionalInput, fields: [childLabel]}, true), true);
+  const boundLabel = {...optionalInput, fields: [], occupied: [
+    {type: optionalLabel.type, path: ['label'], 'binding-id': 'binding', 'version-id': 'version'},
+  ]};
+  assert.equal(t.ctx._tourStructuredOptional(boundLabel, true), true, 'saved nil has an occupied field and can resume');
+  assert.equal(t.ctx._tourStructuredOptional(boundLabel, false), false, 'the source template cannot start with a bound label');
+  const optionalBranch = {...sandbox, name: 'tutorial-45-test'};
+  const optionalChild = {...childReceipt, id: 'optional-child', name: 'tutorial-optional-label',
+    'parent-id': optionalTemplate};
+  t.ctx._tourState = {...saved, lessonId: '45', step: 7, sandboxBranch: optionalBranch.name,
+    created: [optionalBranch, optionalChild]};
+  t.ctx._tourLessons = optionalPayload;
+  t.setBranch(optionalBranch.name);
+  t.setResponse({id: optionalChild.id, 'parent-ids': [optionalTemplate], 'structured-input': boundLabel});
+  assert.deepEqual(Array.from((await scopeOptional(optionalPayload)).lessons), [optionalLesson]);
+  assert.equal(t.reads.at(-1), '/api/graph/entities?scope=subtree&root-id=' + optionalChild.id);
+  assert.equal(t.ctx._tourStructuredChild(t.ctx._tourState, optionalTemplate), optionalChild);
+  t.ctx._tourState.created[1] = {...optionalChild, 'parent-id': contactTemplate};
+  assert.equal(t.ctx._tourStructuredChild(t.ctx._tourState, optionalTemplate), undefined);
+  assert.deepEqual(Array.from((await scopeOptional(optionalPayload)).lessons), []);
+  console.log('✓ structured tutorials: exact templates, sandbox ownership, independent and optional fields, and resume');
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1; });

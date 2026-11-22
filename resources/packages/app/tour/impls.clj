@@ -42,7 +42,8 @@
 
 (def ^:private structured-lesson-templates
   {"43" (ids/fn-id "lessons.structured-input" :lesson-profile)
-   "44" (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route)})
+   "44" (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route)
+   "45" (ids/fn-id "optionalinput.structured" :optional-label)})
 
 
 (defbase structured-lesson-available?

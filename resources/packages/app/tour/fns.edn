@@ -3323,6 +3323,84 @@
               {:title "Finish the lesson"
                :body "Each city belongs to its own path, even though the records share a type. Click [[Finish]] to clean up the lesson branch."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "45"
+             :slug "optional-input-default"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "439a518d-2a0e-50ef-8abf-d8c5e96c9f7e"
+             :title "Run with a default or supply nil"
+             :reads "shows how omission, a value for one run and a saved binding affect an optional input."
+             :steps
+             [{:title "Select the optional label template"
+               :body "Find `optional-label` in the Explorer and select [[optionalinput.structured/optional-label]]. Its optional label accepts text or nil."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "optional-label" :fn-id "439a518d-2a0e-50ef-8abf-d8c5e96c9f7e"}}
+              {:title "Create your optional label"
+               :body "Choose [[Extend]] from the template’s [[⋯]] menu. Name it `tutorial-optional-label`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"optional-label\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"optional-label\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-optional-label"
+                         :parent-id "439a518d-2a0e-50ef-8abf-d8c5e96c9f7e" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :run? true :path ["label"] :state "remaining"}}
+              {:title "Open Run with label still optional"
+               :body "Click [[▶ Run]]. You can run even though label is still free."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "remaining"
+                       :selector ".execute-popover.visible .execute-run-btn"}}
+              {:title "Run without a label"
+               :body "Leave label blank and click [[Run]]. The result `text: automatic` uses the declared default."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "text: automatic"}}
+              {:title "Supply nil for one run"
+               :body "Type `null` in the label box and click [[Run]] again. JSON uses `null` for nil. The result is `explicit nil`."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "explicit nil"}}
+              {:title "Find the free label"
+               :body "On the function card, open [[Remaining inputs]] and choose [[Bind]] beside label. Running with nil left the field free."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Bind label\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind label\"]"}}
+              {:title "Bind nil to label"
+               :body "Enter `null` and click [[Bind]]. This time the nil value is saved as a binding."
+               :target ".arg-value-edit-popover[aria-label=\"Bind label\"]"
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "occupied"}}
+              {:title "Run with the saved nil"
+               :body "Open [[▶ Run]] and click [[Run]]. There is no label box because the binding already supplies nil."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "explicit nil"}}
+              {:title "Remove the saved nil"
+               :body "On the function card, open [[Structured inputs]], choose [[Remove]] beside label in Bound inputs and confirm."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Remove label\"]"
+                         ".arg-value-edit-popover[aria-label=\"Remove label\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "remaining"}}
+              {:title "Run with the default again"
+               :body "Open [[▶ Run]], leave label blank and click [[Run]]. The result returns to `text: automatic`."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "text: automatic"}}
+              {:title "Finish the lesson"
+               :body "Omitting label uses the default. Supplying nil gives a value for one run. Binding nil saves it for later runs. Click [[Finish]] to clean up the lesson branch."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
@@ -3368,15 +3446,25 @@
    :args {:value {:parent :equal?
                   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                          :b {:value "44"}}}}}
+  {:name :_tour-with-contact-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "44"}}}
+          :then :_tour-with-profile-offer
+          :else {:parent :filter :args {:pred :_tour-not-contact? :coll :_tour-with-profile-offer}}}}
+  {:name :_tour-not-optional-label?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "45"}}}}}
   {:name :_tour-payload
    :parent :assoc-in
    :args {:m :_tour-resolved-text
           :path {:value [:lessons]}
           :v {:parent :if
-              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "44"}}}
-                     :then :_tour-with-profile-offer
+              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "45"}}}
+                     :then :_tour-with-contact-offer
                      :else {:parent :filter
-                            :args {:pred :_tour-not-contact? :coll :_tour-with-profile-offer}}}}}}
+                            :args {:pred :_tour-not-optional-label? :coll :_tour-with-contact-offer}}}}}}
 
   {:name :_attach-structured-lesson-templates
    :description "Attach the certified template identities of the offered structured lessons."

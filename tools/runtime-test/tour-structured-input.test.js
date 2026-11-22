@@ -117,7 +117,23 @@ async function run() {
     occupied: ['sender', 'recipient'].map(occupied)};
   assert.equal(t.ctx._tourStructuredContacts(boundContacts, true), true);
   assert.equal(t.ctx._tourStructuredContacts({...boundContacts, occupied: [occupied('sender')]}, true), false);
-  console.log('✓ structured tutorials: exact templates, sandbox ownership, independent contact paths and resume');
+  const optionalLesson = {id: '45', 'template-id': '439a518d-2a0e-50ef-8abf-d8c5e96c9f7e'};
+  const optionalLabel = {...field('label'), type: ['union', 'null', 'text'],
+    required: false, 'required-now?': false};
+  const optionalInput = {...templateInput, fields: [optionalLabel]};
+  t.setResponse({id: optionalLesson['template-id'], 'structured-input': optionalInput});
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(
+    {lessons: [contactLesson, optionalLesson]}, () => true)).lessons), [optionalLesson]);
+  assert.equal(t.ctx._tourStructuredOptional({...optionalInput, fields: [{...optionalLabel, required: true}]}, false), false);
+  assert.equal(t.ctx._tourStructuredOptional(optionalInput, true), false, 'free label must retain its Bind offer');
+  const childLabel = {...optionalLabel, 'bind-path': ['label']};
+  assert.equal(t.ctx._tourStructuredOptional({...optionalInput, fields: [childLabel]}, true), true);
+  const boundLabel = {...optionalInput, fields: [], occupied: [
+    {type: optionalLabel.type, path: ['label'], 'binding-id': 'binding', 'version-id': 'version'},
+  ]};
+  assert.equal(t.ctx._tourStructuredOptional(boundLabel, true), true, 'saved nil has an occupied field and can resume');
+  assert.equal(t.ctx._tourStructuredOptional(boundLabel, false), false, 'the source template cannot start with a bound label');
+  console.log('✓ structured tutorials: exact templates, sandbox ownership, independent and optional fields, and resume');
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1; });

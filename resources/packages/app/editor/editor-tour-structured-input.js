@@ -1,8 +1,9 @@
 // Structured lessons use the ordinary branch factory, Extend and its creation receipt.
 // A package can offer the sample for this viewer through the subtree read.
 const structuredLessonSamples = new Map([
-  ['43', {template: 'abd1ff8f-3ae3-57c4-ad64-412ef0689f78', child: 'tutorial-structured-profile'}],
-  ['44', {template: 'b67af3a3-67c3-5237-89cf-62a815d5dfa1', child: 'tutorial-contact-route'}],
+  ['43', {template: 'abd1ff8f-3ae3-57c4-ad64-412ef0689f78', child: 'tutorial-structured-profile', checkShape: _tourStructuredProfile}],
+  ['44', {template: 'b67af3a3-67c3-5237-89cf-62a815d5dfa1', child: 'tutorial-contact-route', checkShape: _tourStructuredContacts}],
+  ['45', {template: '439a518d-2a0e-50ef-8abf-d8c5e96c9f7e', child: 'tutorial-optional-label', checkShape: _tourStructuredOptional}],
 ]);
 const structuredLessonProofs = new WeakMap();
 
@@ -57,6 +58,20 @@ function _tourStructuredContacts(input, editable) {
   });
 }
 
+function _tourStructuredOptional(input, editable) {
+  if (input?.status !== 'available' || input['run-available'] !== true || !Array.isArray(input.fields)) return false;
+  const nullableText = field => JSON.stringify(field.type) === '["union","null","text"]';
+  const labelPath = path => Array.isArray(path) && path.length === 1 && path[0] === 'label';
+  if (input.fields.length === 1) {
+    const [label] = input.fields;
+    return label?.name === 'label' && label.kind === 'input-field' && label.required === false
+      && label['required-now?'] === false && nullableText(label) && (!editable || labelPath(label['bind-path']));
+  }
+  if (!editable || input.fields.length || input.occupied?.length !== 1) return false;
+  const [label] = input.occupied;
+  return label && nullableText(label) && labelPath(label.path) && !!label['binding-id'] && !!label['version-id'];
+}
+
 async function _tourScopeStructuredLesson(payload, current) {
   const lessons = payload?.lessons?.filter(item => structuredLessonSamples.has(item.id));
   if (!lessons?.length) return payload;
@@ -99,8 +114,7 @@ async function _tourStructuredAvailable(lesson, saved, current) {
     if (!current()) return false;
     const row = data.fns?.find(item => item.id === id);
     const input = row?.['structured-input'];
-    const checkShape = lesson.id === '43' ? _tourStructuredProfile : _tourStructuredContacts;
-    if (!checkShape(input, !!child)) return false;
+    if (!sample.checkShape(input, !!child)) return false;
     if (child) return (row['namespace-id'] ?? null) === child['namespace-id']
       && row['parent-ids']?.length === 1 && row['parent-ids'][0] === child['parent-id'];
     return input['extend-available'] === true

@@ -280,19 +280,25 @@
 
 (deftest shipped-coalesce-rule-is-local-and-preserves-nil-and-false
   (let [base (some #(when (= :coalesce (:name %)) %) (sources "logic"))
-        cases [[:missing nil 7] [:present "checked" nil] [:falsy false true]]
+        cases [[:missing nil 7 :int 7]
+               [:present "checked" nil [:union :null :text] "checked"]
+               [:falsy false true :bool true]]
         children (mapv (fn [[name value default]]
                          {:namespace "fixture" :name name :parent :coalesce :args {:value value :default default}}) cases)
         definitions (into [base] children)
         package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
         owners (mapv #(ids/fn-id "fixture" (:name %)) children)
         {:keys [context options]} (snapshot/freeze-closure package owners @roots)
-        impl (:impl (get @loaded-bases :coalesce))]
-    (doseq [[[name value default] owner] (map vector cases owners)
+        {:keys [impl return-type-rule]} (get @loaded-bases :coalesce)]
+    (doseq [[[name value default expected-type expected-value] owner] (map vector cases owners)
             :let [graph (analysis/analyze-effective-input context owner options)
-                  legacy (impl {:value value :default default} {})]]
+                  legacy (impl {:value value :default default} {})
+                  legacy-type (return-type-rule {:value {:type (literals/classify-literal value)}
+                                                 :default {:type (literals/classify-literal default)}} 'a)]]
       (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
-      (is (= (literals/classify-literal legacy) (get-in graph [:scopes [] :signature :return])) name))))
+      (is (= expected-type legacy-type) name)
+      (is (= legacy-type (get-in graph [:scopes [] :signature :return])) name)
+      (is (= expected-value legacy) name))))
 
 
 (deftest scoped-bindings-are-certified-together

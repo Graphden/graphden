@@ -175,6 +175,37 @@ origins; the migrator must report unresolved cases rather than silently exposing
 new free inputs. The conformance fixture covers both the native distinction and
 the explicit projection that restores the legacy connection.
 
+Legacy env initializers have another boundary. `compile-eager` installs an env
+thunk under its name and slot routes, then restores the caller's original
+values for those keys while evaluating the thunk. A closer inherited env
+binding can replace that initializer entirely. A reference bound to a primitive
+input does not have the same inheritance behavior.
+
+For example, the original binding for `web.crud/_search-normalized` addresses
+the inner `str-trim.string` slot and reaches the outer `str-replace.string`
+through an env thunk. Moving it to that outer slot while keeping its UUID
+preserves standalone formatting: `"  APP/Fn  "` still becomes `"app.fn"`.
+But this derived declaration changes behavior under the same remap:
+
+```clojure
+{:name :derived
+ :parent :web.crud/_search-normalized
+ :args {:string {:value "  ORIGINAL/CASE  "}}}
+```
+
+Legacy execution returns `"  ORIGINAL.CASE  "`; the remapped graph returns `""`
+when no query input is supplied. The descendant's env literal used to hide the
+initializer. Matching names, preserved UUIDs, local type checking and a passing
+standalone execution do not prove this rewrite across inheritance.
+
+Keep this source case blocked until migration preserves the effective env
+precedence of the final derived owner and distinguishes incoming caller cells
+from local initializers. A scoped input route cannot silently replace an
+occupied initializer. Do not infer an input record from the env map: that map
+is lexical runtime state with its own forcing and precedence rules.
+The [source snapshot regression](../test/graphden/input/source_snapshot_test.clj)
+covers the shipped formatter and this derived counterexample.
+
 A `:checked` graph has completed supported analysis, not necessarily validated
 all runtime values. Deferred checks are explicit `:obligations` with stable
 scope/path/kind identities and `:field-read` or `:container-materialization`

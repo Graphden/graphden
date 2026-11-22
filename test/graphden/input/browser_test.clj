@@ -338,7 +338,9 @@
 (deftest browser-keeps-nested-record-member-defaults-closed
   (let [source (-> definitions
                    (assoc-in [:root :input :coll :label] field-default/nullable-text)
-                   (assoc-in [:root :optional] #{[:coll :label]}))
+                   (assoc-in [:root :optional] #{[:coll] [:coll :label]})
+                   (update-in [:root :bindings] select-keys [[:key] [:default]])
+                   (assoc-in [:root :bindings [:key] :value] :label))
         {:keys [options]} (checked-model source)
         field (peek (fixture/field-path :root [:coll :label]))
         record (fixture/id [:root :type [:coll]])
@@ -348,9 +350,22 @@
                 (assoc-in [:fields field :type-fn-id] field-default/nullable-text-id)
                 (update-in [:members record] (fn [rows]
                                                (mapv #(if (= field (:slot-id %)) (assoc % :input-default {:value "Ada"}) %) rows))))
-        graph (analysis/analyze-effective-input ctx (fixture/id :root) {:check-expression check/check-input-binding})]
+        analyze #(analysis/analyze-effective-input % (fixture/id :root) {:check-expression check/check-input-binding})
+        graph (analyze ctx)
+        options (assoc options :context ctx :snapshot-id (:snapshot-id ctx))
+        plain (update-in ctx [:members record] #(mapv (fn [row] (dissoc row :input-default)) %))
+        invoke (jvm/compile-named graph options)
+        siblings {:name "other" :unsafe 3}]
     (is (= :checked (:status graph)))
+    (is (nil? ((jvm/compile-named (analyze plain) (assoc options :context plain)) {} nil)))
+    (is (= "Ada" (invoke {:coll siblings} nil)))
+    (is (nil? (invoke {:coll (assoc siblings :label nil)} nil)))
+    (is (= "given" (invoke {:coll (assoc siblings :label "given")} nil)))
+    (is (thrown? clojure.lang.ExceptionInfo (invoke {:coll (assoc siblings :label false)} nil)))
+    (is (nil? (invoke {} nil)))
+    (is (= :missing-required-input
+           (try (invoke {:coll {}} nil) nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))
     (is (= :browser-field-default-unsupported
-           (try (browser/export-named graph (assoc options :context ctx :snapshot-id (:snapshot-id ctx)))
+           (try (browser/export-named graph options)
                 nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

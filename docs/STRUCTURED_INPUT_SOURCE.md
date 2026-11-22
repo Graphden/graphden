@@ -455,6 +455,23 @@ and derives the existing binding UUID from that pair. Checked execution
 exposes the remaining fields. The seam blocks inherited or external
 parents, configuration, extra declarations and references.
 
+### Defaults in pinned record inputs
+
+The pinned reader stores an optional nullable-text default on the membership
+of the function’s input type. For example, a top-level `:label` can use
+`{:type [:union :null :text] :required false :default "Ada"}`. Nesting
+that declaration inside a record member produces
+`:staged-record-member-default-unsupported` during package preflight.
+
+Inline record declarations with the same authored shape share an anonymous
+type and its memberships across owners. A fallback written to a shared
+membership would be visible to every use of that record. Supporting
+owner-specific defaults requires preserving their ownership through package
+sync. The JVM keeps an omitted optional record absent. Once the caller
+supplies the record, a missing optional member can take its fallback and
+an explicit nil retains its value. The browser exporter rejects nested
+stored defaults with `:browser-field-default-unsupported`.
+
 ## Focused verification
 
 ```sh

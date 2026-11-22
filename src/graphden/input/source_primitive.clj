@@ -61,6 +61,13 @@
            (and (some #{return-type} (vals contract)) (data-type? return-type)))))
 
 
+(defn- record-member-default?
+  [spec]
+  (when (map? (:type spec))
+    (some #(and (map? %) (contains? % :type) (contains? % :default))
+          (vals (:type spec)))))
+
+
 (defn- require-primitive!
   ([source] (require-primitive! source nil))
   ([{:keys [input return-type effects] :as source} record-contract]
@@ -72,6 +79,8 @@
                   (or (nil? (:description source)) (string? (:description source)))
                   (or (nil? effects) (and (set? effects) (every? keyword? effects))))
      (reject! :staged-primitive-declaration-unsupported))
+   (when (and record-contract (map? input) (some record-member-default? (vals input)))
+     (reject! :staged-record-member-default-unsupported))
    (when-not (if record-contract
                (exact-record? input return-type record-contract)
                (and (map? input) (every? simple-keyword? (keys input))

@@ -173,6 +173,33 @@ async function run() {
   ]}, true), true);
   assert.equal(t.ctx._tourStructuredWholeProfile(childInput, true), false, 'a free whole record needs its checked Bind offer');
   assert.equal(t.ctx._tourStructuredWholeProfile(boundInput, true), true, 'the lesson can resume with only the name bound');
+  const computedTemplate = 'computed-template';
+  const computedLesson = {id: '47', 'template-id': computedTemplate};
+  const computedPayload = {lessons: [computedLesson], 'structured-templates': {'47': computedTemplate},
+    'structured-template-refs': {'47': {builder: 'builder', callback: 'callback'}}};
+  const style = {name: 'style', fields: [field('suffix'),
+    {...field('callback'), type: ['fn', {string: 'text'}, 'text', []], 'bind-path': ['style', 'callback']} ]};
+  const profile = {name: 'profile', fields: [field('name')], 'bind-path': ['profile']};
+  const initial = {status: 'available', 'extend-available': true, 'extend-namespace-id': null,
+    fields: [profile, style], occupied: []};
+  t.ctx._tourState = null;
+  t.setBranch('main');
+  t.setResponse({id: computedTemplate, 'structured-input': initial});
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(computedPayload, () => true)).lessons), [computedLesson]);
+  const noReferences = {...computedPayload, 'structured-template-refs': undefined};
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(noReferences, () => true)).lessons), []);
+  const computed = {...initial, 'run-available': true, fields: [
+    {name: 'profile', kind: 'reference-inputs', fields: [profile]},
+    {...style, fields: [field('suffix')]},
+  ], occupied: [
+    {path: ['profile'], 'binding-id': 'profile-binding', 'version-id': 'profile-version'},
+    {path: ['style', 'callback'], 'binding-id': 'callback-binding', 'version-id': 'callback-version'},
+  ]};
+  const callbackBound = {...computed, fields: [profile, computed.fields[1]], occupied: [computed.occupied[1]]};
+  assert.equal(t.ctx._tourStructuredComputedGreeting(callbackBound, true), true,
+    'the callback opens Run while the plain profile can still receive its builder');
+  assert.equal(t.ctx._tourStructuredComputedGreeting(computed, true), true);
+  assert.equal(t.ctx._tourStructuredComputedGreeting({...computed, 'run-available': false}, true), false);
   console.log('✓ structured tutorials: exact templates, sandbox ownership, independent and optional fields, and resume');
 }
 

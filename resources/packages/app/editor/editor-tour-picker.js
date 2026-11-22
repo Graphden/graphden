@@ -479,7 +479,7 @@ async function openTutorialMenu() {
 
   const paused = saved?.lessonId
     ? lessons.lessons.find(lesson => lesson.id === saved.lessonId) : null;
-  const parkedStructured = !paused && ['43', '44', '45', '46'].includes(saved?.lessonId) && _tourPrincipalMatches(saved)
+  const parkedStructured = !paused && ['43', '44', '45', '46', '47'].includes(saved?.lessonId) && _tourPrincipalMatches(saved)
     && !!_tourOwnedBranch(saved);
   const ended = !!paused && (saved.phase === 'cleanup' || saved.step >= (paused.steps || []).length);
   let resume = null;

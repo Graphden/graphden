@@ -13,6 +13,7 @@
     [graphden.system.init.packages]
     [graphden.test-infra.browser-loopback :as browser]
     [graphden.test-infra.golden-app :as golden]
+    [graphden.test-infra.lesson-compute :as compute]
     [graphden.test-infra.lesson-contact :as contact]
     [graphden.test-infra.lesson-optional :as optional]
     [graphden.test-infra.lesson-profile :as lesson]
@@ -45,7 +46,7 @@
 
 
 (def ^:private templates
-  {"43" lesson/root "44" contact/root "45" optional/root "46" lesson/root})
+  {"43" lesson/root "44" contact/root "45" optional/root "46" lesson/root "47" compute/root})
 
 
 (defn- catalogue
@@ -58,6 +59,9 @@
     (is (= 200 (:status response)))
     (is (= "private, no-store" (response-header response "cache-control")))
     (is (= expected (or (:structured-templates payload) {})))
+    (is (= (when (contains? rows "47")
+             {:47 {:builder (str compute/builder) :callback (str compute/callback)}})
+           (:structured-template-refs payload)))
     rows))
 
 
@@ -127,8 +131,8 @@
 
 (deftest anonymous-catalogue-and-owned-structured-lesson-lifecycle-test
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "lesson-contact" "optionalinput"]
-                                             :primitive-inputs [lesson/admission contact/admission optional/admission]})
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "lessons" "lesson-contact" "optionalinput" "lesson-compute"]
+                                             :primitive-inputs (into [lesson/admission contact/admission optional/admission] compute/admissions)})
         {:keys [base-fns]} (ig/init-key :exec/base-fns {:storage storage :packages packages})
         token (str (random-uuid))
         denied (atom nil)
@@ -151,6 +155,9 @@
       (let [available (catalogue app token)
             expected (into #{} (keep (fn [[id template]] (when (not= template root) id))) templates)]
         (is (= expected (set (filter templates (keys available)))))))
+    (doseq [reference [compute/builder compute/callback]]
+      (reset! denied reference)
+      (is (not (contains? (catalogue app token) "47"))))
     (reset! denied nil)
     (ordinary-branch-exercise! app token storage)
     (when (or (= "1" browser-lesson) (contains? templates browser-lesson))
@@ -158,7 +165,7 @@
         (try
           (doseq [[id root] templates
                   :when (or (= "1" browser-lesson) (= browser-lesson id))]
-            (let [timeout (if (= "46" id) 90 60)]
+            (let [timeout (if (#{"46" "47"} id) 90 60)]
               (browser/exercise-with-timeout! timeout
                                               #(router/dispatch app %) token
                                               "tools/browser-test/fixtures/structured-lesson-lifecycle.js" root id)))
@@ -167,4 +174,5 @@
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-contact-route"})))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-optional-label"})))
     (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-whole-profile"})))
+    (is (empty? (sp/query-entities (vs/unwrap storage) :fn {:name "tutorial-computed-greeting"})))
     (is (not-any? (catalogue app nil) (keys templates)))))

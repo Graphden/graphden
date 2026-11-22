@@ -119,9 +119,14 @@
 (defn checked-row
   "Check the exact prospective row against the open field and its compiled postimage."
   [exec-ctx ctx {:keys [fn-id ref-fn-id] :as command} id]
-  (let [row (input/call-with-types ctx #(proposed-row ctx (structured/analyze ctx fn-id) command id))
+  (let [compiled (when (some #(= "ref" (:expression-kind %)) (vals (:bindings ctx)))
+                   (:analysis (run/runnable-input exec-ctx ctx fn-id)))
+        before (or compiled (input/call-with-types ctx #(structured/analyze ctx fn-id)))
+        row (input/call-with-types ctx #(proposed-row ctx before command id))
         after (assoc-in ctx [:bindings (:id row)] row)
-        graph (if ref-fn-id (:analysis (run/runnable-input exec-ctx after fn-id)) (structured/analyze after fn-id))]
+        graph (if (or ref-fn-id compiled)
+                (:analysis (run/runnable-input exec-ctx after fn-id))
+                (structured/analyze after fn-id))]
     (when-not (and (= :available (:status (input/call-with-types after #(structured/project-analysis graph))))
                    (or (nil? ref-fn-id)
                        (some #(and (= (:id row) (:binding-id %)) (= ref-fn-id (:target-fn-id %))

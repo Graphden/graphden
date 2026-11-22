@@ -184,6 +184,11 @@ test('structured input checks observe the current checked root without changing 
   projection = {...occupied, occupied: [{...field, type: whole.type, path: profilePath}]};
   assert(checkIn(state, {...wholeCheck, state: 'occupied'}), 'a whole binding removes its record from the residual projection');
   assert(!checkIn(state, check), 'a bound whole record leaves no descendant Bind offer');
+  projection = {...projection, fields: [{kind: 'reference-inputs', name: 'profile', fields: [whole]}]};
+  assert(checkIn(state, {...wholeCheck, state: 'occupied', 'reference-inputs?': true}),
+    'a checked occupied record may expose the input surface of its reference');
+  assert(!checkIn(state, {...wholeCheck, state: 'occupied'}),
+    'the ordinary occupied check still rejects other surfaces at that path');
 
   projection = occupied;
   const legacy = {kind: 'binding-value', name: FN.name, slot: SLOT.name, value: 'Ada'};

@@ -9,6 +9,7 @@
  "asset-overrides" {:version 7, :steps "ac8da4a5236a7203a65228d5dc6377058415d36b"}
  "branches" {:version 3, :steps "90d46a43c26c026b58471c97d05dd20c20a79587"}
  "components-and-pages" {:version 2, :steps "1edd3031e8453661c3c921a32fcfe7de89195ec7"}
+ "computed-record-and-callback" {:version 1, :steps "c4a2a2eed7903792e502cf9237813ee4192a5da1"}
  "custom-script-escape-hatch" {:version 1, :steps "6888c73f5709486153de1f056cea1c220e0fa128"}
  "debugging-traces" {:version 3, :steps "212c4351fd848770decc1fcd0619ec69cebb9868"}
  "distributing-packages" {:version 2, :steps "b967dcb151ecaebf10c96c0339d44619293b4cfc"}

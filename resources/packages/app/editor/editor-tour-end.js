@@ -90,7 +90,7 @@ async function _tourEnd(nextLessonId = null) {
   // leak one tutorial-* branch per run.
   if (ownedBranch) {
     const branch = ownedBranch;
-    const branchSample = ['43', '44', '45', '46'].includes(lessonId) && typeof _tourStructuredChild === 'function'
+    const branchSample = ['43', '44', '45', '46', '47'].includes(lessonId) && typeof _tourStructuredChild === 'function'
       ? _tourStructuredChild(_tourState, lesson?.['template-id']) : null;
     // `thenStart` — a lesson id to open once the rollback lands. It cannot be
     // started here: the rollback ends in a branch switch, and a branch switch

@@ -16,6 +16,8 @@ const lesson = {
     select: 'Select the optional label template', extend: 'Create your optional label', first: 'Open Run with label still optional'},
   '46': {templateName: 'lesson-profile', childName: 'tutorial-whole-profile',
     select: 'Select the profile template', extend: 'Create your whole-profile sample', first: 'Find the whole record'},
+  '47': {templateName: 'lesson-computed-greeting', childName: 'tutorial-computed-greeting',
+    select: 'Select the greeting template', extend: 'Create your greeting sample', first: 'Find the callback field'},
 }[id];
 assert.ok(lesson, 'known structured input lesson');
 const {templateName, childName} = lesson;
@@ -170,6 +172,82 @@ async function exerciseWhole(page, reach, sampleCard, sample, branch) {
     {id: '77', name: 'Bea', email: 'bea@example.test'});
 }
 
+async function bindFunction(page, reach, path, title, name, expectedId) {
+  await page.getByRole('button', {name: 'Bind ' + path, exact: true}).press('Enter');
+  await reach(title);
+  const dialog = page.getByRole('dialog', {name: 'Bind ' + path, exact: true});
+  await dialog.getByRole('button', {name: 'Choose function'}).press('Enter');
+  await page.getByPlaceholder('Filter fns…').fill(name);
+  await page.locator('.fn-picker-row', {hasText: name}).click();
+  const value = await dialog.getByRole('textbox', {name: 'Function for ' + path}).inputValue();
+  assert.ok(value.endsWith(name));
+  const preview = page.waitForResponse(res => new URL(res.url()).pathname === '/api/structured-input/preview'
+    && res.request().method() === 'POST');
+  const apply = page.waitForResponse(res => new URL(res.url()).pathname === '/api/structured-input/apply'
+    && res.request().method() === 'POST');
+  // Preserve both waits before clicking, but print the checked preview when it stops the commit.
+  apply.catch(() => {});
+  await dialog.getByRole('button', {name: 'Bind', exact: true}).click();
+  const checked = await preview;
+  const proposal = await checked.json();
+  assert.equal(checked.status(), 200, JSON.stringify(proposal));
+  assert.equal(proposal.ok, true, JSON.stringify(proposal));
+  const response = await apply;
+  const request = response.request().postDataJSON();
+  assert.deepEqual(request.path, path.split('.'));
+  assert.equal(request['ref-fn-id'], expectedId);
+  assert.equal(Object.hasOwn(request, 'value'), false);
+  const result = await response.json();
+  assert.equal(result.committed, true, JSON.stringify(result));
+  assert.ok(result['binding-id']);
+  return result['binding-id'];
+}
+
+async function exerciseComputed(page, reach, sampleCard, sample, branch) {
+  const refs = await page.evaluate(async () => {
+    const response = await window.authFetch('/api/tour', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Could not read the lesson references');
+    return (await response.json())['structured-template-refs']?.['47'];
+  });
+  assert.ok(refs.builder && refs.callback && refs.builder !== refs.callback);
+
+  const initial = await readInput(page, sample.id);
+  assert.notEqual(initial['run-available'], true);
+  const unchecked = await inputCommand(page, 'preview', {
+    'fn-id': sample.id, action: 'bind', path: ['profile'], 'ref-fn-id': refs.builder,
+  });
+  assert.equal(unchecked.status, 422, JSON.stringify(unchecked.body));
+  assert.deepEqual(await readInput(page, sample.id), initial);
+  await openDisclosure(sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}), 'Enter');
+  await openDisclosure(page.getByRole('button', {name: /^style — Type:/}));
+  const callback = await bindFunction(page, reach, 'style.callback', 'Bind the callback', 'mark-greeting', refs.callback);
+  await reach('Find the builder destination');
+  await openDisclosure(sampleCard.getByRole('button', {name: 'Structured inputs', exact: true}), 'Enter');
+  const builder = await bindFunction(page, reach, 'profile', 'Bind the profile builder', 'build-greeting-profile', refs.builder);
+  await reach('Run from two named inputs');
+  assert.notEqual(builder, callback);
+
+  await page.reload({waitUntil: 'domcontentloaded'});
+  await reach('Run from two named inputs');
+  assert.equal(new URL(page.url()).searchParams.get('branch'), branch);
+  const projection = await readInput(page, sample.id);
+  assert.equal(projection['run-available'], true);
+  assert.deepEqual(Object.fromEntries(projection.occupied.map(row => [row.path.join('.'), row['binding-id']])),
+    {profile: builder, 'style.callback': callback});
+  const input = projection.fields.find(row => row.name === 'profile');
+  assert.equal(input.kind, 'reference-inputs');
+  assert.deepEqual(input.fields[0].fields.map(field => field.name), ['name']);
+  assert.deepEqual(projection.fields.find(row => row.name === 'style').fields.map(field => field.name), ['suffix']);
+
+  await sampleCard.locator('.ancestor-line[data-level="0"] .fn-run-trigger').click();
+  const form = page.getByRole('form', {name: 'Run function'});
+  await form.getByRole('textbox', {name: 'name', exact: true}).fill('Ada');
+  await form.getByRole('textbox', {name: 'suffix', exact: true}).fill('team');
+  assert.equal(await form.getByRole('textbox').count(), 2);
+  const args = {profile: {profile: {name: 'Ada'}}, style: {suffix: 'team'}};
+  assert.equal(await runWithArgs(page, form, sample.id, args), 'Hello Ada! · team');
+}
+
 async function exerciseRecord(page, reach, sampleCard, sample, branch) {
   const contactLesson = id === '44';
   await openDisclosure(sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}), 'Enter');
@@ -238,7 +316,7 @@ async function exercise() {
     };
     const diagnostic = setTimeout(() => {
       console.error('Lesson ' + id + ' browser deadline', {pageErrors, failedResponses, pathname: new URL(page.url()).pathname});
-    }, id === '46' ? 82000 : 52000).unref();
+    }, ['46', '47'].includes(id) ? 82000 : 52000).unref();
     browser.on('disconnected', () => clearTimeout(diagnostic));
     const doc = await page.goto(origin + '/?tutorial=' + id, {waitUntil: 'domcontentloaded'});
     assert.equal(doc.status(), 200, 'the fixture serves the normal editor document');
@@ -273,6 +351,7 @@ async function exercise() {
     const sampleCard = page.locator(`.node-overlay[data-fn-name="${childName}"]`);
     if (id === '45') await exerciseOptional(page, reach, sampleCard, sample);
     else if (id === '46') await exerciseWhole(page, reach, sampleCard, sample, branch);
+    else if (id === '47') await exerciseComputed(page, reach, sampleCard, sample, branch);
     else await exerciseRecord(page, reach, sampleCard, sample, branch);
     await reach('Finish the lesson');
     await page.getByRole('button', {name: 'Finish', exact: true}).click();

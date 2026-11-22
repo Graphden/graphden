@@ -3483,6 +3483,69 @@
               {:title "Finish the lesson"
                :body "Binding a whole record covers every field. Binding the name alone leaves id and email free. Click [[Finish]] to clean up the lesson branch."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "47"
+             :slug "computed-record-and-callback"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "5d81665d-2de6-54e5-af98-95cece5cd938"
+             :title "Build a record and supply a callback"
+             :reads "shows which inputs come from a builder and which values the callback receives from its caller."
+             :steps
+             [{:title "Select the greeting template"
+               :body "Select [[lesson-compute.structured/lesson-computed-greeting]]. It takes a profile and a style. You will attach the functions it needs before running it."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-computed-greeting" :fn-id "5d81665d-2de6-54e5-af98-95cece5cd938"}}
+              {:title "Create your greeting sample"
+               :body "Choose [[Extend]] from the template’s [[⋯]] menu. Name it `tutorial-computed-greeting`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"lesson-computed-greeting\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-computed-greeting\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-computed-greeting"
+                         :parent-id "5d81665d-2de6-54e5-af98-95cece5cd938" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "remaining" :record? true}}
+              {:title "Find the callback field"
+               :body "Open [[Remaining inputs]], expand [[style]] and click [[Bind]] for callback. This field expects a callable."
+               :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"style — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind style.callback\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["style" "callback"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind style.callback\"]"}}
+              {:title "Bind the callback"
+               :body "Click [[Choose function]], select [[lesson-compute.callback/mark-greeting]] and click [[Bind]]. The callback adds its saved `!` binding to the call argument."
+               :target ".arg-value-edit-popover[aria-label=\"Bind style.callback\"]"
+               :targets [".arg-value-edit-popover[aria-label=\"Bind style.callback\"]" ".fn-picker-popover"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["style" "callback"] :state "occupied" :run? true}}
+              {:title "Find the builder destination"
+               :body "Open [[Structured inputs]] and click [[Bind]] beside profile. This field can take a complete record."
+               :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Bind profile\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "remaining" :record? true
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile\"]"}}
+              {:title "Bind the profile builder"
+               :body "Click [[Choose function]], select [[lesson-compute.builder/build-greeting-profile]] and click [[Bind]]. The builder adds `Hello ` to the name when producing its record."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile\"]"
+               :targets [".arg-value-edit-popover[aria-label=\"Bind profile\"]" ".fn-picker-popover"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "occupied" :reference-inputs? true}}
+              {:title "Run from two named inputs"
+               :body "Open [[▶ Run]]. In the builder’s profile group, enter `Ada` for name. Enter `team` for style’s suffix and click [[Run]]. The renderer supplies the callback’s string from the built profile."
+               :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :value "Hello Ada! · team"}}
+              {:title "Finish the lesson"
+               :body "Name is a builder input. Suffix belongs to the renderer. The invocation supplies the callback’s string, and the callback keeps its saved mark. Click [[Finish]] to clean up the lesson branch."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
@@ -3548,15 +3611,26 @@
    :args {:value {:parent :equal?
                   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                          :b {:value "46"}}}}}
+  {:name :_tour-with-whole-profile-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "46"}}}
+          :then :_tour-with-optional-label-offer
+          :else {:parent :filter
+                 :args {:pred :_tour-not-whole-profile? :coll :_tour-with-optional-label-offer}}}}
+  {:name :_tour-not-computed-greeting?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "47"}}}}}
   {:name :_tour-payload
    :parent :assoc-in
    :args {:m :_tour-resolved-text
           :path {:value [:lessons]}
           :v {:parent :if
-              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "46"}}}
-                     :then :_tour-with-optional-label-offer
+              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "47"}}}
+                     :then :_tour-with-whole-profile-offer
                      :else {:parent :filter
-                            :args {:pred :_tour-not-whole-profile? :coll :_tour-with-optional-label-offer}}}}}}
+                            :args {:pred :_tour-not-computed-greeting? :coll :_tour-with-whole-profile-offer}}}}}}
 
   {:name :_attach-structured-lesson-templates
    :description "Attach the certified template identities of the offered structured lessons."

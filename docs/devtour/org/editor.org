@@ -407,7 +407,7 @@ The current root card opens the server's remaining input projection in the exist
 :CUSTOM_ID: editor/openStructuredInputPopover
 :FILE: resources/packages/app/editor/editor-edit-structured-input.js
 :LINE: 2
-:MINS: 6.8
+:MINS: 6.9
 :END:
 
 Uses the shared inline edit popover to bind, edit or remove a literal leaf confirmed by the current subtree. Edit and removal compare the displayed version with the preview. The editor repeats the exact command with its preview basis, then reloads the graph. A refused proposal keeps the draft in the popover.

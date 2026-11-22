@@ -59,10 +59,13 @@ function openStructuredInputPopover(anchorEl, target, action, field, draft = {})
           if (!isCurrent()) return;
           const literal = ref ? text : control.value;
           closeInlineEdit();
+          // The general picker compares standalone signatures. Structured callbacks
+          // are checked in their call-site scope, including saved arguments, by Preview.
+          const pickerType = Array.isArray(expectedType) && expectedType[0] === 'fn' ? null : expectedType;
           openFnPicker({
             anchorEl,
             excludeIds: [fnId],
-            expectedType,
+            expectedType: pickerType,
             onPick(fn, candidate) {
               const picked = fn?.id ? {id: fn.id, name: candidate?.qualified || fn.name} : ref;
               reopen({text: literal, ref: picked});

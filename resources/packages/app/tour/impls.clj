@@ -34,6 +34,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.input.authoring-principal :as principal]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.graph-writer :as writer]
     [graphden.util.counters :as counters]
@@ -44,7 +45,23 @@
   {"43" (ids/fn-id "lessons.structured-input" :lesson-profile)
    "44" (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route)
    "45" (ids/fn-id "optionalinput.structured" :optional-label)
-   "46" (ids/fn-id "lessons.structured-input" :lesson-profile)})
+   "46" (ids/fn-id "lessons.structured-input" :lesson-profile)
+   "47" (ids/fn-id "lesson-compute.structured" :lesson-computed-greeting)})
+
+
+(def ^:private computed-greeting-refs
+  {:builder (ids/fn-id "lesson-compute.builder" :build-greeting-profile)
+   :callback (ids/fn-id "lesson-compute.callback" :mark-greeting)})
+
+
+(defn- structured-lesson-ready?
+  [ctx storage lesson-id {:keys [run-available]}]
+  (if (= "47" lesson-id)
+    ;; Raw callable arguments cannot run over HTTP. Each known function the
+    ;; lesson binds must itself compile from visible, trusted package source.
+    (every? #(and (owned/owned-fn-id? %) (true? (:run-available (input/read-input storage % false ctx))))
+            (vals computed-greeting-refs))
+    (true? run-available)))
 
 
 (defbase structured-lesson-available?
@@ -59,10 +76,11 @@
           (try
             (writer/assert-write-authorized! (vs/unwrap storage) :branch
                                              {:base-branch-id (vs/current-branch-id storage)} nil)
-            (let [{:keys [status run-available extend-available] :as view}
+            (let [{:keys [status extend-available] :as view}
                   (input/read-input storage template true ctx)]
-              (and (= :available status) (true? run-available) (true? extend-available)
-                   (contains? view :extend-namespace-id) (nil? (:extend-namespace-id view))))
+              (and (= :available status) (true? extend-available)
+                   (contains? view :extend-namespace-id) (nil? (:extend-namespace-id view))
+                   (structured-lesson-ready? ctx storage lesson-id view)))
             (catch clojure.lang.ExceptionInfo error
               (case (:type (ex-data error))
                 (:authz/forbidden :authz/branch-protected :branch/merge-required) false
@@ -79,7 +97,9 @@
                                     [id template-id]))))
                         (:lessons payload))]
     (cond-> payload
-      (seq templates) (assoc :structured-templates templates))))
+      (seq templates) (assoc :structured-templates templates)
+      (contains? templates "47") (assoc :structured-template-refs
+                                        {"47" (update-vals computed-greeting-refs str)}))))
 
 
 (def ^:private events

@@ -5,6 +5,7 @@ const structuredLessonSamples = new Map([
   ['44', {child: 'tutorial-contact-route', checkShape: _tourStructuredContacts}],
   ['45', {child: 'tutorial-optional-label', checkShape: _tourStructuredOptional}],
   ['46', {child: 'tutorial-whole-profile', checkShape: _tourStructuredWholeProfile}],
+  ['47', {child: 'tutorial-computed-greeting', checkShape: _tourStructuredComputedGreeting}],
 ]);
 const structuredLessonProofs = new WeakMap();
 
@@ -87,11 +88,38 @@ function _tourStructuredOptional(input, editable) {
   return label && nullableText(label) && labelPath(label.path) && !!label['binding-id'] && !!label['version-id'];
 }
 
+function _tourStructuredComputedGreeting(input, editable) {
+  if (input?.status !== 'available' || !Array.isArray(input.fields) || input.fields.length !== 2) return false;
+  const profile = input.fields.find(field => field?.name === 'profile');
+  const style = input.fields.find(field => field?.name === 'style');
+  if (!Array.isArray(profile?.fields) || profile.fields.length !== 1 || !Array.isArray(style?.fields)) return false;
+  const occupiedPath = path => Array.isArray(input.occupied) && input.occupied.some(field =>
+    field?.['binding-id'] && field['version-id'] && JSON.stringify(field.path) === path);
+  const builderBound = profile.kind === 'reference-inputs';
+  const source = builderBound ? profile.fields[0] : profile;
+  if (builderBound && (!editable || !occupiedPath('["profile"]') || source?.name !== 'profile')) return false;
+  const [name] = source?.fields || [];
+  if (source?.fields?.length !== 1 || name?.name !== 'name' || name.type !== 'text') return false;
+  if (editable && !builderBound && JSON.stringify(profile['bind-path']) !== '["profile"]') return false;
+  if (style.fields.find(field => field?.name === 'suffix')?.type !== 'text') return false;
+  const callback = style.fields.find(field => field?.name === 'callback');
+  if (callback) return style.fields.length === 2 && callback.type?.[0] === 'fn'
+    && (!editable || JSON.stringify(callback['bind-path']) === '["style","callback"]');
+  return editable && style.fields.length === 1 && input['run-available'] === true
+    && occupiedPath('["style","callback"]');
+}
+
 async function _tourScopeStructuredLesson(payload, current) {
   const lessons = payload?.lessons?.filter(item => structuredLessonSamples.has(item.id));
   if (!lessons?.length) return payload;
   const saved = _tourState || _tourLoadState();
-  const offers = await Promise.all(lessons.map(lesson => _tourStructuredAvailable(lesson, saved, current, payload['structured-templates']?.[lesson.id])));
+  const offers = await Promise.all(lessons.map(lesson => {
+    if (lesson.id === '47') {
+      const refs = payload['structured-template-refs']?.[lesson.id];
+      if (!refs?.builder || !refs.callback || refs.builder === refs.callback) return false;
+    }
+    return _tourStructuredAvailable(lesson, saved, current, payload['structured-templates']?.[lesson.id]);
+  }));
   const hidden = new Set();
   lessons.forEach((lesson, index) => {
     if (offers[index] && current()) structuredLessonProofs.set(lesson, _tourStartTicket(false));

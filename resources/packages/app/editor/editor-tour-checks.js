@@ -80,7 +80,9 @@ function _tourStructuredInputPath(check) {
       && (check['record?'] === true ? Array.isArray(remaining.fields) : !Object.hasOwn(remaining, 'fields'))
       && remaining.type != null && samePath(remaining['bind-path']);
   }
-  if (state !== 'occupied' || remaining || occupied.length !== 1) return false;
+  const expectedReferenceInputs = check['reference-inputs?'] === true;
+  if (state !== 'occupied' || occupied.length !== 1
+      || (expectedReferenceInputs ? remaining?.kind !== 'reference-inputs' : !!remaining)) return false;
   const field = occupied[0];
   return field.type != null && typeof field['binding-id'] === 'string' && !!field['binding-id']
     && typeof field['version-id'] === 'string' && !!field['version-id']

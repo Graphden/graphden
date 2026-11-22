@@ -142,6 +142,28 @@
            (rejection-code #(runtimes source (ids/fn-id "web.crud" :_owner-fn-ids-empty?)))))))
 
 
+(deftest shipped-documenting-value-does-not-install-a-default-binding
+  (let [source (declarations "packages/core/system/fns.edn" #{:parse-json})
+        owner (ids/fn-id "core.system" :parse-json)
+        field (ids/slot-id owner :keywordize)
+        {:keys [canonical legacy analysis]} (runtimes source owner)
+        node (some #(when (= field (:id %)) %) (get-in analysis [:scopes [] :configured-contract :fields]))
+        package (snapshot/package-index (parse/prepare-module source {} {}) source)
+        frozen (snapshot/freeze-declarations package [owner] (:by-id @registry/*rich-types-override*))
+        declared (some #(when (= field (:id %)) %) (get-in frozen [:entries owner :contract :fields]))]
+    (is (= :checked (:status analysis)))
+    (is (= {:type :bool :required false :value true
+            :description "When true, convert string keys to keywords."} (:declaration declared)))
+    (is (false? (:required node)))
+    (is (empty? (get-in frozen [:entries owner :bindings])))
+    (is (= [[[owner []] [(ids/slot-id owner :string)]]] (:required-addresses analysis)))
+    (doseq [[arguments expected] [[{:string "{\"flag\":false,\"missing\":null}"} {"flag" false "missing" nil}]
+                                  [{:string "{\"flag\":false}" :keywordize nil} {"flag" false}]
+                                  [{:string "{\"flag\":false}" :keywordize false} {"flag" false}]
+                                  [{:string "{\"flag\":false}" :keywordize true} {:flag false}]]]
+      (is (= expected (legacy arguments) (canonical arguments))))))
+
+
 (deftest generated-list-projection-reads-the-authored-outer-field
   (let [child {:namespace "fixture" :name :greeting :parent :str
                :args {:parts ["Hello " {:as :person :type :text} "!"]}}

@@ -298,8 +298,10 @@ Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-t
 --focus graphden.input.source-snapshot-test`.
 
 A base argument's documenting `:value` annotation remains a free input;
-conversion does not create a new binding or runtime default. Existing
-implementation fallback behavior is preserved. Ordinary fields named
+conversion does not create a new binding or runtime default. Frozen source
+analysis retains that annotation after checking the original declaration and
+field type UUID; it does not add an occupied input. Existing implementation
+fallback behavior is preserved. Ordinary fields named
 `value`, `ref` or `default` do not introduce new control semantics.
 
 ## Expression grammar and source edits

@@ -1,10 +1,10 @@
 {:paths ["src" "resources"]
 
  :deps
- {org.clojure/clojure {:mvn/version "1.12.6"}
+ {org.clojure/clojure {:mvn/version "1.12.7"}
   ;; Logging
-  org.clojure/tools.logging {:mvn/version "1.3.1"}
-  ch.qos.logback/logback-classic {:mvn/version "1.6.7"}
+  org.clojure/tools.logging {:mvn/version "1.3.2"}
+  ch.qos.logback/logback-classic {:mvn/version "1.6.8"}
   ;; Schema validation
   metosin/malli {:mvn/version "0.20.3"}
   ;; PostgreSQL
@@ -187,9 +187,9 @@
   ;; Checked source migration uses the trusted classpath for native signatures.
   :input-source-migration
   {:extra-paths ["scripts"]
-   :extra-deps {babashka/fs {:mvn/version "0.5.31"}
-                babashka/process {:mvn/version "0.6.23"}
-                rewrite-clj/rewrite-clj {:mvn/version "1.2.55"}}
+   :extra-deps {babashka/fs {:mvn/version "0.5.34"}
+                babashka/process {:mvn/version "0.6.25"}
+                rewrite-clj/rewrite-clj {:mvn/version "1.3.59"}}
    :main-opts ["-m" "structured-input-checked-migration"]}
 
   ;; Build uberjar

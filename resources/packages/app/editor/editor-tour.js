@@ -704,7 +704,7 @@ async function startTutorial(lessonId, resumeStep, resumeCreated, session, ticke
     return false;
   }
   const selected = (lessons.lessons || []).find((l) => l.id === lessonId);
-  if (['43', '44', '45'].includes(lessonId) && (!selected || typeof _tourStructuredBranchMatches !== 'function'
+  if (['43', '44', '45', '46'].includes(lessonId) && (!selected || typeof _tourStructuredBranchMatches !== 'function'
       || !_tourStructuredBranchMatches(session))) return false;
   const lesson = selected || (lessons.lessons || [])[0];
   if (!lesson) return false;
@@ -765,7 +765,7 @@ async function maybeStartTutorial() {
   if (requested) {
     // A 2-digit id ("01") or bare number ("1") both resolve.
     const id = requested.length === 1 ? '0' + requested : requested;
-    if (['43', '44', '45'].includes(id)) {
+    if (['43', '44', '45', '46'].includes(id)) {
       const saved = _tourLoadState();
       if (saved?.lessonId) return saved.lessonId === id && _tourRestoreSession(saved, false, null, ticket);
       return startTutorialIsolated(id, ticket);

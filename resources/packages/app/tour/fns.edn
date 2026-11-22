@@ -3401,6 +3401,88 @@
               {:title "Finish the lesson"
                :body "Omitting label uses the default. Supplying nil gives a value for one run. Binding nil saves it for later runs. Click [[Finish]] to clean up the lesson branch."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "46"
+             :slug "whole-record-binding"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"
+             :title "Bind a whole record or one field"
+             :reads "explains when a saved record covers its fields and how to make them available again."
+             :steps
+             [{:title "Select the profile template"
+               :body "Find `lesson-profile` in the Explorer and select [[lessons.structured-input/lesson-profile]]."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-profile" :fn-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"}}
+              {:title "Create your whole-profile sample"
+               :body "Choose [[Extend]] from the template’s [[⋯]] menu. Name it `tutorial-whole-profile`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-whole-profile"
+                         :parent-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :run? true :path ["profile"] :state "remaining" :record? true}}
+              {:title "Find the whole record"
+               :body "Open [[Remaining inputs]] and choose [[Bind]] beside profile itself."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Bind profile\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "remaining" :record? true
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile\"]"}}
+              {:title "Bind all three profile fields"
+               :body "Enter `{\"id\":\"42\",\"name\":\"Ada\",\"email\":\"ada@example.test\"}` and click [[Bind]]. This saves one binding for the whole record."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile\"]"
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "occupied"}}
+              {:title "Inspect the occupied record"
+               :body "Open [[Structured inputs]] if needed. Under Bound inputs, find the single profile binding. Profile and its fields have no Bind action while this binding is in place."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "occupied"
+                       :selector ".type-inline-host [aria-label=\"Remove profile\"]"}}
+              {:title "Run the whole profile"
+               :body "Open [[▶ Run]] and click [[Run]]. There are no remaining inputs, and the result contains all three saved values."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :value {:id "42" :name "Ada" :email "ada@example.test"}}}
+              {:title "Remove the whole profile binding"
+               :body "Open [[Structured inputs]] if needed. Choose [[Remove]] beside profile and confirm. The three fields are available again."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Remove profile\"]"
+                         ".arg-value-edit-popover[aria-label=\"Remove profile\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "remaining"}}
+              {:title "Find the name inside profile"
+               :body "Open [[Remaining inputs]], expand [[profile]], then choose [[Bind]] beside name."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"profile — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind profile.name\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"}}
+              {:title "Bind only the name"
+               :body "Enter `Bea` and click [[Bind]]. The name is saved while id and email remain free."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "occupied"}}
+              {:title "Run with the remaining fields"
+               :body "Open [[▶ Run]], enter `77` for id and `bea@example.test` for email, then click [[Run]]. The result includes the saved name, Bea."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :value {:id "77" :name "Bea" :email "bea@example.test"}}}
+              {:title "Finish the lesson"
+               :body "Binding a whole record covers every field. Binding the name alone leaves id and email free. Click [[Finish]] to clean up the lesson branch."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
@@ -3456,15 +3538,25 @@
    :args {:value {:parent :equal?
                   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                          :b {:value "45"}}}}}
+  {:name :_tour-with-optional-label-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "45"}}}
+          :then :_tour-with-contact-offer
+          :else {:parent :filter :args {:pred :_tour-not-optional-label? :coll :_tour-with-contact-offer}}}}
+  {:name :_tour-not-whole-profile?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "46"}}}}}
   {:name :_tour-payload
    :parent :assoc-in
    :args {:m :_tour-resolved-text
           :path {:value [:lessons]}
           :v {:parent :if
-              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "45"}}}
-                     :then :_tour-with-contact-offer
+              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "46"}}}
+                     :then :_tour-with-optional-label-offer
                      :else {:parent :filter
-                            :args {:pred :_tour-not-optional-label? :coll :_tour-with-contact-offer}}}}}}
+                            :args {:pred :_tour-not-whole-profile? :coll :_tour-with-optional-label-offer}}}}}}
 
   {:name :_attach-structured-lesson-templates
    :description "Attach the certified template identities of the offered structured lessons."

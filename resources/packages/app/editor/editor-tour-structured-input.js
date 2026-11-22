@@ -4,6 +4,7 @@ const structuredLessonSamples = new Map([
   ['43', {child: 'tutorial-structured-profile', checkShape: _tourStructuredProfile}],
   ['44', {child: 'tutorial-contact-route', checkShape: _tourStructuredContacts}],
   ['45', {child: 'tutorial-optional-label', checkShape: _tourStructuredOptional}],
+  ['46', {child: 'tutorial-whole-profile', checkShape: _tourStructuredWholeProfile}],
 ]);
 const structuredLessonProofs = new WeakMap();
 
@@ -36,6 +37,20 @@ function _tourStructuredProfile(input, editable) {
   if (leaves.has('name')) return text('name') && JSON.stringify(leaves.get('name')['bind-path']) === '["profile","name"]';
   return leaves.size === 2 && Array.isArray(input.occupied) && input.occupied.some(field => field.type === 'text'
     && field['binding-id'] && field['version-id'] && JSON.stringify(field.path) === '["profile","name"]');
+}
+
+function _tourStructuredWholeProfile(input, editable) {
+  if (input?.status !== 'available' || input['run-available'] !== true || !Array.isArray(input.fields)) return false;
+  if (editable && input.fields.length === 0 && Array.isArray(input.occupied) && input.occupied.length === 1) {
+    const [profile] = input.occupied;
+    return profile?.type != null && JSON.stringify(profile.path) === '["profile"]'
+      && !!profile['binding-id'] && !!profile['version-id'];
+  }
+  if (!_tourStructuredProfile(input, editable)) return false;
+  const [profile] = input.fields;
+  return !editable || JSON.stringify(profile['bind-path']) === '["profile"]'
+    || (Array.isArray(input.occupied) && input.occupied.some(
+      field => JSON.stringify(field?.path) === '["profile","name"]'));
 }
 
 function _tourStructuredContacts(input, editable) {

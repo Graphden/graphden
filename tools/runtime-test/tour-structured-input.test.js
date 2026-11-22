@@ -154,6 +154,25 @@ async function run() {
   t.ctx._tourState.created[1] = {...optionalChild, 'parent-id': contactTemplate};
   assert.equal(t.ctx._tourStructuredChild(t.ctx._tourState, optionalTemplate), undefined);
   assert.deepEqual(Array.from((await scopeOptional(optionalPayload)).lessons), []);
+  const wholeLesson = {id: '46', 'template-id': template};
+  const wholePayload = {lessons: [lesson, wholeLesson], 'structured-templates': {'43': template, '46': template}};
+  const boundWhole = {status: 'available', 'run-available': true, fields: [], occupied: [
+    {type: {id: 'text', name: 'text', email: 'text'}, path: ['profile'], 'binding-id': 'whole', 'version-id': 'version'},
+  ]};
+  const wholeBranch = {...sandbox, name: 'tutorial-46-test'};
+  const wholeChild = {...childReceipt, id: 'whole-child', name: 'tutorial-whole-profile'};
+  t.ctx._tourState = {...saved, lessonId: '46', step: 5, sandboxBranch: wholeBranch.name, created: [wholeBranch, wholeChild]};
+  t.ctx._tourLessons = wholePayload;
+  t.setBranch(wholeBranch.name);
+  t.setResponse({id: wholeChild.id, 'parent-ids': [template], 'structured-input': boundWhole});
+  assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(wholePayload, () => true)).lessons), [wholeLesson]);
+  assert.equal(t.ctx._tourStructuredChild(t.ctx._tourState, template), wholeChild, 'a shared template still requires the exact lesson receipt');
+  assert.equal(t.ctx._tourStructuredWholeProfile(boundWhole, false), false, 'a new lesson cannot start from a prebound template');
+  assert.equal(t.ctx._tourStructuredWholeProfile({...childInput, fields: [
+    {...childInput.fields[0], 'bind-path': ['profile']},
+  ]}, true), true);
+  assert.equal(t.ctx._tourStructuredWholeProfile(childInput, true), false, 'a free whole record needs its checked Bind offer');
+  assert.equal(t.ctx._tourStructuredWholeProfile(boundInput, true), true, 'the lesson can resume with only the name bound');
   console.log('✓ structured tutorials: exact templates, sandbox ownership, independent and optional fields, and resume');
 }
 

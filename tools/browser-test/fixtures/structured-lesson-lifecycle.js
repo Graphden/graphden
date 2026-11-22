@@ -14,6 +14,8 @@ const lesson = {
     select: 'Select the contact route template', extend: 'Create your contact route', first: 'Find the sender city'},
   '45': {templateName: 'optional-label', childName: 'tutorial-optional-label',
     select: 'Select the optional label template', extend: 'Create your optional label', first: 'Open Run with label still optional'},
+  '46': {templateName: 'lesson-profile', childName: 'tutorial-whole-profile',
+    select: 'Select the profile template', extend: 'Create your whole-profile sample', first: 'Find the whole record'},
 }[id];
 assert.ok(lesson, 'known structured input lesson');
 const {templateName, childName} = lesson;
@@ -22,7 +24,7 @@ async function openDisclosure(button, key = 'Space') {
   if (await button.getAttribute('aria-expanded') !== 'true') await button.press(key);
 }
 
-async function bindLeaf(page, reach, path, title, value) {
+async function bindInput(page, reach, path, title, value) {
   await page.getByRole('button', {name: 'Bind ' + path, exact: true}).press('Enter');
   await reach(title);
   const dialog = page.getByRole('dialog', {name: 'Bind ' + path});
@@ -32,7 +34,7 @@ async function bindLeaf(page, reach, path, title, value) {
     dialog.getByRole('button', {name: 'Bind', exact: true}).click(),
   ]);
   assert.deepEqual(response.request().postDataJSON().path, path.split('.'));
-  if (value === 'null') assert.equal(response.request().postDataJSON().value, null);
+  if (path === 'profile' || value === 'null') assert.deepEqual(response.request().postDataJSON().value, JSON.parse(value));
   const result = await response.json();
   assert.equal(result.committed, true);
   assert.ok(result['binding-id']);
@@ -51,6 +53,17 @@ async function runWithArgs(page, form, fnId, expectedArgs) {
   return (await response.json()).result;
 }
 
+async function removeInput(page, path, binding) {
+  await page.getByRole('button', {name: 'Remove ' + path, exact: true}).press('Enter');
+  const dialog = page.getByRole('dialog', {name: 'Remove ' + path});
+  const [response] = await Promise.all([
+    page.waitForResponse(res => new URL(res.url()).pathname === '/api/structured-input/apply' && res.request().method() === 'POST'),
+    dialog.getByRole('button', {name: 'Remove', exact: true}).click(),
+  ]);
+  assert.equal(response.request().postDataJSON()['binding-id'], binding);
+  assert.equal((await response.json()).committed, true);
+}
+
 async function exerciseOptional(page, reach, sampleCard, sample) {
   const trigger = sampleCard.locator('.ancestor-line[data-level="0"] .fn-run-trigger');
   const form = page.getByRole('form', {name: 'Run function'});
@@ -65,7 +78,7 @@ async function exerciseOptional(page, reach, sampleCard, sample) {
 
   await reach('Find the free label');
   await openDisclosure(sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}), 'Enter');
-  const binding = await bindLeaf(page, reach, 'label', 'Bind nil to label', 'null');
+  const binding = await bindInput(page, reach, 'label', 'Bind nil to label', 'null');
   await reach('Run with the saved nil');
   const branch = new URL(page.url()).searchParams.get('branch');
   await page.reload({waitUntil: 'domcontentloaded'});
@@ -78,18 +91,83 @@ async function exerciseOptional(page, reach, sampleCard, sample) {
 
   await reach('Remove the saved nil');
   await openDisclosure(sampleCard.getByRole('button', {name: 'Structured inputs', exact: true}), 'Enter');
-  await page.getByRole('button', {name: 'Remove label', exact: true}).press('Enter');
-  const dialog = page.getByRole('dialog', {name: 'Remove label'});
-  const [response] = await Promise.all([
-    page.waitForResponse(res => new URL(res.url()).pathname === '/api/structured-input/apply' && res.request().method() === 'POST'),
-    dialog.getByRole('button', {name: 'Remove', exact: true}).click(),
-  ]);
-  assert.equal(response.request().postDataJSON()['binding-id'], binding);
-  assert.equal((await response.json()).committed, true);
+  await removeInput(page, 'label', binding);
   await reach('Run with the default again');
   await trigger.click();
   assert.equal(await label.inputValue(), '');
   assert.equal(await runWithArgs(page, form, sample.id, {}), 'text: automatic');
+}
+
+async function inputCommand(page, phase, command) {
+  return page.evaluate(async ({phase, command}) => {
+    const response = await window.authFetch('/api/structured-input/' + phase, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(command),
+    });
+    return {status: response.status, body: await response.json()};
+  }, {phase, command});
+}
+
+async function readInput(page, owner) {
+  return page.evaluate(async id => {
+    const response = await window.authFetch('/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(id));
+    if (!response.ok) throw new Error('Could not read the lesson sample');
+    const {fns} = await response.json();
+    return fns.find(row => row.id === id)?.['structured-input'];
+  }, owner);
+}
+
+async function exerciseWhole(page, reach, sampleCard, sample, branch) {
+  const trigger = sampleCard.locator('.ancestor-line[data-level="0"] .fn-run-trigger');
+  const form = page.getByRole('form', {name: 'Run function'});
+  const profile = {id: '42', name: 'Ada', email: 'ada@example.test'};
+  const leaf = {'fn-id': sample.id, action: 'bind', path: ['profile', 'name'], value: 'Blocked'};
+  const before = await inputCommand(page, 'preview', leaf);
+  assert.equal(before.body.ok, true);
+  assert.ok(before.body['expected-state']);
+
+  await openDisclosure(sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}), 'Enter');
+  const binding = await bindInput(page, reach, 'profile', 'Bind all three profile fields', JSON.stringify(profile));
+  await openDisclosure(sampleCard.getByRole('button', {name: 'Structured inputs', exact: true}), 'Enter');
+  await reach('Run the whole profile');
+  const occupied = await readInput(page, sample.id);
+  assert.deepEqual(occupied.fields, []);
+  assert.deepEqual(occupied.occupied.map(row => row.path), [['profile']]);
+  assert.equal(occupied.occupied[0]['binding-id'], binding);
+  assert.ok(occupied.occupied[0]['version-id']);
+  assert.equal(await sampleCard.getByRole('button', {name: /^Bind profile(?:\.|$)/}).count(), 0);
+  const duplicate = {...leaf, path: ['profile'], value: {...profile, name: 'Blocked'}};
+  for (const command of [duplicate, leaf]) {
+    assert.equal((await inputCommand(page, 'preview', command)).status, 409);
+  }
+  assert.equal((await inputCommand(page, 'apply', {...leaf, 'expected-state': before.body['expected-state']})).status, 409);
+  assert.deepEqual(await readInput(page, sample.id), occupied);
+
+  await page.reload({waitUntil: 'domcontentloaded'});
+  await reach('Run the whole profile');
+  assert.equal(new URL(page.url()).searchParams.get('branch'), branch);
+  await trigger.click();
+  await form.getByText('No remaining inputs.', {exact: true}).waitFor();
+  assert.deepEqual(await runWithArgs(page, form, sample.id, {}), profile);
+
+  await reach('Remove the whole profile binding');
+  await openDisclosure(sampleCard.getByRole('button', {name: 'Structured inputs', exact: true}), 'Enter');
+  await removeInput(page, 'profile', binding);
+  await reach('Find the name inside profile');
+  await openDisclosure(sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}), 'Enter');
+  await openDisclosure(page.getByRole('button', {name: /^profile — Type:/}));
+  await bindInput(page, reach, 'profile.name', 'Bind only the name', 'Bea');
+  await reach('Run with the remaining fields');
+  const partial = await readInput(page, sample.id);
+  assert.deepEqual(partial.occupied.map(row => row.path), [['profile', 'name']]);
+  assert.equal(partial.fields[0]['bind-path'], undefined);
+  assert.deepEqual(partial.fields[0].fields.map(field => field.name).sort(), ['email', 'id']);
+  await trigger.click();
+  const fields = form.getByRole('group', {name: 'profile'});
+  assert.equal(await fields.getByRole('textbox', {name: 'name', exact: true}).count(), 0);
+  await fields.getByRole('textbox', {name: 'id', exact: true}).fill('77');
+  await fields.getByRole('textbox', {name: 'email', exact: true}).fill('bea@example.test');
+  assert.deepEqual(await runWithArgs(page, form, sample.id, {profile: {id: '77', email: 'bea@example.test'}}),
+    {id: '77', name: 'Bea', email: 'bea@example.test'});
 }
 
 async function exerciseRecord(page, reach, sampleCard, sample, branch) {
@@ -98,16 +176,16 @@ async function exerciseRecord(page, reach, sampleCard, sample, branch) {
   if (contactLesson) {
     await openDisclosure(page.getByRole('button', {name: /^sender — Type:/}));
     await openDisclosure(page.getByRole('button', {name: /^address — Type:/}));
-    const sender = await bindLeaf(page, reach, 'sender.address.city', 'Bind the sender city', 'London');
+    const sender = await bindInput(page, reach, 'sender.address.city', 'Bind the sender city', 'London');
     await reach('Find the recipient city');
     await openDisclosure(sampleCard.getByRole('button', {name: 'Structured inputs', exact: true}), 'Enter');
     await openDisclosure(page.getByRole('button', {name: /^recipient — Type:/}));
     await openDisclosure(page.getByRole('button', {name: /^address — Type:/}));
-    const recipient = await bindLeaf(page, reach, 'recipient.address.city', 'Bind the recipient city', 'Paris');
+    const recipient = await bindInput(page, reach, 'recipient.address.city', 'Bind the recipient city', 'Paris');
     assert.notEqual(sender, recipient);
   } else {
     await openDisclosure(page.getByRole('button', {name: /^profile — Type:/}));
-    await bindLeaf(page, reach, 'profile.name', 'Bind the name', 'Ada');
+    await bindInput(page, reach, 'profile.name', 'Bind the name', 'Ada');
   }
   await reach('Open Run');
 
@@ -194,6 +272,7 @@ async function exercise() {
     assert.equal(sample['branch-id'], receipt.sandboxBranchId);
     const sampleCard = page.locator(`.node-overlay[data-fn-name="${childName}"]`);
     if (id === '45') await exerciseOptional(page, reach, sampleCard, sample);
+    else if (id === '46') await exerciseWhole(page, reach, sampleCard, sample, branch);
     else await exerciseRecord(page, reach, sampleCard, sample, branch);
     await reach('Finish the lesson');
     await page.getByRole('button', {name: 'Finish', exact: true}).click();

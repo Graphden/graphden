@@ -10,8 +10,9 @@
       TimeUnit)))
 
 
-(defn exercise!
-  [handler token script & args]
+(defn exercise-with-timeout!
+  "Bound the entire browser process independently of its individual waits."
+  [timeout-seconds handler token script & args]
   (let [http-handler (bound-fn [req]
                        ;; Match Graphden's HTTP response boundary.
                        (update (handler req) :headers update-keys name))
@@ -22,9 +23,16 @@
             _ (Map/.put (ProcessBuilder/.environment builder) "GD_BROWSER_FIXTURE_TOKEN" token)
             process (ProcessBuilder/.start (ProcessBuilder/.inheritIO builder))]
         (try
-          (is (Process/.waitFor process 60 TimeUnit/SECONDS) "Playwright completed the live fixture")
-          (when-not (Process/.isAlive process)
-            (is (zero? (Process/.exitValue process))))
+          (let [finished? (Process/.waitFor process timeout-seconds TimeUnit/SECONDS)]
+            (is finished? "Playwright completed the live fixture")
+            (when finished?
+              (is (zero? (Process/.exitValue process)))))
           (finally
             (when (Process/.isAlive process) (Process/.destroyForcibly process)))))
       (finally (stop)))))
+
+
+
+(defn exercise!
+  [handler token script & args]
+  (apply exercise-with-timeout! 60 handler token script args))

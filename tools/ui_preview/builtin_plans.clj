@@ -153,7 +153,7 @@
     (ids/digest-hex "SHA-256"
                     (pr-str (canonical
                               {:definitions (mapv #(dissoc % :impl :return-type-rule :slot-types-rule :nav-types-rule
-                                                           :local-type-rules)
+                                                           :local-type-rules :local-type-rule-aliases)
                                                   definitions)
                                :theme-template theme-template
                                :runtime runtime-source})))))

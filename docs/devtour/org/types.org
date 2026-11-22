@@ -53,26 +53,26 @@ Normalizes partial record maps and explicit value/ref expressions against a supp
 :PROPERTIES:
 :CUSTOM_ID: types/plan-module
 :FILE: src/graphden/input/source.clj
-:LINE: 520
+:LINE: 524
 :MINS: 3.3
 :END:
 
 Compares original source forms with a prepared legacy module to plan supported rewrites. It retains rich declarations and binding origins, while reporting unsupported list, rename, ref-scope and policy forms as explicit blockers. A completed report does not prove runtime equivalence or authorize dropping an unsupported definition.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:520]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:524]]
 - same file :: [[file:types.org::#types/verify-module][verify-module]]
 
 * 5. verify-module
 :PROPERTIES:
 :CUSTOM_ID: types/verify-module
 :FILE: src/graphden/input/source.clj
-:LINE: 725
+:LINE: 730
 :MINS: 2.4
 :END:
 
 Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:725]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:730]]
 - same file :: [[file:types.org::#types/plan-module][plan-module]]
 - referenced from :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 
@@ -80,26 +80,26 @@ Derives declared input contexts for supported rewrites using the frozen package 
 :PROPERTIES:
 :CUSTOM_ID: types/verify-plan
 :FILE: src/graphden/input/source_certification.clj
-:LINE: 77
+:LINE: 78
 :MINS: 2.2
 :END:
 
 Certifies scoped bindings and forwarded fields with trusted implementation signatures. A blocked source owner retries when its exact dependency is certified. The planner then rebuilds the requested package plan with the updated inherited field evidence.
 
-- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:77]]
+- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:78]]
 - see also :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 
 * 7. verify-bindings
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 193
+:LINE: 197
 :MINS: 1.8
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:193]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:197]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]]
 
@@ -107,13 +107,13 @@ Finds all omitted bindings in the original ledger and resolves each route agains
 :PROPERTIES:
 :CUSTOM_ID: types/migrate-forwarded-field
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 507
-:MINS: 1.5
+:LINE: 573
+:MINS: 0.9
 :END:
 
 Freezes both endpoints of an authored field passed to a value-producing reference. The checker replays the exact projection and verifies that the original local field remains available. A successful replay supplies a source proposal with the scoped path and its original field identity.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:507]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:573]]
 - see also :: [[file:types.org::#types/verify-module][verify-module]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]]
 
@@ -121,13 +121,13 @@ Freezes both endpoints of an authored field passed to a value-producing referenc
 :PROPERTIES:
 :CUSTOM_ID: types/plan-verified-module
 :FILE: scripts/structured_input_cst.clj
-:LINE: 753
+:LINE: 807
 :MINS: 2.2
 :END:
 
 Builds replacement text only when every definition in a module has a verified source plan. Edits retain comments and literal payloads, and repeat verification on the patched text. The artifact records the original and replacement byte digests.
 
-- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:753]]
+- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:807]]
 - see also :: [[file:types.org::#types/stage!][stage!]]
 
 * 10. stage!
@@ -147,51 +147,51 @@ Checks a repository's module digests against the migration artifact, validates t
 :PROPERTIES:
 :CUSTOM_ID: types/parse-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 272
+:LINE: 287
 :MINS: 2.1
 :END:
 
 Reads an explicitly versioned source module with caller-resolved declarations and namespace contexts. It retains authored input metadata and origin ledgers, returning validated input-binding rows without registry or storage writes. Partial required fields are legal; structural validation does not prove types or graph readiness.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:272]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:287]]
 - same file :: [[file:types.org::#types/emit-module-v2][emit-module-v2]]
 
 * 12. emit-module-v2
 :PROPERTIES:
 :CUSTOM_ID: types/emit-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 322
+:LINE: 337
 :MINS: 1.5
 :END:
 
 Exports offline definitions using the same declared descriptors and identity callbacks. Re-parsing detects changed binding origins or declaration context. Rich declarations remain intact; source formatting and comments belong to the separate CST writer.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:322]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:337]]
 - same file :: [[file:types.org::#types/parse-module-v2][parse-module-v2]]
 
 * 13. require-legacy!
 :PROPERTIES:
 :CUSTOM_ID: types/require-legacy!
 :FILE: src/graphden/input/format.clj
-:LINE: 362
+:LINE: 406
 :MINS: 1.7
 :END:
 
 Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
 
-- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:362]]
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:406]]
 
 * 14. resolve-contract
 :PROPERTIES:
 :CUSTOM_ID: types/resolve-contract
 :FILE: src/graphden/input/descriptor.clj
-:LINE: 169
+:LINE: 170
 :MINS: 1.3
 :END:
 
 Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs come from memberships; aliases retain those identities, marker/refinement obligations survive, and ambiguous union roots are rejected. This descriptor never stores generated reference dependencies or the remaining input back into the declaration.
 
-- source :: [[file:../../../src/graphden/input/descriptor.clj::(defn resolve-contract][src/graphden/input/descriptor.clj:169]]
+- source :: [[file:../../../src/graphden/input/descriptor.clj::(defn resolve-contract][src/graphden/input/descriptor.clj:170]]
 - referenced from :: [[file:editor.org::#editor/recordExpansionFields][recordExpansionFields]]
 
 * 15. analyze-effective-input
@@ -239,13 +239,13 @@ Includes checked named residual routes and the wire type for each supported supp
 :PROPERTIES:
 :CUSTOM_ID: types/infer-use
 :FILE: src/graphden/input/signatures.clj
-:LINE: 203
+:LINE: 204
 :MINS: 3.1
 :END:
 
 Feeds canonical scoped input facts through the existing type-rule engine using explicit implementation argument paths. Frozen registry views preserve rule lookup isolation; implementation functions never run here. Returned substitutions and proofs must join graph checking before the inferred signature can be treated as checked.
 
-- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:203]]
+- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:204]]
 - referenced from :: [[file:types.org::#types/resolve-closure][resolve-closure]]
 
 * 19. resolve-closure
@@ -536,13 +536,13 @@ Chooses return-type inference for the root [[file:glossary.org::#term/base-funct
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2675
+:LINE: 2677
 :MINS: 9.3
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2675]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2677]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
@@ -550,13 +550,13 @@ Checks one function definition against its parents and inherited [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2811
+:LINE: 2813
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2811]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2813]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
@@ -565,7 +565,7 @@ Checks definitions in [[file:glossary.org::#term/topological-order][dependency o
 :CUSTOM_ID: types/record-rich-types!
 :FILE: src/graphden/executor/registry/core.clj
 :LINE: 448
-:MINS: 10.3
+:MINS: 10.4
 :END:
 
 Stores each function's computed argument types, return type, and [[file:glossary.org::#term/effect][effects]] in the [[file:glossary.org::#term/rich-types][rich-types registry]]. Compiler decisions, runtime checks, [[file:glossary.org::#term/secret][secret redaction]], and editor labels read this data. Writes target the active branch's registry, so checking one branch does not overwrite another branch's types.
@@ -578,11 +578,11 @@ Stores each function's computed argument types, return type, and [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/rich-type-of-id
 :FILE: src/graphden/executor/registry/core.clj
-:LINE: 660
+:LINE: 662
 :MINS: 1.3
 :END:
 
 Looks up [[file:glossary.org::#term/rich-types][rich type information]] by function ID. Names may repeat across namespaces and are not a unique identity. The remaining name index supports [[file:glossary.org::#term/base-function][base functions]] and older call sites; new consumers should use IDs. See the [[file:../../../docs/adr/ADR-identity-model.md][identity model]].
 
-- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:660]]
+- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:662]]
 - same file :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]

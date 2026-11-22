@@ -4,6 +4,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-records :as list-records]
+    [graphden.input.list-signature :as signature]
     [graphden.input.source :as source]
     [graphden.input.source-list :as source-list]
     [graphden.packages.records.ids :as ids]
@@ -69,6 +70,22 @@
     (is (= [[1] [2]] (mapv #(mapv :value (:items %)) (:fragments linked))))
     (is (= (mapv :binding-id (:fragments linked)) (mapv :id (:bindings linked))))
     (is (= :list-source-origin-required (:blocker (trace [tail]))))))
+
+
+(deftest nested-list-operands-retain-their-element-signatures-and-literal-data
+  (let [declarations [{:namespace "demo" :name :consume :args {:xs {:type [:list [:list :text]]}} :return-type :any}
+                      {:namespace "demo" :name :source :args {} :return-type [:list :text]}
+                      {:namespace "demo" :name :child :parent :consume
+                       :args {:xs [:source {:value ["literal" "data"]}]}}]
+        context (parse/prepare-module declarations {} {})
+        entry (last (:definitions (source/plan-module declarations context)))
+        trace (get-in entry [:legacy :arguments 0 :list-builder])
+        generated (signature/entry (:identity entry) (:name->id context) trace)
+        fields (get-in generated [:contract :fields])]
+    (is (= [[:list :text] [:list :text] [:list [:list :text]]] (mapv :type fields)))
+    (is (= [:list [:list :text]] (get-in generated [:list-implementation :root-entry :return])))
+    (is (= ["literal" "data"] (get-in trace [:fragments 0 :items 1 :value])))
+    (is (= 2 (count (get-in generated [:list-implementation :generated-list :operands]))))))
 
 
 (deftest compiler-receives-ordered-refs-and-opaque-literals

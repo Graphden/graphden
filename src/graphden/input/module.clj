@@ -8,6 +8,7 @@
     [graphden.input.list-records :as list-records]
     [graphden.input.rows :as rows]
     [graphden.input.scoped-source :as scoped]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-rich-types :as rich]
     [graphden.input.syntax :as syntax]
     [graphden.packages.rebase :as rebase]
@@ -34,8 +35,9 @@
 (defn- field-configuration?
   [[path spec]]
   (and (vector? path) (= 1 (count path)) (simple-keyword? (first path))
-       (map? spec) (= #{:type} (set (keys spec)))
-       (or (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
+       (map? spec) (every? #{:type :description} (keys spec))
+       (or (not (contains? spec :description)) (string? (:description spec)))
+       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
 
 
 (defn- validate-source!
@@ -147,9 +149,19 @@
 
 
 (defn- resolve-configuration
-  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id]} state [names {:keys [type]}]]
+  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations]} state [names {:keys [type] :as spec}]]
   (let [path (:path (input/resolve-address contract scope names))]
-    (if (rich/callable-shape? type)
+    (cond
+      (and (not (contains? state [scope path])) (get field-annotations names))
+      (let [annotation (get field-annotations names)]
+        (when-not (and (= spec (annotations/configuration annotation))
+                       (= path (:target-path annotation) (get-in annotation [:row :target-path]))
+                       (= (binding-id scope path) (get-in annotation [:row :id]))
+                       (= (first scope) (get-in annotation [:row :fn-id])))
+          (reject! :unverified-field-annotation))
+        [names annotation])
+
+      (rich/callable-shape? type)
       (let [owner (some #(when (= (first scope) (:id %)) %) declaration-records)
             field (some #(when (= path [(:id %)]) %) (:fields contract))]
         (when (contains? state [scope path]) (reject! :self-pin-requires-free-field))
@@ -157,7 +169,10 @@
                        (rich/exact-self-pin? owner field (assoc self-pin :type type) (group-by :id declaration-records)))
           (reject! :unverified-callable-self-pin))
         [names self-pin])
+      :else
       (do
+        (when-not (contains? spec :type) (reject! :unverified-field-annotation))
+        (when (contains? spec :description) (reject! :unverified-field-annotation))
         (when-not (contains? state [scope path]) (reject! :configuration-requires-bound-field))
         (when-not (ifn? resolve-config-type) (reject! :configuration-type-resolver-required))
         (let [resolved (resolve-config-type type)]

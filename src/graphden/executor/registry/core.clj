@@ -508,6 +508,8 @@
                    (:nav-types-rule fn-def)   (assoc :nav-types-rule
                                                      (:nav-types-rule fn-def))
                    (seq local-rules)         (assoc :local-type-rule-evidence local-rules)
+                   (:local-type-rule-aliases fn-def)
+                   (assoc :local-type-rule-aliases (:local-type-rule-aliases fn-def))
                    ;; `:taint-propagate?` — checker applies marker-taint
                    ;; propagation centrally on this base-fn's results.
                    (:taint-propagate? fn-def)  (assoc :taint-propagate? true)

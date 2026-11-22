@@ -33,11 +33,12 @@
            (every? #(migration/same-edn? row %) stored)))))
 
 
-(defn collection-return?
-  "Recover a list or map return stored under a legacy primitive identity.
+(defn erased-return?
+  "Recover a generic, bottom, collection or union return erased by storage.
    Its frozen rich implementation entry must still match the authored type."
   [type-id type]
-  (and (vector? type) (contains? #{:list :map} (first type))
+  (and (or (types/type-var? type) (= :never type)
+           (and (vector? type) (contains? #{:list :map :union} (first type))))
        (descriptor/stored-source-type? type type-id)))
 
 

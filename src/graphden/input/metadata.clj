@@ -6,7 +6,8 @@
     [graphden.input.inheritance :as inheritance]
     [graphden.input.variables :as variables]
     [graphden.types.check.markers :as markers]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.expansion :as expansion]))
 
 
 (defn- prefix?
@@ -34,7 +35,19 @@
 (defn- narrow-type
   [ctx node row scope check-expression substitution]
   (if-let [type-id (:type-override-fn-id row)]
-    (let [override (variables/descriptor-in-scope scope (descriptor/resolve-descriptor ctx type-id))
+    (let [source-key [(:id row) type-id]
+          witness (get (:source-binding-types ctx) source-key)
+          override (if (contains? (:source-binding-types ctx) source-key)
+                     (do
+                       (expansion/assert-finite! witness)
+                       (let [unchanged? (and (= type-id (:type-id node)) (= (:type node) (types/resolve-alias witness)))]
+                         (when-not (or unchanged? (descriptor/stored-source-type? witness type-id (:alias-ids ctx)))
+                           (context/reject! :source-annotation-type-mismatch {:binding-id (:id row)}))
+                         (if unchanged?
+                           node
+                           (variables/descriptor-in-scope
+                             scope (descriptor/resolve-descriptor (assoc-in ctx [:type-bodies type-id] witness) type-id)))))
+                     (variables/descriptor-in-scope scope (descriptor/resolve-descriptor ctx type-id)))
           expected (types/resolve substitution (:type node))
           actual (:type override)
           address [scope (:target-path row)]

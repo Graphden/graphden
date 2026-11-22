@@ -408,7 +408,7 @@
    `defbase`). The executor always calls them with both args, so the
    loader simply hands impl-fn through."
   [fn-def impl-entry]
-  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule local-type-rules
+  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule local-type-rules local-type-rule-aliases
                 taint-propagate? lazy-seq-args compile-time-value?]}
         (impl-entry->parts impl-entry)]
     (cond-> {:args (normalize-args (or (:input fn-def) (:args fn-def)))
@@ -428,6 +428,8 @@
       slot-types-rule       (assoc :slot-types-rule slot-types-rule)
       nav-types-rule        (assoc :nav-types-rule nav-types-rule)
       (seq local-type-rules) (assoc :local-type-rules local-type-rules)
+      (and (seq local-type-rules) (seq local-type-rule-aliases))
+      (assoc :local-type-rule-aliases local-type-rule-aliases)
       ;; `:taint-propagate?` — marker-taint (`:secret` &c.) flows from
       ;; any tainted input into the return. Applied CENTRALLY by the
       ;; checker on top of the structural rule/signature result —

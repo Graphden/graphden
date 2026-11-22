@@ -644,7 +644,7 @@
   (let [text (str "{:namespace \"demo.main\" :fns [{:name :response :parent :base\r\n"
                   " :args {:left :encoder ; reference comment\r\n"
                   "        :data ; field comment\r\n        {:type :text}}}]}\r\n")
-        forwarding {[:left :data] [:project [:data]]}
+        forwarding {[:left :nested :data] [:project [:data]]}
         operation {:op :partition-composed-args :definition :response :path [:args]
                    :declarations [:data] :operators {:left :wrap-ref} :forwarded-bindings forwarding}
         patch (cst/plan text {:namespace "demo.main" :operations [operation]})
@@ -672,6 +672,48 @@
     (is (str/includes? target "; target\r\n"))
     (is (str/includes? target "; identical name\r\n"))
     (is (= :already-applied (:status (cst/apply-text patch target))))))
+
+
+(deftest free-annotations-preserve-comments-payloads-and-crlf-without-moving-entries-test
+  (let [text "{:namespace \"demo.main\" :fns [{:name :child :parent :base :args ; arguments\r\n {:title {:type :text :as ; identity\r\n          :title :description \"multi\r\nline {:as :title}\"}\r\n  :head {:as :head :type [:list :text] :description \"Head\"}}}]}\r\n"
+        raw (first (:fns (edn/read-string text)))
+        defs [{:name :base :namespace "demo.main" :args {:title :text :head {:type [:list :text]}} :return-type :text}
+              (assoc raw :namespace "demo.main")]
+        ctx (parse/prepare-module defs {} {})
+        entry (last (:definitions (source/verify-module (source/plan-module defs ctx) ctx)))
+        patch (cst/plan text (apply request (cst/entry-operations entry)))
+        expected (-> text
+                     (str/replace ":args ; arguments" ":configure ; arguments")
+                     (str/replace "{:title {" "{[:title] {")
+                     (str/replace ":type :text :as ; identity\r\n          :title" ":type :text  ; identity\r\n          ")
+                     (str/replace ":head {:as :head" "[:head] { "))]
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= expected (:target-text patch)))
+    (is (= (:configure (:proposed entry)) (get-in (edn/read-string expected) [:fns 0 :configure])))
+    (is (= :already-applied (:status (cst/apply-text patch expected))))))
+
+
+(deftest annotation-only-inline-keeps-its-original-uuid-and-spelling-test
+  (doseq [spec ["{:as ; same name\r\n :title :description \"Title\" :type :text}"
+                "{:as ; same name\r\n :title}"]]
+    (let [text (str "{:namespace \"demo.main\" :fns [{:name :child :parent :sink :args {:value {:parent :base :args ; inline args\r\n {:title " spec "}}}}]}")
+          raw (first (:fns (edn/read-string text)))
+          defs [{:name :base :namespace "demo.main" :args {:title :text} :return-type :text}
+                {:name :sink :namespace "demo.main" :args {:value :text} :return-type :text}
+                (assoc raw :namespace "demo.main")]
+          ctx (parse/prepare-module defs {} {})
+          entry (last (:definitions (source/verify-module (source/plan-module defs ctx) ctx)))
+          patch (cst/plan text (apply request (cst/entry-operations entry)))
+          target (:target-text patch)
+          proposal (assoc (first (:fns (edn/read-string target))) :namespace "demo.main")
+          replay (first (:definitions (source/verify-module {:definitions [(assoc entry :proposed proposal)]} ctx)))]
+      (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+      (is (= :authored-source-equivalent (:verification replay)) (:blockers replay))
+      (is (= (:identity entry) (:identity replay)))
+      (is (= (get-in entry [:v2 :inline-definitions]) (get-in replay [:v2 :inline-definitions])))
+      (is (str/includes? target "; inline args\r\n"))
+      (is (str/includes? target "; same name\r\n"))
+      (is (= :already-applied (:status (cst/apply-text patch target)))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]

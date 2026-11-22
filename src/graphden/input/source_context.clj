@@ -4,6 +4,7 @@
     [graphden.input.format :as format]
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
@@ -185,7 +186,13 @@
   [source-environment definition records binding-origins]
   (let [{:keys [owner] :as entry} (scope-entry definition records)
         id (:id owner)
+        original (get-in source-environment [:definition-by-id id])
+        field-annotations (into {} (keep (fn [field]
+                                           (when-let [annotation (annotations/annotation (:context source-environment) original records field)]
+                                             [[field] annotation])))
+                                (keys (:args original)))
         common {:fn-id id :declaration-records (into [] (filter #(contains? #{:fn :slot :fn-slot} (:kind %))) records)
+                :field-annotations field-annotations
                 :origin-ledger {:source-owner id}}]
     (if (or (:return-type-fn-id owner) (seq (:parent-ids owner)))
       (let [declared (declared-input source-environment entry binding-origins)
@@ -263,11 +270,31 @@
        (every? #{:type :required :description} (keys spec))))
 
 
+(defn- restore-field-annotations
+  [{:keys [context records-of definition-by-id]} definition source]
+  (let [id (ids/fn-id (:namespace definition) (:name definition))
+        original (get definition-by-id id)]
+    (reduce (fn [source [[field :as path] spec]]
+              (if (or (not= 1 (count path)) (contains? (:bind definition) field))
+                source
+                (if-let [annotation (when original
+                                      (annotations/annotation context original (records-of original) field))]
+                  (let [normalize #(cond-> % (contains? % :type)
+                                           (update :type (fn [type]
+                                                           (rebase/rewrite-type-references
+                                                             type (fn [ref] (parse/normalize-ref ref (:name->id context) (:namespace definition)))))))]
+                    (when-not (= (normalize spec) (normalize (annotations/configuration annotation)))
+                      (reject! :unverified-field-annotation [:configure path]))
+                    (assoc-in source [:args field] (get-in original [:args field])))
+                  source)))
+            source (:configure definition))))
+
+
 (defn lower-declarations
   "Temporary offline compatibility with the existing declaration lowerer.
    The new syntax reader handles :bind separately. Remove this legacy
    lowering adapter when the v2 package loader replaces the v1 loader."
-  [{:keys [context definition-by-id]} definition]
+  [{:keys [context definition-by-id] :as environment} definition]
   (let [projections (into (array-map) (keep (fn [[arg form]]
                                               (when (and (simple-keyword? arg) (format/local-projection? form))
                                                 [arg (first (second form))])))
@@ -284,6 +311,7 @@
                    (assoc source :args (into (apply dissoc declaration (vals projections))
                                              (map (fn [[arg exposed]] [arg (rename-form arg exposed)])) projections)))
                  source)
+        source (restore-field-annotations environment definition source)
         ;; Preserve the anonymous type declaration emitted by the legacy
         ;; owner. An unrelated authored shape cannot supply this evidence.
         original (get definition-by-id (ids/fn-id (:namespace definition) (:name definition)))

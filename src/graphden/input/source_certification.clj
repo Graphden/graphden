@@ -12,12 +12,12 @@
 
 
 (defn- candidate
-  [{id :identity [first-blocker & others :as blockers] :blockers}]
+  [{id :identity blockers :blockers}]
   (when (and (uuid? id) (seq blockers) (every? argument-field blockers))
     (cond
       (every? #(= :ref-scope-required (:code %)) blockers) [id nil]
-      (and (empty? others) (= :field-projection-required (:code first-blocker)))
-      [id (argument-field first-blocker)])))
+      (every? #(= :field-projection-required (:code %)) blockers)
+      [id (mapv argument-field blockers)])))
 
 
 (defn- attempt
@@ -28,7 +28,8 @@
                 (snapshot/with-migrated-bindings package [id] roots))}
     (catch clojure.lang.ExceptionInfo failure
       (let [{:keys [type code fn-id] :as data} (ex-data failure)]
-        (when-not (#{"input" "types"} (some-> type namespace))
+        (when-not (or (#{"input" "types"} (some-> type namespace))
+                      (= :compile/ambiguous-lambda-params type))
           (throw failure))
         {:blocked (cond-> (assoc (select-keys data [:fn-id :blockers])
                                  :code (or code type))

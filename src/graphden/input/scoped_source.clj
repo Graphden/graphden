@@ -88,8 +88,7 @@
                             :projection {:expression-kind "projection" :value-present false
                                          :projection-scope-path (second (:scope expression))
                                          :projection-path (:path expression)})))]
-      (when-not (and (or (not projection?) (= 1 (count use-path)))
-                     (every? uuid? use-path) (= address [[owner use-path] [field-id]]) (migration/same-edn? parsed row))
+      (when-not (and (every? uuid? use-path) (= address [[owner use-path] [field-id]]) (migration/same-edn? parsed row))
         (reject! :scoped-origin-mismatch public-path))
       (cond-> {:address address :row parsed :expression expression}
         projection? (assoc :source-names (:source-names certificate))))))

@@ -29,7 +29,7 @@
       (throw (ex-info "List item identity changed" {:code :list-item-origin-mismatch})))))
 
 
-(defn- verify-file
+(defn- verify-file-once
   [read-source file entries name->id]
   (let [ops (vec (mapcat (partial candidates name->id) entries))]
     (when (seq ops)
@@ -52,6 +52,23 @@
                         whole)}))))
 
 
+(defn- verify-file
+  [read-source file entries name->id]
+  (loop [pending entries blockers []]
+    (let [{:keys [report failure]} (try {:report (verify-file-once read-source file pending name->id)}
+                                        (catch clojure.lang.ExceptionInfo error {:failure error}))]
+      (if failure
+        (let [{:keys [definition code reason]} (ex-data failure)
+              rejected (filter #(= definition (get-in % [:source :name])) pending)]
+          (when-not (= 1 (count rejected)) (throw failure))
+          (recur (remove #(= definition (get-in % [:source :name])) pending)
+                 (conj blockers {:code :list-cst-verification-failed :file file
+                                 :definition [(get-in (first rejected) [:source :namespace]) definition]
+                                 :cause (or code reason)})))
+        (when (or report (seq blockers))
+          (assoc (or report {:fields {} :entries []}) :blockers blockers))))))
+
+
 (defn verify-package
   "Reparse changed spans in original checked files. Submit whole eligible
    definitions from these bytes to the same legacy/v2 meaning comparison."
@@ -61,7 +78,8 @@
                   (fn [result file ds]
                     (try
                       (if-let [report (verify-file read-source file ds (:name->id context))]
-                        (-> result (assoc-in [:verified file] (:fields report)) (update :entries into (:entries report)))
+                        (-> result (assoc-in [:verified file] (:fields report))
+                            (update :entries into (:entries report)) (update :blockers into (:blockers report)))
                         result)
                       (catch Exception error
                         (update result :blockers conj {:code :list-cst-verification-failed :file file

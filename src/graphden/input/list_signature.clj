@@ -4,7 +4,8 @@
     [graphden.input.list-records :as records]
     [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.expansion :as expansion]))
 
 
 (defn- reject!
@@ -33,6 +34,14 @@
     [:list (types/make-union (conj (mapv :type (vals (dissoc facts :tail))) tail-type))]))
 
 
+(defn- element-type?
+  [resolve-named element]
+  (or (contains? #{:any :numeric :int :text :bool :keyword} element)
+      (and (keyword? element) (= :union (:kind (resolve-named element))))
+      (and (vector? element) (= 2 (count element)) (= :list (first element))
+           (element-type? resolve-named (second element)))))
+
+
 (defn entry
   "Verify the full source chain and recover its current contributor's generated
    declarations. Earlier builders enter the closure through true parents.
@@ -41,15 +50,14 @@
   ([owner-id names resolve-named {:keys [fragments field records] :as trace}]
    (let [{:keys [builder-id items target-id] :as fragment} (when (vector? fragments) (peek fragments))
          type (:type field)
+         _ (expansion/assert-finite! type)
          element (when (vector? type) (second type))
          polymorphic? (types/type-var? element)]
      (cond
        (nil? fragment) (reject! owner-id :fragment-chain-signature)
        (not= owner-id (:owner-id fragment)) (reject! owner-id :fragment-owner-mismatch)
        (not (and (vector? type) (= 2 (count type)) (= :list (first type))
-                 (or (contains? #{:any :numeric :int :text :bool :keyword} element)
-                     polymorphic?
-                     (= :union (:kind (resolve-named element))))))
+                 (or polymorphic? (element-type? resolve-named element))))
        (reject! owner-id :list-element-signature)
        (not-every? #(#{:value :ref :projection} (:kind %)) items) (reject! owner-id :list-operand-signature))
      (let [recovered (records/recover-chain (mapv :owner-id fragments) target-id field names records)

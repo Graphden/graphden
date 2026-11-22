@@ -76,6 +76,41 @@ values and refinement obligations remain deferred, and error data omits literal
 payloads. Required missing fields describe invocation readiness independently of
 whether a definition's types have been checked.
 
+A verified source snapshot can retain an annotation or projection pin's rich
+type in `:source-binding-types`, keyed by `[binding-id type-id]`. This prevents
+a collection stored under the legacy `:sequence` FK from losing its element
+type during metadata application. Projection pins require the exact source
+alias, target and binding rows. The declared type must account for its physical
+FK. Restoring the descriptor is local to the binding; it does not redefine the
+shared primitive. Ordinary metadata subtype/marker checks and runtime
+obligations still apply. A missing checker remains incomplete coverage.
+
+### Guard proof boundary
+
+Legacy `types.check.narrowing` recognizes direct `some?`, `nil?` and `is-a?`
+guards. A taken `is-a?` arm can project the target's structural type while
+preserving markers. Its false arm keeps the original type. The existing
+per-function override map is not a proof that two scoped value occurrences
+are the same cell, and cannot be imported into a frozen graph by display name.
+
+The shipped `web.html/_normalized-tag` illustrates the remaining boundary.
+Its `is-a? :text` false arm still returns the nullable generic `_element-tag`.
+The outer `_is-hiccup-element?` is an `and` of sequence/non-empty/tag checks,
+with an `or` over `_first-of-value`. That producer and `_element-tag` have
+different declaration UUIDs. Concluding keyword in the false arm requires
+both the composed guard and proof that the reads share the same input cell.
+Direct-guard legacy semantics supplies neither fact. The resulting
+`equal?.a` conflict (`:keyword` versus `[:union :keyword :null a]`) remains
+refused rather than being converted to an unproved return witness.
+
+This migration keeps the boundary in
+[the composed-guard decision](TYPE_SYSTEM_DECISIONS.md#phase-170-v2--rejected-composed-guard-narrowing).
+It preserves explicit authored type pins through closed-instance/source-row
+proofs. It does not add `and`/`or` recognition or infer equivalence between
+producer declarations. Any future guard proof must identify the guarded value
+cell and branch use through verified source paths; alias names or a permissive
+legacy sweep result alone are insufficient.
+
 `analysis/analyze-effective-input` expands evaluated value and callable-producer
 references into `:scopes`, keyed by vectors of reference binding IDs. Its
 `:dependencies` record source addresses, target use scopes, target function IDs

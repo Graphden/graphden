@@ -8,6 +8,7 @@
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.module :as module]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-forward :as forward]
     [graphden.input.source-list :as source-list]
@@ -185,6 +186,7 @@
                              rename)
                     pin (when (and (= arg field) (= #{:type-override-fn-id} (set (keys (binding-policy binding)))))
                           (rich/self-pin definition arg rows binding target-type))
+                    annotation (annotations/annotation context source rows arg)
                     inline-body (format/inline-binding-body body)
                     inline-ref (prepared-inline-ref value)
                     inline-id (when (and inline-body (keyword? inline-ref))
@@ -204,6 +206,7 @@
                   builder (merge {:list-builder (dissoc builder :inline-items)}
                                  (source-list/contribution-expression builder body (:namespace source) name->id))
                   pin (assoc :self-pin pin)
+                  annotation (assoc :annotation annotation)
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -217,10 +220,11 @@
 
 (defn- field-assertions
   [definition arguments]
-  (into {} (keep (fn [{:keys [rename self-pin source-path]}]
+  (into {} (keep (fn [{:keys [rename self-pin annotation source-path]}]
                    (let [spec (get-in definition source-path)]
-                     (when (or self-pin (:pin-id rename) (typed-binding? spec))
-                       [[(second source-path)] (select-keys spec [:type])])))) arguments))
+                     (when (or self-pin annotation (:pin-id rename) (typed-binding? spec))
+                       [[(second source-path)] (if annotation (annotations/configuration annotation)
+                                                   (select-keys spec [:type]))])))) arguments))
 
 
 (defn- authored-own-field?
@@ -257,7 +261,7 @@
   (let [{:keys [source-path origin expression policy target]} entry
         problem #(blocker source % source-path)
         raw (get-in source source-path)
-        typed? (or (:self-pin entry) (get-in entry [:rename :pin-id]) (typed-binding? raw))
+        typed? (or (:self-pin entry) (contains? (:annotation entry) :type) (get-in entry [:rename :pin-id]) (typed-binding? raw))
         inline-body (format/inline-binding-body raw)
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
@@ -288,9 +292,9 @@
       (and typed? (not (uuid? (:type-override-fn-id policy))))
       (conj (problem :unresolved-binding-type))
       (or (and (contains? policy :type-override-fn-id) (not typed?))
-          (some #(contains? policy %) [:required :terminal :description]))
+          (and (not (:annotation entry)) (some #(contains? policy %) [:required :terminal :description])))
       (conj (problem :binding-metadata-required))
-      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? expression)
+      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? (:annotation entry)) (nil? expression)
            (not (or (:list-append policy) (:list-closed policy))))
       (conj (problem :non-value-binding-required))
       (and (= :ref (first expression)) (nil? (second expression)))
@@ -318,7 +322,7 @@
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         blockers (concat (when collision? [(blocker source :rename-field-collision [:args])])
-                         (source-argument-blockers source (into (set rename-fields) (keep #(when (:self-pin %) (peek (:source-path %)))) arguments))
+                         (source-argument-blockers source (into (set rename-fields) (keep #(when (or (:self-pin %) (:annotation %)) (peek (:source-path %)))) arguments))
                          (mapcat #(argument-blockers source % chain) arguments))]
     {:arguments arguments :aliases aliases :blockers blockers}))
 
@@ -376,7 +380,7 @@
   [source arguments aliases]
   (let [declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
         declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
-        binds (filter #(and (= :binding (:kind %)) (not (:self-pin %))) arguments)
+        binds (filter #(and (= :binding (:kind %)) (not (:self-pin %)) (not (:annotation %))) arguments)
         configuration (field-assertions source arguments)
         bindings (into (array-map)
                        (map (fn [{:keys [source-path expression]}]
@@ -565,6 +569,7 @@
   [record]
   (cond-> (select-keys record [:id :fn-id :slot-id :value-present])
     (:type-override-fn-id record) (assoc :type-override-fn-id (:type-override-fn-id record))
+    (some? (:description record)) (assoc :description (:description record))
     (:value-present record) (assoc :value (:value record))
     (:ref-fn-id record) (assoc :ref-fn-id (:ref-fn-id record))))
 
@@ -753,48 +758,85 @@
 
 
 (defn- forwarded-candidate
-  [{:keys [source legacy] :as entry} field-id]
+  [{:keys [source legacy] :as entry} field-ids]
   (let [arguments (:arguments legacy)]
     (-> entry
         (assoc :status :supported :blockers [] :proposed (composed-source source arguments (keep :rename arguments)))
         (update-in [:legacy :records]
                    (fn [records]
-                     (mapv #(cond-> % (and (= :slot (:kind %)) (= field-id (:id %)))
+                     (mapv #(cond-> % (and (= :slot (:kind %)) (contains? field-ids (:id %)))
                                     (dissoc :source-slot-id)) records))))))
+
+
+(defn- forwarded-proofs
+  [context entry fields]
+  (when-not (and (vector? fields) (seq fields) (= (count fields) (count (set fields)))
+                 (= (set (map #(vector [:args %] :field-projection-required) fields))
+                    (set (map (juxt :source-path :code) (:blockers entry))))
+                 (= (count fields) (count (:blockers entry))))
+    (throw (ex-info "Every implicit local forwarding must be proved together"
+                    {:type :input/source-verification :code :incomplete-forwarded-fields})))
+  (mapv #(forward/verify-forwarded-field context entry %) fields))
+
+
+(defn forwarded-fields-baseline
+  "Omit the complete group of structural links, keeping both addresses free.
+   Each link must have its own exact legacy field and reference origin."
+  [context entry fields]
+  (let [proofs (forwarded-proofs context entry fields)
+        candidate (forwarded-candidate entry (set (map :field-id proofs)))]
+    {:proofs proofs :entry (first (:definitions (verify-module {:definitions [candidate]} context)))}))
 
 
 (defn forwarded-field-baseline
   "Build the offline owner declaration with both addresses still free.
    The structural proof identifies the only implicit link omitted from these rows."
   [context entry field]
-  (let [{:keys [field-id] :as proof} (forward/verify-forwarded-field context entry field)
-        candidate (forwarded-candidate entry field-id)]
-    {:proof proof :entry (first (:definitions (verify-module {:definitions [candidate]} context)))}))
+  (let [{:keys [proofs entry]} (forwarded-fields-baseline context entry [field])]
+    {:proof (first proofs) :entry entry}))
 
 
-(defn rewrite-forwarded-field
-  "Verify one authored forwarded field against the exact scoped projection
+(defn- checked-forwarded-certificate!
+  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id]}
+   field {:keys [source-names public-path row address edges]}]
+  (when-not (and (= [field] source-names) (vector? public-path) (= (inc (count edges)) (count public-path))
+                 (= field (peek public-path)) (= (or target-address address) address)
+                 (= owner-id (ffirst address)) (= target-field-id (first (second address)))
+                 (= root-use-id (first (second (first address))))
+                 (= "projection" (:expression-kind row)) (= projection-id (:id row))
+                 (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
+                 (= target-fn-id (:target-fn-id (first edges))))
+    (throw (ex-info "Forwarded field differs from its checked projection"
+                    {:type :input/source-verification :code :forwarded-certificate-mismatch}))))
+
+
+(defn rewrite-forwarded-fields
+  "Verify authored forwarded fields against their exact scoped projections
    certified by the checked snapshot. The legacy FK becomes an explicit
    projection row. The local field and its membership keep their original IDs.
    This returns offline rows and a proposed form, leaving the source untouched."
-  [context entry field
-   {:keys [source-names public-path row address edges] :as certificate}]
-  (let [{:keys [owner-id field-id source-path target-address projection-id target-fn-id]}
-        (forward/verify-forwarded-field context entry field)]
-    (when-not (and (= [field] source-names) (vector? public-path) (= 2 (count public-path))
-                   (= field (peek public-path)) (= target-address address)
-                   (= "projection" (:expression-kind row)) (= projection-id (:id row))
-                   (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
-                   (= [target-fn-id] (mapv :target-fn-id edges)))
-      (throw (ex-info "Forwarded field differs from its checked projection"
+  [context entry fields certificates]
+  (let [proofs (forwarded-proofs context entry fields)]
+    (when-not (= (count proofs) (count certificates))
+      (throw (ex-info "Every forwarded field needs its checked projection"
                       {:type :input/source-verification :code :forwarded-certificate-mismatch})))
-    (let [candidate (-> (forwarded-candidate entry field-id)
-                        (assoc-in [:proposed :bind public-path] [:project source-names])
+    (run! (fn [[proof field certificate]] (checked-forwarded-certificate! proof field certificate))
+          (map vector proofs fields certificates))
+    (let [by-path (into {} (map (fn [proof certificate] [(:source-path proof) certificate]) proofs certificates))
+          candidate (-> (forwarded-candidate entry (set (map :field-id proofs)))
+                        (update-in [:proposed :bind] into (map (fn [{:keys [public-path source-names]}]
+                                                                 [public-path [:project source-names]]) certificates))
                         (update-in [:legacy :arguments]
                                    (fn [arguments]
-                                     (mapv #(cond-> % (= source-path (:source-path %))
-                                                    (assoc :scope-certificate certificate)) arguments))))]
+                                     (mapv #(cond-> % (contains? by-path (:source-path %))
+                                                    (assoc :scope-certificate (get by-path (:source-path %)))) arguments))))]
       (first (:definitions (verify-module {:definitions [candidate]} context))))))
+
+
+(defn rewrite-forwarded-field
+  "Single-field convenience form of the atomic forwarding replay."
+  [context entry field certificate]
+  (rewrite-forwarded-fields context entry [field] [certificate]))
 
 
 (defn with-forwarded-parent

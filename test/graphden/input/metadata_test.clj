@@ -54,6 +54,54 @@
             (with-rows context [narrowed (row child field {:type-override-fn-id any-type})]) child)))))
 
 
+(deftest exact-source-annotation-retains-the-erased-collection-type-test
+  (let [{:keys [base child field context]} (fixture)
+        sequence-id (get (ids/primitive-fn-ids) :sequence)
+        input-id (get-in context [:fns base :input-type-fn-id])
+        rich [:list :text]
+        annotation (row child field {:expression-kind nil :value-present false :type-override-fn-id sequence-id
+                                     :description "Authored head elements"})
+        ctx (-> context
+                (assoc-in [:fields field :type-fn-id] sequence-id)
+                (assoc-in [:type-bodies input-id] {:value rich})
+                (assoc :source-field-types {[field sequence-id] rich})
+                (with-rows [annotation]))
+        frozen (assoc ctx :source-binding-types {[(:id annotation) sequence-id] rich})
+        analyzed (analysis/analyze-input frozen child)]
+    (is (= rich (get-in analyzed [:configured-contract :fields 0 :type])))
+    (is (= "Authored head elements" (get-in analyzed [:configured-contract :fields 0 :description])))
+    (is (empty? (:bindings analyzed)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+          (analysis/analyze-input ctx child)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+          (analysis/analyze-input (assoc frozen :source-binding-types {[(:id annotation) sequence-id] [:list :int]}) child)))))
+
+
+(deftest rich-pin-witness-restores-only-the-selected-binding-and-keeps-checker-coverage-explicit
+  (let [{:keys [base child field context]} (fixture)
+        sequence-id (ids/primitive-fn-id :sequence)
+        input-id (get-in context [:fns base :input-type-fn-id])
+        other (random-uuid)
+        annotation (row child field {:type-override-fn-id sequence-id})
+        ctx (-> context
+                (assoc-in [:fields field :type-fn-id] sequence-id)
+                (assoc-in [:fields other] {:id other :name "other" :required false :type-fn-id sequence-id})
+                (update-in [:members input-id] conj {:slot-id other :position 1})
+                (assoc-in [:type-bodies input-id] {:value [:list 'a] :other [:list :text]})
+                (assoc :source-field-types {[field sequence-id] [:list 'a] [other sequence-id] [:list :text]}
+                       :source-binding-types {[(:id annotation) sequence-id] [:list :uuid]})
+                (with-rows [annotation]))
+        result (analysis/analyze-input ctx child)]
+    (is (= [[:list :uuid] [:list :text]] (mapv :type (get-in result [:configured-contract :fields]))))
+    (is (= [:list 'a] (get-in result [:declared-contract :fields 0 :type])))
+    (is (not (contains? (:type-bodies ctx) sequence-id)))
+    (is (= :incomplete (:status result)))
+    (is (false? (get-in result [:coverage :type-checker])))
+    (doseq [witness [[:list :missing-type] [:map :text :uuid]]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+            (analysis/analyze-input (assoc ctx :source-binding-types {[(:id annotation) sequence-id] witness}) child))))))
+
+
 (deftest terminal-locks-descendant-but-does-not-retroactively-reject-ancestor-test
   (let [{:keys [base child field context]} (fixture)
         value {:expression-kind "value" :value-present true :value 1}]

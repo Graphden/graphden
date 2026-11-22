@@ -1035,7 +1035,8 @@
    :rest {:impl rest-fn :taint-propagate? true}
    :cons {:impl cons-fn :taint-propagate? true}
    :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
-   :get {:impl get-fn :return-type-rule get-return-rule :taint-propagate? true}
+   :get {:impl get-fn :return-type-rule get-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :get-in {:impl get-in-fn :return-type-rule get-in-return-rule :taint-propagate? true}
    :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule
            :local-type-rules #{:return-type-rule} :taint-propagate? true}
@@ -1046,7 +1047,8 @@
    :keys {:impl keys-fn :return-type-rule keys-return-rule :taint-propagate? true}
    :vals {:impl vals-fn :return-type-rule vals-return-rule :taint-propagate? true}
    :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
-   :into {:impl into-fn :return-type-rule into-return-rule :taint-propagate? true}
+   :into {:impl into-fn :return-type-rule into-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule :taint-propagate? true}
    :range {:impl range-fn :taint-propagate? true}
    :repeat {:impl repeat-fn :taint-propagate? true}
@@ -1054,20 +1056,23 @@
    :drop {:impl drop-fn :taint-propagate? true}
    :reverse {:impl reverse-fn :taint-propagate? true}
    :sort {:impl sort-fn :taint-propagate? true}
-   :concat {:impl concat-fn :return-type-rule concat-return-rule :taint-propagate? true}
+   :concat {:impl concat-fn :return-type-rule concat-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :flatten {:impl flatten-fn :return-type-rule flatten-return-rule :taint-propagate? true}
    :distinct {:impl distinct-fn :taint-propagate? true}
    :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
    :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule
             :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule :taint-propagate? true}
-   :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule :taint-propagate? true}
+   :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :postwalk {:impl postwalk-fn :taint-propagate? true}
    :update-in {:impl update-in-fn
                :return-type-rule update-in-return-rule :taint-propagate? true
                :slot-types-rule update-in-slot-rule
                :nav-types-rule update-in-nav-rule}
-   :list {:impl list-fn :return-type-rule list-return-rule :taint-propagate? true}
+   :list {:impl list-fn :return-type-rule list-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :vec {:impl vec-fn :taint-propagate? true}
    :pairs->map {:impl pairs->map-fn :return-type-rule pairs->map-return-rule
                 :taint-propagate? true}

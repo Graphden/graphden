@@ -460,7 +460,8 @@
    :str-split          {:impl str-split-fn          :taint-propagate? true}
    :str-join           {:impl str-join-fn           :taint-propagate? true}
    :_csv-escape-cell   {:impl _csv-escape-cell      :taint-propagate? true}
-   :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule str-to-keyword-return-rule :taint-propagate? true}
+   :str-to-keyword     {:impl str-to-keyword-fn :return-type-rule str-to-keyword-return-rule
+                        :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :pr-str             {:impl pr-str-fn             :taint-propagate? true}
    :pprint-str         {:impl pprint-str-fn         :taint-propagate? true}
    :to-str             {:impl to-str-fn             :taint-propagate? true}

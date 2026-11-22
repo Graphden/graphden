@@ -68,6 +68,22 @@ assertion or a list, map, tuple or union assertion with named leaves.
 The verifier compares the rich form as well as its storage ID, since
 different collection types can share that ID.
 
+A same-name `{:as :title :type :text :description "Document title"}` on
+an inherited `:title` field is a metadata-only binding, not a rename slot.
+When the authored type is unchanged, it becomes
+`:configure {[:title] {:type :text :description "Document title"}}`.
+The original binding UUID and description survive, and the field stays free.
+Narrowing assertions, extra policies and fields supplied through reference
+scopes still require separate evidence. The CST writer supports an argument
+map containing only these annotations without moving its entries; mixed
+annotation/value maps retain an explicit writer blocker.
+
+A same-name `{:as :field}` with no type also emits an empty legacy binding
+row. Its source-backed `:configure {[:field] {}}` retains that UUID without
+adding a type assertion or occupying the field. Empty configuration without
+matching original source evidence is rejected. Exact metadata-only inline
+configurations use the same frozen row checks as named declarations.
+
 A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
 The reader uses the original namespace, host name, field and normalized
 reference spellings to reproduce each legacy child UUID. The host name of
@@ -87,6 +103,11 @@ when restoring a configured binding. If the added keys would change the
 legacy declaration's iteration order, `:legacy-order` records that order.
 The reader keeps absent arguments distinct from `:bind {}` and verifies
 rows and binding origins recursively.
+
+Metadata-only inline arguments use `[:annotation original-key-order]` in
+`:legacy-forms`. `:legacy-args-order` retains the original argument order
+when annotations move to `:configure`. These source-spelling records reproduce
+the existing anonymous UUID; they do not create runtime bindings.
 
 A type pin authored on an inline reference moves to the enclosing
 binding's `:configure`. The referenced declaration keeps its original UUID.
@@ -176,7 +197,11 @@ The snapshot retains its original field map and checks every slot and membership
 against the record UUID, ordinal, field name and primitive type UUID. A
 projection pin must still join the authored alias, the original target binding
 and the declared record UUID. The checker reports any missing implementation
-signature separately. An optional argument with no effective binding appears
+signature separately. If an admitted rule exposes incompatible runtime-check
+obligations whose intersection is not represented, `projection-readiness`
+retains its source routes in an incomplete diagnostic view with signature
+coverage false. The executable certificate still refuses the same gap.
+An optional argument with no effective binding appears
 in `:free-arguments` and has no value key in the ABI facts. An explicit nil has `:value nil` and
 `:value-present true` and is bound. Both forms retain their authored source
 when the implementation returns the same record member type. Wrapped field
@@ -197,11 +222,59 @@ implementation roots retain diagnostics. At each reference use, a supplied
 alias carries the consuming binding's original UUID and its scoped address in
 `:source-binding` on the analyzer's projection route.
 
-A named pin on a union field uses the prepared package's namespace-resolved
-type definitions. The source planner checks finite expansion, marker
-preservation and directional subtyping. The pin must expand to a concrete
-type and the target may carry each type variable once. Unknown references,
-recursive aliases and unsupported declaration shapes keep the migration blocked.
+An owned field's legacy source-slot link can also target a deeper value-reference
+input. All such fields on one owner must be proved and rewritten together. The
+frozen analyzer identifies one occurrence for each destination UUID and checks
+every reference edge, the source/destination types and existing occupancy. The
+local fields keep their UUIDs, positions and authored metadata; explicit scoped
+projections replace only their implicit source-slot links. Repeated destination
+uses, incomplete groups and unsupported reference modes remain blocked.
+
+Rich-field validation obligations remain explicit. A forwarding proof may remove
+a destination's field-read check only when an identical check remains on its
+original source field; other obligations must survive unchanged. This source
+equivalence proof does not establish execution support for those checks.
+
+Audited native type callbacks run with the frozen signature view. A callback
+that introduces a named type records `:graphden.input/type-aliases` in its
+metadata, mapping the returned label to its qualified source declaration.
+For example, the conditional's positive/non-negative literal refinements use
+the `core.refinements` UUIDs. The snapshot verifies those declarations and
+rejects absent or conflicting aliases instead of reading process-wide policy.
+
+Named list types require source and row evidence too. For `:list T`, the
+snapshot checks the type-only owner, its element FK and its exact implicit
+`:items` slot/membership. The element must resolve through the declaration's
+namespace to a primitive or another verified named type. Executable functions,
+changed memberships and unverified origins are rejected. Compound inline
+elements still require separate evidence; an erased element FK cannot supply
+their authored shape.
+
+An authored generic scalar or `:never` return can use the legacy `:any` FK
+only when the source form, physical FK and frozen implementation signature
+agree. The snapshot retains this return by function UUID and FK; the ordinary
+checker still checks each use. Return variables share the implementation's
+use scope and argument substitution before the declared-return check. Two
+uses of `const` can therefore return different concrete types without sharing
+a type variable. An unrelated FK or implementation return remains an error.
+
+An authored rename pin uses the prepared package's namespace-resolved type
+definitions. The planner checks finite expansion, known source leaves, marker
+preservation and directional subtyping. The existing unifier can instantiate
+the inherited generic contract, for example `[:list a]` to `[:list :uuid]`;
+the result must be closed and still accept the actual pin by subtyping.
+Repeated variables must retain their correlation: a map's keys and values
+cannot independently instantiate the same variable to different types.
+Both named pins and inline collection pins retain their exact source form,
+alias slot UUID, inherited target UUID and physical override FK. Unknown
+references, recursive aliases and unsupported declarations remain blocked.
+
+Frozen analysis records a rich projection pin by its binding UUID and physical
+FK. This keeps an inline list's element type when legacy storage uses the
+shared `:sequence` identity. Only the exact projection row and its authored
+alias type can supply this witness. Metadata restores it for that binding and
+then runs the ordinary subtype/marker checker; runtime obligations and missing
+checker coverage remain explicit.
 
 `source-snapshot/projection-readiness` returns the analyzer's scoped routes,
 binding UUIDs, directional proofs, runtime obligations and signature coverage.
@@ -355,7 +428,11 @@ literals and named references at a field of type `[:list T]`, where `T` is
 primitives and their collections. It rebuilds the generated rows,
 takes each argument path from its stored membership, and retains the receiving
 field's exact list type for the tail and return. The existing signature checker
-checks each operand and its referenced function. The analysis reports runtime
+checks each operand and its referenced function. Finite nested list elements
+are retained recursively: `concat.colls` has `[:list [:list :any]]`, so each
+generated operand has `[:list :any]`, while its tail and return keep the outer
+list. Nested type variables and other nested constructors remain unsupported.
+The analysis reports runtime
 obligations for dynamically typed values. Type variables, other named element
 types, positional projections, inline items and inherited chains need additional
 signature evidence.

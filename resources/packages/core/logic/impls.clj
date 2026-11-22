@@ -493,21 +493,30 @@
    :nil? {:impl nil?-fn :taint-propagate? true}
    :zero? {:impl zero?-fn :taint-propagate? true}
    :assert-some {:impl assert-some-fn
-                 :return-type-rule assert-some-return-rule :taint-propagate? true}
+                 :return-type-rule assert-some-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
    ;; `:assert` shares `:assert-some`'s rule: both pass `:value` through
    ;; and can't return nil (a nil input throws), so stripping `:null`
    ;; from the input's type is sound for both. (`false` also throws but
    ;; a `:bool` input keeps its `:bool` type — narrowing is sound, just
    ;; not complete on the false side.)
    :assert {:impl assert-fn
-            :return-type-rule assert-some-return-rule :taint-propagate? true}
+            :return-type-rule assert-some-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :assert-eq {:impl assert-eq-fn :taint-propagate? true}
-   :if {:impl if-fn :return-type-rule if-return-rule :taint-propagate? true}
+   ;; In structured inference predicate lookups see only the supplied frozen
+   ;; signature view. An absent predicate keeps default-ret; no graph is run.
+   :if {:impl if-fn :return-type-rule if-return-rule
+        :local-type-rules #{:return-type-rule}
+        :local-type-rule-aliases {:positive-int :core.refinements/positive-int
+                                 :non-negative-int :core.refinements/non-negative-int}
+        :taint-propagate? true}
    :cond {:impl cond-fn
           :return-type-rule cond-return-rule :taint-propagate? true
           :lazy-seq-args #{:clauses}}
    :case {:impl case-fn :return-type-rule case-return-rule :taint-propagate? true}
-   :coalesce {:impl coalesce :return-type-rule coalesce-return-rule :taint-propagate? true}
+   :coalesce {:impl coalesce :return-type-rule coalesce-return-rule
+              :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :const {:impl const :taint-propagate? true}
    :equal? {:impl equal?-fn :taint-propagate? true}
    :constant-time-equal? {:impl constant-time-equal?-fn

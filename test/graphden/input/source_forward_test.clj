@@ -58,6 +58,26 @@
     (is (= :nonunique-reference-use (rejection prepared entry)))))
 
 
+(deftest multiple-forwarded-fields-must-be-lowered-as-a-complete-group
+  (let [definitions (mapv #(assoc % :namespace "fixture")
+                          [{:name :combine :args {:left :any :right :any} :return-type :any}
+                           {:name :encode :args {:data :text :other {:type [:list :text]}} :return-type :text}
+                           {:name :middle :parent :combine :args {:left :encode}}
+                           {:name :response :parent :combine
+                            :args {:left :middle :data {:type :text}
+                                   :other {:type [:list :text] :description "Retain collection metadata"}}}])
+        prepared (parse/prepare-module definitions {} {})
+        entry (last (:definitions (source/plan-module definitions prepared)))
+        {:keys [proofs entry] :as baseline} (source/forwarded-fields-baseline prepared entry [:data :other])]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"proved together"
+          (source/forwarded-field-baseline prepared (last (:definitions (source/plan-module definitions prepared))) :data)))
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= [nil nil] (mapv :target-address proofs)))
+    (is (= [:text [:list :text]] (mapv :source-type proofs)))
+    (is (= {:type [:list :text] :description "Retain collection metadata"}
+           (get-in baseline [:entry :proposed :input :other])))))
+
+
 (defn- checked-snapshot
   [{:keys [owner-id target-fn-id field-id target-address]}]
   (let [[[_ [edge]] [target-id]] target-address
@@ -111,6 +131,73 @@
     (is (= [source-address] (:required-addresses result)))
     (is (= source-address (get-in result [:public-input :bindings target-address :reference :source])))
     (is (thrown? clojure.lang.ExceptionInfo (scope/verify-forwarded-projection replay proof analyze)))))
+
+
+(deftest deep-forwarding-uses-every-edge-and-refuses-a-repeated-leaf
+  (let [[prepared entry] (fixture {:left :encode-body :data {:type :text}})
+        {:keys [owner-id target-fn-id root-use-id] :as proof} (forward/verify-forwarded-field prepared entry :data)
+        snapshot (checked-snapshot proof)
+        middle (ids/fn-id "fixture" :middle)
+        parent (ids/fn-id "fixture" :combine)
+        field (ids/slot-id parent :left)
+        edge (ids/binding-id middle field)
+        middle-input (random-uuid)
+        snapshot (-> snapshot
+                     (assoc-in [:fns middle] {:id middle :input-type-fn-id middle-input :parent-ids [parent]})
+                     (assoc-in [:members middle-input] [])
+                     (assoc-in [:signatures middle] {:args {} :return :text :effects #{}})
+                     (assoc-in [:bindings root-use-id :ref-fn-id] middle)
+                     (assoc-in [:bindings edge] {:id edge :fn-id middle :scope-path [] :target-path [field]
+                                                 :expression-kind "ref" :ref-fn-id target-fn-id}))
+        proof (assoc proof :target-fn-id middle :target-address nil)
+        {:keys [row edges public-path] :as certificate} (scope/verify-forwarded-projection snapshot proof analyze)
+        before (analyze snapshot owner-id)
+        ctx {:scope [owner-id []] :contract (get-in before [:scopes [] :declared-contract])
+             :declaration-records [{:kind :fn :id owner-id :parent-ids (:owner-parents certificate)}]
+             :scoped-inputs {public-path certificate}}
+        right (ids/slot-id parent :right)
+        repeat-id (ids/binding-id middle right)
+        repeated (assoc-in snapshot [:bindings repeat-id] {:id repeat-id :fn-id middle :scope-path [] :target-path [right]
+                                                           :expression-kind "ref" :ref-fn-id target-fn-id})]
+    (is (= [root-use-id edge] (:scope-path row) (mapv :binding-id edges)))
+    (is (= [:left :left :data] public-path))
+    (is (= row (get-in (scoped-source/parse-bindings ctx (get-in before [:public-input :bindings])
+                                                     {public-path [:project [:data]]}) [public-path :row])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"reference input occurrence"
+          (scope/verify-forwarded-projection repeated proof analyze)))))
+
+
+(deftest forwarding-cannot-discard-retained-field-read-checks
+  (let [[prepared entry] (fixture {:left :encode-body :data {:type :text}})
+        {:keys [owner-id field-id target-field-id target-fn-id projection-id] :as proof}
+        (forward/verify-forwarded-field prepared entry :data)
+        snapshot (checked-snapshot proof)
+        rich [:list :any]
+        sequence-id (ids/primitive-fn-id :sequence)
+        declaring (ids/fn-id "fixture" :encode)
+        snapshot (-> snapshot
+                     (assoc-in [:fields field-id :type-fn-id] sequence-id)
+                     (assoc-in [:fields target-field-id :type-fn-id] sequence-id)
+                     (assoc-in [:type-bodies (get-in snapshot [:fns owner-id :input-type-fn-id])] {:data rich})
+                     (assoc-in [:type-bodies (get-in snapshot [:fns declaring :input-type-fn-id])] {:data rich})
+                     (assoc-in [:signatures target-fn-id :args :data] rich)
+                     (assoc :source-field-types {[field-id sequence-id] rich [target-field-id sequence-id] rich}))
+        proof (assoc proof :source-type rich :target-type rich)
+        source (:source-address proof)
+        target (:target-address proof)
+        with-checks (fn [ctx owner]
+                      (let [graph (analyze ctx owner)
+                            free (set (map :address (vals (get-in graph [:public-input :routes]))))]
+                        (assoc graph :obligations
+                               (mapv #(hash-map :address % :kind :value-type :trigger :field-read :expected-type rich)
+                                     (filter free [source target])))))
+        certificate (scope/verify-forwarded-projection snapshot proof with-checks)
+        unchecked (fn [ctx owner]
+                    (cond-> (with-checks ctx owner) (get-in ctx [:bindings projection-id]) (assoc :obligations [])))]
+    (is (= [{:address [[owner-id []] [field-id]] :kind :value-type :trigger :field-read :expected-type rich}]
+           (mapv #(select-keys % [:address :kind :trigger :expected-type]) (:obligations certificate))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"reference input occurrence"
+          (scope/verify-forwarded-projection snapshot proof unchecked)))))
 
 
 (deftest forwarded-path-can-be-emitted-and-read-only-with-its-exact-certificate

@@ -38,7 +38,16 @@
          (every? (partial known-type? aliases) (types/child-types t)))))
 
 
-(defn- named-union-pin?
+(defn- closed-instance?
+  [target actual]
+  (let [substitution (types/unify target actual)]
+    (when (map? substitution)
+      (let [instantiated (types/resolve substitution target)]
+        (and (not (types/type-any? types/type-var? instantiated))
+             (types/subtype? actual instantiated))))))
+
+
+(defn- source-pin?
   [snapshot target pin]
   (context/call-with-types
     snapshot
@@ -49,12 +58,12 @@
         (let [expected (types/resolve-alias target)
               actual (types/resolve-alias pin)
               vars (filter types/type-var? (tree-seq #(seq (types/child-types %)) types/child-types expected))]
-          (and (contains? (:aliases snapshot) pin)
-               (every? (partial known-type? (:aliases snapshot)) [target pin])
+          (and (every? (partial known-type? (:aliases snapshot)) [target pin])
                (not (types/type-any? types/type-var? actual))
-               (= (count vars) (count (distinct vars)))
                (markers/preserved? expected actual)
-               (types/subtype? actual expected)))
+               (or (and (= (count vars) (count (distinct vars)))
+                        (types/subtype? actual expected))
+                   (closed-instance? expected actual))))
         (catch clojure.lang.ExceptionInfo _ false)))))
 
 
@@ -63,15 +72,13 @@
   [prepared]
   (let [policy (shapes/markers-snapshot)
         frozen (delay {:aliases (visible-aliases prepared) :markers policy})]
-    (assoc prepared ::named-pin? (memoize #(named-union-pin? @frozen %1 %2)))))
+    (assoc prepared ::source-pin? (memoize #(source-pin? @frozen %1 %2)))))
 
 
 (defn- compatible-pin?
   [context target alias-type]
   (or (= target alias-type) (= :any target) (types/type-var? target)
-      (and (types/union-type? target) (keyword? alias-type)
-           (contains? (:name->id context) alias-type)
-           ((::named-pin? context) target alias-type))))
+      ((::source-pin? context) target alias-type)))
 
 
 (defn origin

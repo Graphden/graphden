@@ -2546,6 +2546,8 @@
     (let [{:keys [substitution proofs]} (check-signature-arguments root-entry bindings-info)
           static-return (types/resolve substitution (or static-return (:return root-entry)))
           computed (types/resolve substitution (rule-return-for-entry root-entry bindings-info static-return))
+          declaration (cond-> declaration (:return-type declaration)
+                              (update :return-type #(types/resolve substitution %)))
           effects (compute-effects argument-effects root-entry)
           result {:return (enforce-declared-return! fn-id declaration computed)
                   :substitution substitution :argument-proofs proofs

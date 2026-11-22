@@ -14,11 +14,13 @@
     [graphden.input.source :as source]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-package-fixtures :as fixtures]
+    [graphden.input.source-scope :as scope]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.sync :as sync]
+    [graphden.types.check :as check]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
@@ -46,10 +48,10 @@
   (delay
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
       (let [loaded @loaded-bases]
-        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(= :equal? (:name %)) (sources "logic"))
-                                                        (filter #(#{:get :zipmap} (:name %)) (sources "collections"))
+        (doseq [{ns-id :namespace :keys [name]} (concat strings (filter #(#{:equal? :const :coalesce :assert-some} (:name %)) (sources "logic"))
+                                                        (filter #(#{:get :zipmap :vec} (:name %)) (sources "collections"))
                                                         (filter #(#{:str :str-trim :re-find?} (:name %)) (sources "strings"))
-                                                        (filter #(#{:shipped-asset :to-json-string} (:name %)) (sources "system"))
+                                                        (filter #(#{:shipped-asset :to-json-string :throw} (:name %)) (sources "system"))
                                                         (filter #(contains? #{:deref :cell :sleep} (:name %)) (sources "concurrency")))]
           (registry/record-rich-types! (ids/fn-id ns-id name) name (get loaded name)))
         (:by-id @registry/*rich-types-override*)))))
@@ -83,6 +85,118 @@
     (is (= "checked" (get-in certificate [:row :value])))))
 
 
+(deftest unchanged-hiccup-field-annotation-freezes-with-its-rich-collection-type
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})
+            shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})]
+    (let [declarations (vec (concat (filter #(= :keyword-or-text (:name %)) (sources "refinements"))
+                                    (fixtures/declarations "packages/web/html/fns.edn" #{:hiccup-node :hiccup})))
+          child {:name :head-annotation :namespace "fixture" :parent :hiccup
+                 :args {:children {:as :children :type [:list :hiccup-node] :description "Extra head elements"}}}
+          definitions (conj declarations child)
+          _ (sync/register-type-aliases! declarations)
+          base (get @fixtures/web-base-definitions :hiccup)
+          _ (registry/record-rich-types! (ids/fn-id "web.html" :hiccup) :hiccup base)
+          roots (:by-id @registry/*rich-types-override*)
+          prepared (parse/prepare-module definitions {} {})
+          package (snapshot/package-index prepared definitions)
+          owner (ids/fn-id "fixture" :head-annotation)
+          field (ids/slot-id (ids/fn-id "web.html" :hiccup) :children)
+          binding (ids/binding-id owner field)
+          {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+          graph (analysis/analyze-effective-input context owner options)
+          child-field (some #(when (= field (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= #{[:value-type :field-read [field]]
+               [:value-type :field-read [(ids/slot-id (ids/fn-id "web.html" :hiccup) :attrs)]]}
+             (set (map (juxt :kind :trigger :path) (:obligations graph)))))
+      (is (= [:list :hiccup-node] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
+      (is (= [:list (types/resolve-alias :hiccup-node)] (:type child-field)))
+      (is (= "Extra head elements" (:description child-field)))
+      (is (= nil (get-in context [:bindings binding :expression-kind])))
+      (is (not (contains? (get-in graph [:public-input :bindings]) [[owner []] [field]]))))))
+
+
+(deftest shipped-html-page-forwarding-preserves-baseline-and-refuses-unproved-tag-typing
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})
+            shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})]
+    (let [core (mapcat sources (:modules (read-package-edn "package.edn")))
+          html-module (edn/read-string (slurp (io/resource "packages/web/html/fns.edn")))
+          html (mapv #(assoc % :namespace (:namespace html-module)) (:fns html-module))
+          definitions (into (vec core) html)
+          declared-ids (set (map #(ids/fn-id (:namespace %) (:name %)) definitions))
+          _ (sync/register-type-aliases! definitions)
+          _ (doseq [[name {:keys [namespace] :as base}] @fixtures/web-base-definitions
+                    :when (contains? declared-ids (ids/fn-id namespace name))]
+              (registry/record-rich-types! (ids/fn-id namespace name) name base))
+          prepared (parse/prepare-module definitions {} {})
+          package (snapshot/package-index prepared definitions)
+          owner (ids/fn-id "web.html" :html-page)
+          fields [:title :head :scripts]
+          original (some #(when (= :html-page (:name %)) %) html)
+          legacy-entry (first (:definitions (source/plan-module [original] prepared)))
+          {:keys [proofs entry]} (source/forwarded-fields-baseline prepared legacy-entry fields)
+          {:keys [context options]} (snapshot/freeze-closure (assoc-in package [:closure-baselines owner] entry)
+                                                             [owner] (:by-id @registry/*rich-types-override*))
+          original-check (:check-expression options)
+          conflict (atom nil)
+          checked (fn [{:keys [expected actual substitution address] :as request}]
+                    (try (original-check request)
+                         (catch clojure.lang.ExceptionInfo error
+                           (reset! conflict {:address address :expected (types/resolve substitution expected)
+                                             :actual (types/resolve substitution actual)
+                                             :raw-expected expected :raw-actual actual
+                                             :substitution (select-keys substitution
+                                                                        (filter types/type-var?
+                                                                                (tree-seq coll? seq [expected actual])))})
+                           (throw error))))
+          diagnostic (failure #(scope/verify-forwarded-projections
+                                 context proofs (fn [ctx id]
+                                                  (analysis/analyze-effective-input ctx id (assoc options :check-expression checked)))))
+          callback (some #(when (= :_hiccup-normalize-attr-key (:name %)) %) html)
+          verified-callback (first (:definitions (source/verify-module (source/plan-module [callback] prepared) prepared)))
+          source-links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
+                                         [(:id %) (:source-slot-id %)]))
+                             (get-in legacy-entry [:legacy :records]))]
+      (.mkdirs (io/file "target"))
+      (spit "target/input-html-page-type-conflict.edn" (pr-str @conflict))
+      (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+      (is (= (select-keys (:args original) fields) (get-in entry [:proposed :input])))
+      (is (= (set fields) (set (map (comp peek :source-path) proofs))))
+      (is (every? (comp nil? :target-address) proofs))
+      (is (= source-links (into {} (map (juxt :field-id :target-field-id)) proofs)))
+      (is (= :authored-source-equivalent (:verification verified-callback)) (:blockers verified-callback))
+      (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) diagnostic)))
+      (is (= owner (ffirst (:address diagnostic))))
+      (is (= (:address diagnostic) (:address @conflict)))
+      (is (= :keyword (:expected @conflict)))
+      (is (= [:union :keyword :null] (pop (:actual @conflict))))
+      (is (types/type-var? (peek (:actual @conflict))))
+      (is (= [(ids/slot-id (ids/fn-id "core.logic" :equal?) :a)] (second (:address diagnostic)))))))
+
+
+(deftest frozen-conditional-rule-does-not-read-an-ambient-predicate
+  (let [predicate (random-uuid)
+        target (random-uuid)
+        nullable [:union :null :text]
+        facts {:test {:type :bool :ref predicate}
+               :then {:type nullable :ref target} :else {:type :text}}
+        bases @fixtures/web-base-definitions]
+    (binding [registry/*rich-types-override*
+              (atom {:by-name {} :by-id {predicate {:primary-parent :some? :resolved-bindings {:value {:ref target}}}}})
+              registry/*per-org-rich-override* (atom {})]
+      (let [id (ids/fn-id "core.logic" :if)
+            _ (registry/record-rich-types! id :if (get bases :if))
+            entry (registry/rich-type-of-id id)
+            result (check/infer-input-signature {:fn-id id :root-entry entry :bindings-info facts
+                                                 :argument-effects {} :free-arguments #{}
+                                                 :signature-view {:by-id {} :by-name {}}
+                                                 :declaration {} :static-return nullable})]
+        (is (= :text ((:return-type-rule entry) facts nullable)))
+        (is (= nullable (:return result)))))))
+
+
 (deftest generated-list-parameters-retain-frozen-element-variables
   (let [base (some #(when (= :zipmap (:name %)) %) (sources "collections"))
         owner (ids/fn-id "fixture" :directory)
@@ -95,6 +209,121 @@
     (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
     (is (empty? (:obligations graph)))
     (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))))
+
+
+(deftest shipped-generic-return-retains-per-use-substitutions-and-legacy-values
+  (let [const (some #(when (= :const (:name %)) %) (sources "logic"))
+        zipmap (some #(when (= :zipmap (:name %)) %) (sources "collections"))
+        number {:namespace "fixture" :name :number :parent :const :args {:value 7}}
+        text {:namespace "fixture" :name :text :parent :const :args {:value "seven"}}
+        directory {:namespace "fixture" :name :directory :parent :zipmap
+                   :args {:keys {:append [{:value :number} {:value :text}] :closed true}
+                          :vals {:append [:fixture/number :fixture/text] :closed true}}}
+        definitions [const zipmap number text directory]
+        prepared (parse/prepare-module definitions {} {})
+        package (snapshot/package-index prepared definitions)
+        owner (ids/fn-id "fixture" :directory)
+        base (ids/fn-id "core.logic" :const)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)
+        per-use (into {} (for [[_ scope] (:scopes graph)
+                               :when (contains? #{(ids/fn-id "fixture" :number) (ids/fn-id "fixture" :text)} (:fn-id scope))]
+                           [(:fn-id scope) (get-in scope [:signature :return])]))
+        grouped (group-by :kind (parse/parse-prepared-module prepared))
+        env (lookups/build-lookups {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+                                    :bindings (:binding grouped) :list-items (:binding-list-item grouped)})
+        legacy (eager/compile-all (assoc env :base-fns (registry/compute-base-fns-map @loaded-bases)))]
+    (is (= 'a (get-in context [:source-return-types [base (ids/primitive-fn-id :any)]])))
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (= {(ids/fn-id "fixture" :number) :int (ids/fn-id "fixture" :text) :text} per-use))
+    (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))
+    (is (= {:number 7 :text "seven"} ((legacy owner) {} {})))
+    (is (= :implementation-signature-required
+           (:code (failure #(snapshot/freeze-closure package [owner] (assoc-in @roots [base :return] :any))))))))
+
+
+(deftest shipped-bottom-return-is-frozen-without-executing-the-thrower
+  (let [declaration (some #(when (= :throw (:name %)) %) (sources "system"))
+        id (ids/fn-id "core.system" :throw)
+        package (snapshot/package-index (parse/prepare-module [declaration] {} {}) [declaration])
+        {:keys [context options]} (snapshot/freeze-closure package [id] @roots)
+        graph (analysis/analyze-effective-input context id options)]
+    (is (= :never (get-in context [:source-return-types [id (ids/primitive-fn-id :any)]])))
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (= :never (get-in graph [:scopes [] :signature :return])))
+    (is (= :any (get-in graph [:public-input :routes [:exception] :completion-type])))))
+
+
+(deftest shipped-nullable-rename-rules-retain-the-legacy-non-null-result
+  (let [base (filterv #(= :assert-some (:name %)) (sources "logic"))
+        aliases (filterv #(#{:nullable-text :nullable-uuid} (:name %)) (sources "refinements"))
+        children (vec (concat (fixtures/declarations "packages/app/lookups/fns.edn" #{:_frbi-id-narrowed})
+                              (fixtures/declarations "packages/app/views/fns.edn" #{:_view-filter-nonnull-text})))
+        definitions (into (into base aliases) children)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owners (mapv #(ids/fn-id (:namespace %) (:name %)) children)
+        {:keys [context options]} (snapshot/freeze-closure package owners @roots)
+        samples {:nullable-uuid (random-uuid) :nullable-text "checked"}
+        impl (:impl (get @loaded-bases :assert-some))]
+    (doseq [[child owner] (map vector children owners)
+            :let [spec (get-in child [:args :value])
+                  sample (get samples (:type spec))
+                  graph (analysis/analyze-effective-input context owner options)
+                  legacy (impl {:value sample} {})]]
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= (literals/classify-literal legacy) (get-in graph [:scopes [] :signature :return])))
+      (is (= sample legacy))
+      (is (empty? (:obligations graph)))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"value is nil"
+        ((:impl (get @loaded-bases :assert-some)) {:value nil} {}))))
+
+
+(deftest shipped-list-pin-retains-uuid-elements-through-metadata-and-inference
+  (let [base (filterv #(= :vec (:name %)) (sources "collections"))
+        children (vec (fixtures/declarations "packages/app/views/fns.edn" #{:_explorer-uses-all :_explorer-also-all}))
+        definitions (into base children)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owners (mapv #(ids/fn-id (:namespace %) (:name %)) children)
+        target (ids/slot-id (ids/fn-id "core.collections" :vec) :coll)
+        {:keys [context options]} (snapshot/freeze-closure package owners @roots)
+        sample [(random-uuid) (random-uuid)]
+        legacy ((:impl (get @loaded-bases :vec)) {:coll sample} {})]
+    (is (= sample legacy))
+    (doseq [owner owners
+            :let [graph (analysis/analyze-effective-input context owner options)
+                  binding (ids/binding-id owner target)
+                  configured (some #(when (= target (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]]
+      (is (= [:list :uuid] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= [:list :uuid] (:type configured)))
+      (is (= [:list :uuid] (get-in graph [:scopes [] :signature :return])))
+      (is (empty? (:obligations graph)))
+      (let [tampered (assoc-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]] [:list :text])
+            diagnostic (failure #(analysis/analyze-effective-input tampered owner options))]
+        (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) diagnostic)))))))
+
+
+(deftest shipped-coalesce-rule-is-local-and-preserves-nil-and-false
+  (let [base (some #(when (= :coalesce (:name %)) %) (sources "logic"))
+        cases [[:missing nil 7 :int 7]
+               [:present "checked" nil [:union :null :text] "checked"]
+               [:falsy false true :bool true]]
+        children (mapv (fn [[name value default]]
+                         {:namespace "fixture" :name name :parent :coalesce :args {:value value :default default}}) cases)
+        definitions (into [base] children)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owners (mapv #(ids/fn-id "fixture" (:name %)) children)
+        {:keys [context options]} (snapshot/freeze-closure package owners @roots)
+        {:keys [impl return-type-rule]} (get @loaded-bases :coalesce)]
+    (doseq [[[name value default expected-type expected-value] owner] (map vector cases owners)
+            :let [graph (analysis/analyze-effective-input context owner options)
+                  legacy (impl {:value value :default default} {})
+                  legacy-type (return-type-rule {:value {:type (literals/classify-literal value)}
+                                                 :default {:type (literals/classify-literal default)}} 'a)]]
+      (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+      (is (= expected-type legacy-type) name)
+      (is (= legacy-type (get-in graph [:scopes [] :signature :return])) name)
+      (is (= expected-value legacy) name))))
 
 
 (deftest scoped-bindings-are-certified-together
@@ -428,7 +657,7 @@
         result (snapshot/projection-readiness package id @roots)
         [route] (:projections result)]
     (is (= :incomplete (:status result)))
-    (is (= :rule-signature-view-required (-> result :diagnostics last :code)))
+    (is (= :conflicting-runtime-obligations (-> result :diagnostics last :code)))
     (is (false? (get-in result [:coverage :signatures])))
     (is (= (ids/binding-id id field) (:binding-id route)))
     (is (= [[id []] [field]] (:from route)))
@@ -510,7 +739,7 @@
         (is (= [(ids/binding-id owner default-id) "value"] [(:id default-row) (:expression-kind default-row)]))
         (is (nil? default-row)))
       (is (= :incomplete (:status report)) (pr-str (:diagnostics report)))
-      (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
+      (is (some #(= :conflicting-runtime-obligations (:code %)) (:diagnostics report)))
       (is (= (ids/binding-id owner target) (:binding-id route)))
       (is (= [[owner []] [(ids/slot-id owner alias-name)]] (:source route)))
       (is (= (get-in record [:source :type]) body (:actual-type route)))
@@ -547,7 +776,7 @@
         [route] (:projections report)
         field (ids/slot-id (ids/fn-id "core.collections" :get) :coll)]
     (is (= :incomplete (:status report)))
-    (is (some #(= :rule-signature-view-required (:code %)) (:diagnostics report)))
+    (is (some #(= :conflicting-runtime-obligations (:code %)) (:diagnostics report)))
     (is (= (ids/binding-id owner field) (:binding-id route)))
     (is (= [[owner []] [(ids/slot-id owner :outcome)]] (:source route)))
     (is (= [:map :keyword :any] (:actual-type route)))

@@ -296,6 +296,26 @@
                           (is (= [file] (fs/list-dir destination))))))))
 
 
+(deftest unsupported-inline-writer-does-not-discard-other-list-definitions
+  (with-repository
+    (fn [root roots]
+      (package! root "example" []
+                [["main" "example"
+                  [{:name :make :args {:items {:type [:list :any]}} :return-type [:list :any]}
+                   {:name :pair :args {:x :any :y :any} :return-type :any}
+                   {:name :good :parent :make :args {:items [{:value :literal} {:value false}]}}
+                   {:name :unsupported :parent :make
+                    :args {:items [{:parent :pair :args {:x {:as :x} :y {:value 1}}}]}}]]])
+      (let [report (dry/dry-run roots)
+            entries (into {} (map (juxt (comp second :definition) identity)) (get-in report [:packages 0 :definitions]))]
+        (is (= {:supported 3 :blocked 1} (:counts report)))
+        (is (true? (get-in entries [:good :reparsed-list-definition])))
+        (is (= :blocked (get-in entries [:unsupported :status])))
+        (is (some #(= [:list-cst-verification-failed :unsupported-inline-annotation-mix ["example" :unsupported]]
+                      ((juxt :code :cause :definition) %))
+                  (:blockers report)))))))
+
+
 (deftest verified-artifact-is-staged-without-touching-source
   (with-repository
     (fn [root roots]

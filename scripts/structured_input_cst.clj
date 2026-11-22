@@ -766,7 +766,13 @@
     (refuse :invalid-request {}))
   (let [definitions (module-definitions source module-namespace)
         starts (line-starts source)]
-    (patch source module-namespace (map #(operation-edit source starts definitions %) operations))))
+    (patch source module-namespace
+           (map (fn [operation]
+                  (try (operation-edit source starts definitions operation)
+                       (catch clojure.lang.ExceptionInfo error
+                         (throw (ex-info (ex-message error)
+                                         (assoc (ex-data error) :definition (:definition operation)) error)))))
+                operations))))
 
 
 (defn- module-header-edit

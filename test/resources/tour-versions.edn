@@ -25,6 +25,7 @@
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
  "lists" {:version 4, :steps "db22c172d0e3246ea91ee13854ebca56dca9ff89"}
  "marketplace-themes-keymaps" {:version 3, :steps "1d5b8b9cda2428d3b2ca516498afee74c8d40246"}
+ "optional-input-default" {:version 1, :steps "f92b53ca3a23813d407ddea5edf49c08512d29ce"}
  "optional-required-sealed" {:version 4, :steps "6e5a2f73fc4a2c21bdd67a327a28428cc91ecd3b"}
  "package-lifecycle" {:version 1, :steps "9ace44ea1d51bd711eab11b5a5876b29f0a45e12"}
  "packages" {:version 1, :steps "aa8fd0ba8ae3001d5142f4d1e9717218509012f3"}

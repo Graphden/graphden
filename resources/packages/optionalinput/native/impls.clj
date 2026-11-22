@@ -4,7 +4,7 @@
 
 
 (defbase render-label [label]
-  (if (nil? label) "explicit nil" label))
+  (if (nil? label) "explicit nil" (str "text: " label)))
 
 
 (def impls {:render-nullable-label render-label})

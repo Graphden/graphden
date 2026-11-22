@@ -101,6 +101,7 @@ of order.
 |---|---|---|
 | 43 | [Bind part of a record and run with the rest](43-structured-input.md) | Written · ▶ interactive when structured Run is available |
 | 44 | [Bind two independent contact records](44-independent-contact-records.md) | Written · ▶ interactive when the contact template is available |
+| 45 | [Run with a default or supply nil](45-optional-input-default.md) | Written · ▶ interactive when the optional label template is available |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for

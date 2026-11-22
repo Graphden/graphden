@@ -132,7 +132,7 @@
 
 
 (def impls
-  {:_structured-lesson-available? {:impl structured-lesson-available?}
-   :_attach-structured-lesson-templates {:impl attach-structured-lesson-templates}
+  {:_structured-lesson-available? {:impl structured-lesson-available? :taint-propagate? true}
+   :_attach-structured-lesson-templates {:impl attach-structured-lesson-templates :taint-propagate? true}
    :count-tour-event! {:impl count-tour-event! :taint-propagate? true}
    :count-tour-step! {:impl count-tour-step! :taint-propagate? true}})

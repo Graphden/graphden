@@ -54,6 +54,7 @@ async function installLesson(page) {
     const output = resultHost.querySelector('pre');
     const lookups = {fnMap: new Map()};
     let authored;
+    let _tourLessons;
     let _tourState;
     function _tourLesson() { return authored; }
     function _tourOwnedBranch(state) { return state.sandboxBranch; }
@@ -61,6 +62,7 @@ async function installLesson(page) {
     function _tourPrincipalMatches() { return true; }
     window.installFixtureReceipt = lesson => {
       authored = lesson;
+      _tourLessons = {'structured-templates': {[lesson.id]: lesson['template-id']}};
       // This fixture begins after sample setup. The real Extend/branch
       // receipt lifecycle is checked separately.
       _tourState = {lessonId: '43', sandboxBranch: 'fixture-lesson',

@@ -311,10 +311,10 @@
 (defn- rule-type-aliases
   [entries roots]
   (reduce (fn [aliases declared-aliases]
-            (reduce-kv (fn [aliases alias qualified]
-                         (when (and (contains? aliases alias) (not= qualified (get aliases alias)))
+            (reduce-kv (fn [aliases type-alias qualified]
+                         (when (and (contains? aliases type-alias) (not= qualified (get aliases type-alias)))
                            (reject! :conflicting-rule-type-alias nil))
-                         (assoc aliases alias qualified))
+                         (assoc aliases type-alias qualified))
                        aliases declared-aliases))
           {}
           (for [id (keys entries)

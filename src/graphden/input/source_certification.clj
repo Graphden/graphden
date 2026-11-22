@@ -14,10 +14,10 @@
 (defn- candidate
   [{id :identity blockers :blockers}]
   (when (and (uuid? id) (seq blockers) (every? argument-field blockers))
-    (cond
-      (every? #(= :ref-scope-required (:code %)) blockers) [id nil]
-      (every? #(= :field-projection-required (:code %)) blockers)
-      [id (mapv argument-field blockers)])))
+    (condp every? blockers
+      #(= :ref-scope-required (:code %)) [id nil]
+      #(= :field-projection-required (:code %)) [id (mapv argument-field blockers)]
+      nil)))
 
 
 (defn- attempt

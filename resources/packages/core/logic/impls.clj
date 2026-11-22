@@ -509,7 +509,7 @@
    :if {:impl if-fn :return-type-rule if-return-rule
         :local-type-rules #{:return-type-rule}
         :local-type-rule-aliases {:positive-int :core.refinements/positive-int
-                                 :non-negative-int :core.refinements/non-negative-int}
+                                  :non-negative-int :core.refinements/non-negative-int}
         :taint-propagate? true}
    :cond {:impl cond-fn
           :return-type-rule cond-return-rule :taint-propagate? true

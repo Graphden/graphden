@@ -52,11 +52,11 @@
         entries (:definitions (source/verify-module (source/plan-module definitions prepared) prepared))
         by-id (into {} (map (juxt :identity identity)) entries)
         package {:prepared prepared :declarations (into {} (map (juxt :fn-id identity)) (vals (:defs-by-name prepared)))}
-        resolve (named/lookup package by-id)
-        frozen (named/evidence {} resolve {:positive-int :core.refinements/positive-int})
+        lookup-type (named/lookup package by-id)
+        frozen (named/evidence {} lookup-type {:positive-int :core.refinements/positive-int})
         id (ids/fn-id "core.refinements" :positive-int)]
     (is (= id (get-in frozen [:alias-ids :positive-int]) (get-in frozen [:alias-ids :core.refinements/positive-int])))
     (is (= [:refine :int [:> 0]] (get-in frozen [:aliases :positive-int])))
     (is (= #{id} (set (keys (:type-origins frozen)))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"source and row evidence"
-          (named/evidence {} resolve {:positive-int :missing/positive-int})))))
+          (named/evidence {} lookup-type {:positive-int :missing/positive-int})))))

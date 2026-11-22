@@ -1,0 +1,5 @@
+{:input-format 2
+ :namespace "refprofile.profile"
+ :fns [{:name :reference-profile
+        :input {:profile {:type {:id :text :name :text :email :text} :required true}}
+        :return-type {:id :text :name :text :email :text}}]}

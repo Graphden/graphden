@@ -1,0 +1,4 @@
+{:name "refprofile"
+ :version "1.0.0"
+ :dependencies ["lessons"]
+ :modules ["profile"]}

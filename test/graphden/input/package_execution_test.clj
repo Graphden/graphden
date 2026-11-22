@@ -158,10 +158,20 @@
     (is (empty? (get-in frozen [:entries owner :bindings])))
     (is (= [[[owner []] [(ids/slot-id owner :string)]]] (:required-addresses analysis)))
     (doseq [[arguments expected] [[{:string "{\"flag\":false,\"missing\":null}"} {"flag" false "missing" nil}]
-                                  [{:string "{\"flag\":false}" :keywordize nil} {"flag" false}]
                                   [{:string "{\"flag\":false}" :keywordize false} {"flag" false}]
                                   [{:string "{\"flag\":false}" :keywordize true} {:flag false}]]]
       (is (= expected (legacy arguments) (canonical arguments))))))
+
+
+(deftest documenting-value-does-not-hide-an-explicit-inherited-false
+  (let [child {:namespace "fixture" :name :string-keys :parent :parse-json
+               :args {:keywordize {:value false}}}
+        source (conj (declarations "packages/core/system/fns.edn" #{:parse-json}) child)
+        owner (ids/fn-id "fixture" :string-keys)
+        {:keys [canonical legacy analysis]} (runtimes source owner)
+        argument {:string "{\"flag\":false,\"missing\":null}"}]
+    (is (= :checked (:status analysis)))
+    (is (= {"flag" false "missing" nil} (legacy argument) (canonical argument)))))
 
 
 (deftest generated-list-projection-reads-the-authored-outer-field

@@ -601,6 +601,14 @@
           case 'supplied':
             if (!structured) throw new Error('Unsupported browser expression');
             return checkedInput(frame.slots.get(value.slot), value.type, tick);
+          case 'supplied-default': {
+            if (!structured || frame.parent) throw new Error('Unsupported browser expression');
+            if (!Array.isArray(value.fallback) || !['nil', 'string'].includes(value.fallback[0])) {
+              throw new Error('Invalid browser field default');
+            }
+            const input = frame.slots.has(value.slot) ? frame.slots.get(value.slot) : decode(value.fallback);
+            return checkedInput(input, value.type, tick);
+          }
           case 'validate':
             if (!structured) throw new Error('Unsupported browser expression');
             return checkedInput(expr(value.expr, frame), value.type, tick);

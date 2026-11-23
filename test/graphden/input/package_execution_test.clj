@@ -509,6 +509,25 @@
     (is (= [:selected] @calls))))
 
 
+(deftest inline-scoped-owner-executes-like-its-legacy-declaration
+  (let [forwarded {:namespace "inline-scope" :name :forwarded :parent :_csv-escape-cell
+                   :args {:value :to-json-string :data {:type :jsonb}}}
+        configured {:namespace "inline-scope" :name :configured :parent :forwarded
+                    :args {:data {:value false} :extra {:type :text}}}
+        child {:parent :configured :args {:extra :str-trim :string " unused "}}
+        host {:namespace "inline-scope" :name :host :parent :_csv-escape-cell :args {:value child}}
+        dependencies (into (declarations "packages/core/strings/fns.edn" #{:_csv-escape-cell :str-trim})
+                           (declarations "packages/core/system/fns.edn" #{:to-json-string}))
+        owner (ids/fn-id "inline-scope" :host)
+        compile-certified (fn [package root roots implementations]
+                            (execution/compile-package (snapshot/with-certified-owner package root roots)
+                                                       root roots implementations))
+        {:keys [canonical legacy analysis]} (runtimes (into dependencies [forwarded configured host]) owner compile-certified)]
+    (is (= :checked (:status analysis)))
+    (is (empty? (:required-addresses analysis)))
+    (is (= "false" (legacy {}) (canonical {})))))
+
+
 (deftest same-owner-joint-proof-preserves-nil-false-and-unread-reference
   (let [parent {:namespace "joint-runtime" :name :with-extra :parent :_csv-escape-cell
                 :args {:extra {:type :text :required false}}}

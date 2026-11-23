@@ -13,7 +13,8 @@
 (classpath/add-classpath "src")
 
 
-(require '[graphden.input.source :as source]
+(require '[graphden.input.format :as format]
+         '[graphden.input.source :as source]
          '[graphden.input.syntax :as syntax]
          '[graphden.packages.records.parse :as parse]
          '[structured-input-cst :as cst])
@@ -46,6 +47,28 @@
     (is (= :already-applied (:status (cst/apply-text plan edited))))
     (is (= :invalid-scoped-path (reason #(cst/plan raw {:namespace "demo.main"
                                                         :operations [(assoc (nth operations 2) :public-path [:left :wrong])]}))))))
+
+
+(deftest inline-scoped-keys-retain-original-source-and-comments
+  (let [raw "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:value {:parent :reader :args {:left :child :flag ;; bool field\r\n {:value false}}}}}]}"
+        original (get-in (edn/read-string raw) [:fns 0 :args :value])
+        path [:left :flag]
+        proposal {:bind (array-map :left [:ref :child] path [:value false])
+                  :legacy-scope-names {path :flag}}
+        body (format/migrate-inline original proposal)
+        patch (cst/plan raw (request {:op :rename-bind :definition :host :path [:args]}
+                                     {:op :inline-ref :definition :host :path [:args :value] :body body}))
+        edited (:text (cst/apply-text patch raw))]
+    (is (= original (format/inline-origin body)))
+    (is (= body (get-in (edn/read-string edited) [:fns 0 :bind :value 1])))
+    (is (str/includes? edited "[:left :flag] ;; bool field\r\n [:value false]"))
+    (is (= :already-applied (:status (cst/apply-text patch edited))))
+    (is (nil? (format/inline-origin (dissoc body :legacy-scope-names))))
+    (is (nil? (format/inline-origin (assoc-in body [:bind path] false))))
+    (is (nil? (format/inline-origin (assoc-in body [:legacy-scope-names path] :left))))
+    (is (nil? (format/inline-origin (assoc-in body [:legacy-scope-names [:other :flag]] :other))))
+    (is (= (assoc-in original [:args :flag] false)
+           (format/inline-origin (format/migrate-inline (assoc-in original [:args :flag] false) proposal))))))
 
 
 (deftest rename-preserves-declaration-style-test

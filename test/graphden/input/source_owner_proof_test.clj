@@ -95,6 +95,33 @@
     (is (= before (source/plan-module changed (:prepared package))))))
 
 
+(deftest inline-scoped-binding-keeps-the-child-owner-and-complete-proof
+  (let [{:keys [originals roots]} (fixture)
+        child (dissoc (peek originals) :namespace :name)
+        owner (ids/fn-id "owner-proof" :host)
+        host {:namespace "owner-proof" :name :host :parent :_csv-escape-cell :args {:value child}}
+        certify (fn [definition]
+                  (let [definitions (conj (pop originals) definition)
+                        prepared (parse/prepare-module definitions {} {})]
+                    (certification/verify-plan prepared definitions {} roots)))
+        result (certify host)
+        entry (get-in result [:package :closure-baselines owner])
+        body (get-in entry [:proposed :bind :value 1])
+        [inline] (vals (get-in entry [:v2 :inline-definitions]))
+        invalid (assoc-in host [:args :value :args :string] 42)
+        invalid-definitions (conj (pop originals) invalid)
+        invalid-package (assoc (snapshot/package-index (parse/prepare-module invalid-definitions {} {}) invalid-definitions)
+                               :closure-baselines {})]
+    (is (= :authored-source-equivalent (:verification entry))
+        (pr-str (:blocked result)))
+    (is (= {[:extra :string] :string} (:legacy-scope-names body)))
+    (is (= [:value " null "] (get-in body [:bind [:extra :string]])))
+    (is (= (get-in inline [:scoped-inputs [:extra :string] :row])
+           (get-in result [:package :closure-baselines (:fn-id inline) :v2 :scoped-inputs [:extra :string] :row])))
+    (is (= :types/check-failed (failure-code #(snapshot/with-certified-owner invalid-package owner roots))))
+    (is (empty? (:closure-baselines invalid-package)))))
+
+
 (deftest joint-proof-completion-is-independent-of-owner-uuid-queue-order
   (let [{:keys [originals roots]} (fixture)
         changed (update originals (dec (count originals)) assoc :name :early)

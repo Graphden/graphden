@@ -99,3 +99,23 @@
   (let [[origin & more] (get origins id)]
     (when (or (seq more) (:ambiguous-owner? origin)) (reject! :ambiguous-inline-owner id))
     origin))
+
+
+(defn direct-inline-binding-blocker?
+  [{:keys [code source-path]}]
+  (when (vector? source-path)
+    (let [[args field child-args child-field] source-path]
+      (and (= :args args child-args) (simple-keyword? field)
+           (case code
+             :ref-scope-required (and (= 4 (count source-path)) (simple-keyword? child-field))
+             :inherited-projection-required (= 3 (count source-path))
+             false)))))
+
+
+(defn child-at
+  "Require an exact enclosing owner and direct argument path."
+  [origins owner path]
+  (let [[match & more] (into [] (comp cat (filter #(and (= owner (:root-owner-id %) (:enclosing-owner-id %))
+                                                        (= path (:source-path %))))) (vals origins))]
+    (when (seq more) (reject! :ambiguous-inline-owner owner))
+    (when match (declaration origins (:fn-id match)))))

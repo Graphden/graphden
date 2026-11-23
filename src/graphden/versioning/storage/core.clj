@@ -35,6 +35,7 @@
   (:require
     [graphden.http-host.lease :as http-lease]
     [graphden.input.access :as input-access]
+    [graphden.input.authority :as input-authority]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -1411,18 +1412,8 @@
     nil))
 
 
-(defn- delete-branch-rows!
-  "The delete itself, on the tx storage `st` — see `delete-branch!`.
-   Returns the branch's own (now deleted) binding version rows."
+(defn- delete-branch-content!
   [st branch-id]
-  ;; Serialize against a concurrent merge that uses this branch as SOURCE
-  ;; (which locks both its endpoints) and against a fork off it
-  ;; (`create-branch!` locks the parent). Taken FIRST, so the guards below
-  ;; and the deletes see a lock-stable view — a merge or fork committing
-  ;; after an unlocked guard read would otherwise be missed (L5).
-  (mrg/lock-branches! st branch-id)
-  (assert-no-children! st branch-id)
-  (assert-not-merge-source! st branch-id)
   ;; Publication uses the same branch lock before reserving capacity. Revoke
   ;; its exact session UUIDs before the branch disappears, without touching
   ;; account sessions. Lease cleanup never takes a graph/branch lock.
@@ -1487,6 +1478,25 @@
           (sp/delete-entities st entity ids))))
     (sp/delete-entity st :branch branch-id)
     (:binding own)))
+
+
+(defn- delete-branch-rows!
+  "The delete itself, on the tx storage `st` — see `delete-branch!`.
+   Returns the branch's own (now deleted) binding version rows."
+  [st branch-id]
+  ;; Serialize against a concurrent merge that uses this branch as SOURCE
+  ;; (which locks both its endpoints) and against a fork off it
+  ;; (`create-branch!` locks the parent). Taken FIRST, so the guards below
+  ;; and the deletes see a lock-stable view — a merge or fork committing
+  ;; after an unlocked guard read would otherwise be missed (L5).
+  (mrg/lock-branches! st branch-id)
+  (assert-no-children! st branch-id)
+  (assert-not-merge-source! st branch-id)
+  (let [remove-content! #(delete-branch-content! st branch-id)]
+    (if-let [cleanup! (get-in st [::input-authority/operations :with-branch-cleanup!])]
+      (input-authority/call st branch-id {:operation :branch-cleanup}
+                            #(cleanup! st branch-id remove-content!))
+      (remove-content!))))
 
 
 (defn delete-branch!

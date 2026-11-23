@@ -272,6 +272,35 @@
     (is (some? (:error (peek results))))))
 
 
+(deftest browser-and-jvm-route-the-same-record-callback-argument
+  (let [item {:value :any :details {:flag :any}}
+        source {:root {:input {:func [:fn {:coll item} :any #{}] :coll [:list :any]}
+                       :return [:list :any] :bindings {[:func] {:ref :callback}}}
+                :callback {:input {:coll item :key :keyword :default :any}
+                           :optional #{[:coll :details]} :return :any
+                           :bindings {[:key] {:value :value} [:default] {:value "missing"}}}}
+        {:keys [analysis context]} (fixture/model source :root)
+        functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:get :impl])}
+        implementations (-> (fixture/implementations source functions)
+                            (assoc-in [(fixture/id :root) :base-fn-id] (ids/fn-id "core.hof" :map))
+                            (assoc-in [(fixture/id :callback) :base-fn-id] (ids/fn-id "core.collections" :get)))
+        options {:context context :snapshot-id (:snapshot-id context)
+                 :implementations implementations :allow-fn? (constantly true)}
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        valid {:coll [{:value nil} {:value false :details {:flag nil}} {:value "next"}]}
+        missing {:coll [{:value nil :details {}}]}
+        unknown {:coll [{:value nil :extra false}]}
+        expected [nil false "next"]
+        [result missing-member unknown-member] (run-browser plan [valid missing unknown])]
+    (is (= expected (invoke valid nil)))
+    (is (= :missing-required-input (invocation-error invoke missing)))
+    (is (= :unknown-input-field (invocation-error invoke unknown)))
+    (is (= {:value (wire/encode-result expected) :sequence true} result))
+    (is (= "Missing graph input field" (:error missing-member)))
+    (is (= "Unknown graph input field" (:error unknown-member)))))
+
+
 (deftest named-browser-map-input-is-an-opaque-value
   (let [source (-> definitions
                    (assoc-in [:root :input :coll] [:map :keyword :any])

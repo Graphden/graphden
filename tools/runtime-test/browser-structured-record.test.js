@@ -137,4 +137,35 @@ assert.throws(() => runRecordInput(emptyConfig, ['label'], []), /Missing graph i
 assert.equal(runRecordInput({config: new Map([[graph.keyword('label'), 'Ada']])}, ['label'], [])
   .get(configKey).get(graph.keyword('label')), 'Ada');
 
+
+const recordSlot = (name, slot, fields) => ({key: graph.encode(graph.keyword(name)), slot, fields});
+const recordCallback = {
+  kind: 'checked-closure', fn: 'callback', slots: [], required: ['item'],
+  record: {slot: 'item', fields: [
+    recordSlot('value', 'value'), recordSlot('unused', 'unused'),
+    recordSlot('details', 'details', [recordSlot('flag', 'flag')]),
+  ]},
+  presence: [
+    {id: 'value', kind: 'supplied', sources: []},
+    {id: 'unused', kind: 'supplied', sources: []},
+    {id: 'flag', kind: 'supplied', sources: []},
+    {id: 'details', kind: 'supplied-record', sources: ['flag'], 'required-fields': ['flag']},
+    {id: 'item', kind: 'supplied-record', sources: ['value', 'unused', 'details'], 'required-fields': ['value']},
+  ],
+};
+const readRecord = scopedFn('callback', 'callback', 'const', {value: {kind: 'supplied', slot: 'value', type: 'any'}});
+const recordMap = scopedFn('entry', 'entry', 'map', {func: recordCallback, coll: {kind: 'supplied', slot: 'items', type: 'any'}});
+const recordValue = (fields) => new Map(fields.map(([name, value]) => [graph.keyword(name), value]));
+assert.deepEqual([...runCallback(recordMap, {items: [
+  recordValue([['value', null]]), recordValue([['value', false], ['details', recordValue([['flag', null]])]]),
+]}, readRecord)], [null, false]);
+assert.throws(() => [...runCallback(recordMap, {items: [recordValue([])]}, readRecord)], /Missing graph input field/);
+assert.throws(() => [...runCallback(recordMap, {items: [recordValue([['value', null], ['details', recordValue([])]])]}, readRecord)], /Missing graph input field/);
+assert.throws(() => [...runCallback(recordMap, {items: [recordValue([['unknown', null]])]}, readRecord)], /Unknown graph input field/);
+const lazyMap = scopedFn('entry', 'entry', 'map', {
+  func: recordCallback,
+  coll: {kind: 'seq', items: [record(field('value', literal('kept')), field('unused', fault))]},
+});
+assert.deepEqual([...runCallback(lazyMap, {}, readRecord)], ['kept']);
+
 console.log('PASS deferred browser record fields, presence, and version admission');

@@ -429,16 +429,23 @@
       : supplied instanceof Map;
     if (!record) throw new Error('Expected a graph input record');
     const byKey = new Map(fields.map((field) => [root ? field.name : decode(field.key), field]));
-    const entries = root ? Object.entries(supplied) : supplied;
-    for (const [key, value] of entries) {
+    const keys = root ? Object.keys(supplied) : supplied.keys();
+    for (const key of keys) {
       tick();
       const field = byKey.get(key);
       if (!field) throw new Error('Unknown graph input field');
+      // Internal callback inputs already belong to graph evaluation.
+      // Retain deferred leaves and validate them only when the callback reads.
+      if (!remaining && !field.fields && supplied instanceof DeferredRecord) {
+        slots.set(field.slot, new Thunk(() => supplied.get(key)));
+        continue;
+      }
+      const value = root ? supplied[key] : supplied.get(key);
       if (field.fields) {
         routeStructured(field.fields, value, slots, tick, remaining, false);
         if (field.slot) slots.set(field.slot, null);
       } else {
-        encodeValue(value, remaining, 0);
+        if (remaining) encodeValue(value, remaining, 0);
         slots.set(field.slot, value);
       }
     }
@@ -555,7 +562,10 @@
         const invoke = (item) => {
           assertLiveCallback();
           const slots = new Map();
-          if (value.slots.length === 1) slots.set(value.slots[0], item);
+          if (value.record) {
+            routeStructured(value.record.fields, item, slots, tick, null, false);
+            slots.set(value.record.slot, null);
+          } else if (value.slots.length === 1) slots.set(value.slots[0], item);
           const frame = {slots, names: new Map(), parent, frame: value.fn,
             present: structuredPresence(value, slots, tick, parent.present)};
           return call(value.fn, frame);
@@ -600,7 +610,7 @@
           case 'literal': return decode(value.value);
           case 'supplied':
             if (!structured) throw new Error('Unsupported browser expression');
-            return checkedInput(frame.slots.get(value.slot), value.type, tick);
+            return checkedInput(force(frame.slots.get(value.slot)), value.type, tick);
           case 'supplied-default': {
             if (!structured || frame.parent) throw new Error('Unsupported browser expression');
             if (!Array.isArray(value.fallback) || !['nil', 'string'].includes(value.fallback[0])) {
@@ -633,6 +643,10 @@
           case 'checked-closure':
             if (!structured || frame.parent || !Array.isArray(value.slots) || value.slots.length > 1) {
               throw new Error('Invalid checked browser callback');
+            }
+            if (value.record && (value.slots.length || typeof value.record.slot !== 'string'
+                                 || !Array.isArray(value.record.fields))) {
+              throw new Error('Invalid checked browser callback record');
             }
             return checkedClosure(value, frame);
           case 'server': return new GraphClosure(item => {

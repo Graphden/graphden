@@ -157,8 +157,8 @@ positional argument. Each declared field routes to the callback's own cells.
 An omitted optional record stays absent. Supplying that record, including an
 empty map, requires its mandatory fields. An explicit nil remains present at a
 nullable leaf. If the caller supplies a graph record, routing retains its
-field cells without reading unused leaves. The browser exporter rejects
-record-shaped callback parameters.
+field cells without reading unused leaves. The checked browser plan uses
+the same field layout for a single positional record parameter.
 
 The callback and its unforced local cells can run on the originating thread while
 the enclosing execution is active. Deferred or worker-thread invocation, nested

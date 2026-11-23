@@ -41,7 +41,7 @@
 (defn- value-origins
   [root owner path host value]
   (cond
-    (parse/inline-anon-fn-def? value)
+    (and (map? value) (or (contains? value :parent) (contains? value :parents)))
     (let [child (parse/inline-declaration (dissoc value :type) host (:namespace owner))
           origin {:root-owner-id (definition-id root)
                   :enclosing-owner-id (definition-id owner)
@@ -81,7 +81,11 @@
                     _ (checked-expansion! prepared normalized)
                     entries (declaration-origins normalized normalized [])]
                 (reduce #(update %1 (:fn-id %2) (fnil conj []) %2) origins entries))
-              (catch clojure.lang.ExceptionInfo _ origins)))
+              (catch clojure.lang.ExceptionInfo failure
+                (if (#{:input/source-origin :packages/unresolved-ref :packages/ambiguous-ref}
+                     (:type (ex-data failure)))
+                  origins
+                  (throw failure)))))
           {} originals))
 
 

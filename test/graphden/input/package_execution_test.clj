@@ -581,11 +581,13 @@
                          (get-in @retained [:certificate :obligations])))))))
 
 
-(deftest exact-named-callable-forwarding-preserves-graph-call-execution
-  (let [request {:value :text}
+(defn- named-callable-runtime
+  [record? compile-package]
+  (let [request (if record? {:value :text} [:map :keyword :text])
+        type-source (if record? {:type request} {:map {:key :keyword :value :text}})
         callable [:fn {:arg :request-shape} :response-shape]
-        definitions [{:namespace "callable-proof" :name :request-shape :type request}
-                     {:namespace "callable-proof" :name :response-shape :type request}
+        definitions [(merge {:namespace "callable-proof" :name :request-shape} type-source)
+                     (merge {:namespace "callable-proof" :name :response-shape} type-source)
                      {:namespace "callable-proof" :name :reader
                       :args {:func {:type callable} :arg {:type :request-shape}}
                       :return-type :response-shape}
@@ -604,14 +606,33 @@
                               :impl (get-in @loaded [:invoke :impl])}
                      :echo {:namespace "callable-proof" :args {:arg {:type request}}
                             :return-type request :effects #{}
-                            :impl (fn [args _] (swap! calls inc) (runtime/resolve-arg args :arg))})
-        {:keys [canonical legacy analysis]}
-        (runtimes source (ids/fn-id "callable-proof" :run)
-                  (fn [package id roots impls]
-                    (execution/compile-package (snapshot/with-certified-owner package id roots) id roots impls))
-                  bases)]
+                            :impl (fn [args _] (swap! calls inc) (runtime/resolve-arg args :arg))})]
+    (assoc (runtimes source (ids/fn-id "callable-proof" :run)
+                     (fn [package id roots impls]
+                       (compile-package (snapshot/with-certified-owner package id roots) id roots impls))
+                     bases)
+           :calls calls)))
+
+
+(deftest exact-named-dictionary-callable-forwarding-preserves-graph-execution
+  (let [{:keys [canonical legacy analysis calls]} (named-callable-runtime false execution/compile-package)]
     (is (= :checked (:status analysis)))
     (doseq [run [legacy canonical]]
       (reset! calls 0)
       (is (= "{\"value\":\"checked\"}" (run {})))
       (is (= 1 @calls)))))
+
+
+(deftest exact-named-record-callable-retains-nested-parameter-refusal
+  (let [retained (atom nil)
+        capture (fn [package id roots impls]
+                  (let [{:keys [context options]} (snapshot/freeze-closure package [id] roots)
+                        checked (analysis/analyze-effective-input context id options)]
+                    (reset! retained {:verification (get-in package [:closure-baselines id :verification])
+                                      :status (:status checked)
+                                      :call-sites (mapcat :call-sites (vals (:closures checked)))})
+                    (execution/compile-package package id roots impls)))]
+    (is (= :callback-parameter-shape-required (rejection-code #(named-callable-runtime true capture))))
+    (is (= :authored-source-equivalent (:verification @retained)))
+    (is (= :checked (:status @retained)))
+    (is (= [[:value]] (mapv :value-path (:call-sites @retained))))))

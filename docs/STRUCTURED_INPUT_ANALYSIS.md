@@ -218,8 +218,18 @@ for example `[:union :null [:map a1 :any]]` and the same shape with `a2`.
 Their printed shapes do not prove that the variables have the same binding.
 Keep the conflict until projection/signature inference supplies that relation,
 or the validation boundary explicitly represents both checks. Erasing the
-variables or keeping only one check cannot establish a certificate. Approving
-a pure native type callback does not make every composite obligation executable;
+variables or keeping only one check cannot establish a certificate.
+
+Frozen source implementations retain their base field declarations alongside
+explicit ABI paths. An unchanged inherited field with the same UUID and source
+type proves that its declaration variable and ABI variable share a binder at
+that use. Inference derives a value-variable renaming through the common type
+walker before checking arguments and returns. Missing origins, changed field
+identities or changed types do not supply that relation; independent uses stay
+separately instantiated. The relation removes duplicate obligations while
+preserving the remaining runtime check.
+
+Approving a pure native type callback does not make every composite obligation executable;
 the compiler must still consume its supported checks or refuse the plan.
 Marked and refined identity inputs remain identity edges; the checker receives
 their target UUID as a known value for policy validation. Marked callable inputs

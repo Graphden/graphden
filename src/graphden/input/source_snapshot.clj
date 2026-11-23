@@ -351,7 +351,8 @@
     (when-not (signatures/local-type-rules? entry)
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
-     :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}))
+     :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)
+     :argument-declarations (into {} (map (juxt :name identity)) fields)}))
 
 
 (defn- implementation-options

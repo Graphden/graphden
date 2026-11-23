@@ -25,6 +25,22 @@
   (types/freshen-with rich (partial variable-name scope)))
 
 
+(defn value-renaming
+  "Derive value-variable names for a proved shared declaration in two scopes.
+   This does not establish binder correspondence. The common type walker keeps
+   execution variables and refinement payload symbols out of the renaming."
+  [from-scope to-scope rich]
+  (let [renaming (volatile! {})]
+    (types/freshen-with rich
+                        (fn [sort variable]
+                          (when (= :value sort)
+                            (vswap! renaming assoc
+                                    (variable-name from-scope sort variable)
+                                    (variable-name to-scope sort variable)))
+                          variable))
+    @renaming))
+
+
 (defn map-descriptor-types
   [f node]
   (cond-> (update node :type f)

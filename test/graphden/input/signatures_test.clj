@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.signatures :as signatures]
+    [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -131,3 +132,39 @@
     (is (not (contains? @seen :impl)))
     (is (= 'a (get-in result [:signature-source :root-entry :return])))
     (is (not (contains? (:signature-source result) :impl)))))
+
+
+(deftest frozen-field-identity-connects-declaration-and-abi-binders
+  (let [[owner base field other use] (repeatedly 5 random-uuid)
+        rich '[:union :null [:map a :any]]
+        declaration {:id field :name :coll :type rich}
+        implementation {:base-fn-id base :root-entry {:args {:coll rich} :return 'a}
+                        :argument-paths {:coll [field]} :argument-declarations {:coll declaration}}
+        infer (fn [scope adjust implementation]
+                (let [contract (variables/descriptor-in-scope scope
+                                                              {:type {:coll rich} :fields [declaration]})
+                      graph {:root-scope scope
+                             :scopes {(second scope) (adjust {:fn-id owner :declared-contract {:type {:coll rich} :fields [declaration]}
+                                                              :configured-contract contract :bindings {}})}}
+                      seen (atom nil)]
+                  (signatures/infer-use {} graph scope implementation
+                                        (fn [facts]
+                                          (reset! seen facts)
+                                          {:return (get-in facts [:root-entry :return]) :effects #{}
+                                           :substitution {} :argument-proofs {}}))
+                  @seen))
+        scope [owner []]
+        linked (infer scope identity implementation)
+        separate (infer [owner [use]] identity implementation)
+        source-variable (variables/type-in-scope scope 'a)]
+    (is (= source-variable (get-in linked [:root-entry :return])))
+    (is (= (get-in linked [:bindings-info :coll :type]) (get-in linked [:root-entry :args :coll])))
+    (is (not= (get-in linked [:root-entry :return]) (get-in separate [:root-entry :return])))
+    (doseq [unproved [(dissoc implementation :argument-declarations)
+                      (assoc-in implementation [:argument-declarations :coll :id] other)
+                      (assoc-in implementation [:argument-declarations :coll :type] '[:list a])
+                      (assoc-in implementation [:argument-declarations :coll :type] '[:union :null [:map b :any]])]]
+      (is (not= source-variable (get-in (infer scope identity unproved) [:root-entry :return]))))
+    (let [narrowed (infer scope #(-> % (assoc-in [:configured-contract :type :coll] :any)
+                                     (assoc-in [:configured-contract :fields 0 :type] :any)) implementation)]
+      (is (not= source-variable (get-in narrowed [:root-entry :return]))))))

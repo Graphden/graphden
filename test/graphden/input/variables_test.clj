@@ -34,3 +34,18 @@
     (is (not= (types/fn-ret callable) (second (types/fn-execution callable))))
     (is (= result (binding [*print-length* 1 *print-level* 1]
                     (variables/type-in-scope scope rich))))))
+
+
+(deftest proved-value-renaming-preserves-variable-sort-and-literal-payloads
+  (let [left [(random-uuid) []]
+        right [(random-uuid) []]
+        rich '[:refine [:fn {:value a} a #{} [:execution-var a]] [:= literal-symbol]]
+        renaming (variables/value-renaming left right rich)
+        a (variables/type-in-scope left 'a)
+        before (variables/type-in-scope left rich)
+        after (types/resolve renaming before)]
+    (is (= (types/fn-execution (types/refine-base before))
+           (types/fn-execution (types/refine-base after))))
+    (is (= {a (variables/type-in-scope right 'a)} renaming))
+    (is (= [:= 'literal-symbol]
+           (types/refine-constraint after)))))

@@ -7,6 +7,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
@@ -183,9 +184,13 @@
                             :unavailable-reference-input)
         edges (mapv #(checked-edge graph snapshot owner (subvec use-path 0 %)) (range 1 (inc (count use-path))))
         field (get-in arg [:target :field])
-        expected (context/call-with-types snapshot #(types/resolve-alias (get-in arg [:target :type])))
         declaring (only (filter #(= slot (ids/slot-id % field)) (get-in graph [:scopes use-path :declaration-order]))
-                        :reference-field-origin-mismatch)]
+                        :reference-field-origin-mismatch)
+        origin (:target-type-origin arg)
+        _ (when (and origin (not (and (positional-type/exact? origin (:target arg) snapshot declaring)
+                                      (false? (:required route)) (false? (:required-now? route)))))
+            (reject! :reference-field-origin-mismatch))
+        expected (if origin :any (context/call-with-types snapshot #(types/resolve-alias (get-in arg [:target :type]))))]
     (when-not (and (seq edges) (= field (peek (:source-path arg))) (= names (conj (mapv :name edges) field))
                    (= :input-field (:kind route)) (:whole-bindable? route) (= slot (:origin-field-id route))
                    (migration/same-edn? expected (:completion-type route)))
@@ -227,10 +232,11 @@
   [snapshot before [arg binding]]
   (let [owner (:fn-id binding)
         [public-path address edges declaring] (public-route before snapshot arg binding)]
-    {:snapshot-id (:snapshot-id snapshot) :source-path (:source-path arg) :public-path public-path
-     :address address :edges edges :field-owner declaring
-     :owner-parents (get-in snapshot [:fns owner :parent-ids])
-     :row (scoped-row binding address)}))
+    (cond-> {:snapshot-id (:snapshot-id snapshot) :source-path (:source-path arg) :public-path public-path
+             :address address :edges edges :field-owner declaring
+             :owner-parents (get-in snapshot [:fns owner :parent-ids])
+             :row (scoped-row binding address)}
+      (:target-type-origin arg) (assoc :target-type-origin (:target-type-origin arg)))))
 
 
 (defn- verified-addition?

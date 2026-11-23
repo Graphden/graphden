@@ -244,6 +244,16 @@ positions, owners, targets and use scopes refuse the replay. This initial proof
 covers a root list contribution; inherited tail continuations need separate
 evidence. Literal operands do not become references.
 
+An untyped legacy positional `:as` field may have no raw target type while its
+original slot row has primitive `:any`. A versioned source witness can prove
+that exact case through the original owner/slot, list binding, item position
+and UUID, optional field policy and membership. The frozen provider checks the
+same slot and converted input membership; the offline reader reconstructs the
+witness from current legacy parser rows. The raw nil target stays unchanged.
+Unknown witness versions, historical row stamps, shifted paths and changed
+type/requiredness refuse this proof. It grants no general nil-to-any conversion
+or executable admission.
+
 Approving a pure native type callback does not make every composite obligation executable;
 the compiler must still consume its supported checks or refuse the plan.
 Marked and refined identity inputs remain identity edges; the checker receives

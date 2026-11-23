@@ -6,6 +6,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.source-annotations :as annotations]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
@@ -275,7 +276,7 @@
 
 
 (defn- check-descendants!
-  [env {:keys [edges field-owner public-path row]}]
+  [env {:keys [edges field-owner public-path row target-type-origin]}]
   (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id source-list-fragment source-list-operand] :as edge}]
           (partition 2 1 edges)]
     (if source-list-operand
@@ -290,7 +291,13 @@
   (let [scope (certified-lineage env (:target-fn-id (peek edges)))
         origin (some #(when (= field-owner (get-in % [:owner :id])) %) scope)]
     (when-not (some #(= (:target-path row) [(:slot-id %)]) (get-in origin [:records :fn-slot]))
-      (reject! :reference-field-drift public-path))))
+      (reject! :reference-field-drift public-path))
+    (when target-type-origin
+      (let [definition (:definition origin)
+            actual (positional-type/origin (:context env) definition definition
+                                           ((:records-of env) definition) (peek public-path))]
+        (when-not (and (= target-type-origin actual) (= (:target-path row) [(:slot-id actual)]))
+          (reject! :reference-field-drift public-path))))))
 
 
 (defn scoped-reference-context

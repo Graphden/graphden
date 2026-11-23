@@ -922,3 +922,34 @@
       (doseq [changed [shifted detached]]
         (is (= :blocked (replay migrated (parse/prepare-module
                                            (mapv #(if (= directory %) changed %) declarations) {} {}))))))))
+
+
+(deftest untyped-positional-input-requires-the-exact-original-type-origin
+  (let [directory {:namespace "fixture" :name :positional-directory :parent :zipmap
+                   :args {:keys {:append [{:value :prefix} {:value :upper}] :closed true}
+                          :vals {:append [{:value false} {:as :upper}] :closed true}}}
+        wrapper {:namespace "fixture" :name :positional-wrapper :parent :const :args {:value :positional-directory}}
+        child {:namespace "fixture" :name :positional-call :parent :positional-wrapper :args {:upper {:value nil}}}
+        declarations (into (filterv #(= :const (:name %)) (sources "logic"))
+                           (concat (filter #(= :zipmap (:name %)) (sources "collections")) [directory wrapper child]))
+        prepared (parse/prepare-module declarations {} {})
+        package (snapshot/package-index prepared declarations)
+        owner (ids/fn-id "fixture" :positional-call)
+        migrated (snapshot/migrate-binding package owner @roots)
+        certificate (get-in migrated [:legacy :arguments 0 :scope-certificate])
+        origin (:target-type-origin certificate)
+        replay #(get-in (source/verify-module {:definitions [%1]} %2) [:definitions 0 :status])]
+    (is (= :authored-source-equivalent (:verification migrated)) (:blockers migrated))
+    (is (nil? (get-in migrated [:legacy :arguments 0 :target :type])))
+    (is (= [:value :upper] (:public-path certificate)))
+    (is (= [:args :vals :append 1] (:source-path origin)))
+    (is (= (ids/primitive-fn-id :any) (:type-fn-id origin)))
+    (is (false? (:required origin)))
+    (is (= :supported (replay migrated prepared)))
+    (doseq [patch [{:version 2} {:slot-id (random-uuid)} {:type-fn-id (ids/primitive-fn-id :text)}
+                   {:required true} {:source-path [:args :keys :append 1]}]]
+      (is (= :blocked (replay (update-in migrated [:legacy :arguments 0 :scope-certificate :target-type-origin] merge patch)
+                              prepared))))
+    (let [shifted (assoc-in directory [:args :vals :append] [{:as :upper} {:value false}])
+          changed (parse/prepare-module (mapv #(if (= directory %) shifted %) declarations) {} {})]
+      (is (= :blocked (replay migrated changed))))))

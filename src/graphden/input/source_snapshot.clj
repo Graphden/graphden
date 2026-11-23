@@ -182,10 +182,22 @@
     (verified-entry-tree package v2 resolve-named)))
 
 
+(defn- declaration-evidence
+  "Compare verified rows and rich declarations, not alternate spelling of bind.
+   The round trip already checked inline-body against its enclosing source;
+   expression, origins and child evidence retain its resolved meaning."
+  [entry]
+  (cond-> (dissoc entry :inline-body)
+    (:source entry) (update :source dissoc :bind)
+    (:inline-definitions entry) (update :inline-definitions #(update-vals % declaration-evidence))))
+
+
 (defn- add-closure-entry
   [entries {:keys [owner] :as entry}]
   (let [id (:id owner)]
-    (when (and (contains? entries id) (not (migration/same-edn? (get entries id) entry)))
+    (when (and (contains? entries id)
+               (not (migration/same-edn? (declaration-evidence (get entries id))
+                                         (declaration-evidence entry))))
       (reject! :conflicting-declaration-record id))
     (assoc entries id entry)))
 

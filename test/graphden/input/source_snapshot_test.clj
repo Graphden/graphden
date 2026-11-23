@@ -524,7 +524,11 @@
       (is (= [base] (get-in context [:fns id :parent-ids])))
       (is (= "checked" (get-in context [:bindings (ids/binding-id id field) :value]))))
     (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
-    (is (= :text (get-in checked [:scopes [left-edge child-edge] :signature :return])))))
+    (is (= :text (get-in checked [:scopes [left-edge child-edge] :signature :return])))
+    (doseq [order [[owner left child right] [right child left owner]]]
+      (is (= (select-keys context [:fns :bindings :type-bodies])
+             (select-keys (:context (snapshot/freeze-closure package order @roots))
+                          [:fns :bindings :type-bodies]))))))
 
 
 (deftest inline-list-leaves-preserve-original-operand-positions

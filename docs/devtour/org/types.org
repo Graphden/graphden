@@ -106,13 +106,13 @@ Matches each original owner's complete normalized inline expansion with preparat
 :PROPERTIES:
 :CUSTOM_ID: types/with-certified-owner
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 677
+:LINE: 689
 :MINS: 1.1
 :END:
 
 Proves one owner and its dependencies as an immutable transaction. Verified parent forwarding is available before replanning inherited inputs; scoped bindings still pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:677]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:689]]
 - see also :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/verify-bindings][verify-bindings]]
 - same file :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 
@@ -134,13 +134,13 @@ Finds all omitted bindings in the original ledger and resolves each route agains
 :PROPERTIES:
 :CUSTOM_ID: types/migrate-forwarded-field
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 584
+:LINE: 596
 :MINS: 0.9
 :END:
 
 Freezes both endpoints of an authored field passed to a value-producing reference. The checker replays the exact projection and verifies that the original local field remains available. A successful replay supplies a source proposal with the scoped path and its original field identity.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:584]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:596]]
 - see also :: [[file:types.org::#types/verify-module][verify-module]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]]

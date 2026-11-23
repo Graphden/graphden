@@ -571,7 +571,10 @@ A closure may request a generated child before reaching its enclosing owner,
 including when a scoped binding is temporarily omitted for proof. The child
 can then be checked independently using its exact original body. It still
 requires the ordinary authored-source round trip; the provenance index does
-not itself certify its rows. Repeated closure entries must agree completely.
+not itself certify its rows. Repeated closure entries must agree on rows,
+resolved expressions, origins and rich declaration metadata. Alternate scalar
+spelling in the already verified `:bind` source and its enclosing inline-body
+wrapper do not change this evidence; child declarations are compared recursively.
 Generated names remain internal and are never added to authored modules.
 
 `source-snapshot/with-certified-owner` proves inherited projections and

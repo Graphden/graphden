@@ -194,7 +194,8 @@
   [package id]
   (if (contains? (:originals package) id)
     package
-    (if-let [{:keys [declaration]} (origins/declaration @(:inline-origins package) id)]
+    (if-let [{:keys [declaration]} (when-let [index (:inline-origins package)]
+                                     (origins/declaration @index id))]
       ;; The child keeps its parser UUID and exact enclosing source location.
       ;; Its own authored rows still need the ordinary complete round trip.
       (assoc-in package [:originals id] [declaration])

@@ -966,4 +966,4 @@
         package (snapshot/package-index prepared declarations)]
     (is (= :scope-replay-mismatch
            (try (snapshot/migrate-binding package (ids/fn-id "fixture" :positional-call) @roots)
-                (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure))))))))
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

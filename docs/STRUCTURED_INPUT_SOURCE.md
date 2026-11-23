@@ -556,3 +556,29 @@ expression interpretation, legacy semantic classification and offline module
 round trips. `graphden.packages.input-format-test` verifies the production
 boundary and preflight using tiny synthetic packages. These focused checks do
 not replace the native landing gate or whole-corpus execution comparison.
+
+## Enclosing source owners and dependency proof transactions
+
+`source-origins/index` records the original enclosing owner and source path of
+parser-generated inline declarations. It repeats the parser's normalization
+and expansion and compares the complete result with preparation. Nested
+bodies retain their immediate owner; sequence positions participate in their
+existing identities. A value-wrapped map remains opaque. Duplicate original
+owners cannot supply a unique witness. These private entries contain source
+payloads and must not be printed in diagnostics.
+
+A closure may request a generated child before reaching its enclosing owner,
+including when a scoped binding is temporarily omitted for proof. The child
+can then be checked independently using its exact original body. It still
+requires the ordinary authored-source round trip; the provenance index does
+not itself certify its rows. Repeated closure entries must agree completely.
+Generated names remain internal and are never added to authored modules.
+
+`source-snapshot/with-certified-owner` proves inherited projections and
+scoped bindings in one immutable dependency transaction. Each declaring
+owner must pass its existing forwarding or rename checks before replanning
+the descendant. Scoped additions retain the aggregate type, reference-use
+and occupancy checks. An occupied ancestor input, ambiguous occurrence,
+cyclic proof dependency or unsupported blocker aborts the transaction; no
+partial package is returned. This is offline source evidence, not proof of
+runtime equivalence or authorization to activate the new loader.

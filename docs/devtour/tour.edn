@@ -768,6 +768,15 @@
            A blocked source owner retries when its exact dependency is certified. The planner
            then rebuilds the requested package plan with the updated inherited field evidence."
      :see [[:types "verify-bindings"] [:types "migrate-forwarded-field"]]}
+    {:ns graphden.input.source-origins :defn index
+     :say "Matches each original owner's complete normalized inline expansion with preparation.
+           Generated UUIDs retain their enclosing owner and exact nested or sequence path.
+           These private source bodies are provenance, not checked runtime declarations."}
+    {:ns graphden.input.source-snapshot :defn with-certified-owner
+     :say "Proves one owner and its dependencies as an immutable transaction. Verified parent
+           forwarding is available before replanning inherited inputs; scoped bindings still
+           pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package."
+     :see [[:types "verify-plan"] [:types "verify-bindings"]]}
     {:ns graphden.input.source-scope :defn verify-bindings
      :say "Finds all omitted bindings in the original ledger and resolves each route against one
            frozen baseline. Replays the bindings together against the stock checker and verifies

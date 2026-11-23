@@ -490,7 +490,7 @@
     (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
     (is (= :text (get-in checked [:scopes [edge] :signature :return])))
     (is (= child-id (get-in (snapshot/freeze-closure package [child-id host-id] @roots) [:context :fns child-id :id])))
-    (is (= :missing-original-declaration (:code (failure #(snapshot/freeze-closure package [child-id] @roots)))))
+    (is (= child-id (get-in (snapshot/freeze-closure package [child-id] @roots) [:context :fns child-id :id])))
     (is (= :conflicting-inline-declaration
            (:code (failure #(snapshot/freeze-closure (assoc-in package [:originals child-id] [host]) [host-id] @roots)))))
     (is (= :missing-original-declaration

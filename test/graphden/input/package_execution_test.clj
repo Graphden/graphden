@@ -450,3 +450,34 @@
     (is (= :checked (:status analysis)))
     (is (empty? (:obligations analysis)))
     (is (= {:prefix false :upper "CHECKED"} (legacy {}) (canonical {})))))
+
+
+(deftest inherited-forwarding-and-scoped-owner-chain-executes-like-legacy
+  (let [a {:namespace "owner-proof" :name :a :parent :_csv-escape-cell
+           :args {:value :to-json-string :data {:type :jsonb}}}
+        b {:namespace "owner-proof" :name :b :parent :a
+           :args {:data {:value nil} :extra {:type :text}}}
+        c {:namespace "owner-proof" :name :c :parent :b
+           :args {:extra :str-trim :string "unread"}}
+        source (into (declarations "packages/core/strings/fns.edn" #{:_csv-escape-cell :str-trim})
+                     (concat (declarations "packages/core/system/fns.edn" #{:to-json-string}) [a b c]))
+        root (ids/fn-id "owner-proof" :c)
+        calls (atom [])
+        original (get-in @loaded [:to-json-string :impl])
+        implementations (-> @loaded
+                            (assoc-in [:to-json-string :impl]
+                                      (fn [& args] (swap! calls conj :selected) (apply original args)))
+                            (assoc-in [:str-trim :impl]
+                                      (fn [& _] (swap! calls conj :unread) (throw (ex-info "Unread reference forced" {})))))
+        {:keys [canonical legacy analysis]}
+        (runtimes source root
+                  (fn [package owner roots impls]
+                    (execution/compile-package (snapshot/with-certified-owner package owner roots) owner roots impls))
+                  implementations)]
+    (is (= :checked (:status analysis)))
+    (is (empty? (:required-addresses analysis)))
+    (is (= "null" (legacy {})))
+    (is (= [:selected] @calls))
+    (reset! calls [])
+    (is (= "null" (canonical {})))
+    (is (= [:selected] @calls))))

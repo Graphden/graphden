@@ -13,19 +13,28 @@
 
 (defn- candidate
   [{id :identity blockers :blockers}]
-  (when (and (uuid? id) (seq blockers) (every? argument-field blockers))
+  (when (and (uuid? id) (seq blockers))
     (cond
-      (every? #(= :ref-scope-required (:code %)) blockers) [id nil]
-      (every? #(= :field-projection-required (:code %)) blockers)
-      [id (mapv argument-field blockers)])))
+      (and (every? argument-field blockers)
+           (every? #(= :ref-scope-required (:code %)) blockers)) [id nil]
+      (and (every? argument-field blockers)
+           (every? #(= :field-projection-required (:code %)) blockers))
+      [id (mapv argument-field blockers)]
+      (every? (fn [blocker]
+                (if (= :inherited-projection-required (:code blocker))
+                  (= [:args] (:source-path blocker))
+                  (and (#{:ref-scope-required :field-projection-required} (:code blocker))
+                       (argument-field blocker)))) blockers)
+      [id :joint])))
 
 
 (defn- attempt
   [package roots id field]
   (try
-    {:package (if field
-                (snapshot/with-migrated-forwarding package id field roots)
-                (snapshot/with-migrated-bindings package [id] roots))}
+    {:package (cond
+                (= :joint field) (snapshot/with-certified-owner package id roots)
+                field (snapshot/with-migrated-forwarding package id field roots)
+                :else (snapshot/with-migrated-bindings package [id] roots))}
     (catch clojure.lang.ExceptionInfo failure
       (let [{:keys [type code fn-id] :as data} (ex-data failure)]
         (when-not (or (#{"input" "types"} (some-> type namespace))

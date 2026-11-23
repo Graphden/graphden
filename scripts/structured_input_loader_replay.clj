@@ -120,7 +120,7 @@
                                    #(outcome (fn [] (loader/load-packages ["core"] {:primitive-input admission})))))))
 
 
-(defn check
+(defn replay!
   [{:keys [artifact checkout postgres]}]
   (let [ledger (inventory/read-edn artifact (slurp artifact :encoding "UTF-8"))
         source-identity (some #(when (= "core" (:label %)) (:source-identity %)) (get-in ledger [:report :source-identities]))
@@ -149,3 +149,16 @@
                           (expect! [-3 15] (mapv #(get-in legacy [% :result]) [:floor :add]))
                           (prn {:source-head source-head :staged (cond-> (dissoc staged :executions :packages) postgres (assoc :postgres proof))
                                 :results (update-vals legacy :result)}))))))
+
+
+(defn check
+  "Standalone -X entry point. The real HTTP handler starts a process-wide watchdog."
+  [opts]
+  (System/exit
+    (try
+      (replay! opts)
+      (flush)
+      0
+      (catch Throwable error
+        (.printStackTrace error)
+        1))))

@@ -100,3 +100,37 @@
                                             {:namespace "fixture" :name :ids :list :producer}])]
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
           ((named-types/lookup package entries) :fixture/ids)))))
+
+
+(deftest shipped-request-retains-its-erased-union-and-field-identities
+  (let [[package entries] (package-entries
+                            (into (declarations "packages/core/refinements/fns.edn" #{:http-status :text-map})
+                                  (concat (declarations "packages/core/system/fns.edn" #{:ring-response-shape})
+                                          (declarations "packages/web/ring-adapter/fns.edn" #{:ring-request-shape}))))
+        type [:fn {:arg :ring-request-shape} :ring-response-shape]
+        frozen (named-types/evidence {:root {:contract {:fields [{:type type}]}}} (named-types/lookup package entries))
+        id (ids/fn-id "web.ring-adapter" :ring-request-shape)
+        field-id (ids/slot-id id :body)
+        grouped (group-by :kind (mapcat val (:type-rows frozen)))
+        ctx (context/build-context (assoc frozen :fields (into {} (map (juxt :id identity)) (:slot grouped))
+                                          :members (group-by :fn-id (:fn-slot grouped))))
+        contract (descriptor/resolve-descriptor ctx id)
+        body (descriptor/find-node contract [field-id])]
+    (is (= #{:ring-request-shape :ring-response-shape :http-status :text-map} (set (keys (:aliases frozen)))))
+    (is (= (ids/primitive-fn-id :any) (:type-id body)))
+    (is (= (types/resolve-alias [:union :null :input-stream :text :jsonb]) (:type body)))
+    (is (= [:union :null :input-stream :text :jsonb]
+           (get-in frozen [:source-field-types [field-id (ids/primitive-fn-id :any)]])))
+    (is (true? (:required body)))
+    (let [changed (update-in entries [id :v2 :declaration-records]
+                             (fn [rows]
+                               (mapv #(cond-> % (= field-id (:id %))
+                                              (assoc :type-fn-id (ids/primitive-fn-id :text))) rows)))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
+            (named-types/evidence {:root {:contract {:fields [{:type type}]}}} (named-types/lookup package changed)))))))
+
+
+(deftest transient-primitive-is-not-an-erased-standalone-storage-kind
+  (is (false? (descriptor/stored-source-type? :input-stream (ids/primitive-fn-id :any))))
+  (is (descriptor/stored-source-type? [:union :null :input-stream :text :jsonb] (ids/primitive-fn-id :any)))
+  (is (false? (descriptor/stored-source-type? [:union :null :unknown-native] (ids/primitive-fn-id :any)))))

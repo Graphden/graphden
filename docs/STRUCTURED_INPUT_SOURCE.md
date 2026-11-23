@@ -242,6 +242,21 @@ a destination's field-read check only when an identical check remains on its
 original source field; other obligations must survive unchanged. This source
 equivalence proof does not establish execution support for those checks.
 
+An authored callable field retains the anonymous type UUID computed from its
+literal `[:fn ...]` form. Qualification or alias expansion must not replace that
+identity. The source ledger must contain the exact callable row; named argument
+and result types independently require their complete frozen declaration rows.
+An erased primitive `:fn` FK cannot supply this evidence.
+
+Named record fields may retain supported collection and union forms erased by
+storage when their original declaration, FK and complete field memberships
+agree. The descriptor uses that source witness with the existing type rules;
+this does not change union normalization or discharge runtime obligations.
+A named atomic dictionary callback has a legacy/canonical execution regression.
+A named record callback with a nested parameter route still fails explicitly
+with `:callback-parameter-shape-required`, even after its source transaction and
+analysis succeed. Record callback lowering is a separate compiler obligation.
+
 Audited native type callbacks run with the frozen signature view. A callback
 that introduces a named type records `:graphden.input/type-aliases` in its
 metadata, mapping the returned label to its qualified source declaration.

@@ -19,8 +19,8 @@
 
 
 (defn- prepared-definition
-  [prepared {:keys [namespace name]}]
-  (get-in prepared [:defs-by-name (keyword (or namespace "") (clojure.core/name name))]))
+  [prepared {ns-id :namespace :keys [name]}]
+  (get-in prepared [:defs-by-name (keyword (or ns-id "") (clojure.core/name name))]))
 
 
 (defn- checked-expansion!

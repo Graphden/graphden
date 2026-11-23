@@ -128,3 +128,9 @@
                                               (assoc :type-fn-id (ids/primitive-fn-id :text))) rows)))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
             (named-types/evidence {:root {:contract {:fields [{:type type}]}}} (named-types/lookup package changed)))))))
+
+
+(deftest transient-primitive-is-not-an-erased-standalone-storage-kind
+  (is (false? (descriptor/stored-source-type? :input-stream (ids/primitive-fn-id :any))))
+  (is (descriptor/stored-source-type? [:union :null :input-stream :text :jsonb] (ids/primitive-fn-id :any)))
+  (is (false? (descriptor/stored-source-type? [:union :null :unknown-native] (ids/primitive-fn-id :any)))))

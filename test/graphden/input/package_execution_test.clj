@@ -598,9 +598,12 @@
         source (into (declarations "packages/core/system/fns.edn" #{:to-json-string}) definitions)
         calls (atom 0)
         bases (assoc @loaded
-                     :reader {:args {:func [:fn {:arg request} request] :arg request} :return request :effects #{}
+                     :reader {:namespace "callable-proof"
+                              :args {:func {:type [:fn {:arg request} request]} :arg {:type request}}
+                              :return-type request :effects #{}
                               :impl (get-in @loaded [:invoke :impl])}
-                     :echo {:args {:arg request} :return request :effects #{}
+                     :echo {:namespace "callable-proof" :args {:arg {:type request}}
+                            :return-type request :effects #{}
                             :impl (fn [args _] (swap! calls inc) (runtime/resolve-arg args :arg))})
         {:keys [canonical legacy analysis]}
         (runtimes source (ids/fn-id "callable-proof" :run)

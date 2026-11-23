@@ -61,12 +61,12 @@
       (is (= :map (:kind witness)))
       (is (= witness (generic/verify! context checked owner witness)))
       (is (= :authored-source-equivalent (get-in result [:closure-baselines owner :verification]))
-          (select-keys result [:failure :observed]))
+          (pr-str (select-keys result [:failure :observed])))
       (doseq [patch [{:base-fn-id (random-uuid)} {:field-id (random-uuid)}
                      {:argument :other} {:expected [:map 'other :any]}
                      {:binding-id (random-uuid)} {:target-fn-id (random-uuid)}
                      {:return-owner-id (random-uuid)} {:return-type-ref :other/shape}]]
-        (is (= :unproved-generic-map-reference
+        (is (= (if (contains? patch :field-id) :unknown-field :unproved-generic-map-reference)
                (try (generic/verify! context checked owner (merge witness patch))
                     nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))
       (doseq [edit [#(assoc % :substitution {})

@@ -256,6 +256,8 @@
                                   list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
                                   (rich/erased-return? type-id return) [[id type-id] return]))))
                    entries)
+             :source-list-fragments (into {} (keep (fn [[id entry]]
+                                                     (when-let [fragment (:list-fragment entry)] [id fragment]))) entries)
              :source-field-types (source-field-types entries)
              :source-binding-types
              (into {}

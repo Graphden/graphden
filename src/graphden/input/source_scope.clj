@@ -3,6 +3,8 @@
    analysis. Derives no routes and changes neither source nor storage."
   (:require
     [graphden.input.context :as context]
+    [graphden.input.list-builder :as list-builder]
+    [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.input.source-rename :as rename]
@@ -100,6 +102,48 @@
     (only candidates :nonunique-reference-input)))
 
 
+(defn- list-use?
+  [graph snapshot [owner use-path] {:keys [owner-id binding-id builder-id scope-path target-path]}]
+  (when (and (vector? scope-path) (> (count use-path) (count scope-path)))
+    (let [anchor (subvec use-path 0 (- (count use-path) (inc (count scope-path))))
+          parent [owner (pop use-path)]
+          from [parent target-path]
+          link (get-in snapshot [:bindings binding-id])
+          bound (get-in graph [:scopes (second parent) :bindings from])]
+      (and (= use-path (into anchor (conj scope-path binding-id)))
+           (some #{owner-id} (get-in graph [:scopes anchor :declaration-order]))
+           (= builder-id (get-in graph [:scopes use-path :fn-id]))
+           (= owner-id (:origin-fn-id bound)) (= binding-id (:binding-id bound))
+           (= {:kind :ref :fn-id builder-id} (:expression bound))
+           (= owner-id (:fn-id link)) (= "ref" (:expression-kind link))
+           (= scope-path (:scope-path link)) (= target-path (:target-path link))
+           (= builder-id (:ref-fn-id link))
+           (some #(= {:from from :to [owner use-path] :binding-id binding-id
+                      :target-fn-id builder-id :mode :value} %) (:dependencies graph))))))
+
+
+(defn- list-reference-row?
+  [graph snapshot scope row]
+  (let [builder (:fn-id row)
+        {:keys [owner-id target-id items] :as fragment} (get-in snapshot [:source-list-fragments builder])
+        field (first (:target-path row))
+        input (get-in snapshot [:fns builder :input-type-fn-id])
+        memberships (filter #(= field (:slot-id %)) (get-in snapshot [:members input]))
+        [member & more] memberships
+        position (:position member)
+        link (get-in snapshot [:bindings (:binding-id fragment)])]
+    (and (uuid? owner-id) (uuid? target-id)
+         (= (list-builder/origin owner-id target-id)
+            (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id]))
+         (= builder (:builder-id fragment)) (vector? items) (empty? more)
+         (nat-int? position) (= (ids/fn-slot-id input field) (:id member))
+         (= field (ids/slot-id builder (str "item-" position)))
+         (= (:id row) (:id (get items position)))
+         (list-signature/inline-operand? fragment link position (:ref-fn-id row))
+         (list-use? graph snapshot scope fragment)
+         {:binding-id (:binding-id fragment) :position position :item-id (:id row) :ref-fn-id (:ref-fn-id row)})))
+
+
 (defn- checked-edge
   [graph snapshot owner prefix]
   (let [to [owner prefix]
@@ -109,15 +153,23 @@
         bound (get-in graph [:public-input :bindings address])
         row (get-in snapshot [:bindings id])
         contract (get-in graph [:public-input :scope-contracts parent])
-        name (:name (only (filter #(= field (:id %)) (:fields contract)) :missing-reference-use))]
+        name (:name (only (filter #(= field (:id %)) (:fields contract)) :missing-reference-use))
+        operand (list-reference-row? graph snapshot parent row)
+        fragment (get-in snapshot [:source-list-fragments target])
+        fragment (when (and fragment (list-use? graph snapshot to fragment))
+                   (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id :scope-path :target-path]))
+        certificate (cond-> {:from address :binding-id id :target-fn-id target :origin-fn-id (:fn-id row) :name name}
+                      operand (assoc :source-list-operand operand)
+                      fragment (assoc :source-list-fragment fragment))]
     (when-not (and (= :value (:mode edge)) (= [owner (pop prefix)] parent)
                    (= id (peek prefix) (:binding-id bound) (:id row))
                    (= "ref" (:expression-kind row)) (= (:fn-id row) (:origin-fn-id bound))
                    (empty? (:scope-path row)) (= path [field] (:target-path row))
-                   (= id (ids/binding-id (:fn-id row) field))
+                   (or operand (= id (ids/binding-id (:fn-id row) field)))
+                   (or (nil? fragment) (list-signature/source-link? certificate))
                    (uuid? target) (= target (:ref-fn-id row) (get-in bound [:expression :fn-id])))
       (reject! :unsupported-reference-use))
-    {:from address :binding-id id :target-fn-id target :origin-fn-id (:fn-id row) :name name}))
+    certificate))
 
 
 (defn- public-route

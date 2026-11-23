@@ -2,6 +2,7 @@
   "Read and emit certified reference input paths in an offline :bind map."
   (:require
     [graphden.input.core :as input]
+    [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]))
@@ -53,11 +54,14 @@
   (let [uses (mapv :binding-id edges)]
     (every? true?
             (map-indexed
-              (fn [index {:keys [from origin-fn-id binding-id target-fn-id]}]
+              (fn [index {:keys [from origin-fn-id binding-id target-fn-id source-list-fragment source-list-operand] :as edge}]
                 (let [[[root prefix] [slot :as path]] from]
                   (and (= root owner) (= prefix (subvec uses 0 index)) (= path [slot])
                        (every? uuid? [slot origin-fn-id target-fn-id binding-id])
-                       (= binding-id (ids/binding-id origin-fn-id slot)))))
+                       (cond
+                         source-list-operand (list-signature/source-operand? (get edges (dec index)) edge)
+                         source-list-fragment (list-signature/source-link? edge)
+                         :else (= binding-id (ids/binding-id origin-fn-id slot))))))
               edges))))
 
 

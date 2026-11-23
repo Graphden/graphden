@@ -433,3 +433,20 @@
                      (declarations "packages/web/http/fns.edn" #{:response-cache-cell :_response-cache-current}))]
     (is (= :compile-time-value-compilation-required
            (rejection-code #(runtimes source (ids/fn-id "web.http" :_response-cache-current)))))))
+
+
+(deftest scoped-list-operand-executes-at-its-preserved-legacy-position
+  (let [directory {:namespace "fixture" :name :operand-directory :parent :zipmap
+                   :args {:keys {:append [{:value :prefix} {:value :upper}] :closed true}
+                          :vals {:append [{:value false} :str-upper] :closed true}}}
+        child {:namespace "fixture" :name :operand-call :parent :operand-directory :args {:string "checked"}}
+        source (into (declarations "packages/core/strings/fns.edn" #{:str-upper})
+                     (concat (declarations "packages/core/collections/fns.edn" #{:zipmap}) [directory child]))
+        owner (ids/fn-id "fixture" :operand-call)
+        compile-certified (fn [package root roots implementations]
+                            (execution/compile-package (snapshot/with-migrated-bindings package [root] roots)
+                                                       root roots implementations))
+        {:keys [canonical legacy analysis]} (runtimes source owner compile-certified)]
+    (is (= :checked (:status analysis)))
+    (is (empty? (:obligations analysis)))
+    (is (= {:prefix false :upper "CHECKED"} (legacy {}) (canonical {})))))

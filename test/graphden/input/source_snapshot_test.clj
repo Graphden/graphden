@@ -885,3 +885,40 @@
            (set (map :source-binding routes))))
     (is (= :blocked (:status (replay conflicting))))
     (is (some #{:inherited-projection-required} (get-in (replay conflicting) [:diagnostics 0 :blockers])))))
+
+
+(deftest scoped-source-list-operand-keeps-the-real-item-id-and-position
+  (let [directory {:namespace "fixture" :name :operand-directory :parent :zipmap
+                   :args {:keys {:append [{:value :prefix} {:value :upper}] :closed true}
+                          :vals {:append [{:value false} :str-upper] :closed true}}}
+        child {:namespace "fixture" :name :operand-call :parent :operand-directory :args {:string "checked"}}
+        declarations (into (filterv #(= :str-upper (:name %)) (sources "strings"))
+                           (concat (filter #(= :zipmap (:name %)) (sources "collections")) [directory child]))
+        prepared (parse/prepare-module declarations {} {})
+        package (snapshot/package-index prepared declarations)
+        owner (ids/fn-id "fixture" :operand-call)
+        list-owner (ids/fn-id "fixture" :operand-directory)
+        list-binding (ids/binding-id list-owner (ids/slot-id (ids/fn-id "core.collections" :zipmap) :vals))
+        item-id (ids/binding-list-item-id list-binding 1)
+        path [:vals :item-1 :string]
+        migrated (snapshot/migrate-binding package owner @roots)
+        certificate (get-in migrated [:legacy :arguments 0 :scope-certificate])
+        replay (fn [entry context]
+                 (get-in (source/verify-module {:definitions [entry]} context) [:definitions 0 :status]))]
+    (is (= :authored-source-equivalent (:verification migrated)) (:blockers migrated))
+    (is (= path (:public-path certificate)))
+    (is (= [list-binding item-id] (get-in certificate [:row :scope-path])))
+    (is (= item-id (get-in certificate [:edges 1 :source-list-operand :item-id])))
+    (is (= 1 (get-in certificate [:edges 1 :source-list-operand :position])))
+    (is (= list-owner (get-in certificate [:edges 0 :source-list-fragment :owner-id])))
+    (is (= [] (get-in certificate [:edges 0 :source-list-fragment :scope-path])))
+    (is (= :supported (replay migrated prepared)))
+    (doseq [changed [(assoc-in migrated [:legacy :arguments 0 :scope-certificate :edges 1 :source-list-operand :position] 0)
+                     (assoc-in migrated [:legacy :arguments 0 :scope-certificate :edges 1 :source-list-operand :item-id] (random-uuid))
+                     (assoc-in migrated [:legacy :arguments 0 :scope-certificate :edges 0 :source-list-fragment :scope-path] [(random-uuid)])]]
+      (is (= :blocked (replay changed prepared))))
+    (let [shifted (assoc-in directory [:args :vals :append] [:str-upper {:value false}])
+          detached (assoc-in directory [:args :vals :append] [{:value false} {:value "literal"}])]
+      (doseq [changed [shifted detached]]
+        (is (= :blocked (replay migrated (parse/prepare-module
+                                           (mapv #(if (= directory %) changed %) declarations) {} {}))))))))

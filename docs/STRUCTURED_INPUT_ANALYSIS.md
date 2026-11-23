@@ -235,6 +235,15 @@ rows. The certificate carries that set. Dropping, adding or changing a check,
 or requiring container materialization, refuses the replay. This preserves the
 existing validation boundary; it does not grant executable admission.
 
+Generated list operands retain the legacy list-item UUID and position. Frozen
+source fragments prove the list owner and actual attached use; compact origin
+witnesses accompany the list link and operand edges in scope certificates.
+The source reader checks them against current legacy binding and item rows,
+then applies the same identity formulas to the scoped path. Missing or changed
+positions, owners, targets and use scopes refuse the replay. This initial proof
+covers a root list contribution; inherited tail continuations need separate
+evidence. Literal operands do not become references.
+
 Approving a pure native type callback does not make every composite obligation executable;
 the compiler must still consume its supported checks or refuse the plan.
 Marked and refined identity inputs remain identity edges; the checker receives

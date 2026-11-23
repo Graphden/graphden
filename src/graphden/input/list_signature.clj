@@ -1,6 +1,7 @@
 (ns graphden.input.list-signature
   "Frozen stage-4 signatures for ordinary operands of a verified list builder."
   (:require
+    [graphden.input.list-builder :as builder]
     [graphden.input.list-records :as records]
     [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
@@ -93,3 +94,31 @@
          (= owner-id (:fn-id edge)) (= path (:target-path edge)) (= (or scope-path []) (:scope-path edge))
          (= builder-id (:ref-fn-id edge)) (= binding-id (:id edge))
          (= child-id (:fn-id item)) (= (:id item) (ids/binding-list-item-id binding-id position)))))
+
+
+(defn source-link?
+  "Identity formula for a proved root source-list link in a scope certificate.
+   Source rows and actual use attachment must be verified by the provider."
+  [{:keys [from binding-id origin-fn-id target-fn-id source-list-fragment]}]
+  (let [{:keys [owner-id target-id builder-id scope-path target-path] :as fragment} source-list-fragment]
+    (and (uuid? owner-id) (uuid? target-id)
+         (= (builder/origin owner-id target-id)
+            (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id]))
+         (= [] scope-path) (= [target-id] target-path (second from))
+         (= owner-id origin-fn-id) (= (:binding-id fragment) binding-id)
+         (= builder-id target-fn-id))))
+
+
+(defn source-operand?
+  "A list operand retains the source list-item UUID, not a new field binding
+   UUID. Its preceding checked source link fixes the owner and use scope."
+  [prior {:keys [from name binding-id origin-fn-id target-fn-id source-list-operand]}]
+  (let [{:keys [builder-id] :as fragment} (:source-list-fragment prior)
+        {:keys [position item-id ref-fn-id] list-binding :binding-id} source-list-operand
+        [root prefix] (first (:from prior))]
+    (and (source-link? prior) (nat-int? position) (uuid? ref-fn-id)
+         (= list-binding (:binding-id fragment))
+         (= item-id binding-id (ids/binding-list-item-id list-binding position))
+         (= builder-id origin-fn-id) (= ref-fn-id target-fn-id)
+         (= name (keyword (str "item-" position)))
+         (= from [[root (conj prefix list-binding)] [(ids/slot-id builder-id name)]]))))

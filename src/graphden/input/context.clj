@@ -27,6 +27,8 @@
    collection returns, including verified list builders. :source-binding-types retains
    exact source annotations and projection pins keyed by [binding-id type-id]. Named source declarations
    retain their authored form and available file path in :type-origins by UUID.
+   :source-list-fragments retains verified generated-builder origins, including
+   the source list-item IDs, positions and contributor scope.
    Missing aliases never fall back to the process registry. Marker policy is
    captured once unless explicitly supplied. :snapshot-id identifies this
    graph/type-policy snapshot for a caller-owned cache, not only the fn row.
@@ -36,10 +38,10 @@
   [snapshot]
   (let [context (merge {:fns {} :fields {} :members {} :bindings {}
                         :type-bodies {} :source-field-types {} :source-return-types {} :source-binding-types {} :type-origins {}
-                        :signatures {} :aliases {} :alias-ids {}
+                        :source-list-fragments {} :signatures {} :aliases {} :alias-ids {}
                         :markers (shapes/markers-snapshot) :snapshot-id (random-uuid)
                         :field-default-required? false} snapshot)]
-    (doseq [key [:fns :fields :members :bindings :type-bodies :source-field-types :source-return-types :source-binding-types :type-origins :signatures :aliases :alias-ids :markers]]
+    (doseq [key [:fns :fields :members :bindings :type-bodies :source-field-types :source-return-types :source-binding-types :type-origins :source-list-fragments :signatures :aliases :alias-ids :markers]]
       (when-not (map? (get context key))
         (reject! :snapshot-map-required {:component key})))
     (when-not (boolean? (:field-default-required? context))

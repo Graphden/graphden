@@ -155,7 +155,7 @@
 
 (deftest either-joint-phase-failure-publishes-no-owner-or-parent-proof
   (doseq [[type value expected-steps expected-code]
-          [[:input-stream "unread" [] :unproved-forwarded-target]
+          [[:any "unread" [] :unproved-forwarded-target]
            [:jsonb 42 [:projection :scope] :types/check-failed]]]
     (let [{:keys [package originals roots owner]} (joint-fixture type value)
           before (source/plan-module originals (:prepared package))

@@ -3,6 +3,9 @@
   (:require
     [graphden.executor.browser-plan :as browser]
     [graphden.executor.capabilities :as capabilities]
+    [graphden.input.browser-default :as browser-default]
+    [graphden.input.descriptor :as descriptor]
+    [graphden.input.field-default :as field-default]
     [graphden.input.ir :as ir]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
@@ -50,8 +53,8 @@
 
 (defn- wire-presence
   [{:keys [presence-program required-addresses]} address-ids]
-  {:presence (mapv (fn [{:keys [address kind sources required-fields]}]
-                     (cond-> {:id (get address-ids address) :kind (name kind)
+  {:presence (mapv (fn [{:keys [address kind sources required-fields default-present?]}]
+                     (cond-> {:id (get address-ids address) :kind (if default-present? "always" (name kind))
                               :sources (mapv address-ids sources)}
                        (seq required-fields) (assoc :required-fields (mapv address-ids required-fields))))
                    presence-program)
@@ -68,13 +71,15 @@
 
 
 (defn- browser-expression
-  [{:keys [op value source scope fields type]} address {:keys [address-ids scope-ids encode closures] :as wire}]
+  [{:keys [op value source scope fields type] :as expression} address {:keys [address-ids scope-ids encode closures] :as wire}]
   (case op
     :literal {:kind "literal" :value (encode value)}
     :read (call-expr (get address-ids source))
     :invoke (call-expr (get scope-ids scope))
     :closure (closure-expr (get closures address) wire)
-    :supplied {:kind "supplied" :slot (get address-ids address) :type (supplied-type! type)}
+    :supplied (cond-> {:kind "supplied" :slot (get address-ids address) :type (supplied-type! type)}
+                (contains? expression :default)
+                (assoc :kind "supplied-default" :fallback (encode (:default expression))))
     :record {:kind "record"
              :fields (mapv (fn [[key child]]
                              (let [field-id (get address-ids child)]
@@ -169,12 +174,33 @@
                      :expr (validate-expression emitted (when-not supplied? obligation))}])))
 
 
+(defn- check-defaults!
+  [analysis {:keys [expressions root-scope frame-layouts parameters]} options]
+  (let [occurrence? (browser-default/occurrence-checker options (disj browser-input-types :any))]
+    (doseq [[[scope path :as address] expression] expressions
+            :when (contains? expression :default)]
+      (let [node-scope (get-in analysis [:scopes (second scope)])
+            node (descriptor/node-at (:configured-contract node-scope) path)
+            fallback (:default expression)]
+        (when-not (and (= :supplied (:op expression)) (contains? parameters address)
+                       (= field-default/nullable-text-id (:type-id node))
+                       (field-default/supported? (:required node) (:type node) fallback)
+                       (or (= 1 (count path))
+                           (and (= 2 (count path)) (= root-scope scope)
+                                ;; Named input routing supplies the record slot on every explicit
+                                ;; member write. The fallback alone cannot activate this record.
+                                (contains? (get-in frame-layouts [root-scope :record-inputs]) [scope [(first path)]])
+                                (occurrence? node-scope path fallback))))
+          (ir/reject! :browser-field-default-unsupported {}))))))
+
+
 (defn- export*
   [analysis {:keys [allow-fn?] :as options} closed?]
   (when-not (fn? allow-fn?)
     (ir/reject! :browser-visibility-policy-required {}))
   (let [{:keys [root-scope expressions scopes parameters frame-layouts] :as plan}
         (ir/lower-checked analysis options)]
+    (check-defaults! analysis plan options)
     (when (and closed?
                (or (seq parameters)
                    (let [{:keys [record-inputs required-addresses]} (get frame-layouts root-scope)]

@@ -58,11 +58,15 @@
     (is (= 7 (:id rpc)))))
 
 
+(def ^:private tool-names
+  #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"
+    "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
+    "diff-branch" "configure-input"})
+
+
 (deftest tools-list-catalog
   (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 2 :method "tools/list"})]
-    (is (= #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"
-             "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
-             "diff-branch"}
+    (is (= tool-names
            (into #{} (map :name) (get-in rpc [:result :tools]))))
     (testing "every tool carries an object inputSchema"
       (doseq [t (get-in rpc [:result :tools])]
@@ -282,9 +286,7 @@
 
   (testing "tools/list advertises the mutation + verification tools"
     (let [{:keys [rpc]} (rpc! {:jsonrpc "2.0" :id 100 :method "tools/list"})]
-      (is (= #{"list-namespaces" "search-fns" "read-fn" "describe-fn" "execute-fn"
-               "create-branch" "upsert-fn-defs" "run-tests" "list-branches"
-               "diff-branch"}
+      (is (= tool-names
              (into #{} (map :name) (get-in rpc [:result :tools])))))))
 
 

@@ -85,7 +85,7 @@ FK. Restoring the descriptor is local to the binding; it does not redefine the
 shared primitive. Ordinary metadata subtype/marker checks and runtime
 obligations still apply. A missing checker remains incomplete coverage.
 
-### Guard proof boundary
+## Guard proof boundary
 
 Legacy `types.check.narrowing` recognizes direct `some?`, `nil?` and `is-a?`
 guards. A taken `is-a?` arm can project the target's structural type while

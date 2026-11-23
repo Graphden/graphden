@@ -97,13 +97,13 @@
           _ (sync/register-type-aliases! declarations)
           base (get @fixtures/web-base-definitions :hiccup)
           _ (registry/record-rich-types! (ids/fn-id "web.html" :hiccup) :hiccup base)
-          roots (:by-id @registry/*rich-types-override*)
+          signatures (:by-id @registry/*rich-types-override*)
           prepared (parse/prepare-module definitions {} {})
           package (snapshot/package-index prepared definitions)
           owner (ids/fn-id "fixture" :head-annotation)
           field (ids/slot-id (ids/fn-id "web.html" :hiccup) :children)
           binding (ids/binding-id owner field)
-          {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+          {:keys [context options]} (snapshot/freeze-closure package [owner] signatures)
           graph (analysis/analyze-effective-input context owner options)
           child-field (some #(when (= field (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]
       (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
@@ -113,7 +113,7 @@
       (is (= [:list :hiccup-node] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
       (is (= [:list (types/resolve-alias :hiccup-node)] (:type child-field)))
       (is (= "Extra head elements" (:description child-field)))
-      (is (= nil (get-in context [:bindings binding :expression-kind])))
+      (is (nil? (get-in context [:bindings binding :expression-kind])))
       (is (not (contains? (get-in graph [:public-input :bindings]) [[owner []] [field]]))))))
 
 
@@ -127,9 +127,9 @@
           definitions (into (vec core) html)
           declared-ids (set (map #(ids/fn-id (:namespace %) (:name %)) definitions))
           _ (sync/register-type-aliases! definitions)
-          _ (doseq [[name {:keys [namespace] :as base}] @fixtures/web-base-definitions
-                    :when (contains? declared-ids (ids/fn-id namespace name))]
-              (registry/record-rich-types! (ids/fn-id namespace name) name base))
+          _ (doseq [[name {fn-ns :namespace :as base}] @fixtures/web-base-definitions
+                    :when (contains? declared-ids (ids/fn-id fn-ns name))]
+              (registry/record-rich-types! (ids/fn-id fn-ns name) name base))
           prepared (parse/prepare-module definitions {} {})
           package (snapshot/package-index prepared definitions)
           owner (ids/fn-id "web.html" :html-page)
@@ -159,8 +159,6 @@
           source-links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
                                          [(:id %) (:source-slot-id %)]))
                              (get-in legacy-entry [:legacy :records]))]
-      (.mkdirs (io/file "target"))
-      (spit "target/input-html-page-type-conflict.edn" (pr-str @conflict))
       (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
       (is (= (select-keys (:args original) fields) (get-in entry [:proposed :input])))
       (is (= (set fields) (set (map (comp peek :source-path) proofs))))
@@ -182,12 +180,12 @@
         nullable [:union :null :text]
         facts {:test {:type :bool :ref predicate}
                :then {:type nullable :ref target} :else {:type :text}}
-        bases @fixtures/web-base-definitions]
+        base-definitions @fixtures/web-base-definitions]
     (binding [registry/*rich-types-override*
               (atom {:by-name {} :by-id {predicate {:primary-parent :some? :resolved-bindings {:value {:ref target}}}}})
               registry/*per-org-rich-override* (atom {})]
       (let [id (ids/fn-id "core.logic" :if)
-            _ (registry/record-rich-types! id :if (get bases :if))
+            _ (registry/record-rich-types! id :if (get base-definitions :if))
             entry (registry/rich-type-of-id id)
             result (check/infer-input-signature {:fn-id id :root-entry entry :bindings-info facts
                                                  :argument-effects {} :free-arguments #{}
@@ -213,13 +211,13 @@
 
 (deftest shipped-generic-return-retains-per-use-substitutions-and-legacy-values
   (let [const (some #(when (= :const (:name %)) %) (sources "logic"))
-        zipmap (some #(when (= :zipmap (:name %)) %) (sources "collections"))
+        zipmap-definition (some #(when (= :zipmap (:name %)) %) (sources "collections"))
         number {:namespace "fixture" :name :number :parent :const :args {:value 7}}
         text {:namespace "fixture" :name :text :parent :const :args {:value "seven"}}
         directory {:namespace "fixture" :name :directory :parent :zipmap
                    :args {:keys {:append [{:value :number} {:value :text}] :closed true}
                           :vals {:append [:fixture/number :fixture/text] :closed true}}}
-        definitions [const zipmap number text directory]
+        definitions [const zipmap-definition number text directory]
         prepared (parse/prepare-module definitions {} {})
         package (snapshot/package-index prepared definitions)
         owner (ids/fn-id "fixture" :directory)
@@ -490,7 +488,9 @@
     (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
     (is (= :text (get-in checked [:scopes [edge] :signature :return])))
     (is (= child-id (get-in (snapshot/freeze-closure package [child-id host-id] @roots) [:context :fns child-id :id])))
-    (is (= :missing-original-declaration (:code (failure #(snapshot/freeze-closure package [child-id] @roots)))))
+    (is (= child-id (get-in (snapshot/freeze-closure package [child-id] @roots) [:context :fns child-id :id])))
+    (is (= :missing-original-declaration
+           (:code (failure #(snapshot/freeze-closure (dissoc package :inline-origins) [child-id] @roots)))))
     (is (= :conflicting-inline-declaration
            (:code (failure #(snapshot/freeze-closure (assoc-in package [:originals child-id] [host]) [host-id] @roots)))))
     (is (= :missing-original-declaration
@@ -522,7 +522,11 @@
       (is (= [base] (get-in context [:fns id :parent-ids])))
       (is (= "checked" (get-in context [:bindings (ids/binding-id id field) :value]))))
     (is (= :checked (:status checked)) (pr-str (:diagnostics checked)))
-    (is (= :text (get-in checked [:scopes [left-edge child-edge] :signature :return])))))
+    (is (= :text (get-in checked [:scopes [left-edge child-edge] :signature :return])))
+    (doseq [order [[owner left child right] [right child left owner]]]
+      (is (= (select-keys context [:fns :bindings :type-bodies])
+             (select-keys (:context (snapshot/freeze-closure package order @roots))
+                          [:fns :bindings :type-bodies]))))))
 
 
 (deftest inline-list-leaves-preserve-original-operand-positions

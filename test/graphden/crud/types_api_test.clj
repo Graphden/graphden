@@ -9,6 +9,7 @@
    validate stages and the candidates enumeration are graph fn-defs —
    covered through the handlers in `types-api-graph-test`."
   (:require
+    [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.types-api :as ta]
     [graphden.executor.context :as ctx]
@@ -81,19 +82,13 @@
            return-type-rule partial, not the /api/types wire")))
 
   (testing "every value in the projected entry is JSON-encodable"
-    ;; A future contributor adding a non-encodable side-channel will
-    ;; trip this — the assertion stays naive (no Clojure-fns / instances).
-    (let [projected (ta/project-rich-type-entry
-                      {:return :any
-                       :return-type-rule (fn [_ _] :int)
-                       :slot-types-rule (fn [_ _] :int)
-                       :nav-types-rule (fn [_ _] :int)
-                       :args {:m :any}
-                       :effects []})]
-      (doseq [v (vals projected)]
-        (is (not (fn? v))
-            (str "projected entry should not carry a Clojure fn, got: "
-                 (type v)))))))
+    (let [rule (fn [_ _] :int)
+          projected (ta/project-rich-type-entry
+                      {:return :any :args {:m :any} :effects []
+                       :return-type-rule rule :slot-types-rule rule :nav-types-rule rule
+                       :local-type-rule-evidence {:return-type-rule rule}})]
+      (is (= {:return "any" :args {:m "any"} :effects []}
+             (json/parse-string (json/generate-string projected) true))))))
 
 
 ;; ============================================================================

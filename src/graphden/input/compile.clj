@@ -53,14 +53,21 @@
         (invoke (arguments/route-values surface supplied) ctx)))))
 
 
+(defn analyze-stored
+  "Resolve trusted implementations and check their frozen stored input."
+  [ctx owner trusted]
+  (let [implementations (stored/resolve-closure ctx owner trusted)]
+    {:implementations implementations
+     :analysis (analysis/analyze-effective-input ctx owner {:implementations implementations
+                                                            :check-expression check/check-input-binding
+                                                            :infer-signature check/infer-input-signature})}))
+
+
 (defn compile-stored
   "Prepare one authorized branch-resolved input snapshot for named invocation.
    trusted maps base UUIDs to native implementations and frozen signatures.
    The returned closure still uses the ordinary executor entrypoint."
   [ctx owner trusted]
-  (let [implementations (stored/resolve-closure ctx owner trusted)
-        checked (analysis/analyze-effective-input ctx owner {:implementations implementations
-                                                             :check-expression check/check-input-binding
-                                                             :infer-signature check/infer-input-signature})]
-    {:analysis checked
-     :invoke (compile-named checked {:context ctx :implementations implementations})}))
+  (let [{:keys [analysis implementations]} (analyze-stored ctx owner trusted)]
+    {:analysis analysis
+     :invoke (compile-named analysis {:context ctx :implementations implementations})}))

@@ -29,9 +29,9 @@
               (let [memo-address [anchor address]]
                 (if-let [entry (find @result memo-address)]
                   (val entry)
-                  (let [{:keys [op source value fields scope target-id binding-id type]}
+                  (let [{:keys [op source value fields scope target-id binding-id type default]}
                         (get-in ir [:expressions address])
-                        known (if (= :supplied op) (get supplied address) value)
+                        known (if (= :supplied op) (get supplied address default) value)
                         value (cond
                                 (not (get present address)) [:absent]
                                 (= :read op) (let [source-key (token anchor source)]

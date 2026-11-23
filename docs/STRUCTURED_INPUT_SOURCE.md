@@ -541,6 +541,34 @@ and derives the existing binding UUID from that pair. Checked execution
 exposes the remaining fields. The seam blocks inherited or external
 parents, configuration, extra declarations and references.
 
+### Defaults in pinned record inputs
+
+A scalar field can declare `{:type [:union :null :text] :required false
+:default "Ada"}`. Each direct member of a pinned record input can declare
+its own optional nullable-text fallback. Other members of that record must
+have scalar primitive types. The operator pin and the independently registered native
+ABI must agree with the record shape.
+
+The owner’s top-level input membership carries a nested fallback as
+`{:target-path ["<member slot UUID>"] :value "Ada"}`. Two inputs of the
+same record type can supply different fallbacks. For two or more fallback
+values the same membership stores `{:members [...]}` containing those
+path/value entries in ascending UUID string order. The reader rejects the
+whole group if a path repeats or fails validation. A member omitted from
+the group has no fallback. A present entry whose `:value` is nil supplies
+an explicit nil fallback. The shared record supplies field identities and types.
+
+The JVM keeps an omitted optional record absent. When a caller supplies
+the record, its omitted optional member can take its fallback. An explicit
+nil retains its value. A named browser entry can export this fallback for a
+public optional record supplied directly in the root invocation. The exporter checks the
+authorizing owner, its input type, the shared record and the nullable
+member type against the visible frozen snapshot. It matches the member
+path and fallback on the owner's input membership. A missing or changed
+membership, a shared-member default, or a callback-local record yields
+`:browser-field-default-unsupported`. Execution still requires a
+browser-supported primitive.
+
 ## Focused verification
 
 ```sh
@@ -556,3 +584,45 @@ expression interpretation, legacy semantic classification and offline module
 round trips. `graphden.packages.input-format-test` verifies the production
 boundary and preflight using tiny synthetic packages. These focused checks do
 not replace the native landing gate or whole-corpus execution comparison.
+
+## Enclosing source owners and dependency proof transactions
+
+`source-origins/index` records the original enclosing owner and source path of
+parser-generated inline declarations. It repeats the parser's normalization
+and expansion and compares the complete result with preparation. Nested
+bodies retain their immediate owner; sequence positions participate in their
+existing identities. A value-wrapped map remains opaque. Duplicate original
+owners cannot supply a unique witness. These private entries contain source
+payloads and must not be printed in diagnostics.
+
+A closure may request a generated child before reaching its enclosing owner,
+including when a scoped binding is temporarily omitted for proof. The child
+can then be checked independently using its exact original body. It still
+requires the ordinary authored-source round trip; the provenance index does
+not itself certify its rows. Repeated closure entries must agree on rows,
+resolved expressions, origins and rich declaration metadata. Alternate scalar
+spelling in the already verified `:bind` source and its enclosing inline-body
+wrapper do not change this evidence; child declarations are compared recursively.
+Generated names remain internal and are never added to authored modules.
+
+`source-snapshot/with-certified-owner` proves inherited projections and
+scoped bindings in one immutable dependency transaction. Each declaring
+owner must pass its existing forwarding or rename checks before replanning
+the descendant. Scoped additions retain the aggregate type, reference-use
+and occupancy checks. An occupied ancestor input, ambiguous occurrence,
+cyclic proof dependency or unsupported blocker aborts the transaction; no
+partial package is returned. This is offline source evidence, not proof of
+runtime equivalence or authorization to activate the new loader.
+
+One owner may also contain both direct local forwarding declarations and
+scoped bindings. Its projection group is proved first with the scoped values
+omitted. The full original reference origins must agree with that reduced
+owner, so omission cannot hide a competing reference. Before the scope replay,
+`source-joint/scope-view` checks every remaining legacy row, declaration,
+membership and projection against the verified baseline and frozen snapshot.
+The projection rows stay in the graph; adding the scoped values must preserve
+their occupancy, unique destinations and all runtime obligations. Only a full
+round trip of the combined source proposal publishes the owner and its parent
+forwarding links. The existing forwarding type admission still applies;
+inline callable fields such as `router-ring-response/:func` remain explicitly
+blocked by `:unproved-field-origin`.

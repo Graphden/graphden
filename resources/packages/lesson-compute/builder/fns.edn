@@ -1,0 +1,5 @@
+{:input-format 2
+ :namespace "lesson-compute.builder"
+ :fns [{:name :build-greeting-profile
+        :input {:profile {:type {:name :text} :required true}}
+        :return-type {:name :text}}]}

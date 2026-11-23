@@ -42,9 +42,14 @@ function _tourFindFn(name) {
 function _tourFnForCheck(check) {
   if (!check['owned?']) return _tourFindFn(check.name);
   if (typeof _tourState === 'undefined' || !_tourPrincipalMatches(_tourState)) return null;
-  const created = _tourState?.created?.find(
-    row => row.type === 'fn' && row.name === check.name && row.id && row.receipt === 'created');
-  return created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
+  const parentId = check['lesson-branch?'] ? _tourLesson()?.['template-id'] : null;
+  const created = check['lesson-branch?'] ? _tourStructuredChild(_tourState, parentId)
+    : _tourState?.created?.find(row => row.type === 'fn' && row.name === check.name
+      && row.id && row.receipt === 'created');
+  const fn = created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
+  if (check['lesson-branch?'] && ((fn?.['namespace-id'] ?? null) !== created?.['namespace-id']
+      || fn?.['parent-ids']?.length !== 1 || fn['parent-ids'][0] !== parentId)) return null;
+  return fn;
 }
 
 function _tourStructuredInputPath(check) {
@@ -55,6 +60,8 @@ function _tourStructuredInputPath(check) {
   if (!fn || fn.id !== selectedFnId) return false;
   const input = window.gdStructuredInputFor?.(fn.id);
   if (input?.status !== 'available' || !Array.isArray(input.fields) || !Array.isArray(input.occupied)) return false;
+  if (check['run?'] && input['run-available'] !== true) return false;
+  if (check.selector && !_tourDomVisible(check.selector)) return false;
 
   const samePath = candidate => Array.isArray(candidate) && candidate.length === path.length
     && path.every((name, index) => candidate[index] === name);
@@ -69,10 +76,13 @@ function _tourStructuredInputPath(check) {
   }
   if (state === 'remaining') {
     return !Object.hasOwn(check, 'version-id') && !occupied.length
-      && remaining?.kind === 'input-field' && !Object.hasOwn(remaining, 'fields')
+      && remaining?.kind === 'input-field'
+      && (check['record?'] === true ? Array.isArray(remaining.fields) : !Object.hasOwn(remaining, 'fields'))
       && remaining.type != null && samePath(remaining['bind-path']);
   }
-  if (state !== 'occupied' || remaining || occupied.length !== 1) return false;
+  const expectedReferenceInputs = check['reference-inputs?'] === true;
+  if (state !== 'occupied' || occupied.length !== 1
+      || (expectedReferenceInputs ? remaining?.kind !== 'reference-inputs' : !!remaining)) return false;
   const field = occupied[0];
   return field.type != null && typeof field['binding-id'] === 'string' && !!field['binding-id']
     && typeof field['version-id'] === 'string' && !!field['version-id']
@@ -278,7 +288,7 @@ function _tourCheckPasses(check) {
       case 'selected': {
         if (typeof selectedFnId === 'undefined' || !selectedFnId) return false;
         const sel = lookups?.fnMap ? lookups.fnMap.get(selectedFnId) : null;
-        return !!(sel && sel.name === check.name);
+        return !!(sel && sel.name === check.name && (!check['fn-id'] || sel.id === check['fn-id']));
       }
       case 'on-branch': {
         // Branch context IS the URL param; switching reloads the page and

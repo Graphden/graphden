@@ -779,7 +779,7 @@
 (defn- forwarded-proofs
   [context entry fields]
   (when-not (and (vector? fields) (seq fields) (= (count fields) (count (set fields)))
-                 (= (set (map #(vector [:args %] :field-projection-required) fields))
+                 (= (set (for [field-name fields] [[:args field-name] :field-projection-required]))
                     (set (map (juxt :source-path :code) (:blockers entry))))
                  (= (count fields) (count (:blockers entry))))
     (throw (ex-info "Every implicit local forwarding must be proved together"

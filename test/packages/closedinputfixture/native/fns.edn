@@ -1,0 +1,5 @@
+{:namespace "closedinputfixture.native"
+ :fns [{:name :closed-apply-text
+        :args {:payload {:type {:item :text :callback [:fn {:string :text} :text #{}]}
+                         :required true}}
+        :return-type :text}]}

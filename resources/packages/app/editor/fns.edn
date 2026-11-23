@@ -155,6 +155,7 @@
                   "packages/app/editor/editor-namespace-picker.js"
                   "packages/app/editor/editor-edit-validation.js"
                   "packages/app/editor/editor-edit-modes.js"
+                  "packages/app/editor/editor-edit-structured-input.js"
                   ;; sequence-item, fn-level + type-level edit modes (the
                   ;; skeleton lives in editor-edit-modes.js).
                   "packages/app/editor/editor-edit-modes-seq.js"
@@ -281,6 +282,7 @@
                   "packages/app/editor/editor-tour-session-graph.js"
                   "packages/app/editor/editor-tour.js"
                   "packages/app/editor/editor-tour-session.js"
+                  "packages/app/editor/editor-tour-structured-input.js"
                   "packages/app/editor/editor-tour-receipts.js"
                   "packages/app/editor/editor-tour-app-receipts.js"
                   "packages/app/editor/editor-tour-tokens.js"

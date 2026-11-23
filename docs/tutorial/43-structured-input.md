@@ -22,19 +22,23 @@ was.
 ## Try it
 
 1. Start **Bind part of a record and run with the rest** in the editor's
-   interactive tutorial. Select `tutorial-structured-profile` in the Explorer.
-2. Open **Remaining inputs** and expand **profile**. Click **Bind** beside
+   interactive tutorial from **main**. It opens a separate lesson branch.
+   Find `lesson-profile` in the Explorer and select the template from
+   `lessons.structured-input`.
+2. Open the template's **⋯** menu and choose **Extend**. Name the new function
+   `tutorial-structured-profile`, keep the root namespace selected and save.
+3. Open **Remaining inputs** and expand **profile**. Click **Bind** beside
    **name**, enter `Ada` and confirm. The lesson checks the saved binding at
    `profile.name`.
-3. Click **Run** on the sample's card. Under **profile**, enter `42` as
+4. Click **Run** on the sample's card. Under **profile**, enter `42` as
    **id** and `ada@example.test` as **email**. Submit the form.
-4. Check that the result contains all three fields.
+5. Check that the result contains all three fields.
 
    ```json
    {"id": "42", "name": "Ada", "email": "ada@example.test"}
    ```
 
-5. Click **Finish** and use the lesson's cleanup to remove its branch.
+6. Click **Finish** and use the lesson's cleanup to remove its branch.
 
 If you repeat the exercise, start on a fresh lesson branch so that
 `profile.name` is free again. For background on record types, read

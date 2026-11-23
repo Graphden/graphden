@@ -48,24 +48,24 @@
 
 
 (defn configuration
-  [annotation]
-  (select-keys annotation [:type :description]))
+  [evidence]
+  (select-keys evidence [:type :description]))
 
 
 (defn exact?
   "An unchanged field type and a metadata-only row require no value or callable
    invocation proof. The caller supplies the proved inherited field; narrower
    types do not match."
-  [owner field {:keys [row type target-path type-override-fn-id] :as annotation}]
+  [owner field {:keys [row type target-path type-override-fn-id] :as evidence}]
   (let [id (:id field)
         expected (when (and (uuid? (:id owner)) (uuid? id))
                    (cond-> {:kind :input-binding :id (ids/binding-id (:id owner) id)
                             :fn-id (:id owner) :scope-path [] :target-path [id]
                             :expression-kind nil :value-present false}
-                     (contains? annotation :type) (assoc :type-override-fn-id (:type-id field))
-                     (contains? annotation :description) (assoc :description (:description annotation))))]
+                     (contains? evidence :type) (assoc :type-override-fn-id (:type-id field))
+                     (contains? evidence :description) (assoc :description (:description evidence))))]
     (and (uuid? (:id owner)) (uuid? id)
-         (or (not (contains? annotation :type)) (= type (:type field)))
+         (or (not (contains? evidence :type)) (= type (:type field)))
          (= [id] target-path)
-         (= (when (contains? annotation :type) (:type-id field)) type-override-fn-id)
+         (= (when (contains? evidence :type) (:type-id field)) type-override-fn-id)
          (= expected row))))

@@ -1,0 +1,1 @@
+{:name "listfixture" :version "1.0.0" :dependencies ["core"] :modules ["numeric"]}

@@ -159,7 +159,7 @@
           apply-request (assoc request :expected-state (:expected-state preview))]
       (is (:ok preview))
       (is (empty? (sp/query-entities storage :input-binding {})))
-      (is (= :input/leaf-unavailable
+      (is (= :types/check-failed
              (attempt #(bind-command/preview ctx (assoc request :path ["user"])))))
       (is (= :types/check-failed
              (attempt #(bind-command/preview ctx (assoc request :value 42)))))
@@ -168,7 +168,8 @@
       (is (= :input/stale-preview
              (attempt #(bind-command/bind! ctx (assoc apply-request :value "Different")))))
       (binding [access/*offline?* false]
-        (is (= :input/offline-only (attempt #(bind-command/bind! ctx apply-request)))))
+        (is (= :authz/forbidden (attempt #(bind-command/preview ctx request))))
+        (is (= :authz/forbidden (attempt #(bind-command/bind! ctx apply-request)))))
       (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
         (tenancy/install-browser-source-policy!
           (constantly (fn [row]

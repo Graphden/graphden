@@ -63,6 +63,8 @@
       (is (= :timestamptz (:type (:source-timestamp fields))))
       (is (= :ref (:type (:target-branch-id fields))))
       (is (= :branch (:ref-entity (:target-branch-id fields))))
+      (is (= {:type :bool :nullable? true}
+             (select-keys (:input-versions-materialized? fields) [:type :nullable?])))
       (is (= :timestamptz (:type (:target-timestamp fields))))
       (is (= :timestamptz (:type (:created-at fields)))))))
 
@@ -155,7 +157,9 @@
              :return-type-fn-id :anonymous-hash :expects-effects
              :lambda-params}
            (vds/version-data-fields :fn)))
-    (is (= #{:fn-id :slot-id :position} (vds/version-data-fields :fn-slot)))
+    (is (= #{:fn-id :slot-id :position :input-default} (vds/version-data-fields :fn-slot)))
+    (is (not-any? (vds/version-data-fields :input-binding)
+                  [:merge-edge-id :merge-source-version-id :merge-selected-version-id]))
     (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id
              :type-override-fn-id :description :list-append :list-closed
              :terminal :required :resolver-fn-id}

@@ -1,5 +1,5 @@
 (ns graphden.crud.structured-input-bind
-  "Fixture-gated preview and creation of one structured literal binding."
+  "Authorize and check one named structured binding on a versioned owner."
   (:require
     [clojure.string :as str]
     [clojure.walk :as walk]
@@ -9,8 +9,10 @@
     [graphden.crud.request :as request]
     [graphden.crud.structured-authoring :as authoring]
     [graphden.crud.structured-input :as structured]
+    [graphden.crud.structured-run :as run]
     [graphden.input.access :as access]
     [graphden.input.authoring-principal :as principal]
+    [graphden.input.context :as input]
     [graphden.input.migration :as migration]
     [graphden.input.read-view :as read-view]
     [graphden.input.storage :as input-storage]
@@ -36,14 +38,23 @@
   (if (keyword? segment) segment (keyword segment)))
 
 
+(defn- command-id
+  [id]
+  (if (string? id) (parse-uuid id) id))
+
+
 (defn- normalize-command
-  [{:keys [fn-id path] :as command}]
-  (let [id (if (string? fn-id) (parse-uuid fn-id) fn-id)]
-    (when-not (and (uuid? id) (vector? path) (<= 1 (count path) 64)
-                   (contains? command :value)
-                   (every? #{:fn-id :path :value :expected-state} (keys command)))
-      (reject! :input/invalid-command "Supply a function, path and explicit literal value"))
-    (assoc command :fn-id id :path (mapv field-name path))))
+  [{:keys [fn-id path ref-fn-id] :as command}]
+  (let [owner (command-id fn-id)
+        reference? (contains? command :ref-fn-id)
+        target (command-id ref-fn-id)]
+    (when-not (and (uuid? owner) (vector? path) (<= 1 (count path) 64)
+                   (not= reference? (contains? command :value))
+                   (or (not reference?) (uuid? target))
+                   (every? #{:fn-id :path :value :ref-fn-id :expected-state} (keys command)))
+      (reject! :input/invalid-command "Supply a function, path and one literal or function reference"))
+    (cond-> (assoc command :fn-id owner :path (mapv field-name path))
+      reference? (assoc :ref-fn-id target))))
 
 
 (defn- ordered-map-keys
@@ -61,7 +72,9 @@
   (let [branch (vs/current-branch-id storage)
         base (vs/unwrap storage)
         version-anchors (fn [entity ids]
-                          (let [versions (res/resolve-version-ids base entity (vec ids) branch)]
+                          (let [versions (if (= entity :input-binding)
+                                           (input-storage/binding-versions storage (update-vals bindings :fn-id))
+                                           (res/resolve-version-ids base entity (vec ids) branch))]
                             (when-not (= (count ids) (count versions))
                               (reject! :input/stale-preview "Refresh the structured input before binding"))
                             versions))
@@ -75,59 +88,100 @@
     (crypto/sha256-hex (migration/stable-edn (ordered-map-keys state)))))
 
 
-(defn visible-leaf
-  "Resolve a visible, free leaf in the function's own input scope."
+(defn visible-field
+  "Resolve a visible, free field in the function's own input scope."
   [graph path]
-  (let [view (structured/project-analysis graph)
+  (let [view (structured/project-analysis graph true)
         wire (reduce (fn [node name] (some #(when (= name (:name %)) %) (:fields node))) view path)
-        route (structured/free-leaf-route (get-in graph [:public-input :routes]) path)]
-    (when-not (and (= :available (:status view)) wire (not (contains? wire :fields)) route)
+        route (structured/free-field-route (get-in graph [:public-input :routes]) path)]
+    (when-not (and (= :available (:status view)) (= path (:bind-path wire)) route)
       (reject! :input/leaf-unavailable "This input field is unavailable for binding"))
     route))
 
 
-(defn- checked-row
-  [ctx {:keys [fn-id path value]}]
-  (let [graph (structured/analyze ctx fn-id)
-        {[scope field-path :as address] :address} (visible-leaf graph path)
-        id (random-uuid)
-        form (reduce (fn [form key] {key form}) [:value value] (rseq path))
-        bound (surface/bind-input ctx (:public-input graph) form {:name->id {} :binding-id (constantly id)})
-        {:keys [binding-id expression]} (get bound address)
-        _ (when-not (and (= id binding-id) (= :value (:kind expression)) (contains? expression :value))
-            (reject! :input/unproven-bind "The proposed literal could not be resolved"))
-        row {:id id :fn-id fn-id :scope-path (second scope) :target-path field-path
-             :expression-kind "value" :value (:value expression) :value-present true}
-        postimage (structured/project (assoc-in ctx [:bindings id] row) fn-id)]
-    (when-not (= :available (:status postimage))
+(defn- proposed-row
+  [ctx graph {:keys [fn-id path ref-fn-id value]} id]
+  (let [{[scope field-path :as address] :address} (visible-field graph path)
+        form (reduce (fn [form key] {key form}) (if ref-fn-id [:ref ::target] [:value value]) (rseq path))
+        bound (surface/bind-input ctx (:public-input graph) form {:name->id {::target ref-fn-id} :binding-id (constantly id)})
+        {:keys [binding-id expression]} (get bound address)]
+    (when-not (and (= id binding-id)
+                   (if ref-fn-id
+                     (and (= :ref (:kind expression)) (= ref-fn-id (:fn-id expression)))
+                     (and (= :value (:kind expression)) (contains? expression :value))))
+      (reject! :input/unproven-bind "The proposed binding could not be resolved"))
+    (merge {:id id :fn-id fn-id :scope-path (second scope) :target-path field-path}
+           (if ref-fn-id
+             {:expression-kind "ref" :ref-fn-id ref-fn-id :value-present false}
+             {:expression-kind "value" :value (:value expression) :value-present true}))))
+
+
+(defn checked-row
+  "Check the exact prospective row against the open field and its compiled postimage."
+  [exec-ctx ctx {:keys [fn-id ref-fn-id] :as command} id]
+  (let [compiled (when (some #(= "ref" (:expression-kind %)) (vals (:bindings ctx)))
+                   (:analysis (run/runnable-input exec-ctx ctx fn-id)))
+        before (or compiled (input/call-with-types ctx #(structured/analyze ctx fn-id)))
+        row (input/call-with-types ctx #(proposed-row ctx before command id))
+        after (assoc-in ctx [:bindings (:id row)] row)
+        graph (if (or ref-fn-id compiled)
+                (:analysis (run/runnable-input exec-ctx after fn-id))
+                (structured/analyze after fn-id))]
+    (when-not (and (= :available (:status (input/call-with-types after #(structured/project-analysis graph))))
+                   (or (nil? ref-fn-id)
+                       (some #(and (= (:id row) (:binding-id %)) (= ref-fn-id (:target-fn-id %))
+                                   (or (= :value (:mode %)) (structured/verified-callable-reference? graph %)))
+                             (:dependencies graph))))
       (reject! :input/unproven-bind "The type of this binding could not be verified"))
     row))
 
 
+(defn reference-context
+  "Read an authorized proposed target and owner on the same writer snapshot."
+  [exec-ctx storage owner target]
+  (when-let [guard (:execute-guard exec-ctx)] (guard exec-ctx target))
+  (try
+    (let [frozen (read-view/collect-roots storage [owner target] (tenancy/browser-source-policy storage))]
+      (when-not (get-in frozen [:fns target :input-type-fn-id])
+        (reject! :authz/forbidden "The selected reference is unavailable"))
+      frozen)
+    (catch clojure.lang.ExceptionInfo error
+      (case (:type (ex-data error))
+        (:input/unresolved-contract :storage-error/candidate-limit :storage-error/bounded-query-unsupported)
+        (reject! :authz/forbidden "The selected reference is unavailable")
+        (throw error)))))
+
+
 (defn writable-context
   "Reauthorize the root and collect the sources visible on the writer connection."
-  [exec-ctx storage fn-id]
-  (writer/assert-write-authorized! storage :fn {} fn-id)
-  (when-let [reason (pkg/write-rejection storage :fn {:id fn-id})]
-    (reject! :authz/forbidden reason))
-  (when-not (or access/*offline?* (and (:authenticated? (principal/current))
-                                       (:input-type-fn-id (sp/read-entity storage :fn fn-id))))
-    (reject! :authz/forbidden "Structured input editing is unavailable"))
-  (let [frozen (read-view/collect storage fn-id (tenancy/browser-source-policy storage))]
-    (when-not (or access/*offline?* (authoring/editable-child? exec-ctx storage frozen fn-id))
-      (reject! :authz/forbidden "Structured input editing is unavailable"))
-    frozen))
+  ([exec-ctx storage fn-id] (writable-context exec-ctx storage fn-id nil))
+  ([exec-ctx storage fn-id detached]
+   (writer/assert-write-authorized! storage :fn {} fn-id)
+   (when-let [reason (pkg/write-rejection storage :fn {:id fn-id})]
+     (reject! :authz/forbidden reason))
+   (when-not (or access/*offline?* (and (:authenticated? (principal/current))
+                                        (:input-type-fn-id (sp/read-entity storage :fn fn-id))))
+     (reject! :authz/forbidden "Structured input editing is unavailable"))
+   (let [policy (tenancy/browser-source-policy storage)
+         frozen (if detached (read-view/collect-for-removal storage fn-id detached policy)
+                    (read-view/collect storage fn-id policy))]
+     (when-not (or access/*offline?* (authoring/editable-child? exec-ctx storage frozen fn-id))
+       (reject! :authz/forbidden "Structured input editing is unavailable"))
+     frozen)))
 
 
 (defn- owner-plan
-  [exec-ctx storage {:keys [fn-id] :as command} apply?]
-  (let [ctx (writable-context exec-ctx storage fn-id)
+  [exec-ctx storage {:keys [fn-id ref-fn-id] :as command} apply?]
+  (let [exec-ctx (assoc exec-ctx :storage storage)
+        owner (writable-context exec-ctx storage fn-id)
+        ctx (if ref-fn-id (reference-context exec-ctx storage fn-id ref-fn-id) owner)
         basis (preview-basis storage ctx command)
         _ (when (and apply? (not= basis (:expected-state command)))
             (reject! :input/stale-preview "Refresh the structured input before binding"))
-        row (checked-row ctx command)]
-    (writer/assert-write-authorized! storage :input-binding row nil)
-    {:basis basis :row row :owner (get-in ctx [:fns fn-id])}))
+        row (checked-row exec-ctx ctx command (random-uuid))
+        proof (input-storage/binding-proof storage :bind row nil)]
+    (input-storage/binding-call storage :check fn-id (:id row) proof #(writer/assert-write-authorized! storage :input-binding row nil))
+    {:basis basis :row row :proof proof :owner (get-in ctx [:fns fn-id])}))
 
 
 (defn with-input-write
@@ -161,7 +215,7 @@
 
 
 (defn bind!
-  "Revalidate one literal and its preview basis under the writer lock, then
+  "Revalidate the proposed binding and its preview basis under the writer lock, then
    insert a binding version. The caller supplies the same command as preview."
   [ctx request]
   (shield/run!
@@ -169,8 +223,10 @@
       (let [storage (request/require-storage ctx)
             command (normalize-command request)
             {:keys [binding owner]} (with-plan ctx storage command true
-                                      (fn [snapshot {:keys [row owner]}]
-                                        {:binding (or (access/with-binding-write (:id owner) (:id row) #(sp/create-entity snapshot :input-binding row))
+                                      (fn [snapshot {:keys [row owner proof]}]
+                                        {:binding (or (input-storage/binding-call
+                                                        snapshot :write (:id owner) (:id row) proof
+                                                        #(access/with-binding-write (:id owner) (:id row) (fn [] (sp/create-entity snapshot :input-binding row))))
                                                       (reject! :input/write-refused "The input binding was not written"))
                                          :owner owner}))
             result {:ok true :committed true :fn-id (:id owner) :binding-id (:id binding)}]

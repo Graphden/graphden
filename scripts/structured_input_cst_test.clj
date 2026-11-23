@@ -469,8 +469,8 @@
     (is (= {:n {:type :int :required false} :label {:type :text :required false}} (:input rewritten)))
     (is (= {:a [:project [:n]] :b [:project [:label]]} (:bind rewritten)))
     (is (= {[:a] {:type :int} [:b] {:type :text}} (:configure rewritten)))
-    (doseq [comment ["; number pin\r\n" "; name route\r\n"]]
-      (is (= 1 (count (re-seq (re-pattern comment) target)))))))
+    (doseq [annotation ["; number pin\r\n" "; name route\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern annotation) target)))))))
 
 
 (deftest original-concurrency-module-replays-renames-and-stable-binding-ids
@@ -727,8 +727,8 @@
     (is (= {:body {:type :text :required false}} (:input child)))
     (is (= {:value [:project [:body]]} (:bind child)))
     (is (= {[:value] {:type :text :description (edn/read-string description)}} (:configure child)))
-    (doseq [bytes [description "; alias header\r\n" "; description tail\r\n" "; alias spelling\r\n" "; type spelling\r\n"]]
-      (is (str/includes? target bytes)))))
+    (doseq [original-bytes [description "; alias header\r\n" "; description tail\r\n" "; alias spelling\r\n" "; type spelling\r\n"]]
+      (is (str/includes? target original-bytes)))))
 
 
 (deftest inline-description-remains-part-of-the-inline-declaration

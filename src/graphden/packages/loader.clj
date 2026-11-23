@@ -408,7 +408,7 @@
    `defbase`). The executor always calls them with both args, so the
    loader simply hands impl-fn through."
   [fn-def impl-entry]
-  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule local-type-rules
+  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule local-type-rules local-type-rule-aliases
                 taint-propagate? lazy-seq-args compile-time-value?]}
         (impl-entry->parts impl-entry)]
     (cond-> {:args (normalize-args (or (:input fn-def) (:args fn-def)))
@@ -428,6 +428,8 @@
       slot-types-rule       (assoc :slot-types-rule slot-types-rule)
       nav-types-rule        (assoc :nav-types-rule nav-types-rule)
       (seq local-type-rules) (assoc :local-type-rules local-type-rules)
+      (and (seq local-type-rules) (seq local-type-rule-aliases))
+      (assoc :local-type-rule-aliases local-type-rule-aliases)
       ;; `:taint-propagate?` — marker-taint (`:secret` &c.) flows from
       ;; any tainted input into the return. Applied CENTRALLY by the
       ;; checker on top of the structural rule/signature result —
@@ -537,11 +539,11 @@
   "Read and validate every module before any implementation is evaluated.
    The snapshot is local to one load call and is also the source consumed by
    processing, so a later resource change cannot bypass this format check."
-  [package-name pkg-meta admission]
+  [package-name pkg-meta admissions]
   {:package-name package-name
    :meta pkg-meta
    :modules (mapv (fn [module-name]
-                    [module-name (if (= [package-name module-name] (:module admission))
+                    [module-name (if-let [admission (get admissions [package-name module-name])]
                                    (primitive/read-module package-name module-name admission)
                                    (load-module-fns package-name module-name))])
                   (:modules pkg-meta))})
@@ -676,15 +678,34 @@
   (:ordered (resolve-package-set package-names)))
 
 
+(defn- primitive-admissions
+  [{:keys [primitive-input primitive-inputs]}]
+  (when (or (and (some? primitive-input) (some? primitive-inputs))
+            (and (some? primitive-inputs) (not (vector? primitive-inputs))))
+    (throw (ex-info "Invalid native primitive module selection" {:type :package-error/primitive-admission})))
+  (reduce (fn [admissions {:keys [module] :as admission}]
+            (when-not (and (map? admission) (vector? module) (= 2 (count module))
+                           (every? string? module) (not (contains? admissions module)))
+              (throw (ex-info "Invalid native primitive module selection" {:type :package-error/primitive-admission})))
+            (assoc admissions module admission))
+          {}
+          (if (some? primitive-input) [primitive-input] primitive-inputs)))
+
+
 (defn- load-packages*
-  [package-names primitive-input]
+  [package-names admissions]
   (let [{:keys [ordered metas]} (resolve-package-set package-names)
         _ (log/info "Loading packages in order:" ordered)
         ;; Eager preflight of the complete resolved closure. In particular a
         ;; late v2/unknown-format module cannot follow an earlier impl effect.
-        sources (mapv #(snapshot-package-source % (get metas %) primitive-input) ordered)
-        _ (when (and primitive-input (not-any? (fn [package] (some (comp :primitive second) (:modules package))) sources))
-            (throw (ex-info "Admitted primitive module missing" {:type :package-error/primitive-admission})))
+        sources (mapv #(snapshot-package-source % (get metas %) admissions) ordered)
+        _ (when (seq admissions)
+            (let [admitted-modules (set (for [{:keys [package-name modules]} sources
+                                              [module source] modules
+                                              :when (:primitive source)]
+                                          [package-name module]))]
+              (when-not (= (set (keys admissions)) admitted-modules)
+                (throw (ex-info "Admitted primitive module missing" {:type :package-error/primitive-admission})))))
         results (mapv load-single-package sources)
         ;; Single pass over results to build all aggregations
         combined (reduce (fn [acc result]
@@ -733,7 +754,7 @@
     ;; the loaded-package roster (packages.loaded) — recorded HERE, not in
     ;; the init-key, so every loader use (boot, the test golden bootstrap)
     ;; leaves the same read model behind
-    (when primitive-input
+    (when (seq admissions)
       (let [definitions (:base-fn-defs combined)]
         (primitive/check-implementations! (primitive/declarations definitions) definitions {})))
     (loaded/install! combined)
@@ -748,9 +769,10 @@
    Arguments:
    - package-names: seq of package names to load (e.g., [\"core\" \"web\" \"app\"])
 
-   The optional internal :primitive-input selects one [package module] with an
-   externally pinned :sha256, :fn-id and independent :abi-fn-id. Every other
-   module follows the ordinary source preflight.
+   The optional internal :primitive-input selects one [package module], or
+   :primitive-inputs selects a vector of distinct modules. Each admission has
+   a pinned :sha256, :fn-id and independent :abi-fn-id. The complete package
+   closure is preflighted before evaluating any implementation.
 
    Returns:
    {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
@@ -764,9 +786,9 @@
                        :restart-policy :always
                        :cardinality :per-pod
                        :description \"…\"} …]}"
-  ([package-names] (load-packages* package-names nil))
-  ([package-names {:keys [primitive-input]}]
-   (load-packages* package-names primitive-input)))
+  ([package-names] (load-packages* package-names {}))
+  ([package-names opts]
+   (load-packages* package-names (primitive-admissions opts))))
 
 
 ;; =============================================================================

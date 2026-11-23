@@ -16,6 +16,7 @@
    resource-override)."
   (:require
     [clojure.set :as set]
+    [graphden.input.access :as input-access]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.grouped-read :as grouped]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -209,6 +210,13 @@
     candidates))
 
 
+(defn conflicting-input-ids
+  "Compare only the supplied binding identities at the normal merge fork."
+  [storage ids source target]
+  (get-in (divergent-ids storage {:input-binding ids} source target (fork-point storage source target nil))
+          [:ids :input-binding] #{}))
+
+
 (defn- resolved-side
   "The conflict payload's view of one side: identity + version data for
    a live row (what `resolve-entity` answers), nil when that side
@@ -356,7 +364,7 @@
 (defn- create-merge-record!
   "Insert the branch-merge row that lets resolution surface source
    branch versions on target. Returns the inserted record."
-  [base-storage source-branch-id target-branch-id ts]
+  [base-storage source-branch-id target-branch-id ts host-context resolutions]
   (let [merge-record {:id (random-uuid)
                       :source-branch-id source-branch-id
                       :source-timestamp ts
@@ -364,14 +372,17 @@
                       :target-timestamp ts
                       :created-at ts
                       :change-revision (some-> tx/*transaction-context*
-                                               :change-revision deref)}]
-    (sp/create-entity base-storage :branch-merge merge-record)
+                                               :change-revision deref)}
+        write! (get-in base-storage [:graphden.input.authority/operations :create-merge!])
+        stored (if write!
+                 (input-access/with-merge-snapshot merge-record #(write! base-storage merge-record host-context resolutions))
+                 (sp/create-entity base-storage :branch-merge merge-record))]
     ;; The request's memoised merge rows for the target chain are stale
     ;; the moment this row exists — the post-merge reads of this same
     ;; request (delta service restart, the response's resolved view)
     ;; must see it.
     (res/forget-merges-memo!)
-    merge-record))
+    (if (:input-versions-materialized? stored) stored merge-record)))
 
 
 (defn- conflict-resolution->version-record
@@ -795,7 +806,7 @@
   ([versioned-storage source-branch-id]
    (merge-branch! versioned-storage source-branch-id {}))
   ([versioned-storage source-branch-id {:keys [conflict-resolutions inherited-checked?
-                                               trusted-precommit-check!]}]
+                                               trusted-precommit-check! structured-context]}]
    (let [base-storage (:base-storage versioned-storage)
          target-branch-id (:branch-id versioned-storage)
          ;; A branch cannot be merged into itself. `fork-point` degenerates
@@ -871,13 +882,15 @@
                (when revision (tx/note-change-revision! revision))
                (try
                  (let [merge-record (create-merge-record! storage source-branch-id
-                                                          target-branch-id merge-ts)]
+                                                          target-branch-id merge-ts structured-context conflict-resolutions)]
                    (apply-resolutions! storage conflicts conflict-resolutions
                                        target-branch-id merge-ts)
                    ;; The merge may introduce a resolved-view name or list
                    ;; position collision between distinct identities.
                    (assert-merge-preserves-uniqueness! storage source-branch-id
                                                        target-branch-id)
+                   (when (:input-versions-materialized? merge-record)
+                     ((get-in storage [:graphden.input.authority/operations :validate-merge!]) storage merge-record structured-context))
                    merge-record)
                  (catch Exception t
                    (when revision (epoch/note-applied! storage [revision]))

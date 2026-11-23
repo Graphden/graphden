@@ -371,9 +371,11 @@ async function startTutorialIsolated(lessonId, ticket = _tourStartTicket()) {
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
+  const requiresSandbox = ['43', '44', '45', '46', '47'].includes(lessonId);
+  if (requiresSandbox && (!lesson || !onMain)) return false;
   if (lesson?.requires === 'services'
       && !await _tourPrepareServiceLesson(lesson, () => _tourStartCurrent(ticket))) return false;
-  if (lesson?.['in-place']) return startTutorial(lessonId, null, null, null, ticket);
+  if (lesson?.['in-place'] && !requiresSandbox) return startTutorial(lessonId, null, null, null, ticket);
   if (!canBranch || !onMain) return startTutorial(lessonId, null, null, null, ticket);
   const branch = 'tutorial-' + lessonId + '-'
     + Math.random().toString(36).slice(2, 6);
@@ -387,6 +389,7 @@ async function startTutorialIsolated(lessonId, ticket = _tourStartTicket()) {
     id = window.crypto.randomUUID();
   } catch (_) {
     if (!_tourStartCurrent(ticket)) return false;
+    if (requiresSandbox) return false;
     if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
     return startTutorial(lessonId, null, null, null, ticket);
   }
@@ -406,6 +409,11 @@ async function startTutorialIsolated(lessonId, ticket = _tourStartTicket()) {
     if (_tourState !== state || !_tourStartCurrent(ticket)
         || !_tourPrincipalMatches(state)) return false;
     if ((response.status >= 400 && response.status < 500) || (response.ok && body?.ok === false)) {
+      if (requiresSandbox) {
+        _tourTeardown();
+        if (typeof gdToast === 'function') gdToast('Could not create the lesson branch');
+        return false;
+      }
       _tourState.created = [];
       _tourSaveState();
       if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');

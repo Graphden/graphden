@@ -770,13 +770,13 @@
 
 (deftest shipped-nullable-renames-instantiate-only-the-parent-nullable-variable
   (let [declarations (fn [module names]
-                       (let [{:keys [namespace fns]} (edn/read-string (slurp (io/resource (str "packages/" module "/fns.edn"))))]
-                         (mapv #(assoc % :namespace namespace) (filter #(contains? names (:name %)) fns))))
-        base (declarations "core/logic" #{:assert-some})
+                       (let [{module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource (str "packages/" module "/fns.edn"))))]
+                         (mapv #(assoc % :namespace module-ns) (filter #(contains? names (:name %)) fns))))
+        base-declarations (declarations "core/logic" #{:assert-some})
         aliases (declarations "core/refinements" #{:nullable-text :nullable-uuid})
         children (into (declarations "app/lookups" #{:_frbi-id-narrowed})
                        (declarations "app/views" #{:_view-filter-nonnull-text}))
-        definitions (into (into base aliases) children)
+        definitions (into (into base-declarations aliases) children)
         ctx (prepared definitions)
         report (source/verify-module (source/plan-module children ctx) ctx)]
     (is (= {:supported 2 :blocked 0} (:counts report)))
@@ -793,7 +793,7 @@
              ((juxt :id :target-path :projection-path) row))))
     (let [child (first children)
           replay (fn [target-type pin]
-                   (let [ds (into [(assoc-in (first base) [:args :value :type] target-type)] aliases)
+                   (let [ds (into [(assoc-in (first base-declarations) [:args :value :type] target-type)] aliases)
                          ds (conj ds (assoc-in child [:args :value :type] pin))
                          ctx (prepared ds)]
                      (first (:definitions (source/verify-module (source/plan-module [(last ds)] ctx) ctx)))))]
@@ -803,13 +803,13 @@
 
 
 (deftest closed-collection-pins-preserve-the-shared-generic-contract-and-physical-rows
-  (let [base {:namespace "fixture" :name :collect
-              :args {:xs {:type '[:list a]} :index {:type '[:map k [:list v]]}}
-              :return-type :any}
+  (let [parent-definition {:namespace "fixture" :name :collect
+                           :args {:xs {:type '[:list a]} :index {:type '[:map k [:list v]]}}
+                           :return-type :any}
         child {:namespace "fixture" :name :typed :parent :collect
                :args {:xs {:as :items :type [:list :uuid]}
                       :index {:as :groups :type [:map :text [:list :int]]}}}
-        definitions [base child]
+        definitions [parent-definition child]
         ctx (prepared definitions)
         entry (first (:definitions (source/verify-module (source/plan-module [child] ctx) ctx)))
         owner (ids/fn-id "fixture" :typed)
@@ -823,9 +823,9 @@
     (is (= {:type [:map :text [:list :int]]} (get-in entry [:proposed :configure [:index]])))
     (is (= [(ids/binding-id owner target) [target] [(ids/slot-id owner :items)] (ids/primitive-fn-id :sequence)]
            ((juxt :id :target-path :projection-path :type-override-fn-id) row)))
-    (is (contains? (codes (replay (assoc-in base [:args :xs :type] [:list :text]) [:list :uuid])) :rename-projection-required))
-    (is (contains? (codes (replay base [:list :missing-type])) :rename-projection-required))
-    (is (contains? (codes (replay (assoc-in base [:args :xs :type] '[:map a a]) [:map :keyword :text]))
+    (is (contains? (codes (replay (assoc-in parent-definition [:args :xs :type] [:list :text]) [:list :uuid])) :rename-projection-required))
+    (is (contains? (codes (replay parent-definition [:list :missing-type])) :rename-projection-required))
+    (is (contains? (codes (replay (assoc-in parent-definition [:args :xs :type] '[:map a a]) [:map :keyword :text]))
                    :rename-projection-required))))
 
 

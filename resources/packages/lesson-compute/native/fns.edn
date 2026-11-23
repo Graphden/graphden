@@ -1,0 +1,11 @@
+{:namespace "lesson-compute.native"
+ :fns [{:name :build-greeting-record
+        :args {:profile {:type {:name :text} :required true}}
+        :return-type {:name :text}}
+       {:name :decorate-greeting
+        :args {:string :text :mark :text}
+        :return-type :text}
+       {:name :deliver-greeting
+        :args {:profile {:type {:name :text} :required true}
+               :style {:type {:suffix :text :callback [:fn {:string :text} :text #{}]} :required true}}
+        :return-type :text}]}

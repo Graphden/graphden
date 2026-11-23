@@ -78,13 +78,16 @@
         admission {:module ["core" "arithmetic"] :fn-id root :abi-fn-id root :sha256 target-sha}
         ordinary (outcome #(loader/load-packages ["core"]))
         in-place (outcome #(loader/load-packages ["core"] {:primitive-input admission}))
-        sibling (outcome #(primitive/prepare-literal-root module (ids/fn-id "core.arithmetic" :add) owners))]
+        ;; A different registered native is only a negative control. The
+        ;; whole-module check runs before comparing these implementations.
+        control (assoc admission :abi-fn-id (ids/fn-id "core.arithmetic" :ceil))
+        sibling (outcome #(loader/load-packages ["core"] {:primitive-input control}))]
     (expect! [20 20 root] [(count owners) (count (remove #(or (:parent %) (:parents %)) entries))
                            (:fn-id (primitive/prepare module root))])
     (expect! {:type :package-error/input-format :code :unsupported-input-format} ordinary)
     (expect! {:type :package-error/primitive-admission} in-place)
     (expect! {:type :input/staged-primitive :code :staged-literal-parent-unsupported} sibling)
-    {:module-sha256 target-sha :roots (count owners) :ordinary ordinary :original-abi in-place :sibling sibling}))
+    {:module-sha256 target-sha :roots (count owners) :ordinary ordinary :original-abi in-place :distinct-abi-control sibling}))
 
 
 (defn check

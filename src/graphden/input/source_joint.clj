@@ -89,7 +89,7 @@
   (let [{:keys [fields paths]} (groups original)
         owner (:identity original)
         path-set (set paths)
-        field-paths (set (map #(vector :args %) fields))
+        field-paths (set (for [field-name fields] [:args field-name]))
         arguments (get-in original [:legacy :arguments])
         omitted (filter #(path-set (:source-path %)) arguments)
         ids (set (map #(get-in % [:origin :binding-id]) omitted))
@@ -126,7 +126,7 @@
   [original projected scoped]
   (let [{:keys [fields paths]} (groups original)
         projections (projection-certificates projected fields)
-        by-path (into (zipmap (map #(vector :args %) fields) projections)
+        by-path (into (zipmap (for [field-name fields] [:args field-name]) projections)
                       (map (juxt :source-path identity)) scoped)
         arguments (mapv #(if-let [certificate (get by-path (:source-path %))]
                            (assoc % :scope-certificate certificate) %) (get-in original [:legacy :arguments]))]

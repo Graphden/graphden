@@ -30,6 +30,7 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
     [graphden.input.access :as input-access]
+    [graphden.packages.arithmetic-input :as arithmetic]
     [graphden.packages.loader :as pkg]
     [graphden.packages.owned :as owned]
     [graphden.packages.primitive-input :as primitive]
@@ -328,6 +329,7 @@
    ;; Fail loud BEFORE any DB write if a base-fn and a fn-def share a name,
    ;; or a bare route's handler declares a wire-breaking :lambda-params.
    (validate-no-name-collisions! packages)
+   (arithmetic/assert-ledgers! packages)
    (validate-route-handler-shapes! packages)
    ;; Trusted-bootstrap batch ceiling — same rationale as the binding in
    ;; `sync-fn-entities-from-packages!` (which see): `*max-batch-size*`

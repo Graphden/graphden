@@ -11,7 +11,8 @@
     [graphden.input.read-view :as view]
     [graphden.packages.owned :as owned]
     [graphden.types.check.provenance :as provenance]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.validator :as validator]))
 
 
 (defn- trusted-roots
@@ -55,6 +56,19 @@
     (input/reject! :unsupported-run-signature {})))
 
 
+(defn- project-result
+  [t value]
+  ;; HTTP Run emits ordinary JSON. Preserve a finite scalar in its declared
+  ;; numeric type. The tagged browser protocol bounds composite results.
+  (if (and (float? value) (Double/isFinite (double value))
+           (loop [base t]
+             (if (types/refine-type? base)
+               (recur (types/refine-base base))
+               (contains? #{:numeric :float} base))))
+    (validator/validate! t value)
+    (values/project t value)))
+
+
 (defn- prepare
   "The HTTP result and argument-history boundaries require plain value types.
    Prepare only completely checked pure graphs with finite public contracts."
@@ -75,7 +89,7 @@
                         (values/contract (get-in analysis [:scopes [] :signature :return]))))]
     {:analysis (assoc analysis :compiled-input? true) :targets targets
      :invoke (executor/named-input-closure
-               (fn [args context] (values/project result-type (invoke args context))))
+               (fn [args context] (project-result result-type (invoke args context))))
      :surface surface
      :free-slots (into {} (map (fn [{:keys [name origin-field-id result-address]}]
                                  [name (or origin-field-id (peek (second result-address)))]))

@@ -47,7 +47,8 @@
 
 
 (defn- fixture
-  "The outer-mark candidate is in-memory diagnostic data, never package admission."
+  "Free mark selects the existing unbound callback primitive. The outer-mark
+   candidate is in-memory diagnostic data, never package admission."
   [{:keys [free-mark? outer-mark? projection?]}]
   (let [source (cond-> (source-module "structured")
                  outer-mark? (assoc-in [:fns 0 :input :style :type :mark] :text))
@@ -68,15 +69,13 @@
         edge (ids/binding-id lesson/root (:id callable))
         address [[lesson/root []] [(:id style) (:id callable)]]
         origins (into {} (map (juxt :id identity)) (:input-binding grouped))
-        bindings (cond-> origins
-                   free-mark? (dissoc (ids/binding-id lesson/callback (:id mark))))
         links {edge {:id edge :fn-id lesson/root :scope-path [] :target-path (second address)
-                     :expression-kind "ref" :ref-fn-id lesson/callback}
+                     :expression-kind "ref" :ref-fn-id (if free-mark? callback-base lesson/callback)}
                (ids/binding-id lesson/root (:id profile))
                {:id (ids/binding-id lesson/root (:id profile)) :fn-id lesson/root :scope-path []
                 :target-path [(:id profile)] :expression-kind "ref" :ref-fn-id lesson/builder}}
         projection-id (ids/binding-id lesson/root (:id mark))
-        bindings (cond-> (merge bindings links)
+        bindings (cond-> (merge origins links)
                    projection? (assoc projection-id {:id projection-id :fn-id lesson/root :scope-path [edge]
                                                      :target-path [(:id mark)] :expression-kind "projection"
                                                      :projection-scope-path []
@@ -131,11 +130,12 @@
     (is (= "Hello Ada! · team" (invoke (update (arguments "?") :style dissoc :mark) {})))))
 
 
-(deftest freeing-the-callback-mark-does-not-invent-a-lexical-source
+(deftest the-existing-unbound-callback-does-not-invent-a-lexical-source
   (let [{:keys [analysis address edge mark] :as sample} (fixture {:free-mark? true})
         plan (get-in analysis [:closures address])
         refused (rejection #(compile-fixture sample))]
     (is (= :checked (:status analysis)))
+    (is (= callback-base (get-in analysis [:scopes [edge] :fn-id])))
     (is (= [:string] (:parameters plan)))
     (is (= [] (:captures plan)))
     (is (= [{:target [[lesson/root [edge]] [mark]] :value-path []}] (:external-captures plan)))

@@ -99,7 +99,7 @@
                        #(assoc-in % [:scopes [] :signature-source :root-entry :effects] #{:db})
                        #(assoc-in % [:scopes [] :proofs address :status] :deferred)
                        #(assoc-in % [:scopes [binding-id] :signature :return] [:fn {} :text])
-                   #(assoc-in % [:scopes [binding-id] :declaration-order] [(random-uuid)])
+                       #(assoc-in % [:scopes [binding-id] :declaration-order] [(random-uuid)])
                        #(assoc-in % [:scopes [binding-id] :signature :effects] #{:db})]]
       (is (= :unproved-generic-forward-reference
              (rejection #(generic/verify! context (transform graph) owner witness)))))

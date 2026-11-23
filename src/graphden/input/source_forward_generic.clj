@@ -58,7 +58,7 @@
             type-origin (get-in snapshot [:type-origins return-type-id])
             _ (when-not (and (= 1 version) (= base-fn-id (ids/fn-id "core.logic" :const))
                              (= field-id (ids/slot-id base-fn-id :value)) (types/type-var? variable)
-                              (uuid? return-owner-id)
+                             (uuid? return-owner-id)
                              (some #{return-type-id} (vals (:alias-ids snapshot)))
                              (map? (:map type-origin)) (keyword? (:name type-origin))
                              (= return-type-ref (keyword (or (:namespace type-origin) "") (name (:name type-origin)))))

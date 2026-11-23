@@ -213,6 +213,42 @@
                (rejection-code #(runtimes base base-id execution/compile-package without-proof))))))))
 
 
+(deftest frozen-lookup-abi-and-source-field-share-the-declared-binder
+  (binding [types/*type-aliases-override* (atom {})]
+    (let [child {:namespace "fixture" :name :json-lookup :parent :get-in
+                 :args {:map :parse-json :path {:value [:leaf]} :default {:value false}}}
+          source (into (declarations "packages/core/collections/fns.edn" #{:get-in})
+                       (concat (declarations "packages/core/refinements/fns.edn" #{:path-segment})
+                               (declarations "packages/core/system/fns.edn" #{:parse-json}) [child]))
+          owner (ids/fn-id "fixture" :json-lookup)
+          base (ids/fn-id "core.collections" :get-in)
+          field (ids/slot-id base :map)
+          _ (sync/register-type-aliases! source)
+          _ (doseq [name [:get-in :parse-json]
+                    :let [native (get @loaded name)]]
+              (registry/record-rich-types! (ids/fn-id (:namespace native) name) name native))
+          roots (:by-id @registry/*rich-types-override*)
+          package (snapshot/package-index (parse/prepare-module source {} {}) source)
+          {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+          checked (analysis/analyze-effective-input context owner options)
+          obligations (filterv #(= [[owner []] [field]] (:address %)) (:obligations checked))]
+      (is (= '[:union :null [:map a :any]]
+             (get-in options [:implementations owner :argument-declarations :map :type])))
+      (is (= field (get-in options [:implementations owner :argument-declarations :map :id])))
+      (is (= :checked (:status checked)))
+      (is (= 1 (count obligations)))
+      (is (= :field-read (:trigger (first obligations))))
+      (is (= (:expected-type (first obligations))
+             (:type (some #(when (= field (:id %)) %) (get-in checked [:scopes [] :configured-contract :fields])))))
+      ;; Binder equality removes a duplicate check, not its runtime boundary.
+      (is (= :runtime-obligations-required
+             (rejection-code #(execution/compile-package
+                                package owner roots
+                                (into {} (for [name [:get-in :parse-json]
+                                               :let [native (get @loaded name)]]
+                                           [(ids/fn-id (:namespace native) name) (:impl native)])))))))))
+
+
 (deftest generated-list-projection-reads-the-authored-outer-field
   (let [child {:namespace "fixture" :name :greeting :parent :str
                :args {:parts ["Hello " {:as :person :type :text} "!"]}}
@@ -397,3 +433,20 @@
                      (declarations "packages/web/http/fns.edn" #{:response-cache-cell :_response-cache-current}))]
     (is (= :compile-time-value-compilation-required
            (rejection-code #(runtimes source (ids/fn-id "web.http" :_response-cache-current)))))))
+
+
+(deftest scoped-list-operand-executes-at-its-preserved-legacy-position
+  (let [directory {:namespace "fixture" :name :operand-directory :parent :zipmap
+                   :args {:keys {:append [{:value :prefix} {:value :upper}] :closed true}
+                          :vals {:append [{:value false} :str-upper] :closed true}}}
+        child {:namespace "fixture" :name :operand-call :parent :operand-directory :args {:string "checked"}}
+        source (into (declarations "packages/core/strings/fns.edn" #{:str-upper})
+                     (concat (declarations "packages/core/collections/fns.edn" #{:zipmap}) [directory child]))
+        owner (ids/fn-id "fixture" :operand-call)
+        compile-certified (fn [package root roots implementations]
+                            (execution/compile-package (snapshot/with-migrated-bindings package [root] roots)
+                                                       root roots implementations))
+        {:keys [canonical legacy analysis]} (runtimes source owner compile-certified)]
+    (is (= :checked (:status analysis)))
+    (is (empty? (:obligations analysis)))
+    (is (= {:prefix false :upper "CHECKED"} (legacy {}) (canonical {})))))

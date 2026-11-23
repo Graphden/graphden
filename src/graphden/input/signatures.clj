@@ -201,25 +201,44 @@
     (:type (descriptor/resolve-descriptor ctx return-type-fn-id))))
 
 
+(defn- declared-binder-renaming
+  [node scope implementation-scope root-entry argument-paths declarations]
+  (reduce-kv
+    (fn [renaming argument {:keys [id type]}]
+      (let [path (get argument-paths argument)
+            rich (types/resolve-alias type)
+            declared (when (= [id] path) (descriptor/node-at (:declared-contract node) path))
+            configured (when declared (descriptor/node-at (:configured-contract node) path))]
+        ;; A frozen base field and its unchanged inherited declaration share
+        ;; a binder. Shape equality alone, another field, or an overlay does
+        ;; not prove that an implementation variable names that binder.
+        (if (and declared (= rich (get-in root-entry [:args argument]) (:type declared))
+                 (= (variables/type-in-scope scope rich) (:type configured)))
+          (merge renaming (variables/value-renaming implementation-scope scope rich))
+          renaming)))
+    {} declarations))
+
+
 (defn infer-use
   "Infer one use from resolved dependency signatures through the supplied
    existing-engine callback. The implementation descriptor is shared with the
    compiler; :impl is never read or invoked. Returned substitutions/proofs must
    join graph checking before this signature can be called checked."
-  [ctx graph scope {:keys [base-fn-id root-entry argument-paths generated-list] :as implementation} infer-signature]
+  [ctx graph scope {:keys [base-fn-id root-entry argument-paths argument-declarations generated-list] :as implementation} infer-signature]
   (when-not (and (uuid? base-fn-id) (map? root-entry) (:return root-entry)
                  (fn? infer-signature))
     (context/reject! :signature-provider-required {:scope scope}))
   (let [node (get-in graph [:scopes (second scope)])
         implementation-scope [base-fn-id (conj (second scope) (first scope))]
-        root-entry (variables/signature-in-scope
-                     implementation-scope
-                     (assoc root-entry :fn-id base-fn-id))
+        renaming (declared-binder-renaming node scope implementation-scope root-entry argument-paths argument-declarations)
+        root-entry (->> (assoc root-entry :fn-id base-fn-id)
+                        (variables/signature-in-scope implementation-scope)
+                        (variables/resolve-signature renaming))
         declaration (get-in ctx [:fns (:fn-id node)])
         stored-return (when (:return-type-fn-id declaration) (declared-return ctx declaration))
         declaration (cond-> declaration
                       (and stored-return (not (:infer-return? generated-list)))
-                      (assoc :return-type (variables/type-in-scope implementation-scope stored-return)))
+                      (assoc :return-type (types/resolve renaming (variables/type-in-scope implementation-scope stored-return))))
         facts (binding-facts graph scope argument-paths)
         result (infer-signature
                  (assoc facts :fn-id (:fn-id node) :root-entry root-entry

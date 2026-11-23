@@ -256,6 +256,8 @@
                                   list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
                                   (rich/erased-return? type-id return) [[id type-id] return]))))
                    entries)
+             :source-list-fragments (into {} (keep (fn [[id entry]]
+                                                     (when-let [fragment (:list-fragment entry)] [id fragment]))) entries)
              :source-field-types (source-field-types entries)
              :source-binding-types
              (into {}
@@ -353,7 +355,8 @@
     (when-not (signatures/local-type-rules? entry)
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
-     :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}))
+     :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)
+     :argument-declarations (into {} (map (juxt :name identity)) fields)}))
 
 
 (defn- implementation-options

@@ -1,7 +1,8 @@
 (ns graphden.input.obligations-test
   (:require
     [clojure.test :refer [deftest is]]
-    [graphden.input.obligations :as obligations]))
+    [graphden.input.obligations :as obligations]
+    [graphden.input.variables :as variables]))
 
 
 (deftest coincident-field-read-checks-retain-the-configured-type-in-either-order
@@ -26,3 +27,19 @@
              (try (separate diagnostics)
                   nil
                   (catch clojure.lang.ExceptionInfo error (ex-data error))))))))
+
+
+(deftest equal-shapes-from-independent-binders-remain-distinct-checks
+  (let [owner (random-uuid)
+        field (random-uuid)
+        address [[owner []] [field]]
+        rich '[:union :null [:map a :any]]
+        left (variables/type-in-scope [owner [(random-uuid)]] rich)
+        right (variables/type-in-scope [owner [(random-uuid)]] rich)
+        graph {:scopes {[] {:configured-contract {:fields [{:id field :type left}]}}}
+               :diagnostics (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) [left right])}]
+    (is (not= left right))
+    (is (= :conflicting-runtime-obligations
+           (try (obligations/separate graph)
+                nil
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

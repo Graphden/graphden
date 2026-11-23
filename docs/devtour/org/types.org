@@ -93,13 +93,13 @@ Certifies scoped bindings and forwarded fields with trusted implementation signa
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 197
-:MINS: 1.8
+:LINE: 248
+:MINS: 2.0
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:197]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:248]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]]
 
@@ -107,13 +107,13 @@ Finds all omitted bindings in the original ledger and resolves each route agains
 :PROPERTIES:
 :CUSTOM_ID: types/migrate-forwarded-field
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 574
+:LINE: 577
 :MINS: 0.9
 :END:
 
 Freezes both endpoints of an authored field passed to a value-producing reference. The checker replays the exact projection and verifies that the original local field remains available. A successful replay supplies a source proposal with the scoped path and its original field identity.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:574]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:577]]
 - see also :: [[file:types.org::#types/verify-module][verify-module]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]]
 
@@ -239,13 +239,13 @@ Includes checked named residual routes and the wire type for each supported supp
 :PROPERTIES:
 :CUSTOM_ID: types/infer-use
 :FILE: src/graphden/input/signatures.clj
-:LINE: 204
-:MINS: 3.1
+:LINE: 222
+:MINS: 3.2
 :END:
 
 Feeds canonical scoped input facts through the existing type-rule engine using explicit implementation argument paths. Frozen registry views preserve rule lookup isolation; implementation functions never run here. Returned substitutions and proofs must join graph checking before the inferred signature can be treated as checked.
 
-- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:204]]
+- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:222]]
 - referenced from :: [[file:types.org::#types/resolve-closure][resolve-closure]]
 
 * 19. resolve-closure

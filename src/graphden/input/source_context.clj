@@ -3,6 +3,7 @@
   (:require
     [graphden.input.format :as format]
     [graphden.input.list-positions :as positions]
+    [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.source-annotations :as annotations]
     [graphden.input.source-rename :as rename]
@@ -246,14 +247,46 @@
     (reject! :missing-reference-declaration [])))
 
 
+(defn- source-list-link
+  [lineage {:keys [source-list-fragment] :as edge} public-path]
+  (let [{:keys [owner-id target-id binding-id builder-id]} source-list-fragment
+        origin (some #(when (= owner-id (get-in % [:owner :id])) %) lineage)
+        [link & more] (filter #(= binding-id (:id %)) (get-in origin [:records :binding]))]
+    (when-not (and (list-signature/source-link? edge) (empty? more)
+                   (= owner-id (:fn-id link)) (= target-id (:slot-id link))
+                   (true? (:list-append link)) (false? (:value-present link))
+                   (nil? (:ref-fn-id link)) (nil? (:value link)))
+      (reject! :reference-use-drift public-path))
+    ;; The ordinary reader consumes the verified list builder as a ref.
+    ;; This is derived context, never a replacement legacy binding row.
+    (assoc link :ref-fn-id builder-id)))
+
+
+(defn- check-list-operand!
+  [env prior {:keys [source-list-operand binding-id target-fn-id] :as edge} public-path]
+  (let [lineage (certified-lineage env (:origin-fn-id prior))
+        link (source-list-link lineage prior public-path)
+        origin (some #(when (= (:fn-id link) (get-in % [:owner :id])) %) lineage)
+        [item & more] (filter #(= binding-id (:id %)) (get-in origin [:records :binding-list-item]))]
+    (when-not (and (list-signature/source-operand? prior edge) (empty? more)
+                   (= (:id link) (:binding-id item)) (= (:position source-list-operand) (:position item))
+                   (= target-fn-id (:ref-fn-id item)) (nil? (:value item)) (not (:literal item)))
+      (reject! :reference-use-drift public-path))))
+
+
 (defn- check-descendants!
   [env {:keys [edges field-owner public-path row]}]
-  (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id]}] (partition 2 1 edges)]
-    (let [scope (certified-lineage env (:target-fn-id prior))
-          origin (some #(when (= origin-fn-id (get-in % [:owner :id])) %) scope)
-          link (some #(when (= binding-id (:id %)) %) (get-in origin [:records :binding]))]
-      (when-not (and (= (:ref-fn-id link) target-fn-id) (= [(:slot-id link)] (second from)))
-        (reject! :reference-use-drift public-path))))
+  (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id source-list-fragment source-list-operand] :as edge}]
+          (partition 2 1 edges)]
+    (if source-list-operand
+      (check-list-operand! env prior edge public-path)
+      (let [scope (certified-lineage env (:target-fn-id prior))]
+        (if source-list-fragment
+          (source-list-link scope edge public-path)
+          (let [origin (some #(when (= origin-fn-id (get-in % [:owner :id])) %) scope)
+                link (some #(when (= binding-id (:id %)) %) (get-in origin [:records :binding]))]
+            (when-not (and (= (:ref-fn-id link) target-fn-id) (= [(:slot-id link)] (second from)))
+              (reject! :reference-use-drift public-path)))))))
   (let [scope (certified-lineage env (:target-fn-id (peek edges)))
         origin (some #(when (= field-owner (get-in % [:owner :id])) %) scope)]
     (when-not (some #(= (:target-path row) [(:slot-id %)]) (get-in origin [:records :fn-slot]))
@@ -268,10 +301,15 @@
     (when (seq certificates)
       (let [own (scope-entry definition records)
             lineage (rest (parent-order env own))
-            links (into {} (comp (mapcat #(get-in % [:records :binding])) (filter :ref-fn-id) (map (juxt :id identity))) lineage)]
+            links (into {} (comp (mapcat #(get-in % [:records :binding])) (filter :ref-fn-id) (map (juxt :id identity))) lineage)
+            list-links (into {} (keep (fn [certificate]
+                                        (let [edge (first (:edges certificate))]
+                                          (when (:source-list-fragment edge)
+                                            (let [link (source-list-link (cons own lineage) edge (:public-path certificate))]
+                                              [(:id link) link]))))) certificates)]
         (run! (partial check-descendants! env) certificates)
         {:scoped-inputs (into {} (map (juxt :public-path identity)) certificates)
-         :inherited-scoped-refs links}))))
+         :inherited-scoped-refs (merge links list-links)}))))
 
 
 (defn own-field-declaration?

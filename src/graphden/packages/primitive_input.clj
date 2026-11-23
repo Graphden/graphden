@@ -7,6 +7,7 @@
     [graphden.input.source-primitive :as primitive]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
+    [graphden.packages.arithmetic-input :as arithmetic]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
@@ -109,7 +110,7 @@
 (defn declarations
   [definitions]
   (into {} (keep (fn [[name definition]]
-                   (when-let [source (declaration name definition)] [name source]))) definitions))
+                   (when-let [source (or (arithmetic/evidence definition) (declaration name definition))] [name source]))) definitions))
 
 
 (defn check-implementations!
@@ -117,25 +118,27 @@
    loaded reference implementation. Runtime overrides cannot change either."
   [sources definitions overrides]
   (doseq [[name source] sources]
-    (let [[reference-name reference]
-          (some (fn [[n d :as entry]] (when (= (:abi-fn-id source) (ids/fn-id (:namespace d) n)) entry))
-                definitions)
-          impl (get-in definitions [name :impl])]
-      (when-not (and (not (contains? sources reference-name))
-                     (fn? impl) (identical? impl (:impl reference))
-                     (identical? impl (get overrides name impl))
-                     (identical? impl (get overrides reference-name impl))
-                     (= (get-in source [:parsed :source :return-type]) (:return-type reference))
-                     (= (into {} (map (juxt :name :type)) (get-in source [:parsed :contract :fields]))
-                        (update-vals (:args reference) :type))
-                     (every? #(= (get-in source [:parsed :source :input % :required])
-                                 (get-in reference [:args % :required]))
-                             (get-in source [:parsed :occurrence-fields]))
-                     (empty? (:effects reference)))
-        (reject!)))))
+    (if (:in-place-definition source)
+      (arithmetic/assert-implementation! source name (get definitions name) overrides)
+      (let [[reference-name reference]
+            (some (fn [[n d :as entry]] (when (= (:abi-fn-id source) (ids/fn-id (:namespace d) n)) entry))
+                  definitions)
+            impl (get-in definitions [name :impl])]
+        (when-not (and (not (contains? sources reference-name))
+                       (fn? impl) (identical? impl (:impl reference))
+                       (identical? impl (get overrides name impl))
+                       (identical? impl (get overrides reference-name impl))
+                       (= (get-in source [:parsed :source :return-type]) (:return-type reference))
+                       (= (into {} (map (juxt :name :type)) (get-in source [:parsed :contract :fields]))
+                          (update-vals (:args reference) :type))
+                       (every? #(= (get-in source [:parsed :source :input % :required])
+                                   (get-in reference [:args % :required]))
+                               (get-in source [:parsed :occurrence-fields]))
+                       (empty? (:effects reference)))
+          (reject!))))))
 
 
-(defn checked-records
+(defn- checked-alias-records
   "Validate the independently registered package ABI and exact native function
    identity. Both entries must come from the current registration."
   [{:keys [parsed abi-fn-id module children list-module]} impls signatures]
@@ -168,3 +171,10 @@
                         row)) (:declaration-records parsed))
               (comp (mapcat :declaration-records) (remove (set (:declaration-records parsed))) (distinct))
               children)))))
+
+
+(defn checked-records
+  [source impls signatures]
+  (if (:in-place-definition source)
+    (arithmetic/checked-records source impls signatures)
+    (checked-alias-records source impls signatures)))

@@ -57,41 +57,72 @@
         (finally (.setContextClassLoader thread original))))))
 
 
-(defn- original!
-  []
-  (let [definitions (:base-fn-defs (loader/load-packages ["core"]))
-        floor (:floor definitions)
-        value ((:impl floor) {:number -2.25} {})
-        witnesses (into [] (keep (fn [[name {impl :impl}]]
-                                   (when (identical? impl (:impl floor)) name))) definitions)]
-    (expect! ["core.arithmetic" :int -3 [:floor]] [(:namespace floor) (:return-type floor) value witnesses])
-    {:floor value :registrations witnesses}))
+(def ^:private inputs
+  {:add {:nums [10 3 2]} :sub {:nums [10 3 2]} :mul {:nums [10 3 2]} :div {:nums [12 3 2]}
+   :min {:nums [10 -3 2]} :max {:nums [10 -3 2]}
+   :floor {:number -2.25} :ceil {:number -2.25} :sqrt {:number 9} :pow {:base 2 :exponent 5}
+   :mod {:dividend 13 :divisor 5} :quot {:dividend 13 :divisor 5} :neg {:number 3} :abs {:number -3}
+   :round {:number 2.76 :decimals 1} :neq {:values ["one" 2]} :lt {:nums [1 2]} :lte {:nums [1 1]}
+   :gt {:nums [3 2]} :gte {:nums [3 3]}})
+
+
+(defn- execute-module
+  [packages]
+  (let [entries (into {} (filter (fn [[_ d]] (= "core.arithmetic" (:namespace d)))) (:base-fn-defs packages))]
+    (expect! (set (keys inputs)) (set (keys entries)))
+    (into (sorted-map)
+          (map (fn [[n args]]
+                 (let [d (get entries n)]
+                   [n {:result ((:impl d) args {}) :args (:args d) :return (:return-type d)
+                       :metadata (disj (set (keys d)) :local-type-rules)
+                       :inferred (when-let [rule (:return-type-rule d)]
+                                   (rule (update-vals args (fn [v] {:type (if (vector? v) [:list :int] :int)}))
+                                         (:return-type d)))}])))
+          inputs)))
+
+
+(def ^:private admission
+  {:module ["core" "arithmetic"] :in-place-abi :core.arithmetic :sha256 target-sha})
 
 
 (defn- candidate!
-  []
+  [postgres?]
   (let [root (ids/fn-id "core.arithmetic" :floor)
         module (with-open [stream (io/input-stream (io/resource module-path))]
                  (staged/read-pinned (.readAllBytes stream) target-sha))
         entries (:fns module)
         owners (set (map #(ids/fn-id (:namespace module) (:name %)) entries))
-        admission {:module ["core" "arithmetic"] :fn-id root :abi-fn-id root :sha256 target-sha}
+        alias-admission {:module ["core" "arithmetic"] :fn-id root :abi-fn-id root :sha256 target-sha}
         ordinary (outcome #(loader/load-packages ["core"]))
-        in-place (outcome #(loader/load-packages ["core"] {:primitive-input admission}))
+        in-place (outcome #(loader/load-packages ["core"] {:primitive-input alias-admission}))
         ;; A different registered native is only a negative control. The
         ;; whole-module check runs before comparing these implementations.
-        control (assoc admission :abi-fn-id (ids/fn-id "core.arithmetic" :ceil))
+        control (assoc alias-admission :abi-fn-id (ids/fn-id "core.arithmetic" :ceil))
         sibling (outcome #(loader/load-packages ["core"] {:primitive-input control}))]
     (expect! [20 20 root] [(count owners) (count (remove #(or (:parent %) (:parents %)) entries))
                            (:fn-id (primitive/prepare module root))])
     (expect! {:type :package-error/input-format :code :unsupported-input-format} ordinary)
     (expect! {:type :package-error/primitive-admission} in-place)
     (expect! {:type :input/staged-primitive :code :staged-literal-parent-unsupported} sibling)
-    {:module-sha256 target-sha :roots (count owners) :ordinary ordinary :original-abi in-place :distinct-abi-control sibling}))
+    (let [packages (loader/load-packages ["core"] {:primitive-input admission})]
+      (cond-> {:executions (execute-module packages)
+               :module-sha256 target-sha :roots (count owners) :ordinary ordinary :original-abi in-place :distinct-abi-control sibling}
+        postgres? (assoc :postgres ((requiring-resolve 'graphden.test-infra.arithmetic-replay/check) packages inputs))))))
+
+
+(defn- reject-changed-impl!
+  [tmp resources]
+  (let [changed (fs/path tmp "changed")
+        file (fs/path changed "packages/core/arithmetic/impls.clj")]
+    (fs/create-dirs (fs/parent file))
+    (spit (str file) "(throw (ex-info \"Unexpected implementation evaluation\" {}))")
+    (expect! {:type :package-error/primitive-admission}
+             (on-package-classpath (cons changed resources)
+                                   #(outcome (fn [] (loader/load-packages ["core"] {:primitive-input admission})))))))
 
 
 (defn check
-  [{:keys [artifact checkout]}]
+  [{:keys [artifact checkout postgres]}]
   (let [ledger (inventory/read-edn artifact (slurp artifact :encoding "UTF-8"))
         source-identity (some #(when (= "core" (:label %)) (:source-identity %)) (get-in ledger [:report :source-identities]))
         path (str "resources/" module-path)
@@ -108,6 +139,10 @@
                         (fs/create-dirs original)
                         (fs/unzip archive original)
                         (stage/stage! (assoc ledger :modules module) "core" original candidate)
-                        (let [legacy (on-package-classpath [resources] original!)
-                              staged (on-package-classpath [(fs/path candidate "resources") resources] candidate!)]
-                          (prn {:source-head source-head :legacy legacy :staged staged}))))))
+                        (let [legacy (on-package-classpath [resources] #(execute-module (loader/load-packages ["core"])))
+                              staged (on-package-classpath [(fs/path candidate "resources") resources] #(candidate! postgres))]
+                          (reject-changed-impl! tmp [(fs/path candidate "resources") resources])
+                          (expect! legacy (:executions staged))
+                          (expect! [-3 15] (mapv #(get-in legacy [% :result]) [:floor :add]))
+                          (prn {:source-head source-head :staged (dissoc staged :executions)
+                                :results (update-vals legacy :result)}))))))

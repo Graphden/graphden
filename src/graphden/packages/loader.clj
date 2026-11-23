@@ -50,6 +50,8 @@
     [clojure.tools.reader :as treader]
     [clojure.tools.reader.reader-types :as treader-types]
     [graphden.input.format :as input-format]
+    [graphden.packages.arithmetic-input :as arithmetic]
+    [graphden.packages.implementation :as impl]
     [graphden.packages.loaded :as loaded]
     [graphden.packages.primitive-input :as primitive]
     [graphden.packages.records.wire :as wire]
@@ -242,20 +244,6 @@
 ;; Implementation Loading
 ;; =============================================================================
 
-;; Compiling a module = `read-string` then `eval`, both of which mutate
-;; JVM-GLOBAL state: the reader's `*ns*`/data-reader tables, the namespace
-;; registry, and the shared DynamicClassLoader `eval` defines classes into.
-;; Two threads compiling different modules concurrently corrupt that shared
-;; state — the observed symptom is a bogus reader error ("Map literal must
-;; contain an even number of forms") thrown while another thread is mid-eval.
-;; Production loads packages serially so it never trips; only the parallel
-;; test harness (many registry builds at once) does, where it surfaced as a
-;; gate flake. Serialize the compile step behind one lock. This is a
-;; boot/registry-build path, run a bounded number of times, NOT a hot path —
-;; the lock adds no steady-state cost.
-(defonce ^:private eval-load-lock (Object.))
-
-
 (defn- reuse-loaded-impls?
   "COVERAGE MODE — `-Dgraphden.impls.reuse-loaded=true` (the `:coverage`
    deps alias, set by `bb coverage`). An impls.clj is normally `eval`ed
@@ -272,37 +260,9 @@
 
 
 (defn- load-impls-via-eval
-  "Loads implementations by evaluating the impls.clj file as Clojure code.
-   Returns the impls map from the namespace."
   [package-name module-name]
-  (let [path (str "packages/" package-name "/" module-name "/impls.clj")]
-    (when-let [resource (io/resource path)]
-      (let [content (slurp resource)]
-        (locking eval-load-lock
-          ;; Parse the ns form to extract the namespace name
-          (let [forms (read-string (str "[" content "]"))
-                ns-form (first forms)
-                ns-sym (when (and (seq? ns-form) (= 'ns (first ns-form)))
-                         (second ns-form))
-                loaded-impls (when (and ns-sym (reuse-loaded-impls?))
-                               (some-> (find-ns ns-sym) (ns-resolve 'impls)))]
-            (cond
-              ;; Coverage mode: the instrumented namespace is already here.
-              loaded-impls @loaded-impls
-
-              ns-sym
-              (do
-                ;; Create the namespace if it doesn't exist
-                (create-ns ns-sym)
-
-                ;; Evaluate all forms in the namespace context
-                (binding [*ns* (the-ns ns-sym)]
-                  (doseq [form forms]
-                    (eval form)))
-
-                ;; Return the impls var value
-                (when-let [impls-var (ns-resolve ns-sym 'impls)]
-                  @impls-var)))))))))
+  (when-let [resource (io/resource (str "packages/" package-name "/" module-name "/impls.clj"))]
+    (impl/evaluate (slurp resource) (reuse-loaded-impls?))))
 
 
 (defn- load-module-impls
@@ -484,7 +444,8 @@
   [package-name module-name module-source]
   (let [{ns-path :ns-path ns-description :ns-description fns :fns}
         module-source
-        impls (load-module-impls package-name module-name)
+        registration (some-> (:in-place module-source) arithmetic/register-module)
+        impls (if registration (:impls registration) (load-module-impls package-name module-name))
 
         ;; Separate base functions from fn-defs
         {base-fns true fn-defs false} (group-by base-fn? fns)
@@ -503,8 +464,9 @@
                                                   (fn-def->base-fn-def fn-def impl-entry))]]
                              (if (:impl base-def)
                                [fn-name (cond-> (assoc base-def :namespace ns-path)
-                                          (:primitive module-source) (vary-meta assoc ::primitive/source (:primitive module-source)))]
-                               (if (:primitive module-source)
+                                          (:primitive module-source) (vary-meta assoc ::primitive/source (:primitive module-source))
+                                          registration ((:attest registration) fn-name))]
+                               (if (or registration (:primitive module-source))
                                  (throw (ex-info "Package primitive implementation missing" {:type :package-error/primitive-admission}))
                                  (do
                                    (log/warn "No impl found for base fn:" fn-name
@@ -544,7 +506,9 @@
    :meta pkg-meta
    :modules (mapv (fn [module-name]
                     [module-name (if-let [admission (get admissions [package-name module-name])]
-                                   (primitive/read-module package-name module-name admission)
+                                   (if (contains? admission :in-place-abi)
+                                     (arithmetic/read-module package-name module-name admission)
+                                     (primitive/read-module package-name module-name admission))
                                    (load-module-fns package-name module-name))])
                   (:modules pkg-meta))})
 
@@ -702,7 +666,7 @@
         _ (when (seq admissions)
             (let [admitted-modules (set (for [{:keys [package-name modules]} sources
                                               [module source] modules
-                                              :when (:primitive source)]
+                                              :when (or (:primitive source) (:in-place source))]
                                           [package-name module]))]
               (when-not (= (set (keys admissions)) admitted-modules)
                 (throw (ex-info "Admitted primitive module missing" {:type :package-error/primitive-admission})))))
@@ -750,10 +714,13 @@
                                         (range (count segments)))]
                          (set paths)))
         all-namespaces (reduce into #{} (map expand-ns (into all-ns-paths fn-def-ns)))
-        combined (assoc combined :namespaces all-namespaces)]
+        in-place (for [package sources [_ source] (:modules package) :when (:in-place source)] (:in-place source))
+        combined (cond-> (assoc combined :namespaces all-namespaces)
+                   (seq in-place) (vary-meta assoc ::arithmetic/modules (vec in-place)))]
     ;; the loaded-package roster (packages.loaded) — recorded HERE, not in
     ;; the init-key, so every loader use (boot, the test golden bootstrap)
     ;; leaves the same read model behind
+    (arithmetic/assert-ledgers! combined)
     (when (seq admissions)
       (let [definitions (:base-fn-defs combined)]
         (primitive/check-implementations! (primitive/declarations definitions) definitions {})))
@@ -771,7 +738,8 @@
 
    The optional internal :primitive-input selects one [package module], or
    :primitive-inputs selects a vector of distinct modules. Each admission has
-   a pinned :sha256, :fn-id and independent :abi-fn-id. The complete package
+   a pinned :sha256, :fn-id and independent :abi-fn-id, or the exact
+   :in-place-abi :core.arithmetic registration. The complete package
    closure is preflighted before evaluating any implementation.
 
    Returns:

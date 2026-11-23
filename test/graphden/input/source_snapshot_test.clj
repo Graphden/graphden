@@ -690,9 +690,9 @@
         package (snapshot/package-index (parse/prepare-module selected {} {}) selected)
         result (snapshot/projection-readiness package id @roots)
         [route] (:projections result)]
-    (is (= :incomplete (:status result)))
-    (is (= :conflicting-runtime-obligations (-> result :diagnostics last :code)))
-    (is (false? (get-in result [:coverage :signatures])))
+    (is (= :checked (:status result)))
+    (is (empty? (:diagnostics result)))
+    (is (true? (get-in result [:coverage :signatures])))
     (is (= (ids/binding-id id field) (:binding-id route)))
     (is (= [[id []] [field]] (:from route)))
     (is (= [[id []] [alias-id]] (:source route)))

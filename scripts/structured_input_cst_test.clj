@@ -71,6 +71,22 @@
            (format/inline-origin (format/migrate-inline (assoc-in original [:args :flag] false) proposal))))))
 
 
+(deftest scoped-inline-annotations-keep-comments-and-the-legacy-name
+  (let [raw "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:value {:parent :reader :args {:flag ;; binding comment\r\n {:as :flag :type :bool :description \"Switch\"}}}}}]}"
+        original (get-in (edn/read-string raw) [:fns 0 :args :value])
+        path [:left :flag]
+        proposal {:configure {path {:type :bool :description "Switch"}} :legacy-scope-names {path :flag}}
+        body (format/migrate-inline original proposal)
+        patch (cst/plan raw (request {:op :rename-bind :definition :host :path [:args]}
+                                     {:op :inline-ref :definition :host :path [:args :value] :body body}))
+        edited (:text (cst/apply-text patch raw))]
+    (is (= original (format/inline-origin body)))
+    (is (= body (get-in (edn/read-string edited) [:fns 0 :bind :value 1])))
+    (is (str/includes? edited "[:left :flag] ;; binding comment\r\n"))
+    (is (= :already-applied (:status (cst/apply-text patch edited))))
+    (is (nil? (format/inline-origin (dissoc body :legacy-scope-names))))))
+
+
 (deftest rename-preserves-declaration-style-test
   (let [source "; module\n{:namespace \"demo.main\", :fns\n [{:name :base\n   :args ; owned declaration comment\n   {:x {:type :any :value {:args 9 :input 2}}}}]} ; end\n"
         patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}))

@@ -90,3 +90,24 @@
          (= [id] target-path)
          (= (when (contains? evidence :type) (:type-id field)) type-override-fn-id)
          (= expected row))))
+
+
+(defn exact-scope?
+  "Check the shape of a previously proved scoped metadata row."
+  [owner {:keys [address row legacy-path target-path field-owner type-override-fn-id] :as evidence}]
+  (let [owner-id (:id owner)
+        [name] legacy-path
+        [slot] target-path
+        uses (:scope-path row)]
+    (and (every? uuid? [owner-id field-owner slot])
+         (= [name] legacy-path) (simple-keyword? name)
+         (= [slot] target-path) (= slot (ids/slot-id field-owner name))
+         (vector? uses) (seq uses) (every? uuid? uses)
+         (= [[owner-id uses] target-path] address)
+         (= (cond-> {:kind :input-binding :id (ids/binding-id owner-id slot) :fn-id owner-id
+                     :scope-path uses :target-path target-path :expression-kind nil :value-present false}
+              (:org-id row) (assoc :org-id (:org-id row))
+              (contains? evidence :type) (assoc :type-override-fn-id type-override-fn-id)
+              (contains? evidence :description) (assoc :description (:description evidence)))
+            row)
+         (or (not (contains? evidence :type)) (uuid? type-override-fn-id)))))

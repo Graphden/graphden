@@ -53,26 +53,26 @@ Normalizes partial record maps and explicit value/ref expressions against a supp
 :PROPERTIES:
 :CUSTOM_ID: types/plan-module
 :FILE: src/graphden/input/source.clj
-:LINE: 564
+:LINE: 565
 :MINS: 3.3
 :END:
 
 Compares original source forms with a prepared legacy module to plan supported rewrites. It retains rich declarations and binding origins, while reporting unsupported list, rename, ref-scope and policy forms as explicit blockers. A completed report does not prove runtime equivalence or authorize dropping an unsupported definition.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:564]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:565]]
 - same file :: [[file:types.org::#types/verify-module][verify-module]]
 
 * 5. verify-module
 :PROPERTIES:
 :CUSTOM_ID: types/verify-module
 :FILE: src/graphden/input/source.clj
-:LINE: 770
+:LINE: 772
 :MINS: 2.4
 :END:
 
 Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:770]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:772]]
 - same file :: [[file:types.org::#types/plan-module][plan-module]]
 - referenced from :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 
@@ -106,13 +106,13 @@ Matches each original owner's complete normalized inline expansion with preparat
 :PROPERTIES:
 :CUSTOM_ID: types/with-certified-owner
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 748
+:LINE: 751
 :MINS: 1.1
 :END:
 
 Proves one owner and its dependencies as an immutable transaction. Verified parent forwarding is available before replanning inherited inputs; scoped bindings still pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:748]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:751]]
 - see also :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/verify-bindings][verify-bindings]]
 - same file :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]
@@ -121,13 +121,13 @@ Proves one owner and its dependencies as an immutable transaction. Verified pare
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 283
+:LINE: 297
 :MINS: 0.9
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:283]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:297]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/with-certified-owner][with-certified-owner]]
@@ -150,13 +150,13 @@ Checks the exact boundary between one owner's two proof groups. The projected ba
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings-after-forwarding
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 290
+:LINE: 304
 :MINS: 1.1
 :END:
 
 Replays the remaining scoped group with the verified projections still in the graph. Their occupied addresses and unique destinations must survive, and the runtime checks must remain exactly equal. The complete source round trip precedes publication.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:290]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:304]]
 - see also :: [[file:types.org::#types/scope-view][scope-view]], [[file:types.org::#types/verify-module][verify-module]]
 - same file :: [[file:types.org::#types/verify-bindings][verify-bindings]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]
@@ -178,13 +178,13 @@ Checks the anonymous callable row against its literal authored form and stored F
 :PROPERTIES:
 :CUSTOM_ID: types/migrate-forwarded-field
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 605
+:LINE: 608
 :MINS: 0.9
 :END:
 
 Freezes both endpoints of an authored field passed to a value-producing reference. The checker replays the exact projection and verifies that the original local field remains available. A successful replay supplies a source proposal with the scoped path and its original field identity.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:605]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:608]]
 - see also :: [[file:types.org::#types/verify-module][verify-module]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/authored-callable-field?][authored-callable-field?]]
@@ -193,13 +193,13 @@ Freezes both endpoints of an authored field passed to a value-producing referenc
 :PROPERTIES:
 :CUSTOM_ID: types/plan-verified-module
 :FILE: scripts/structured_input_cst.clj
-:LINE: 827
+:LINE: 834
 :MINS: 2.2
 :END:
 
 Builds replacement text only when every definition in a module has a verified source plan. Edits retain comments and literal payloads, and repeat verification on the patched text. The artifact records the original and replacement byte digests.
 
-- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:827]]
+- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:834]]
 - see also :: [[file:types.org::#types/stage!][stage!]]
 
 * 15. stage!
@@ -219,39 +219,39 @@ Checks a repository's module digests against the migration artifact, validates t
 :PROPERTIES:
 :CUSTOM_ID: types/parse-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 292
+:LINE: 298
 :MINS: 2.1
 :END:
 
 Reads an explicitly versioned source module with caller-resolved declarations and namespace contexts. It retains authored input metadata and origin ledgers, returning validated input-binding rows without registry or storage writes. Partial required fields are legal; structural validation does not prove types or graph readiness.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:292]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:298]]
 - same file :: [[file:types.org::#types/emit-module-v2][emit-module-v2]]
 
 * 17. emit-module-v2
 :PROPERTIES:
 :CUSTOM_ID: types/emit-module-v2
 :FILE: src/graphden/input/module.clj
-:LINE: 342
+:LINE: 348
 :MINS: 1.5
 :END:
 
 Exports offline definitions using the same declared descriptors and identity callbacks. Re-parsing detects changed binding origins or declaration context. Rich declarations remain intact; source formatting and comments belong to the separate CST writer.
 
-- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:342]]
+- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:348]]
 - same file :: [[file:types.org::#types/parse-module-v2][parse-module-v2]]
 
 * 18. require-legacy!
 :PROPERTIES:
 :CUSTOM_ID: types/require-legacy!
 :FILE: src/graphden/input/format.clj
-:LINE: 437
+:LINE: 442
 :MINS: 1.7
 :END:
 
 Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
 
-- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:437]]
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:442]]
 
 * 19. resolve-contract
 :PROPERTIES:

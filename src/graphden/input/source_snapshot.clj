@@ -125,6 +125,13 @@
   (assoc v2 :owner (some #(when (and (= :fn (:kind %)) (= fn-id (:id %))) %) declaration-records)))
 
 
+(defn- exact-annotation?
+  [owner contract {:keys [address target-path] :as config}]
+  (if address
+    (annotations/exact-scope? owner config)
+    (annotations/exact? owner (some #(when (= [(:id %)] target-path) %) (:fields contract)) config)))
+
+
 (defn- inline-entry
   "The verified parent's round trip compared the child's original body, use-site
    UUID and authored rows. Match its local field or stored list position."
@@ -143,18 +150,14 @@
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
                    (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
                    (= 1 (count (get-in entry [:owner :parent-ids])))
-                   (or (empty? (:scoped-inputs child))
+                   (or (and (empty? (:scoped-inputs child)) (not-any? :address (vals (:configurations child))))
                        (let [proof (get-in package [:closure-baselines id])
                              evidence [:fn-id :input-type-id :declaration-records :contract
                                        :binding-state :bindings :scoped-inputs :configurations]]
                          (and (= :authored-source-equivalent (:verification proof))
                               (migration/same-edn? (select-keys (:v2 proof) evidence)
                                                    (select-keys child evidence)))))
-                   (every? (fn [{:keys [target-path] :as config}]
-                             (annotations/exact? (:owner entry)
-                                                 (some #(when (= [(:id %)] target-path) %) (get-in child [:contract :fields]))
-                                                 config))
-                           (vals (:configurations child))))
+                   (every? (partial exact-annotation? (:owner entry) (:contract child)) (vals (:configurations child))))
       (reject! :unsupported-scope-declaration fn-id))
     (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
     child))
@@ -291,10 +294,9 @@
              (into {}
                    (for [{:keys [owner contract configurations bindings]} (vals entries)
                          {:keys [row type target-path type-override-fn-id] :as config} (vals configurations)
-                         :let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))
-                               projection? (exact-projection-pin? (:alias-ids named) contract bindings config)
+                         :let [projection? (exact-projection-pin? (:alias-ids named) contract bindings config)
                                binding (or row (when projection? (some #(when (= target-path (:target-path %)) %) bindings)))]
-                         :when (and type-override-fn-id (or (annotations/exact? owner field config) projection?))]
+                         :when (and type-override-fn-id (or (exact-annotation? owner contract config) projection?))]
                      [[(:id binding) type-override-fn-id] type]))
              :markers markers))))
 
@@ -319,7 +321,7 @@
                         (if row
                           (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
                             (and (some #{row} bindings)
-                                 (or (annotations/exact? owner field config)
+                                 (or (exact-annotation? owner contract config)
                                      (rich/exact-self-pin? owner field config type-rows))))
                           (exact-projection-pin? type-ids contract bindings config)))
                       (vals configurations))
@@ -420,8 +422,8 @@
     ;; An external function has no verified invocation signature. Executable
     ;; admission needs a proved graph closure or a suitable runtime validator.
     (doseq [[id {:keys [configurations contract owner]}] entries
-            {:keys [row target-path] :as config} (vals configurations)
-            :when (and row (not (annotations/exact? owner (some #(when (= [(:id %)] target-path) %) (:fields contract)) config)))]
+            {:keys [row] :as config} (vals configurations)
+            :when (and row (not (exact-annotation? owner contract config)))]
       (throw (ex-info "Execution requires proof of the callable field-read contract"
                       {:type :input/source-snapshot :code :callable-self-pin-obligation-required :fn-id id
                        :binding-id (:id row) :target-path (:target-path row) :type-override-fn-id (:type-override-fn-id row)})))
@@ -558,10 +560,11 @@
 
 (defn- add-scoped-form
   [owner proposed {:keys [scope-certificate expression]}]
-  (let [path (:public-path scope-certificate)]
-    (when (contains? (:bind proposed) path)
+  (let [path (:public-path scope-certificate)
+        keyspace (if (contains? scope-certificate :configuration) :configure :bind)]
+    (when (contains? (get proposed keyspace) path)
       (reject! :unsupported-scope-source owner))
-    (assoc-in proposed [:bind path] expression)))
+    (assoc-in proposed [keyspace path] (get scope-certificate :configuration expression))))
 
 
 (defn migrate-binding

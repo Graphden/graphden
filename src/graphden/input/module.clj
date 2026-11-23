@@ -34,7 +34,7 @@
 
 (defn- field-configuration?
   [[path spec]]
-  (and (vector? path) (= 1 (count path)) (simple-keyword? (first path))
+  (and (vector? path) (seq path) (every? simple-keyword? path)
        (map? spec) (every? #{:type :description} (keys spec))
        (or (not (contains? spec :description)) (string? (:description spec)))
        (or (not (contains? spec :type)) (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
@@ -273,8 +273,14 @@
             state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
                                                      (:scope ctx) builders)
             routes (scoped/parse-bindings ctx state bind)
-            configs (into {} (map (partial resolve-configuration ctx state)) (:configure source))
-            by-path (into {} (map (juxt :target-path identity)) (vals configs))
+            local-configs (into {} (keep (fn [[path :as entry]]
+                                           (when (= 1 (count path)) (resolve-configuration ctx state entry))))
+                                (:configure source))
+            configs (into local-configs
+                          (keep (fn [[path spec]]
+                                  (when (< 1 (count path)) (scoped/parse-annotation ctx state path spec))))
+                          (:configure source))
+            by-path (into {} (map (juxt :target-path identity)) (vals local-configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
                :expression expression :binding-state (scoped/binding-state state routes)

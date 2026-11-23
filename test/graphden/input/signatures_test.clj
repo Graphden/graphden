@@ -147,17 +147,21 @@
                              :scopes {(second scope) (adjust {:fn-id owner :declared-contract {:type {:coll rich} :fields [declaration]}
                                                               :configured-contract contract :bindings {}})}}
                       seen (atom nil)]
-                  (signatures/infer-use {} graph scope implementation
-                                        (fn [facts]
-                                          (reset! seen facts)
-                                          {:return (get-in facts [:root-entry :return]) :effects #{}
-                                           :substitution {} :argument-proofs {}}))
+                  (signatures/infer-use
+                    {:fns {owner {:id owner :return-type-fn-id (ids/primitive-fn-id :any)}}
+                     :source-return-types {[owner (ids/primitive-fn-id :any)] 'a}}
+                    graph scope implementation
+                    (fn [facts]
+                      (reset! seen facts)
+                      {:return (get-in facts [:root-entry :return]) :effects #{}
+                       :substitution {} :argument-proofs {}}))
                   @seen))
         scope [owner []]
         linked (infer scope identity implementation)
         separate (infer [owner [use]] identity implementation)
         source-variable (variables/type-in-scope scope 'a)]
-    (is (= source-variable (get-in linked [:root-entry :return])))
+    (is (= source-variable (get-in linked [:root-entry :return])
+           (get-in linked [:declaration :return-type])))
     (is (= (get-in linked [:bindings-info :coll :type]) (get-in linked [:root-entry :args :coll])))
     (is (not= (get-in linked [:root-entry :return]) (get-in separate [:root-entry :return])))
     (doseq [unproved [(dissoc implementation :argument-declarations)

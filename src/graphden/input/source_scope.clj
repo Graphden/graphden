@@ -122,7 +122,7 @@
                       :target-fn-id builder-id :mode :value} %) (:dependencies graph))))))
 
 
-(defn- list-reference-row?
+(defn- list-reference-origin
   [graph snapshot scope row]
   (let [builder (:fn-id row)
         {:keys [owner-id target-id items] :as fragment} (get-in snapshot [:source-list-fragments builder])
@@ -154,7 +154,7 @@
         row (get-in snapshot [:bindings id])
         contract (get-in graph [:public-input :scope-contracts parent])
         name (:name (only (filter #(= field (:id %)) (:fields contract)) :missing-reference-use))
-        operand (list-reference-row? graph snapshot parent row)
+        operand (list-reference-origin graph snapshot parent row)
         fragment (get-in snapshot [:source-list-fragments target])
         fragment (when (and fragment (list-use? graph snapshot to fragment))
                    (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id :scope-path :target-path]))
@@ -165,7 +165,9 @@
                    (= id (peek prefix) (:binding-id bound) (:id row))
                    (= "ref" (:expression-kind row)) (= (:fn-id row) (:origin-fn-id bound))
                    (empty? (:scope-path row)) (= path [field] (:target-path row))
-                   (or operand (= id (ids/binding-id (:fn-id row) field)))
+                   (or operand
+                       (and (not (contains? (:source-list-fragments snapshot) (:fn-id row)))
+                            (= id (ids/binding-id (:fn-id row) field))))
                    (or (nil? fragment) (list-signature/source-link? certificate))
                    (uuid? target) (= target (:ref-fn-id row) (get-in bound [:expression :fn-id])))
       (reject! :unsupported-reference-use))

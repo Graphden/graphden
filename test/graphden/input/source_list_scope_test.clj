@@ -42,7 +42,7 @@
 
 (deftest generated-reference-keeps-its-source-position-and-attached-use
   (let [{:keys [snapshot graph use row builder fragment]} (fixture)
-        check (fn [g s r] (#'scope/list-reference-row? g s use r))
+        check (fn [g s r] (#'scope/list-reference-origin g s use r))
         fragment-path [:source-list-fragments builder]]
     (is (= (ids/binding-list-item-id (:binding-id fragment) 1) (:id row)))
     (is (not= (ids/binding-id builder (first (:target-path row))) (:id row)))
@@ -77,7 +77,7 @@
                      :source-list-fragment (dissoc fragment :items :tail))
         edge {:from [use (:target-path row)] :origin-fn-id builder :name :item-1
               :binding-id (:id row) :target-fn-id (:ref-fn-id row)
-              :source-list-operand (#'scope/list-reference-row? graph snapshot use row)}]
+              :source-list-operand (#'scope/list-reference-origin graph snapshot use row)}]
     (is (signature/source-link? prior))
     (is (signature/source-operand? prior edge))
     (doseq [changed [(assoc-in edge [:source-list-operand :position] 0)
@@ -89,3 +89,25 @@
     (is (not (signature/source-operand? nil edge)))
     (is (not (signature/source-operand? (dissoc prior :source-list-fragment) edge)))
     (is (not (signature/source-link? (assoc-in prior [:source-list-fragment :scope-path] [(random-uuid)]))))))
+
+
+(deftest a-generated-operand-cannot-fall-back-to-a-new-direct-binding-id
+  (let [{:keys [snapshot graph use row builder]} (fixture)
+        field (first (:target-path row))
+        check (fn [id]
+                (let [changed (assoc row :id id)
+                      prefix (conj (second use) id)
+                      from [use [field]]
+                      bound {:binding-id id :origin-fn-id builder
+                             :expression {:kind :ref :fn-id (:ref-fn-id row)}}
+                      graph (-> graph
+                                (update :dependencies conj {:from from :to [(first use) prefix] :binding-id id
+                                                            :target-fn-id (:ref-fn-id row) :mode :value})
+                                (assoc :public-input {:bindings {from bound}
+                                                      :scope-contracts {use {:fields [{:id field :name :item-1}]}}}))
+                      snapshot (-> snapshot (update :bindings dissoc (:id row)) (assoc-in [:bindings id] changed))]
+                  (try (#'scope/checked-edge graph snapshot (first use) prefix)
+                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))))]
+    (is (= (:id row) (:binding-id (check (:id row)))))
+    (is (= :unsupported-reference-use (:code (check (ids/binding-id builder field)))))
+    (is (= :unsupported-reference-use (:code (check (random-uuid)))))))

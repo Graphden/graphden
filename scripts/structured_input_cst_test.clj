@@ -727,8 +727,8 @@
     (is (= {:body {:type :text :required false}} (:input child)))
     (is (= {:value [:project [:body]]} (:bind child)))
     (is (= {[:value] {:type :text :description (edn/read-string description)}} (:configure child)))
-    (doseq [bytes [description "; alias header\r\n" "; description tail\r\n" "; alias spelling\r\n" "; type spelling\r\n"]]
-      (is (str/includes? target bytes)))))
+    (doseq [original-bytes [description "; alias header\r\n" "; description tail\r\n" "; alias spelling\r\n" "; type spelling\r\n"]]
+      (is (str/includes? target original-bytes)))))
 
 
 (deftest inline-description-remains-part-of-the-inline-declaration

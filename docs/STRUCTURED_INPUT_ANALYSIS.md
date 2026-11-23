@@ -235,6 +235,19 @@ rows. The certificate carries that set. Dropping, adding or changing a check,
 or requiring container materialization, refuses the replay. This preserves the
 existing validation boundary; it does not grant executable admission.
 
+Forwarding through generic `const.value` requires its original base field UUID
+and ABI path. A provisional source origin must refer to a named map return;
+the frozen verifier then requires the stock checker's closed substitution to
+equal that resolved named type, the configured field and the checked target
+return exactly. The original return declaration must be in the target's
+lineage and keep that named type UUID; an equal body under another UUID is
+insufficient. The proof retains the value-reference mode and inferred effects.
+A different binder, unresolved variable, callable result or missing read proof
+does not supply this evidence. A deferred value check must retain the exact
+field-read obligation for the same named contract. Occupancy and obligation
+replay guards still apply. Unsupported map validation still refuses execution;
+execution capabilities are unchanged.
+
 Generated list operands retain the legacy list-item UUID and position. Frozen
 source fragments prove the list owner and actual attached use; compact origin
 witnesses accompany the list link and operand edges in scope certificates.

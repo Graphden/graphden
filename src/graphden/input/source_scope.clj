@@ -7,6 +7,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
+    [graphden.input.source-forward :as forward]
     [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-joint :as joint]
     [graphden.input.source-positional-type :as positional-type]
@@ -315,7 +316,7 @@
 
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
-                           field-id source-type target-type target-fn-id target-field-id root-use-id generic-reference]}]
+                           field-id source-type target-type target-fn-id target-field-id root-use-id generic-reference list-reference] :as proof}]
   (let [address (occurrence before target-field-id)
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
@@ -333,7 +334,7 @@
           field-owner (only (filter #(= target-field-id (ids/slot-id % (peek target-names)))
                                     (get-in before [:scopes uses :declaration-order]))
                             :reference-field-origin-mismatch)]
-      (when-not (and (= target-fn-id (:target-fn-id (first edges)))
+      (when-not (and (forward/reference-path? proof edges)
                      (= 1 (count source-names)) (= (conj (mapv :name edges) (first source-names)) target-names))
         (reject! :unproved-forwarded-use))
       (cond-> {:snapshot-id (:snapshot-id snapshot)
@@ -344,7 +345,8 @@
                                      :projection-scope-path [] :projection-path [field-id]})
                :edges edges :field-owner field-owner :owner-parents (get-in snapshot [:fns owner-id :parent-ids])
                :address address :public-path target-names :source-names source-names}
-        generic-reference (assoc :generic-reference generic-reference)))))
+        generic-reference (assoc :generic-reference generic-reference)
+        list-reference (assoc :list-reference list-reference)))))
 
 
 (defn- preserved-field-checks?

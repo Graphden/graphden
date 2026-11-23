@@ -830,7 +830,7 @@
 
 
 (defn- checked-forwarded-certificate!
-  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id generic-reference]}
+  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id generic-reference list-reference] :as proof}
    field {:keys [source-names public-path row address edges] :as certificate}]
   (when-not (and (= [field] source-names) (vector? public-path) (= (inc (count edges)) (count public-path))
                  (= field (peek public-path)) (= (or target-address address) address)
@@ -838,8 +838,9 @@
                  (= root-use-id (first (second (first address))))
                  (= "projection" (:expression-kind row)) (= projection-id (:id row))
                  (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
-                 (= target-fn-id (:target-fn-id (first edges)))
-                 (= generic-reference (:generic-reference certificate)))
+                 (forward/reference-path? proof edges)
+                 (= generic-reference (:generic-reference certificate))
+                 (= list-reference (:list-reference certificate)))
     (throw (ex-info "Forwarded field differs from its checked projection"
                     {:type :input/source-verification :code :forwarded-certificate-mismatch}))))
 

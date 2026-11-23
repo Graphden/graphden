@@ -804,6 +804,12 @@
            field remains available. A successful replay supplies a source proposal with
            the scoped path and its original field identity."
      :see [[:types "verify-module"] [:types "analyze-effective-input"]]}
+    {:ns graphden.input.source-forward-list :defn origin
+     :say "Recovers a forwarded input behind an authored list operand, retaining the original
+           list binding, item UUID and position. The entire contribution is rechecked before
+           the existing frozen route verifier accepts its builder-to-operand prefix. This
+           preserves ordinary value delivery and leaves type narrowing as a separate proof."
+     :see [[:types "migrate-forwarded-field"]]}
     {:file "scripts/structured_input_cst.clj" :defn plan-verified-module
      :say "Builds replacement text only when every definition in a module has a verified source
            plan. Edits retain comments and literal payloads, and repeat verification on the

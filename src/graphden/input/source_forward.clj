@@ -4,6 +4,7 @@
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.input.source-forward-generic :as generic]
+    [graphden.input.source-forward-list :as list-forward]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -86,11 +87,9 @@
        :return-type (some #(get-in defs-by-name [% :return-type]) target-lineage)})))
 
 
-(defn- checked-reference-binding
-  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]} {:keys [target-id return-type] :as target}]
-  (let [row (single (filter #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %)))
-                            (:records legacy)) :missing-direct-reference-binding)
-        argument (single (filter #(= (:id row) (get-in % [:origin :binding-id])) (:arguments legacy))
+(defn- checked-direct-reference-binding
+  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]} {:keys [target-id return-type] :as target} row]
+  (let [argument (single (filter #(= (:id row) (get-in % [:origin :binding-id])) (:arguments legacy))
                          :missing-direct-reference-binding)
         [op ref] (:expression argument)
         expected (get-in argument [:target :type])
@@ -106,6 +105,23 @@
     (cond-> {:binding-id (:id row)} origin (assoc :generic-reference origin))))
 
 
+(defn- checked-reference-binding
+  [prepared {:keys [legacy] :as entry} {:keys [target-id] :as target}]
+  (let [row (single (filter #(and (#{:binding :binding-list-item} (:kind %)) (= target-id (:ref-fn-id %)))
+                            (:records legacy)) :missing-direct-reference-binding)]
+    (if (= :binding-list-item (:kind row))
+      (list-forward/origin prepared entry row target)
+      (checked-direct-reference-binding prepared entry target row))))
+
+
+(defn reference-path?
+  "Require the exact direct reference or checked list-builder operand prefix."
+  [{:keys [target-fn-id list-reference]} edges]
+  (if list-reference
+    (and (= target-fn-id (:target-fn-id list-reference)) (list-forward/matches-path? list-reference edges))
+    (= target-fn-id (:target-fn-id (first edges)))))
+
+
 (defn verify-forwarded-field
   "Prove the slot and direct value-reference occurrence behind one blocked
    authored field. Uses the prepared legacy context and source-plan ledger.
@@ -117,7 +133,7 @@
     (reject! :missing-field-origin))
   (let [{:keys [slot membership type]} (linked-declaration entry field name->id)
         {:keys [field-id field-type target-id direct?] :as target} (reference-occurrence prepared entry field)
-        {:keys [binding-id generic-reference]} (checked-reference-binding prepared entry target)
+        {:keys [binding-id generic-reference list-reference]} (checked-reference-binding prepared entry target)
         type (qualified-type prepared (:source entry) type)]
     (when-not (and (= field-id (:source-slot-id slot))
                    (or (= type field-type)
@@ -128,5 +144,6 @@
              :source-type type :target-type field-type
              :projection-id (migration/derived-id :forwarded-field owner-id binding-id field-id)
              :source-address [[owner-id []] [(:id slot)]]
-             :target-address (when direct? [[owner-id [binding-id]] [field-id]])}
-      generic-reference (assoc :generic-reference generic-reference))))
+             :target-address (when direct? [[owner-id (cond-> [binding-id] list-reference (conj (:item-id list-reference)))] [field-id]])}
+      generic-reference (assoc :generic-reference generic-reference)
+      list-reference (assoc :list-reference list-reference))))

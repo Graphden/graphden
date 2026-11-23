@@ -237,6 +237,15 @@ local fields keep their UUIDs, positions and authored metadata; explicit scoped
 projections replace only their implicit source-slot links. Repeated destination
 uses, incomplete groups and unsupported reference modes remain blocked.
 
+A forwarded field can also belong to a value-producing list item. Its proof
+retains the original list binding and item UUID, position and complete authored
+contribution, including literals and the open/closed continuation. The frozen
+route must begin with the checked builder link and its matching item operand;
+the source reader revalidates those same edges. This admission currently covers
+root contributions with ordinary value delivery and the existing forwarding
+type rules. It does not treat function-reference delivery as a value call or
+prove a named-type narrowing merely because the item origin matches.
+
 Rich-field validation obligations remain explicit. A forwarding proof may remove
 a destination's field-read check only when an identical check remains on its
 original source field; other obligations must survive unchanged. This source

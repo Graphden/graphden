@@ -1,4 +1,4 @@
-(ns graphden.input.source-certification-test
+(ns ^:serial graphden.input.source-certification-test
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.source-certification :as certification]

@@ -4,6 +4,7 @@
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.input.source-forward-generic :as generic]
+    [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -48,7 +49,9 @@
                    (every? #(= :field-projection-required (:code %)) blockers)
                    (= :declaration (:kind argument)) (record-types/own-slot-declaration? spec)
                    (migration/same-edn? spec (:spec argument))
-                   (format/configuration-type? (:type spec)) (= (:type-fn-id slot) (record-types/resolve-type-ref (:type spec) name->id))
+                   (or (format/configuration-type? (:type spec))
+                       (rich/authored-callable-field? (group-by :id rows) (:type-fn-id slot) (:type spec)))
+                   (= (:type-fn-id slot) (record-types/resolve-type-ref (:type spec) name->id))
                    (= (name field) (:name slot))
                    (= (:source-slot-id argument) (:source-slot-id slot))
                    (uuid? (:source-slot-id slot)) (not= slot-id (:source-slot-id slot))

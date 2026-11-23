@@ -7,6 +7,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
+    [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.packages.records.ids :as ids]
@@ -293,11 +294,12 @@
 
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
-                           field-id source-type target-type target-fn-id target-field-id root-use-id]}]
+                           field-id source-type target-type target-fn-id target-field-id root-use-id generic-reference]}]
   (let [address (occurrence before target-field-id)
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
         target-type (context/call-with-types snapshot #(types/resolve-alias target-type))]
+    (when generic-reference (generic/verify! snapshot before owner-id generic-reference))
     (when-not (and (= owner-id root) (= source-address [[owner-id []] [field-id]])
                    (= (or target-address address) address) (= root-use-id (first uses))
                    (every? uuid? [owner-id field-id root-use-id target-field-id target-fn-id])
@@ -313,14 +315,15 @@
       (when-not (and (= target-fn-id (:target-fn-id (first edges)))
                      (= 1 (count source-names)) (= (conj (mapv :name edges) (first source-names)) target-names))
         (reject! :unproved-forwarded-use))
-      {:snapshot-id (:snapshot-id snapshot)
-       :row (rows/normalize {:kind :input-binding :id projection-id :fn-id owner-id
-                             :org-id (get-in snapshot [:fns owner-id :org-id])
-                             :scope-path uses :target-path target-path
-                             :expression-kind "projection" :value-present false
-                             :projection-scope-path [] :projection-path [field-id]})
-       :edges edges :field-owner field-owner :owner-parents (get-in snapshot [:fns owner-id :parent-ids])
-       :address address :public-path target-names :source-names source-names})))
+      (cond-> {:snapshot-id (:snapshot-id snapshot)
+               :row (rows/normalize {:kind :input-binding :id projection-id :fn-id owner-id
+                                     :org-id (get-in snapshot [:fns owner-id :org-id])
+                                     :scope-path uses :target-path target-path
+                                     :expression-kind "projection" :value-present false
+                                     :projection-scope-path [] :projection-path [field-id]})
+               :edges edges :field-owner field-owner :owner-parents (get-in snapshot [:fns owner-id :parent-ids])
+               :address address :public-path target-names :source-names source-names}
+        generic-reference (assoc :generic-reference generic-reference)))))
 
 
 (defn- preserved-field-checks?

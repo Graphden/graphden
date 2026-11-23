@@ -475,3 +475,31 @@
                (into #{} (map (juxt :kind :trigger :expected-type)) (:obligations analysis))))
         (is (= (set @retained-checks) (set (:obligations analysis))))
         (is (= (str false value) (legacy {}) (canonical {})))))))
+
+
+(deftest generic-const-forwarding-executes-with-the-exact-named-map-return
+  (binding [types/*type-aliases-override* (atom {})]
+    (let [producer {:namespace "fixture" :name :generic-map-producer
+                    :args {:payload :any} :return-type :map-result}
+          host {:namespace "fixture" :name :generic-map-host :parent :const
+                :args {:value :generic-map-producer :payload {:type :any}}}
+          source (into (declarations "packages/core/logic/fns.edn" #{:const})
+                       [{:namespace "fixture" :name :map-result :map {:key :keyword :value :any}} producer host])
+          _ (sync/register-type-aliases! source)
+          base (assoc producer :impl (fn [{:keys [payload]}] {:payload payload}))
+          bases (assoc @loaded :generic-map-producer base)
+          retained (atom nil)
+          compile-certified (fn [package root roots implementations]
+                              (let [migrated (snapshot/migrate-forwarded-field package root :payload roots)]
+                                (reset! retained (get-in migrated [:legacy :arguments 1 :scope-certificate]))
+                                (execution/compile-package (snapshot/with-migrated-forwarding package root :payload roots)
+                                                           root roots implementations)))
+          {:keys [canonical legacy analysis]}
+          (runtimes source (ids/fn-id "fixture" :generic-map-host) compile-certified bases)]
+      (is (= :checked (:status analysis)))
+      (is (= [:map :keyword :any] (get-in analysis [:scopes [] :signature :return])))
+      (is (empty? (:obligations analysis)))
+      (is (= (ids/slot-id (ids/fn-id "core.logic" :const) :value)
+             (get-in @retained [:generic-reference :field-id])))
+      (doseq [value [nil false {:input [:as :data] :bind false :configure nil}]]
+        (is (= {:payload value} (legacy {:payload value}) (canonical {:payload value})))))))

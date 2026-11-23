@@ -67,7 +67,7 @@
                        (= variable (:type declared) (get-in snapshot [:source-field-types [field-id (:type-fn-id field)]]))
                        (= field-id (:id declared) (:id configured) (:id field))
                        (= (ids/primitive-fn-id :any) (:type-fn-id field))
-                       (= scoped (get-in entry [:args :value]) (:return entry)) (= #{} (:effects entry))
+                       (= variable (get-in entry [:args :value]) (:return entry)) (= #{} (:effects entry))
                        (types/map-type? named) (not (types/type-any? types/type-var? named))
                        (not (types/type-any? types/callable-type? named))
                        (= named solved (:type configured) (:expected-type bound)

@@ -47,7 +47,7 @@
                :scopes {[] {:declared-contract {:fields [{:id field-id :name :value :type variable}]}
                             :configured-contract {:fields [{:id field-id :name :value :type rich}]}
                             :signature-source {:base-fn-id base-fn-id :argument-paths {:value [field-id]}
-                                               :root-entry {:args {:value scoped} :return scoped :effects #{}}}
+                                               :root-entry {:args {:value variable} :return variable :effects #{}}}
                             :bindings {address {:binding-id binding-id :expected-type rich
                                                 :reference {:mode :value :actual-type rich}}}
                             :proofs {address {:status :checked}} :signature {:effects #{}}}

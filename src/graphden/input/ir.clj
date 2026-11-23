@@ -206,11 +206,30 @@
     {:name parameter :address target :required? (:required field)}))
 
 
+(defn- external-addresses!
+  [public-routes contract scope expressions parameters captures]
+  (let [addresses (into #{} (map :target) captures)]
+    (when-not (= (count captures) (count addresses))
+      (reject! :unsupported-closure-scope {:scope scope}))
+    (doseq [{:keys [target value-path]} captures]
+      (let [[target-scope path] target
+            field (when (= target-scope scope) (descriptor/find-node contract path))
+            [route & more] (get public-routes target)]
+        (when-not (and (= [] value-path) (= 1 (count path))
+                       field (not (:fields field)) (not (parameters (:name field)))
+                       (= :supplied (get-in expressions [target :op]))
+                       (= :input-field (:kind route)) (:whole-bindable? route) (empty? more)
+                       (= (:type field) (:completion-type route) (get-in expressions [target :type])))
+          (reject! :unsupported-closure-scope {:scope scope}))))
+    addresses))
+
+
 (defn- closure-plans
   [analysis expressions routes]
   (let [plans (:closures analysis)
         addresses (into #{} (keep (fn [[address expr]] (when (= :closure (:op expr)) address))) expressions)
-        route-keys [:from :source :role :via :required?]]
+        route-keys [:from :source :role :via :required?]
+        public-routes (group-by :address (vals (get-in analysis [:public-input :routes])))]
     (when-not (= addresses (set (keys plans)))
       (reject! :closure-plan-mismatch {}))
     (into {}
@@ -220,7 +239,7 @@
                        contract (get-in analysis [:scopes (second scope) :configured-contract])
                        reference (get-in analysis [:scopes (second owner) :bindings address :reference])]
                    (when-not (and (= (:root-scope analysis) owner) (:capture-resolved? reference)
-                                  (empty? external-captures) (vector? parameters)
+                                  (or (nil? external-captures) (vector? external-captures)) (vector? parameters)
                                   (every? keyword? parameters) (= (count parameters) (count (set parameters))))
                      (reject! :unsupported-closure-scope {:address address}))
                    (when-not (and (= callable-type (:callable-type reference))
@@ -233,7 +252,9 @@
                                     (= (select-keys capture route-keys)
                                        (select-keys (get routes from) route-keys)))
                        (reject! :closure-capture-route-mismatch {:address address})))
-                   (let [sites (mapv (partial call-site! contract scope expressions) call-sites)]
+                   (let [sites (mapv (partial call-site! contract scope expressions) call-sites)
+                         external (external-addresses! public-routes contract scope expressions
+                                                       (set parameters) external-captures)]
                      (when-not (= (frequencies parameters) (frequencies (map :name sites)))
                        (reject! :callback-parameter-shape-required {:scope scope}))
                      (when (and (seq sites)
@@ -241,18 +262,24 @@
                                       (into {} (map (fn [{:keys [name address]}]
                                                       [name (:type (get expressions address))])) sites)))
                        (reject! :callback-parameter-type-mismatch {:scope scope}))
-                     [address {:scope scope :type type :parameters parameters :call-sites sites}]))))
+                     [address (cond-> {:scope scope :type type :parameters parameters :call-sites sites}
+                                (seq external) (assoc :external-addresses external))]))))
           plans)))
 
 
 (defn- frame-layouts
   [root scopes expressions closures program required]
   (let [callbacks (into {} (map (juxt :scope :call-sites)) (vals closures))
+        external (into #{} (mapcat :external-addresses) (vals closures))
         owner (fn [[fn-id path]]
                 (let [branch [fn-id (subvec path 0 (min (count path) 1))]]
                   (if (contains? callbacks branch) branch root)))
-        by-frame (group-by (comp owner first :address) program)
-        required (group-by (comp owner first) required)]
+        ;; A callback's exposed capture is supplied by the surrounding
+        ;; invocation. Keep its verified address but allocate its cell in the
+        ;; root frame, so callback arguments cannot replace it.
+        address-owner #(if (contains? external %) root (owner (first %)))
+        by-frame (group-by (comp address-owner :address) program)
+        required (group-by address-owner required)]
     (doseq [[address {:keys [op source scope]}] expressions]
       (let [local (owner (first address))]
         (when (case op

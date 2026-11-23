@@ -134,6 +134,29 @@
                                                    :implementations (fixture/implementations definitions functions)}))))))
 
 
+(deftest exposed-callback-capture-keeps-its-scope-and-surrounding-invocation
+  (let [definitions {:root {:input {:style {:callback [:fn {:item :text} :text #{}] :mark :text}}
+                            :return :any :bindings {[:style :callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:item :text :mark :text} :return :text}}
+        functions {:root (fn [args _]
+                           (let [callback (:callback (runtime/resolve-arg args :style))]
+                             [(callback {:item "Ada"})
+                              (callback {:item "Ben"})
+                              (rejection-code #(callback {:item "Ada" :mark "shadow"}))]))
+                   :child (fn [args _]
+                            (str (runtime/resolve-arg args :item)
+                                 (runtime/resolve-arg args :mark)))}
+        {:keys [analysis context]} (fixture/model definitions :root)
+        callback (compile/compile-named analysis {:context context
+                                                  :implementations (fixture/implementations definitions functions)})
+        arguments (fn [mark] {:style {:mark "independent outer field" :callback {:mark mark}}})]
+    (is (= ["Ada!" "Ben!" :unknown-callback-parameter] (invoke callback (arguments "!") {})))
+    (is (= ["Ada?" "Ben?" :unknown-callback-parameter] (invoke callback (arguments "?") {})))
+    (is (= ["Ada!" "Ben!" :unknown-callback-parameter] (invoke callback (arguments "!") {})))
+    (is (= :missing-required-input
+           (rejection-code #(invoke callback {:style {:mark "not a capture"}} {}))))))
+
+
 (deftest callback-map-presence-and-lifetime-remain-explicit
   (let [definitions {:root {:input {:callback [:fn {:item :any :flag :any} :any #{}]} :return :any
                             :bindings {[:callback] {:ref :child}}}

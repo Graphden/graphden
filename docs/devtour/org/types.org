@@ -284,10 +284,10 @@ Builds an offline graph of evaluated reference uses. Each use has a binding-ID s
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
 :LINE: 233
-:MINS: 1.0
+:MINS: 1.1
 :END:
 
-Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. A checked callback runs in a fresh local frame with its enclosing cells still visible. Source authorization precedes export.
+Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. A checked callback runs in a fresh local frame with its enclosing cells still visible. An exposed scalar capture keeps its callback field address and is supplied by the enclosing invocation. Source authorization precedes export.
 
 - source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:233]]
 - see also :: [[file:types.org::#types/export-named][export-named]]

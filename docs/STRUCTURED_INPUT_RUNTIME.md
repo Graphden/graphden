@@ -145,6 +145,13 @@ validation are checked separately for the callback. Its memo keys include a fres
 invocation token so two calls with equal arguments still evaluate their own local
 references. Multiple reads of a callback-local field share its once-cell.
 
+An exposed scalar capture keeps its address under the callback's input path.
+For example, `{:style {:callback {:mark "!"}}}` supplies the mark to the
+enclosing invocation. The callback receives its own call arguments separately.
+The checked lowering allocates the mark cell in the outer frame so every call
+within that invocation sees the same value. The caller cannot replace the mark
+through the callback's parameter map.
+
 The callback and its unforced local cells can run on the originating thread while
 the enclosing execution is active. Deferred or worker-thread invocation, nested
 graph callbacks, unproven captures and record-shaped parameter routes fail closed.

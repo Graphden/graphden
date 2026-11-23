@@ -844,7 +844,8 @@
      :say "Lowers the checked input IR to browser format 2 for closed pure graphs. A field
            address keeps one lazy result per invocation, shared by every projection. A checked
            callback runs in a fresh local frame with its enclosing cells still visible.
-           Source authorization precedes export."
+           An exposed scalar capture keeps its callback field address and is supplied by the
+           enclosing invocation. Source authorization precedes export."
      :see [[:types "export-named"]]}
     {:ns graphden.input.browser :defn export-named
      :say "Includes checked named residual routes and the wire type for each supported supplied

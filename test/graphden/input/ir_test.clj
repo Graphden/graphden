@@ -1,6 +1,7 @@
 (ns graphden.input.ir-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.input.arguments :as arguments]
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.ir :as ir]))
 
@@ -101,6 +102,36 @@
     (is (= [] (:parameters closure) (:call-sites closure)))
     (is (= #{} (get-in plan [:frame-layouts (:scope closure) :parameters])))
     (is (= (fixture/address :root [] :root [:config]) (get-in plan [:expressions capture :source])))))
+
+
+(deftest exposed-callback-captures-are-supplied-by-the-enclosing-frame
+  (let [definitions {:root {:input {:style {:callback [:fn {:item :text} :text #{}]}} :return :text
+                            :bindings {[:style :callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:item :text :mark :text} :return :text}}
+        model (structural-model definitions)
+        plan (lower model definitions)
+        style (fixture/address :root [] :root [:style])
+        callback (fixture/address :root [] :root [:style :callback])
+        item (fixture/address :root [:callback-use] :child [:item])
+        mark (fixture/address :root [:callback-use] :child [:mark])
+        closure (get-in plan [:closures callback])
+        fail (fn [changed]
+               (try (lower changed definitions)
+                    (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))]
+    (is (= [:item] (:parameters closure)))
+    (is (= #{mark} (:external-addresses closure) (:parameters plan) (:required-addresses plan)))
+    (is (= {style {} mark "!"}
+           (arguments/route-values (get-in model [:analysis :public-input]) {:style {:callback {:mark "!"}}})))
+    (is (= #{item} (get-in plan [:frame-layouts (:scope closure) :parameters])))
+    (is (= #{item} (get-in plan [:frame-layouts (:scope closure) :required-addresses])))
+    (is (true? (get (ir/present-addresses (get-in plan [:frame-layouts (:root-scope plan) :presence-program])
+                                          {mark "!"})
+                    mark)))
+    (is (= :unsupported-closure-scope
+           (fail (assoc-in model [:analysis :closures callback :external-captures]
+                           [{:target mark :value-path [:nested]}]))))
+    (is (= :unsupported-closure-scope
+           (fail (update-in model [:analysis :public-input :routes] dissoc [:style :callback :mark]))))))
 
 
 (deftest special-base-semantics-and-missing-abi-provenance-reject

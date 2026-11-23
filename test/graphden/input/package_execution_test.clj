@@ -459,13 +459,19 @@
         dependencies (into (declarations "packages/core/logic/fns.edn" #{:const})
                            (declarations "packages/core/strings/fns.edn" #{:str}))
         owner (ids/fn-id "fixture" :positional-call)
+        retained-checks (atom nil)
         compile-certified (fn [package root roots implementations]
-                            (execution/compile-package (snapshot/with-migrated-bindings package [root] roots)
-                                                       root roots implementations))]
+                            (let [migrated (snapshot/migrate-binding package root roots)]
+                              (reset! retained-checks (get-in migrated [:legacy :arguments 0 :scope-certificate :obligations]))
+                              (execution/compile-package (snapshot/with-migrated-bindings package [root] roots)
+                                                         root roots implementations)))]
     (doseq [value [nil false {:input [:as :data] :bind false :configure nil}]]
       (let [child {:namespace "fixture" :name :positional-call :parent :positional-wrapper :args {:upper {:value value}}}
             source (into dependencies [directory wrapper child])
             {:keys [canonical legacy analysis]} (runtimes source owner compile-certified)]
         (is (= :checked (:status analysis)))
-        (is (empty? (:obligations analysis)))
+        (is (= 2 (count (:obligations analysis))))
+        (is (= #{[:value-type :field-read [:list :any]] [:value-type :field-read :any]}
+               (into #{} (map (juxt :kind :trigger :expected-type)) (:obligations analysis))))
+        (is (= (set @retained-checks) (set (:obligations analysis))))
         (is (= (str false value) (legacy {}) (canonical {})))))))

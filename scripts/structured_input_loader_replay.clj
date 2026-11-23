@@ -86,7 +86,7 @@
 
 
 (defn- candidate!
-  [postgres?]
+  []
   (let [root (ids/fn-id "core.arithmetic" :floor)
         module (with-open [stream (io/input-stream (io/resource module-path))]
                  (staged/read-pinned (.readAllBytes stream) target-sha))
@@ -105,9 +105,8 @@
     (expect! {:type :package-error/primitive-admission} in-place)
     (expect! {:type :input/staged-primitive :code :staged-literal-parent-unsupported} sibling)
     (let [packages (loader/load-packages ["core"] {:primitive-input admission})]
-      (cond-> {:executions (execute-module packages)
-               :module-sha256 target-sha :roots (count owners) :ordinary ordinary :original-abi in-place :distinct-abi-control sibling}
-        postgres? (assoc :postgres ((requiring-resolve 'graphden.test-infra.arithmetic-replay/check) packages inputs))))))
+      {:packages packages :executions (execute-module packages)
+       :module-sha256 target-sha :roots (count owners) :ordinary ordinary :original-abi in-place :distinct-abi-control sibling})))
 
 
 (defn- reject-changed-impl!
@@ -140,9 +139,13 @@
                         (fs/unzip archive original)
                         (stage/stage! (assoc ledger :modules module) "core" original candidate)
                         (let [legacy (on-package-classpath [resources] #(execute-module (loader/load-packages ["core"])))
-                              staged (on-package-classpath [(fs/path candidate "resources") resources] #(candidate! postgres))]
+                              staged (on-package-classpath [(fs/path candidate "resources") resources] candidate!)
+                              proof (when postgres
+                                      (on-package-classpath [resources]
+                                                            #((requiring-resolve 'graphden.test-infra.arithmetic-replay/check)
+                                                              (:packages staged) inputs)))]
                           (reject-changed-impl! tmp [(fs/path candidate "resources") resources])
                           (expect! legacy (:executions staged))
                           (expect! [-3 15] (mapv #(get-in legacy [% :result]) [:floor :add]))
-                          (prn {:source-head source-head :staged (dissoc staged :executions)
+                          (prn {:source-head source-head :staged (cond-> (dissoc staged :executions :packages) postgres (assoc :postgres proof))
                                 :results (update-vals legacy :result)}))))))

@@ -195,11 +195,11 @@
         binding-descriptions (into {}
                                    (keep (fn [[field-name spec]]
                                            (when-let [origin (rename/origin (:context source-environment) original owner
-                                                                           grouped field-name spec)]
+                                                                            grouped field-name spec)]
                                              (when (contains? origin :description)
                                                [[field-name] {:description (:description origin)
-                                                         :target-path [(:field-id origin)]
-                                                         :binding-id (ids/binding-id id (:field-id origin))}]))))
+                                                              :target-path [(:field-id origin)]
+                                                              :binding-id (ids/binding-id id (:field-id origin))}]))))
                                    (:args original))
         common {:fn-id id :declaration-records (into [] (filter #(contains? #{:fn :slot :fn-slot} (:kind %))) records)
                 :field-annotations field-annotations

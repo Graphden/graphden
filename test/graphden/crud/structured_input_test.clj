@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.structured-input :as structured]
+    [graphden.crud.structured-input-bind :as bind]
     [graphden.input.context :as context]))
 
 
@@ -39,3 +40,11 @@
       (is (empty? (project ctx (assoc-in graph [:scopes [] :proofs address :status] :deferred))))
       (is (empty? (project ctx (assoc-in graph [:scopes [] :bindings address :origin-fn-id] (random-uuid)))))
       (is (empty? (project (assoc-in ctx [:bindings binding-id :resolver-fn-id] (random-uuid)) graph))))))
+
+
+(deftest named-bind-cannot-author-a-field-default
+  (let [target {:fn-id (random-uuid) :path ["profile" "label"]}]
+    (doseq [proposal [(assoc target :default "Ada") (assoc target :value nil :default "Ada")]]
+      (is (= :input/invalid-command
+             (try (bind/preview {} proposal) nil
+                  (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))

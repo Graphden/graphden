@@ -175,6 +175,31 @@
                     (:type (input-format-error (fn [] (primitive/declarations {:checked-echo forged}))))))))))))
 
 
+(deftest unsupported-record-member-default-stops-before-loading-implementations
+  (let [member {:type [:union :null :text] :required false :default false}
+        record-type {:id :text :label [:union :null :text]}
+        witness (pr-str {:namespace "format.fixture" :fns [{:name :echo :args {:x {:type record-type}} :return-type :text}]})
+        source (pr-str {:input-format 2 :namespace "format.fixture"
+                        :fns [{:name :checked-echo :input {:x {:type {:id :text :label member} :required true}}
+                               :return-type :text}]})
+        admission {:module ["format-fixture-main" "checked"]
+                   :fn-id (ids/fn-id "format.fixture" :checked-echo)
+                   :abi-fn-id (ids/fn-id "format.fixture" :echo)
+                   :record-contract {:x record-type}
+                   :sha256 (ids/digest-hex "SHA-256" source)}
+        loaded-impls (atom 0)]
+    (binding [*on-effect* #(swap! loaded-impls inc)]
+      (with-sources {"packages/format-fixture-main/package.edn" (package-source ["early" "checked"] [])
+                     "packages/format-fixture-main/early/fns.edn" witness
+                     "packages/format-fixture-main/early/impls.clj" impl-source
+                     "packages/format-fixture-main/checked/fns.edn" source}
+        (fn [_]
+          (let [failure (input-format-error #(loader/load-packages ["format-fixture-main"] {:primitive-input admission}))]
+            (is (= :staged-record-member-default-unsupported (:code failure)))
+            (is (zero? @loaded-impls))
+            (is (empty? (loaded/read-roster)))))))))
+
+
 (deftest pins-preflight-all-modules-before-loading-implementations
   (let [root "format.fixture"
         abi (ids/fn-id root :echo)

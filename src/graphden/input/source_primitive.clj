@@ -53,17 +53,46 @@
            (= #{} (peek type)) (record-of? (second type) data-type?) (data-type? (nth type 2)))))
 
 
+(defn- occurrence-layout
+  "Prepare a direct optional nullable-text member. Its shared type identity
+   depends on the declaration of the field and excludes the fallback value."
+  [spec]
+  (when (map? (:type spec))
+    (let [shape (:type spec)
+          members (filter (fn [[_ child]]
+                            (and (map? child) (contains? child :type)
+                                 (or (contains? child :default) (= field-default/nullable-text (:type child))))) shape)]
+      (when (seq members)
+        (let [[member child] (first members)]
+          (when-not (and (= 1 (count members)) (simple-keyword? member)
+                         (= #{:type :required} (set (keys spec))) (boolean? (:required spec))
+                         (not (contains? shape :type)) (every? simple-keyword? (keys shape)) (every? leaf-type? (vals (dissoc shape member)))
+                         (every? #{:type :required :default} (keys child))
+                         (field-default/supported? (:required child) (:type child) (:default child)))
+            (reject! :staged-record-member-default-unsupported))
+          (let [storage (assoc shape member {:type :core.refinements/nullable-text :required false})
+                record (ids/anonymous-fn-id (ids/shape-hash storage))]
+            (cond-> {:storage storage :type (assoc shape member field-default/nullable-text)}
+              (contains? child :default)
+              (assoc :envelope {:target-path [(str (ids/slot-id record member))] :value (:default child)}))))))))
+
+
 (defn- exact-record?
-  [input return-type contract]
-  (and (record-of? contract #(record-of? % pinned-input-type?))
-       (= input (update-vals contract #(hash-map :type % :required true)))
+  [input return-type contract layouts]
+  (and (map? contract) (seq contract) (= (set (keys contract)) (set (keys input)))
+       (every? (fn [[name type]]
+                 (and (simple-keyword? name)
+                      (if-let [layout (get layouts name)]
+                        (= type (:type layout))
+                        (and (record-of? type pinned-input-type?) (= {:type type :required true} (get input name))))))
+               contract)
        (or (leaf-type? return-type)
            (and (some #{return-type} (vals contract)) (data-type? return-type)))))
 
 
 (defn- require-primitive!
-  ([source] (require-primitive! source nil))
-  ([{:keys [input return-type effects] :as source} record-contract]
+  ([source] (require-primitive! source nil {}))
+  ([{:keys [input return-type effects] :as source} record-contract layouts]
    (when (some #(contains? source %) [:parent :parents])
      (reject! :staged-primitive-inheritance-unsupported))
    (when (some #(contains? source %) [:bind :configure])
@@ -73,7 +102,7 @@
                   (or (nil? effects) (and (set? effects) (every? keyword? effects))))
      (reject! :staged-primitive-declaration-unsupported))
    (when-not (if record-contract
-               (exact-record? input return-type record-contract)
+               (and (map? input) (exact-record? input return-type record-contract layouts))
                (and (map? input) (every? simple-keyword? (keys input))
                     (every? field-spec? (vals input)) (leaf-type? return-type)))
      (reject! :staged-primitive-type-unsupported))))
@@ -92,35 +121,44 @@
 
 
 (defn- base-context
-  [environment authored]
+  [environment layouts authored]
   (let [owner (ids/fn-id (:namespace authored) (:name authored))
         defaults (into {} (keep (fn [[field spec]]
                                   (when (and (map? spec) (contains? spec :default))
                                     [(ids/slot-id owner field) {:value (:default spec)}]))) (:input authored))
-        rows (module/unique-records (parse/base-declaration-records authored (:input authored) {}))
+        storage-input (reduce-kv #(assoc-in %1 [%2 :type] (:storage %3)) (:input authored) layouts)
+        member-defaults (into {} (keep (fn [[name {:keys [envelope]}]]
+                                         (when envelope [(ids/slot-id owner name) envelope]))) layouts)
+        stored-defaults (merge defaults member-defaults)
+        rows (module/unique-records (parse/base-declaration-records authored storage-input
+                                                                    {:core.refinements/nullable-text field-default/nullable-text-id}))
         rows (mapv #(if (and (= :slot (:kind %)) (contains? defaults (:id %)))
                       (assoc % :type-fn-id field-default/nullable-text-id) %) rows)
         ctx (source-context/declaration-context environment authored rows [])]
     (update ctx :declaration-records
             (fn [records]
               (mapv (fn [{:keys [kind fn-id slot-id] :as row}]
-                      (if (and (= :fn-slot kind) (= (:input-type-id ctx) fn-id) (contains? defaults slot-id))
-                        (assoc row :input-default (get defaults slot-id))
+                      (if (and (= :fn-slot kind) (= (:input-type-id ctx) fn-id) (contains? stored-defaults slot-id))
+                        (assoc row :input-default (get stored-defaults slot-id))
                         row)) records)))))
 
 
 (defn prepare
   "Prepare a standalone pure-shape declaration. Scalar fields are the default.
-   The optional record ABI pins exact required record fields. A callable field
+   The record ABI pins field types, including one optional nullable-text
+   member per record. A callable field
    must have a closed effect-free signature and data-only call values.
    Results are scalar or an admitted data record. No bindings or parents."
   ([source root] (prepare source root nil))
   ([source root record-contract]
-   (let [definition (selected-root source root)]
-     (require-primitive! definition record-contract)
-     (let [environment (source-context/environment {:name->id {}})]
-       (first (:definitions (module/parse-module-v2 (assoc source :fns [definition])
-                                                    {:context-for (partial base-context environment)})))))))
+   (let [definition (selected-root source root)
+         layouts (when (and record-contract (map? (:input definition)))
+                   (into {} (keep (fn [[k v]] (when-let [layout (occurrence-layout v)] [k layout]))) (:input definition)))]
+     (require-primitive! definition record-contract layouts)
+     (let [environment (source-context/environment {:name->id {}})
+           parsed (first (:definitions (module/parse-module-v2 (assoc source :fns [definition])
+                                                               {:context-for (partial base-context environment layouts)})))]
+       (cond-> parsed (seq layouts) (assoc :occurrence-fields (set (keys layouts))))))))
 
 
 (defn- scalar-literal?

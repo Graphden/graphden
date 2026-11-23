@@ -152,6 +152,8 @@
                 (vswap! seen conj address)
                 (let [expression (get expressions address)
                       sources (presence-dependencies expression)
+                      default-members (when (and (= :record (:op expression)) (seq (second address)))
+                                        (into #{} (filter #(contains? (get expressions %) :default)) sources))
                       kind (case (:op expression)
                              :supplied :supplied
                              :read :any-present
@@ -162,6 +164,8 @@
                              :always)]
                   (doseq [source sources] (visit source))
                   (vswap! rules conj (cond-> {:address address :kind kind :sources sources}
+                                       (seq default-members) (assoc :sources (into [] (remove default-members) sources)
+                                                                    :default-members default-members)
                                        (contains? expression :default) (assoc :default-present? true)
                                        (= :supplied-record kind)
                                        (assoc :required-fields (:required-fields expression)))))))]
@@ -169,17 +173,25 @@
       @rules)))
 
 
+(defn- any-source-present?
+  [presence supplied sources default-members]
+  ;; A fallback is available when its parent is active. Only an explicit
+  ;; argument at that address can activate the parent through this member.
+  (boolean (or (some presence sources)
+               (and default-members (some #(contains? supplied %) default-members)))))
+
+
 (defn present-addresses
   "Return address presence without forcing any field or reference."
   ([program supplied] (present-addresses program supplied {}))
   ([program supplied inherited]
-   (reduce (fn [presence {:keys [address kind sources default-present?]}]
+   (reduce (fn [presence {:keys [address kind sources default-present? default-members]}]
              (assoc presence address
                     (case kind
                       :always true
                       :supplied (or (true? default-present?) (contains? supplied address))
-                      :supplied-record (or (contains? supplied address) (boolean (some presence sources)))
-                      :any-present (boolean (some presence sources)))))
+                      :supplied-record (or (contains? supplied address) (any-source-present? presence supplied sources default-members))
+                      :any-present (any-source-present? presence supplied sources default-members))))
            inherited
            program)))
 

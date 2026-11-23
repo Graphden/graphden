@@ -196,14 +196,49 @@
            program)))
 
 
-(defn- call-site!
-  [contract scope expressions {:keys [parameter target value-path]}]
-  (let [[target-scope path] target
-        field (when (= target-scope scope) (descriptor/find-node contract path))]
-    (when-not (and field (= [] value-path) (= 1 (count path))
-                   (= parameter (:name field)) (= :supplied (:op (get expressions target))))
+(defn- parameter-node!
+  [scope expressions field path]
+  (let [address [scope path]
+        record? (contains? field :fields)
+        expected-op (if record? :record :supplied)]
+    (when-not (= expected-op (get-in expressions [address :op]))
       (reject! :callback-parameter-shape-required {:scope scope}))
-    {:name parameter :address target :required? (:required field)}))
+    (cond-> {:kind :input-field :name (:name field)
+             :address address :type (:type field) :required? (:required field)}
+      record? (assoc :fields (mapv #(parameter-node! scope expressions % (conj path (:id %)))
+                                   (:fields field))))))
+
+
+(defn- parameter-routes
+  [{:keys [address fields]} path]
+  (if (seq fields)
+    (mapcat #(parameter-routes % (conj path (:name %))) fields)
+    [{:target address :value-path path}]))
+
+
+(defn- callback-parameters!
+  [contract scope expressions parameters call-sites callable-type]
+  (let [by-name (into {} (map (juxt :name identity)) (:fields contract))
+        nodes (mapv (fn [name]
+                      (let [field (get by-name name)]
+                        (when-not field
+                          (reject! :callback-parameter-shape-required {:scope scope}))
+                        (parameter-node! scope expressions field [(:id field)])))
+                    parameters)
+        routes (mapcat (fn [node]
+                         (map #(assoc % :parameter (:name node))
+                              (parameter-routes node [])))
+                       nodes)
+        tree (mapcat #(tree-seq :fields :fields %) nodes)
+        record-addresses (into #{} (comp (filter :fields) (map :address)) tree)]
+    (when-not (= (frequencies call-sites) (frequencies routes))
+      (reject! :callback-parameter-shape-required {:scope scope}))
+    (when-not (= (types/fn-args callable-type) (into {} (map (juxt :name :type)) nodes))
+      (reject! :callback-parameter-type-mismatch {:scope scope}))
+    {:call-sites (into [] (comp (remove :fields) (map #(select-keys % [:name :address :required?]))) tree)
+     :required-parameters (into #{} (comp (filter :required?) (map :address)) nodes)
+     :record-addresses record-addresses
+     :parameter-surface (when (seq record-addresses) {:root {:fields nodes}})}))
 
 
 (defn- external-addresses!
@@ -252,24 +287,17 @@
                                     (= (select-keys capture route-keys)
                                        (select-keys (get routes from) route-keys)))
                        (reject! :closure-capture-route-mismatch {:address address})))
-                   (let [sites (mapv (partial call-site! contract scope expressions) call-sites)
+                   (let [plan (callback-parameters! contract scope expressions parameters call-sites callable-type)
                          external (external-addresses! public-routes contract scope expressions
                                                        (set parameters) external-captures)]
-                     (when-not (= (frequencies parameters) (frequencies (map :name sites)))
-                       (reject! :callback-parameter-shape-required {:scope scope}))
-                     (when (and (seq sites)
-                                (not= (types/fn-args callable-type)
-                                      (into {} (map (fn [{:keys [name address]}]
-                                                      [name (:type (get expressions address))])) sites)))
-                       (reject! :callback-parameter-type-mismatch {:scope scope}))
-                     [address (cond-> {:scope scope :type type :parameters parameters :call-sites sites}
+                     [address (cond-> (assoc plan :scope scope :type type :parameters parameters)
                                 (seq external) (assoc :external-addresses external))]))))
           plans)))
 
 
 (defn- frame-layouts
   [root scopes expressions closures program required]
-  (let [callbacks (into {} (map (juxt :scope :call-sites)) (vals closures))
+  (let [callbacks (into {} (map (juxt :scope identity)) (vals closures))
         external (into #{} (mapcat :external-addresses) (vals closures))
         owner (fn [[fn-id path]]
                 (let [branch [fn-id (subvec path 0 (min (count path) 1))]]
@@ -292,13 +320,14 @@
                           inputs-by-kind (group-by :kind rules)
                           parameters (into #{} (map :address) (:supplied inputs-by-kind))
                           records (into #{} (map :address) (:supplied-record inputs-by-kind))
-                          sites (get callbacks frame)]
-                      (when (and sites (not= parameters (set (map :address sites))))
+                          callback (get callbacks frame)]
+                      (when (and callback (or (not= parameters (into #{} (map :address) (:call-sites callback)))
+                                              (not= records (:record-addresses callback))))
                         (reject! :unrouted-callback-input {:scope frame}))
                       [frame {:scopes scopes :presence-program rules :parameters parameters
                               :record-inputs records
                               :required-addresses (into (set (get required frame))
-                                                        (comp (filter :required?) (map :address)) sites)}])))
+                                                        (:required-parameters callback))}])))
           (group-by owner (keys scopes)))))
 
 
@@ -346,7 +375,8 @@
         (reject! :input-route-not-lowered {:address address})))
     (references! expressions)
     (let [closures (closure-plans analysis expressions routes)
-          record-inputs (public-record-inputs analysis expressions)
+          record-inputs (into (public-record-inputs analysis expressions)
+                              (mapcat :record-addresses) (vals closures))
           program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})
           layouts (frame-layouts root scopes expressions closures program (:required-addresses analysis))]
       {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes

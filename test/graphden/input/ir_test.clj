@@ -147,3 +147,33 @@
            (code (assoc-in impls [target :root-entry :compile-time-value?] true))))
     (is (= :lazy-sequence-abi-required
            (code (assoc-in impls [target :root-entry :lazy-seq-args] #{:x}))))))
+
+
+(deftest callback-record-uses-identity-stable-routes-and-explicit-presence
+  (let [item {:value :any :details {:flag :any}}
+        definitions {:root {:input {:callback [:fn {:item item} :any #{}]} :return :any
+                            :bindings {[:callback] {:ref :child :id :use}}}
+                     :child {:input {:item item} :optional #{[:item :details]} :return :any}}
+        model (structural-model definitions)
+        callback (fixture/address :root [] :root [:callback])
+        address (partial fixture/address :root [:use] :child)
+        item-address (address [:item])
+        detail-address (address [:item :details])
+        value-address (address [:item :value])
+        flag-address (address [:item :details :flag])
+        plan (lower model definitions)
+        closure (get-in plan [:closures callback])
+        layout (get-in plan [:frame-layouts (:scope closure)])]
+    (is (= #{item-address} (:required-addresses layout)))
+    (is (= #{item-address detail-address} (:record-inputs layout)))
+    (is (= #{value-address flag-address} (:parameters layout)))
+    (is (= {item-address {} value-address nil detail-address {} flag-address false}
+           (arguments/route-values (:parameter-surface closure) {:item {:value nil :details {:flag false}}})))
+    (is (= {item-address {} value-address nil}
+           (arguments/route-values (:parameter-surface closure) {:item {:value nil}})))
+    (is (false? (get (ir/present-addresses (:presence-program layout) {item-address {} value-address false})
+                     detail-address)))
+    (is (= :callback-parameter-shape-required
+           (try
+             (lower (update-in model [:analysis :closures callback :call-sites] pop) definitions)
+             (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure))))))))

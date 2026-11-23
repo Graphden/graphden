@@ -62,7 +62,9 @@
 
 
 (defn- closure-expr
-  [{:keys [scope call-sites]} {:keys [scope-ids layouts address-ids]}]
+  [{:keys [scope call-sites parameter-surface]} {:keys [scope-ids layouts address-ids]}]
+  (when parameter-surface
+    (ir/reject! :unsupported-browser-callback-record {}))
   (when (> (count call-sites) 1)
     (ir/reject! :unsupported-browser-callback-arity {}))
   (merge {:kind "checked-closure" :fn (get scope-ids scope)

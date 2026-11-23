@@ -136,7 +136,7 @@ Optional absence, explicit nil and false are distinct. No default is invented.
 ### Synchronous graph callbacks
 
 A checked graph-callable binding in the root scope can reference a callback
-with direct leaf parameters and captures routed by stable address. The compiler
+with parameters and captures routed by stable address. The compiler
 uses the existing `tagged-callable` to preserve zero-argument, positional and
 named-map invocation shapes, trace frames and callable identity. Each callback
 invocation allocates its own cells. Reads of captured fields share the original
@@ -152,9 +152,17 @@ The checked lowering allocates the mark cell in the outer frame so every call
 within that invocation sees the same value. The caller cannot replace the mark
 through the callback's parameter map.
 
+On the JVM, a callback with one record parameter receives the record as its
+positional argument. Each declared field routes to the callback's own cells.
+An omitted optional record stays absent. Supplying that record, including an
+empty map, requires its mandatory fields. An explicit nil remains present at a
+nullable leaf. If the caller supplies a graph record, routing retains its
+field cells without reading unused leaves. The browser exporter rejects
+record-shaped callback parameters.
+
 The callback and its unforced local cells can run on the originating thread while
 the enclosing execution is active. Deferred or worker-thread invocation, nested
-graph callbacks, unproven captures and record-shaped parameter routes fail closed.
+graph callbacks and unproven captures fail closed.
 The package adapter checks the authored callable shape against its exact
 anonymous type row, including inherited fields. It keeps a list return when the
 legacy parser confirms its sequence FK and the frozen implementation signature

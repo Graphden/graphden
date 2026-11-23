@@ -5,6 +5,7 @@
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.runtime :as runtime]
+    [graphden.input.arguments :as arguments]
     [graphden.input.ir :as ir]
     [graphden.input.memo :as memo]
     [graphden.input.runtime :as input]))
@@ -34,14 +35,26 @@
 
 
 (defn- callback-supplies
-  [{:keys [parameters call-sites]} args]
+  [{:keys [parameters call-sites parameter-surface]} args]
   (when-not (if (seq parameters) (map? args) (nil? args))
     (ir/reject! :callback-arguments-required {}))
   (let [known (set parameters)]
     (when-not (every? known (keys args))
       (ir/reject! :unknown-callback-parameter {})))
-  (into {} (keep (fn [{:keys [name address]}]
-                   (when (contains? args name) [address (get args name)]))) call-sites))
+  (if parameter-surface
+    ;; Presence routing needs a supplied address. Its deferred source
+    ;; remains separate from eager values and is only read by the new cell.
+    (let [input-sources (volatile! {})
+          supplied (arguments/route-values
+                     parameter-surface args
+                     (fn [record {:keys [name address]}]
+                       (if (input/record-view? record)
+                         (do (vswap! input-sources assoc address (get (input/cache-token record) name))
+                             nil)
+                         (get record name))))]
+      [supplied @input-sources])
+    [(into {} (keep (fn [{:keys [name address]}]
+                      (when (contains? args name) [address (get args name)]))) call-sites) nil]))
 
 
 (defn- check-callback-lifetime!
@@ -60,8 +73,8 @@
         ;; outer cells. A deferred invocation needs a separate lifetime proof.
         (check-callback-lifetime! (:lifetime frame) scope)
         (executor/check-cancel!)
-        (let [supplied (callback-supplies plan args)
-              local (instantiate-frame (:ir frame) (:validators frame) scope supplied frame ctx)]
+        (let [[supplied input-sources] (callback-supplies plan args)
+              local (instantiate-frame (:ir frame) (:validators frame) scope supplied input-sources frame ctx)]
           (invoke-scope local scope ctx))))))
 
 
@@ -71,7 +84,9 @@
     (case op
       :literal value
       :closure (lexical-callable frame address target-id ctx)
-      :supplied (get (:supplied frame) address default)
+      :supplied (if-let [cell (get (:input-sources frame) address)]
+                  @cell
+                  (get (:supplied frame) address default))
       :read @(get-in frame [:cells source])
       :record (input/record-view
                 (into {} (keep (fn [[name child]]
@@ -93,7 +108,7 @@
 
 
 (defn- instantiate-frame
-  [ir validators scope supplied parent ctx]
+  [ir validators scope supplied input-sources parent ctx]
   (when-not (map? supplied) (ir/reject! :address-map-required {}))
   (let [{:keys [scopes parameters record-inputs presence-program required-addresses]} (get-in ir [:frame-layouts scope])
         _ (when-not (every? (fn [[address value]]
@@ -114,6 +129,7 @@
                    [address (input/field-cell read-value)]))
           cells (into (:cells parent {}) (map cell) presence-program)
           frame {:ir ir :validators validators :supplied (into (:supplied parent {}) supplied)
+                 :input-sources (into (:input-sources parent {}) input-sources)
                  :present present :cells cells :scopes scopes :invocation-key (when parent (Object.))
                  :lifetime (if parent (:lifetime parent)
                                (when (seq (:closures ir))
@@ -127,7 +143,7 @@
   "Freeze the outer frame before exposing any resolver. Callback cells are
    allocated only when the tagged callable is actually invoked."
   [ir validators supplied ctx]
-  (instantiate-frame ir validators (:root-scope ir) supplied nil ctx))
+  (instantiate-frame ir validators (:root-scope ir) supplied nil nil ctx))
 
 
 (defn invoke-root

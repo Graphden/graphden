@@ -782,6 +782,16 @@
            frozen baseline. Replays the bindings together against the stock checker and verifies
            that the other occupied fields and all original binding identities survive."
      :see [[:types "analyze-effective-input"]]}
+    {:ns graphden.input.source-joint :defn scope-view
+     :say "Checks the exact boundary between one owner's two proof groups. The projected baseline
+           must preserve all original rows except the scoped bindings and certified field links.
+           Its declarations, memberships, contract and projection rows must match the frozen graph."
+     :see [[:types "with-certified-owner"] [:types "verify-bindings-after-forwarding"]]}
+    {:ns graphden.input.source-scope :defn verify-bindings-after-forwarding
+     :say "Replays the remaining scoped group with the verified projections still in the graph.
+           Their occupied addresses and unique destinations must survive, and the runtime checks
+           must remain exactly equal. The complete source round trip precedes publication."
+     :see [[:types "scope-view"] [:types "verify-module"]]}
     {:ns graphden.input.source-snapshot :defn migrate-forwarded-field
      :say "Freezes both endpoints of an authored field passed to a value-producing reference.
            The checker replays the exact projection and verifies that the original local

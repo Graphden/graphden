@@ -613,3 +613,16 @@ and occupancy checks. An occupied ancestor input, ambiguous occurrence,
 cyclic proof dependency or unsupported blocker aborts the transaction; no
 partial package is returned. This is offline source evidence, not proof of
 runtime equivalence or authorization to activate the new loader.
+
+One owner may also contain both direct local forwarding declarations and
+scoped bindings. Its projection group is proved first with the scoped values
+omitted. The full original reference origins must agree with that reduced
+owner, so omission cannot hide a competing reference. Before the scope replay,
+`source-joint/scope-view` checks every remaining legacy row, declaration,
+membership and projection against the verified baseline and frozen snapshot.
+The projection rows stay in the graph; adding the scoped values must preserve
+their occupancy, unique destinations and all runtime obligations. Only a full
+round trip of the combined source proposal publishes the owner and its parent
+forwarding links. The existing forwarding type admission still applies;
+inline callable fields such as `router-ring-response/:func` remain explicitly
+blocked by `:unproved-field-origin`.

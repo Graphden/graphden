@@ -792,6 +792,12 @@
            Their occupied addresses and unique destinations must survive, and the runtime checks
            must remain exactly equal. The complete source round trip precedes publication."
      :see [[:types "scope-view"] [:types "verify-module"]]}
+    {:ns graphden.input.source-rich-types :defn authored-callable-field?
+     :say "Checks the anonymous callable row against its literal authored form and stored FK.
+           Named argument and result leaves need a separate frozen declaration closure; alias
+           expansion must not mint a replacement identity. Source evidence does not discharge
+           callable field-read obligations or admit unsupported nested callback parameters."
+     :see [[:types "migrate-forwarded-field"]]}
     {:ns graphden.input.source-snapshot :defn migrate-forwarded-field
      :say "Freezes both endpoints of an authored field passed to a value-producing reference.
            The checker replays the exact projection and verifies that the original local

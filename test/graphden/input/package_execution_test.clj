@@ -582,9 +582,9 @@
 
 
 (defn- named-callable-runtime
-  [record? compile-package]
-  (let [request (if record? {:value :text} [:map :keyword :text])
-        type-source (if record? {:type request} {:map {:key :keyword :value :text}})
+  [record-shape? compile-package]
+  (let [request (if record-shape? {:value :text} [:map :keyword :text])
+        type-source (if record-shape? {:type request} {:map {:key :keyword :value :text}})
         callable [:fn {:arg :request-shape} :response-shape]
         definitions [(merge {:namespace "callable-proof" :name :request-shape} type-source)
                      (merge {:namespace "callable-proof" :name :response-shape} type-source)
@@ -599,18 +599,18 @@
                       :args {:func :echo :arg {:value {:value "checked"}}}}]
         source (into (declarations "packages/core/system/fns.edn" #{:to-json-string}) definitions)
         calls (atom 0)
-        bases (assoc @loaded
-                     :reader {:namespace "callable-proof"
-                              :args {:func {:type [:fn {:arg request} request]} :arg {:type request}}
-                              :return-type request :effects #{}
-                              :impl (get-in @loaded [:invoke :impl])}
-                     :echo {:namespace "callable-proof" :args {:arg {:type request}}
-                            :return-type request :effects #{}
-                            :impl (fn [args _] (swap! calls inc) (runtime/resolve-arg args :arg))})]
+        base-definitions (assoc @loaded
+                                :reader {:namespace "callable-proof"
+                                         :args {:func {:type [:fn {:arg request} request]} :arg {:type request}}
+                                         :return-type request :effects #{}
+                                         :impl (get-in @loaded [:invoke :impl])}
+                                :echo {:namespace "callable-proof" :args {:arg {:type request}}
+                                       :return-type request :effects #{}
+                                       :impl (fn [args _] (swap! calls inc) (runtime/resolve-arg args :arg))})]
     (assoc (runtimes source (ids/fn-id "callable-proof" :run)
                      (fn [package id roots impls]
                        (compile-package (snapshot/with-certified-owner package id roots) id roots impls))
-                     bases)
+                     base-definitions)
            :calls calls)))
 
 

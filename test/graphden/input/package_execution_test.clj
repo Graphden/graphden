@@ -184,6 +184,7 @@
       (doseq [[value path default expected] [[{:leaf false} [:leaf] "fallback" false]
                                              [{:leaf nil} [:leaf] false nil]
                                              [{} [:leaf] false false]
+                                             [nil [:leaf] false false]
                                              [{:leaf 7} ["leaf"] "fallback" "fallback"]]]
         (let [child {:namespace "fixture" :name :lookup :parent :get-in
                      :args {:map {:value value} :path {:value path} :default {:value default}}}

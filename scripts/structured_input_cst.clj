@@ -141,12 +141,15 @@
   (if legacy-args-order
     (do
       (when-not (and (empty? bind) (empty? input)
-                     (= (set legacy-args-order) (set (map first (keys configure)))))
+                     (= (set legacy-args-order) (set (map #(get legacy-scope-names % (first %)) (keys configure)))))
         (refuse :unsupported-inline-annotation-mix {:path path}))
       [(annotation-map-edit source starts loc configure
                             (str ":bind {} :legacy-forms " (migration/stable-edn legacy-forms)
                                  " :legacy-args-order " (migration/stable-edn legacy-args-order) " "
-                                 (when legacy-order (str ":legacy-order " (migration/stable-edn legacy-order) " "))))])
+                                 (when (seq legacy-scope-names)
+                                   (str ":legacy-scope-names " (migration/stable-edn legacy-scope-names) " "))
+                                 (when legacy-order (str ":legacy-order " (migration/stable-edn legacy-order) " ")))
+                            legacy-scope-names)])
     (let [source-fields (format/inline-source-fields body)
           args (value-at loc [:args])
           fields (mapv (fn [[target form]]
@@ -446,19 +449,23 @@
 
 
 (defn- annotation-map-edit
-  [source starts loc configuration prefix]
+  [source starts loc configuration prefix & [scope-names]]
   (let [args (value-at loc [:args])
-        original (inventory/read-edn "<annotation>" (:before (node-edit source starts args identity)))]
+        original (inventory/read-edn "<annotation>" (:before (node-edit source starts args identity)))
+        scoped-paths (into {} (map (fn [[path field]] [field path])) scope-names)
+        path-for #(get scoped-paths % [%])]
     (when-not (and (or (key-loc loc :parent) (key-loc loc :parents))
                    (not-any? #(key-loc loc %) [:bind :input :configure])
                    (map? original) (seq original)
                    (every? (fn [[field spec]] (annotations/source-form? field spec)) original)
-                   (= configuration (into {} (map (fn [[field spec]] [[field] (select-keys spec [:type :description])])) original)))
+                   (= configuration (into {} (map (fn [[field spec]] [(path-for field) (select-keys spec [:type :description])])) original)))
       (refuse :annotation-origin-mismatch {}))
     (let [key-edit (assoc (rename-edit source starts loc nil [:args] :configure) :after (str prefix ":configure"))
           edits (into [key-edit]
                       (mapcat (fn [[key spec]]
-                                [(node-edit source starts key #(str "[" % "]"))
+                                [(node-edit source starts key (if-let [path (get scoped-paths (z/sexpr key))]
+                                                                (constantly (migration/stable-edn path))
+                                                                #(str "[" % "]")))
                                  (node-edit source starts (key-loc spec :as) (constantly ""))
                                  (node-edit source starts (value-at spec [:as]) (constantly ""))]))
                       (partition 2 (children args)))

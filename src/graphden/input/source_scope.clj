@@ -46,6 +46,8 @@
                               :value (and (:value-present binding) (migration/same-edn? payload (:value binding)))
                               :ref (and (qualified-keyword? payload)
                                         (= (:ref-fn-id binding) (ids/fn-id (namespace payload) (keyword (name payload)))))
+                              nil (when-let [row (get-in arg [:scoped-annotation :row])]
+                                    (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding row))))
                               false)]
     (when-not (and expected-expression (= owner-id (:fn-id binding) (get-in arg [:origin :fn-id]))
                    (= (:slot-id binding) (get-in arg [:origin :slot-id]))
@@ -60,7 +62,9 @@
                  (seq paths) (= (count paths) (count (set paths)) (count blockers))
                  (= (set (for [path paths] [path :ref-scope-required]))
                     (set (map (juxt :source-path :code) blockers)))
-                 (every? #(and (= :binding (:kind %)) (empty? (:policy %))) (:arguments legacy)))
+                 (every? #(and (= :binding (:kind %))
+                               (or (empty? (:policy %)) (:annotation %) (:scoped-annotation %)))
+                         (:arguments legacy)))
     (reject! :unsupported-scope-source))
   (let [records (:records legacy)
         bindings (filter #(= :binding (:kind %)) records)
@@ -202,13 +206,14 @@
 
 
 (defn- scoped-row
-  [binding [[_ use-path] field-path]]
+  [binding [[_ use-path] field-path] annotation]
   (rows/normalize
     (merge (select-keys binding [:id :fn-id :org-id])
            {:kind :input-binding :scope-path use-path :target-path field-path}
            (cond
              (:value-present binding) {:expression-kind "value" :value-present true :value (:value binding)}
              (:ref-fn-id binding) {:expression-kind "ref" :value-present false :ref-fn-id (:ref-fn-id binding)}
+             annotation (select-keys (:row annotation) [:type-override-fn-id :description :expression-kind :value-present])
              :else (reject! :unsupported-scoped-binding)))))
 
 
@@ -234,23 +239,32 @@
 (defn- binding-certificate
   [snapshot before [arg binding]]
   (let [owner (:fn-id binding)
-        [public-path address edges declaring] (public-route before snapshot arg binding)]
+        [public-path address edges declaring] (public-route before snapshot arg binding)
+        annotation (:scoped-annotation arg)]
+    (when (and annotation (not= declaring (:declaring-id annotation)))
+      (reject! :reference-field-origin-mismatch))
     (cond-> {:snapshot-id (:snapshot-id snapshot) :source-path (:source-path arg) :public-path public-path
              :address address :edges edges :field-owner declaring
              :owner-parents (get-in snapshot [:fns owner :parent-ids])
-             :row (scoped-row binding address)}
+             :row (scoped-row binding address annotation)}
+      annotation (assoc :configuration (select-keys annotation [:type :description]))
       (:target-type-origin arg) (assoc :target-type-origin (:target-type-origin arg)))))
 
 
 (defn- verified-addition?
-  [after binding {:keys [address row]}]
+  [before after binding {:keys [address row public-path] :as certificate}]
   (let [added (get-in after [:public-input :bindings address])
         expression (if (:value-present binding)
                      {:kind :value :value (:value binding)}
                      {:kind :ref :fn-id (:ref-fn-id binding)})]
     (and (= address (occurrence after (:slot-id binding)))
-         (= (:id binding) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
-         (migration/same-edn? expression (:expression added))
+         (if (contains? certificate :configuration)
+           (let [quantities [:address :completion-type :required :required-now? :whole-bindable?]]
+             (and (nil? added)
+                  (migration/same-edn? (select-keys (get-in before [:public-input :routes public-path]) quantities)
+                                       (select-keys (get-in after [:public-input :routes public-path]) quantities))))
+           (and (= (:id binding) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
+                (migration/same-edn? expression (:expression added))))
          (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))))
 
 
@@ -271,7 +285,7 @@
           after (checked-graph analyze updated owner)
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
-      (when-not (and (every? true? (map #(verified-addition? after (second %1) %2) omitted certificates))
+      (when-not (and (every? true? (map #(verified-addition? before after (second %1) %2) omitted certificates))
                      (every? (fn [{:keys [address row]}]
                                (= address (occurrence after (first (:target-path row))))) projections)
                      (preserves-occupancy? prior current certificates)

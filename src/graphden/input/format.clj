@@ -192,20 +192,20 @@
 
 
 (defn- valid-inline-configuration?
-  [{:keys [bind configure legacy-forms] :as body}]
+  [{:keys [bind configure legacy-forms legacy-scope-names] :as body}]
   (or (not (contains? body :configure))
       (and (map? configure)
            (every? (fn [[path spec]]
-                     (and (vector? path) (= 1 (count path))
-                          (or (contains? bind (first path))
-                              (let [spelling (get legacy-forms (first path))]
-                                (and (vector? spelling) (= :annotation (first spelling)))))
-                          (map? spec) (every? #{:type :description} (keys spec))
-                          (or (contains? spec :type)
-                              (let [spelling (get legacy-forms (first path))]
-                                (and (vector? spelling) (= :annotation (first spelling)))))
-                          (or (not (contains? spec :description)) (string? (:description spec)))
-                          (or (not (contains? spec :type)) (configuration-type? (:type spec)))))
+                     (let [local? (and (vector? path) (= 1 (count path)))
+                           field (if local? (first path) (get legacy-scope-names path))
+                           spelling (get legacy-forms field)
+                           annotation? (and (vector? spelling) (= :annotation (first spelling)))]
+                       (and (simple-keyword? field)
+                            (or annotation? (and local? (contains? bind field)))
+                            (map? spec) (every? #{:type :description} (keys spec))
+                            (or (contains? spec :type) annotation?)
+                            (or (not (contains? spec :description)) (string? (:description spec)))
+                            (or (not (contains? spec :type)) (configuration-type? (:type spec))))))
                    configure))))
 
 
@@ -243,9 +243,8 @@
 
 
 (defn- original-annotation
-  [field spelling configure]
-  (let [spec (get configure [field])
-        spelling-keys (second spelling)]
+  [field spelling spec]
+  (let [spelling-keys (second spelling)]
     (when (and (annotation-spelling? spelling) (= (disj (set spelling-keys) :as) (set (keys spec))))
       (let [raw (assoc spec :as field)]
         [field (apply array-map (mapcat (juxt identity raw) spelling-keys))]))))
@@ -262,22 +261,26 @@
 
 
 (defn inline-source-fields
-  "Map each inline binding key to its original argument name. Scoped keys
+  "Map each inline binding and scoped annotation to its original name. Scoped keys
    require an explicit one-to-one spelling map. This does not prove a route."
-  [{:keys [bind legacy-scope-names] :as body}]
-  (when (map? bind)
+  [{:keys [bind configure legacy-scope-names] :as body}]
+  (when (and (map? bind) (or (nil? configure) (map? configure)))
     (let [local (filter simple-keyword? (keys bind))
-          scoped (remove simple-keyword? (keys bind))
+          scoped-binds (remove simple-keyword? (keys bind))
+          scoped-configs (filter #(and (vector? %) (< 1 (count %))) (keys configure))
+          scoped (concat scoped-binds scoped-configs)
           names (or legacy-scope-names {})]
       (when (and (map? names) (= (set scoped) (set (keys names)))
+                 (= (count scoped) (count names))
                  (or (seq scoped) (not (contains? body :legacy-scope-names)))
                  (every? #(and (vector? %) (> (count %) 1) (every? simple-keyword? %)) scoped)
                  (every? (fn [path]
                            (let [form (get bind path)]
                              (and (vector? form) (= 2 (count form)) (#{:value :ref :project} (first form)))))
-                         scoped)
+                         scoped-binds)
                  (every? simple-keyword? (vals names))
-                 (= (count bind) (count (set (into (vec local) (vals names))))))
+                 (= (+ (count local) (count names)) (count (set (into (vec local) (vals names)))))
+                 (not-any? #(contains? configure [%]) (map names scoped-configs)))
         (into names (map (juxt identity identity)) local)))))
 
 
@@ -291,7 +294,7 @@
       (when-not (some #(contains? body %) [:legacy-forms :legacy-order :legacy-args-order :legacy-scope-names :input :configure]) body)
       (let [{:keys [bind input legacy-forms configure]} body
             source-fields (inline-source-fields body)
-            source-names (set (vals source-fields))]
+            source-names (into #{} (map #(get source-fields %)) (keys (when source-fields bind)))]
         (when (and source-fields (valid-inline-configuration? body) (valid-inline-input? body)
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
@@ -299,7 +302,8 @@
                             (every? #(or (#{:bare-value :ref-wrapper :type-first} %)
                                          (inline-type-position? %) (list-origin? %) (annotation-spelling? %))
                                     (vals legacy-forms)))))
-          (let [originals (mapv (fn [[key-path form]]
+          (let [annotation-paths (into {} (map (fn [[path field]] [field path])) (:legacy-scope-names body))
+                originals (mapv (fn [[key-path form]]
                                   (let [field (get source-fields key-path)]
                                     (when-let [[original] (original-leaf form (get legacy-forms field)
                                                                          (get-in configure [[field] :type]) input
@@ -308,7 +312,7 @@
                                 bind)
                 annotations (mapv (fn [[field spelling]]
                                     (when-not (contains? source-names field)
-                                      (original-annotation field spelling configure)))
+                                      (original-annotation field spelling (get configure (get annotation-paths field [field])))))
                                   (filter (comp annotation-spelling? val) legacy-forms))
                 originals (into originals annotations)]
             (when (every? some? originals)
@@ -371,9 +375,10 @@
           destination (into {} (map (fn [[path field]] [field path])) source-fields)
           leaves (mapv (fn [[k raw]]
                          (let [target (get destination k k)
-                               expression (get bind target)]
+                               expression (get bind target)
+                               config-path (if (vector? target) target [k])]
                            (if (and (not (contains? bind target)) (map? raw) (= k (:as raw))
-                                    (= (select-keys raw [:type :description]) (get configure [k]))
+                                    (= (select-keys raw [:type :description]) (get configure config-path))
                                     (contains? #{#{:as} #{:as :description} #{:as :type} #{:as :type :description}} (set (keys raw))))
                              [k target ::annotation [:annotation (vec (keys raw))]]
                              (when-let [[form spelling] (migrated-leaf raw expression (get configure [k]))]

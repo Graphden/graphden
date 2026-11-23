@@ -28,7 +28,8 @@
                   {:name :host :parent :sink :args (cond-> {:left :reader :deep remote-value}
                                                      duplicate? (assoc :right (if (= :occupied duplicate?) :fixed-reader :reader)))}]
          sources (mapv #(assoc % :namespace "demo") sources)
-         [entry] (:definitions (source/plan-module [(peek sources)] (parse/prepare-module sources {} {})))
+         original-context (parse/prepare-module sources {} {})
+         [entry] (:definitions (source/plan-module [(peek sources)] original-context))
          baseline (update-in sources [(dec (count sources)) :args] dissoc :deep)
          prepared (parse/prepare-module baseline {} {})
          validated (source/verify-module (source/plan-module baseline prepared) prepared)
@@ -46,7 +47,7 @@
                      :signatures {(demo-id :reader) {:return (if (= result :returned) {:deep :text} result) :args {:deep :text} :effects #{}}
                                   (demo-id :fixed-reader) {:return :text :args {} :effects #{}}
                                   producer {:return :text :args {} :effects #{}}}})]
-     {:owner owner :producer producer :entry entry :snapshot snapshot
+     {:owner owner :producer producer :entry entry :snapshot snapshot :original-context original-context
       :edge (ids/binding-id owner (ids/slot-id (demo-id :sink) :left))
       :slot (ids/slot-id (demo-id :reader) :deep)})))
 
@@ -77,6 +78,36 @@
         (is (= producer (:ref-fn-id row)))
         (is (= value (:value row))))
       (is (not (contains? (:bindings snapshot) (:id row)))))))
+
+
+(deftest referenced-field-annotation-retains-its-identity-and-free-state
+  (let [annotation {:as :deep :type :text :description "Reader input"}
+        {:keys [entry owner slot edge snapshot original-context]} (fixture annotation false)
+        certificate (scope/verify-binding entry [:args :deep] snapshot analyze)
+        row (:row certificate)
+        candidate (-> entry
+                      (assoc :status :supported :blockers []
+                             :proposed {:name :host :namespace "demo" :parent :sink
+                                        :bind {:left [:ref :demo/reader]}
+                                        :configure {[:left :deep] (:configuration certificate)}})
+                      (update-in [:legacy :arguments]
+                                 (fn [arguments]
+                                   (mapv #(cond-> % (= [:args :deep] (:source-path %))
+                                                  (assoc :scope-certificate certificate))
+                                         arguments))))
+        [verified] (:definitions (source/verify-module {:definitions [candidate]} original-context))
+        duplicate (fixture annotation true)]
+    (is (= {:type :text :description "Reader input"} (:configuration certificate)))
+    (is (= [[owner [edge]] [slot]] (:address certificate)))
+    (is (= (ids/binding-id owner slot) (:id row)))
+    (is (= [edge] (:scope-path row)))
+    (is (= (ids/primitive-fn-id :text) (:type-override-fn-id row)))
+    (is (= [nil false "Reader input"] ((juxt :expression-kind :value-present :description) row)))
+    (is (= :authored-source-equivalent (:verification verified)) (pr-str (:blockers verified)))
+    (is (= row (get-in verified [:v2 :configurations [:left :deep] :row])))
+    (is (= 1 (count (get-in verified [:v2 :binding-state]))))
+    (is (= :nonunique-reference-input
+           (code #(scope/verify-binding (:entry duplicate) [:args :deep] (:snapshot duplicate) analyze))))))
 
 
 (deftest result-fields-and-constructor-inputs-keep-distinct-addresses

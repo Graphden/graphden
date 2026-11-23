@@ -229,8 +229,9 @@
 
 (defn- field-assertions
   [definition arguments]
-  (into {} (keep (fn [{:keys [rename self-pin annotation source-path]}]
-                   (let [spec (get-in definition source-path)]
+  (into {} (keep (fn [{:keys [rename self-pin annotation scoped-annotation source-path]}]
+                   (let [spec (get-in definition source-path)
+                         annotation (or annotation scoped-annotation)]
                      (when (or self-pin annotation (:pin-id rename) (contains? rename :description) (typed-binding? spec))
                        [[(second source-path)] (if annotation (annotations/configuration annotation)
                                                    (select-keys spec (if rename [:type :description] [:type])))])))) arguments))
@@ -639,7 +640,8 @@
 (defn- v2-authored-meaning
   [definition parsed]
   (let [traces (or (:list-builders parsed) {})
-        certified (set (map :row (vals (:scoped-inputs parsed))))
+        certified (into (set (map :row (vals (:scoped-inputs parsed))))
+                        (comp (filter :address) (map :row)) (vals (:configurations parsed)))
         forwarded (into #{} (comp (filter :source-names) (map :row)) (vals (:scoped-inputs parsed)))
         bindings (mapv #(if (contains? certified %)
                           (migration/legacy-binding (assoc % :scope-path []))
@@ -647,7 +649,7 @@
                        (remove forwarded (ordinary-bindings (:bindings parsed) traces)))]
     (assoc (authored-meaning definition parsed bindings)
            :list-builders traces
-           :asserted-types (into {} (map (fn [[path assertion]] [path (:type assertion)]))
+           :asserted-types (into {} (map (fn [[path assertion]] [(get assertion :legacy-path path) (:type assertion)]))
                                  (:configurations parsed)))))
 
 

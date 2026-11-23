@@ -530,6 +530,20 @@
         (is (= "false" (legacy {}) (canonical {})))))))
 
 
+(deftest scoped-inline-annotation-preserves-input-and-execution
+  (let [child {:parent :_csv-escape-cell
+               :args {:value :str-trim :string {:as :string :type :text :description "Source"}}}
+        host {:namespace "inline-annotation" :name :host :parent :_csv-escape-cell :args {:value child}}
+        dependencies (declarations "packages/core/strings/fns.edn" #{:_csv-escape-cell :str-trim})
+        owner (ids/fn-id "inline-annotation" :host)
+        compile-certified (fn [package root roots implementations]
+                            (execution/compile-package (snapshot/with-certified-owner package root roots)
+                                                       root roots implementations))
+        {:keys [canonical legacy analysis]} (runtimes (conj dependencies host) owner compile-certified)]
+    (is (= :checked (:status analysis)))
+    (is (= "input" (legacy {:string " input "}) (canonical {:value {:value {:string " input "}}})))))
+
+
 (deftest same-owner-joint-proof-preserves-nil-false-and-unread-reference
   (let [parent {:namespace "joint-runtime" :name :with-extra :parent :_csv-escape-cell
                 :args {:extra {:type :text :required false}}}

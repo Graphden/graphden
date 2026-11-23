@@ -65,8 +65,8 @@
               edges))))
 
 
-(defn- parse-route
-  [{:keys [scope scoped-inputs declaration-records] :as ctx} local-state public-path form]
+(defn- checked-route
+  [{:keys [scope scoped-inputs declaration-records] :as ctx} local-state public-path]
   (let [{:keys [address row edges field-owner owner-parents snapshot-id] :as certificate} (get scoped-inputs public-path)
         [owner] scope
         parents (:parent-ids (some #(when (and (= :fn (:kind %)) (= owner (:id %))) %) declaration-records))]
@@ -76,8 +76,17 @@
                    (= owner-parents parents) (edge-path? owner edges) (root-link? ctx local-state (first edges)))
       (reject! :unverified-scoped-input public-path))
     (let [use-path (mapv :binding-id edges)
-          field-id (ids/slot-id field-owner (peek public-path))
-          expression (read-leaf ctx certificate public-path form)
+          field-id (ids/slot-id field-owner (peek public-path))]
+      (when-not (and (every? uuid? use-path) (= address [[owner use-path] [field-id]]))
+        (reject! :scoped-origin-mismatch public-path))
+      (assoc certificate :owner owner :use-path use-path :field-id field-id))))
+
+
+(defn- parse-route
+  [ctx local-state public-path form]
+  (let [{:keys [address row owner use-path field-id] :as certificate} (checked-route ctx local-state public-path)]
+    (when (contains? certificate :configuration) (reject! :unsupported-scoped-expression public-path))
+    (let [expression (read-leaf ctx certificate public-path form)
           projection? (= :projection (:kind expression))
           id (if projection?
                (migration/derived-id :forwarded-field owner (first use-path) field-id)
@@ -92,7 +101,7 @@
                             :projection {:expression-kind "projection" :value-present false
                                          :projection-scope-path (second (:scope expression))
                                          :projection-path (:path expression)})))]
-      (when-not (and (every? uuid? use-path) (= address [[owner use-path] [field-id]]) (migration/same-edn? parsed row))
+      (when-not (migration/same-edn? parsed row)
         (reject! :scoped-origin-mismatch public-path))
       (cond-> {:address address :row parsed :expression expression}
         projection? (assoc :source-names (:source-names certificate))))))
@@ -103,6 +112,25 @@
   (into {} (keep (fn [[path form]]
                    (when (vector? path) [path (parse-route ctx state path form)])))
         (when (map? bind) bind)))
+
+
+(defn parse-annotation
+  [ctx state path spec]
+  (when-not (contains? (get-in ctx [:scoped-inputs path]) :configuration)
+    (reject! :unsupported-field-configuration path))
+  (let [{:keys [address row owner use-path field-id field-owner configuration]} (checked-route ctx state path)
+        pin (:type-override-fn-id row)
+        expected (cond-> {:kind :input-binding :id (ids/binding-id owner field-id) :fn-id owner
+                          :scope-path use-path :target-path [field-id] :expression-kind nil :value-present false}
+                   (:org-id row) (assoc :org-id (:org-id row))
+                   (contains? spec :description) (assoc :description (:description spec))
+                   (contains? spec :type) (assoc :type-override-fn-id pin))]
+    (when-not (and (migration/same-edn? spec configuration)
+                   (or (not (contains? spec :type)) (uuid? pin))
+                   (migration/same-edn? expected row))
+      (reject! :scoped-origin-mismatch path))
+    [path (assoc spec :row expected :address address :target-path [field-id] :field-owner field-owner
+                 :legacy-path [(peek path)] :type-override-fn-id pin)]))
 
 
 (defn binding-state

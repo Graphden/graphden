@@ -4,6 +4,7 @@
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
     [graphden.input.source :as source]
+    [graphden.input.source-context :as source-context]
     [graphden.input.source-forward :as forward]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
@@ -97,3 +98,31 @@
       (is (= (ids/binding-list-item-id list-binding 1) (get-in origin [:list-reference :item-id])))
       (is (= (:target-id target) (get-in origin [:list-reference :target-fn-id])))
       (is (= :unproved-forwarded-target (failure #(forward/verify-forwarded-field prepared entry :method)))))))
+
+
+(deftest own-list-source-replay-uses-the-frozen-authored-owner
+  (let [{:keys [prepared entry]} (fixture)
+        owner (:identity entry)
+        proof (forward/verify-forwarded-field prepared entry :string)
+        {:keys [binding-id builder-id target-id item-id target-fn-id position] :as origin} (:list-reference proof)
+        fragment (assoc (dissoc origin :item-id :target-fn-id :position) :scope-path [] :target-path [target-id])
+        link {:from [[owner []] [target-id]] :binding-id binding-id :target-fn-id builder-id :origin-fn-id owner
+              :name :items :source-list-fragment fragment}
+        operand {:from [[owner [binding-id]] [(ids/slot-id builder-id (str "item-" position))]]
+                 :binding-id item-id :target-fn-id target-fn-id :origin-fn-id builder-id :name :item-2
+                 :source-list-operand {:binding-id binding-id :position position :item-id item-id :ref-fn-id target-fn-id}}
+        certificate {:edges [link operand] :field-owner target-fn-id :public-path [:items :item-2 :string]
+                     :row {:target-path [(:target-field-id proof)]}}
+        baseline (:entry (source/forwarded-fields-baseline prepared entry [:string]))
+        env (source-context/environment prepared)
+        [lowered rows] (source-context/lower-declarations env (assoc (:proposed baseline) :namespace "fixture"))
+        replay (fn [environment cert]
+                 (source-context/scoped-reference-context environment lowered rows [{:scope-certificate cert}]))]
+    (is (not-any? #(= :binding (:kind %)) rows))
+    (is (= certificate (get-in (replay env certificate) [:scoped-inputs [:items :item-2 :string]])))
+    (is (= :reference-use-drift (failure #(replay (update env :definition-by-id dissoc owner) certificate))))
+    (doseq [changed [(assoc-in certificate [:edges 1 :source-list-operand :position] 0)
+                     (assoc-in certificate [:edges 0 :source-list-fragment :owner-id] target-fn-id)]]
+      (is (= :reference-use-drift (failure #(replay env changed)))))
+    (let [changed (assoc-in env [:definition-by-id owner :args :items :append 2] {:value false})]
+      (is (= :reference-use-drift (failure #(replay changed certificate)))))))

@@ -300,6 +300,20 @@
           (reject! :reference-field-drift public-path))))))
 
 
+(defn- authored-list-root
+  [{:keys [definition-by-id records-of]} own public-path]
+  (let [id (get-in own [:owner :id])
+        original (get definition-by-id id)]
+    (when-not original (reject! :reference-use-drift public-path))
+    (let [authored (scope-entry original (records-of original))]
+      ;; Declaration lowering intentionally omits :bind. Read the original
+      ;; contribution from this same frozen owner, never from lowered rows.
+      (when-not (= (select-keys (:owner own) [:id :parent-ids])
+                   (select-keys (:owner authored) [:id :parent-ids]))
+        (reject! :reference-use-drift public-path))
+      authored)))
+
+
 (defn scoped-reference-context
   "Check inherited root links, descendant references and the leaf membership
    against the current prepared package's declaration and binding rows."
@@ -312,7 +326,9 @@
             list-links (into {} (keep (fn [certificate]
                                         (let [edge (first (:edges certificate))]
                                           (when (:source-list-fragment edge)
-                                            (let [link (source-list-link (cons own lineage) edge (:public-path certificate))]
+                                            (let [path (:public-path certificate)
+                                                  authored (authored-list-root env own path)
+                                                  link (source-list-link (cons authored lineage) edge path)]
                                               [(:id link) link]))))) certificates)]
         (run! (partial check-descendants! env) certificates)
         {:scoped-inputs (into {} (map (juxt :public-path identity)) certificates)

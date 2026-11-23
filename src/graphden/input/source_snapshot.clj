@@ -13,6 +13,7 @@
     [graphden.input.source-annotations :as annotations]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-named-types :as named-types]
+    [graphden.input.source-origins :as origins]
     [graphden.input.source-primitive :as primitive]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
@@ -45,7 +46,8 @@
     {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous))
      :markers (shapes/markers-snapshot)
      :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
-     :originals by-id}))
+     :originals by-id
+     :inline-origins (delay (origins/index prepared originals))}))
 
 
 (defn- plan-entry
@@ -180,30 +182,49 @@
     (verified-entry-tree package v2 resolve-named)))
 
 
+(defn- declaration-evidence
+  "Compare verified rows and rich declarations, not alternate spelling of bind.
+   The round trip already checked inline-body against its enclosing source;
+   expression, origins and child evidence retain its resolved meaning."
+  [entry]
+  (cond-> (dissoc entry :inline-body)
+    (:source entry) (update :source dissoc :bind)
+    (:inline-definitions entry) (update :inline-definitions #(update-vals % declaration-evidence))))
+
+
 (defn- add-closure-entry
   [entries {:keys [owner] :as entry}]
   (let [id (:id owner)]
-    (when (contains? entries id) (reject! :conflicting-declaration-record id))
+    (when (and (contains? entries id)
+               (not (migration/same-edn? (declaration-evidence (get entries id))
+                                         (declaration-evidence entry))))
+      (reject! :conflicting-declaration-record id))
     (assoc entries id entry)))
+
+
+(defn- declaration-package
+  [package id]
+  (if (contains? (:originals package) id)
+    package
+    (if-let [{:keys [declaration]} (when-let [index (:inline-origins package)]
+                                     (origins/declaration @index id))]
+      ;; The child keeps its parser UUID and exact enclosing source location.
+      ;; Its own authored rows still need the ordinary complete round trip.
+      (assoc-in package [:originals id] [declaration])
+      (reject! :missing-original-declaration id))))
 
 
 (defn- closure
   [package roots resolve-named]
-  (loop [pending (vec roots) entries {} undeclared []]
+  (loop [pending (vec roots) entries {}]
     (if-let [id (peek pending)]
-      (cond
-        (contains? entries id) (recur (pop pending) entries undeclared)
-        ;; An overlay or another dependency can request the anonymous UUID
-        ;; before its enclosing source has supplied the verified declaration.
-        (not (contains? (:originals package) id)) (recur (pop pending) entries (conj undeclared id))
-        :else
-        (let [added (closure-entries package id resolve-named)
+      (if (contains? entries id)
+        (recur (pop pending) entries)
+        (let [added (closure-entries (declaration-package package id) id resolve-named)
               parents (mapcat #(get-in % [:owner :parent-ids]) added)
               refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
-          (recur (into (into (pop pending) parents) refs) (reduce add-closure-entry entries added) undeclared)))
-      (if-let [missing (first (remove #(contains? entries %) undeclared))]
-        (reject! :missing-original-declaration missing)
-        entries))))
+          (recur (into (into (pop pending) parents) refs) (reduce add-closure-entry entries added))))
+      entries)))
 
 
 (defn- merge-record
@@ -603,3 +624,75 @@
     (-> package
         (assoc-in [:closure-baselines owner] result)
         (update :prepared source/with-forwarded-parent result))))
+
+
+(defn- inherited-candidate?
+  [blockers]
+  (and (some #(= :inherited-projection-required (:code %)) blockers)
+       (every? (fn [{:keys [code source-path]}]
+                 (if (= :inherited-projection-required code)
+                   (= [:args] source-path)
+                   (and (#{:ref-scope-required :field-projection-required} code)
+                        (= 2 (count source-path)) (= :args (first source-path)))))
+               blockers)))
+
+
+(declare certify-owner)
+
+
+(defn- certify-inherited
+  [package owner entry roots active]
+  (let [parents (some #(when (and (= :fn (:kind %)) (= owner (:id %))) (:parent-ids %))
+                      (get-in entry [:legacy :records]))
+        next-package (reduce #(certify-owner %1 %2 roots active) package parents)
+        next-entry (plan-entry next-package owner)]
+    (when (some #(= :inherited-projection-required (:code %)) (:blockers next-entry))
+      (reject! :unproved-inherited-projection owner))
+    (certify-owner next-package owner roots (disj active owner))))
+
+
+(defn- certify-owner-step
+  [package owner roots active]
+  (let [entry (plan-entry package owner)
+        blockers (:blockers entry)]
+    (cond
+      (= :authored-source-equivalent (:verification entry))
+      (assoc-in package [:closure-baselines owner] entry)
+
+      (inherited-candidate? blockers)
+      (certify-inherited package owner entry roots active)
+
+      (and (seq blockers) (every? #(= :ref-scope-required (:code %)) blockers))
+      (with-migrated-bindings package [owner] roots)
+
+      (and (seq blockers) (every? #(= :field-projection-required (:code %)) blockers))
+      (with-migrated-forwarding package owner (mapv (comp second :source-path) blockers) roots)
+
+      :else (reject! :unsupported-owner-certificate owner))))
+
+
+(defn- certify-owner
+  [package owner roots active]
+  (when (contains? active owner) (reject! :cyclic-source-certificate owner))
+  (let [active (conj active owner)
+        outcome (try {:package (certify-owner-step package owner roots active)}
+                     (catch clojure.lang.ExceptionInfo failure
+                       (let [{:keys [code fn-id]} (ex-data failure)]
+                         (if (and (= :unverified-source-declaration code) (uuid? fn-id)
+                                  (not (contains? (:closure-baselines package) fn-id)))
+                           {:dependency fn-id}
+                           (throw failure)))))]
+    (if-let [dependency (:dependency outcome)]
+      (let [updated (certify-owner package dependency roots active)]
+        (certify-owner updated owner roots (disj active owner)))
+      (:package outcome))))
+
+
+(defn with-certified-owner
+  "Certify one owner and the exact dependencies needed by its proof as one
+   immutable transaction. Inherited links require the declaring owner's
+   existing forwarding/rename evidence; scoped additions still run the full
+   aggregate availability, type and occupancy checks. Any failure returns no
+   partially certified package. Cycles and unknown blocker kinds stay blocked."
+  [package owner roots]
+  (certify-owner package owner roots #{}))

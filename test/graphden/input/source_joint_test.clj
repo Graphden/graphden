@@ -50,3 +50,22 @@
       (is (= :fn (first (get-in original [:args :func :type]))))
       (is (= :unproved-field-origin
              (code #(joint/check-full-reference-origins! prepared entry reduced-prepared reduced-entry)))))))
+
+
+(deftest omitted-scoped-ref-cannot-hide-a-second-forwarding-occurrence
+  (let [definitions (mapv #(assoc % :namespace "joint-origins")
+                          [{:name :sink :args {:a :text :b :text} :return-type :text}
+                           {:name :reader-a :args {:data :text} :return-type :text}
+                           {:name :reader-b :args {:string :text} :return-type :text}
+                           {:name :producer :args {:data :text} :return-type :text}
+                           {:name :host :parent :sink
+                            :args {:a :reader-a :b :reader-b :data {:type :text} :string :producer}}])
+        prepared (parse/prepare-module definitions {} {})
+        entry (last (:definitions (source/plan-module definitions prepared)))
+        reduced (update-in definitions [4 :args] dissoc :string)
+        reduced-prepared (parse/prepare-module reduced {} {})
+        reduced-entry (last (:definitions (source/plan-module reduced reduced-prepared)))]
+    (is (= {:fields [:data] :paths [[:args :string]]} (joint/groups entry)))
+    (is (= [:field-projection-required] (mapv :code (:blockers reduced-entry))))
+    (is (= :nonunique-reference-use
+           (code #(joint/check-full-reference-origins! prepared entry reduced-prepared reduced-entry))))))

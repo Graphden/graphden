@@ -336,10 +336,10 @@
 (defn- rule-type-aliases
   [entries roots]
   (reduce (fn [aliases callback]
-            (reduce-kv (fn [aliases alias qualified]
-                         (when (and (contains? aliases alias) (not= qualified (get aliases alias)))
+            (reduce-kv (fn [aliases alias-name qualified]
+                         (when (and (contains? aliases alias-name) (not= qualified (get aliases alias-name)))
                            (reject! :conflicting-rule-type-alias nil))
-                         (assoc aliases alias qualified))
+                         (assoc aliases alias-name qualified))
                        aliases (:graphden.input/type-aliases (meta callback) {})))
           {}
           (for [id (keys entries)
@@ -605,8 +605,8 @@
   (let [original (plan-entry package owner)
         {:keys [fields paths]} (joint/groups original)
         reduced-package (omit-arguments package owner (mapv second paths))
-        reduced (plan-entry reduced-package owner)
-        _ (joint/check-full-reference-origins! (:prepared package) original (:prepared reduced-package) reduced)
+        baseline-entry (plan-entry reduced-package owner)
+        _ (joint/check-full-reference-origins! (:prepared package) original (:prepared reduced-package) baseline-entry)
         projected (migrate-forwarded-fields reduced-package owner fields roots)
         baseline (assoc-in reduced-package [:closure-baselines owner] projected)
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))

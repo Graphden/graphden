@@ -42,10 +42,10 @@
           prepared (parse/prepare-module definitions {} {})
           context (assoc prepared :fn-defs (filterv #(= :router-ring-response (:name %)) (:fn-defs prepared)))
           entry (first (:definitions (source/plan-module [original] context)))
-          reduced (update original :args dissoc :defaults)
-          reduced-prepared (parse/prepare-module (mapv #(if (= original %) reduced %) definitions) {} {})
+          baseline-entry (update original :args dissoc :defaults)
+          reduced-prepared (parse/prepare-module (mapv #(if (= original %) baseline-entry %) definitions) {} {})
           reduced-context (assoc reduced-prepared :fn-defs (filterv #(= :router-ring-response (:name %)) (:fn-defs reduced-prepared)))
-          reduced-entry (first (:definitions (source/plan-module [reduced] reduced-context)))]
+          reduced-entry (first (:definitions (source/plan-module [baseline-entry] reduced-context)))]
       (is (= {:fields [:func] :paths [[:args :defaults]]} (joint/groups entry)))
       (is (= :fn (first (get-in original [:args :func :type]))))
       (is (= :unproved-field-origin
@@ -62,9 +62,9 @@
                             :args {:a :reader-a :b :reader-b :data {:type :text} :string :producer}}])
         prepared (parse/prepare-module definitions {} {})
         entry (last (:definitions (source/plan-module definitions prepared)))
-        reduced (update-in definitions [4 :args] dissoc :string)
-        reduced-prepared (parse/prepare-module reduced {} {})
-        reduced-entry (last (:definitions (source/plan-module reduced reduced-prepared)))]
+        baseline-entry (update-in definitions [4 :args] dissoc :string)
+        reduced-prepared (parse/prepare-module baseline-entry {} {})
+        reduced-entry (last (:definitions (source/plan-module baseline-entry reduced-prepared)))]
     (is (= {:fields [:data] :paths [[:args :string]]} (joint/groups entry)))
     (is (= [:field-projection-required] (mapv :code (:blockers reduced-entry))))
     (is (= :nonunique-reference-use

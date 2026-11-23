@@ -32,13 +32,13 @@
 
 (defn check-full-reference-origins!
   "Omitting a scoped reference must not hide another occurrence of a forwarded
-   field. Check the structural origins against both the full and reduced owner."
-  [prepared original reduced-prepared reduced]
+   field. Check the structural origins against both the full owner and the owner without scoped bindings."
+  [prepared original reduced-prepared baseline-entry]
   (let [{:keys [fields paths]} (groups original)
         field-view (assoc original :blockers (filterv #(= :field-projection-required (:code %)) (:blockers original)))]
-    (when-not (and (migration/same-edn? (without-scoped-source original paths) (:source reduced))
+    (when-not (and (migration/same-edn? (without-scoped-source original paths) (:source baseline-entry))
                    (migration/same-edn? (mapv #(forward/verify-forwarded-field prepared field-view %) fields)
-                                        (mapv #(forward/verify-forwarded-field reduced-prepared reduced %) fields)))
+                                        (mapv #(forward/verify-forwarded-field reduced-prepared baseline-entry %) fields)))
       (reject!))))
 
 

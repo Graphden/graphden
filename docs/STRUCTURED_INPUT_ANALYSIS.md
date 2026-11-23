@@ -206,6 +206,43 @@ is lexical runtime state with its own forcing and precedence rules.
 The [source snapshot regression](../test/graphden/input/source_snapshot_test.clj)
 covers the shipped formatter and this derived counterexample.
 
+`app.branches/_branch-ref-named?` has the same boundary inside its inline
+`is-a?` test. Its authored `:value :_branch-ref-input` is stored as binding
+`c8c410ff-d87b-54bd-9de0-aa2e588895fe`, owned by inline function
+`668ff893-ec30-51dc-aa1c-bd668239a546`, on `core.logic/const.value`
+(`6fc2f92b-8fb7-5c14-932c-67ee0c62b937`). The primitive's own
+`is-a?.value` (`f573082c-ca10-59f0-ae1f-2a5c92dec7f0`) is free. The legacy
+executor connects them through the local `:value` env binding, shadowing both
+the public name and the free reader UUID. The initializer reads the caller's
+`:ref` through `_branch-ref-input`: `{:ref "main"}` returns true, while
+`{:ref nil :value "direct"}` returns false. Source planning refuses
+`:ref-scope-required` at `[:args :test :args :value]`; the origin ledger contains
+the old `const.value` address, without an origin for the free reader address.
+
+An isolated root remap reproduces those samples, but still fails inheritance.
+For a function with the same `is-a?` body, the descendant
+`{:parent :host :args {:value {:value false}}}` binds `const.value`, hiding the
+parent's env initializer. With `{:ref "main"}` legacy returns false; moving
+the parent's binding to `is-a?.value` makes it return true. This counterexample
+retains the original parent binding UUID and every other column. The
+[legacy env regression](../test/graphden/input/source_legacy_env_test.clj)
+pins the actual package identities and this positive/negative differential.
+
+A possible lowering must retain the old binding as a scoped initializer,
+rather than replace its target. At the row level a new link at `[is-a?.value]`
+could invoke the existing `core.logic/const`, while the original row keeps its
+UUID, owner and `[const.value]` target under that link's use path. This is a
+design boundary, not an admitted source form: the current scoped source reader
+has no origin witness for that generated scalar link. A future witness must
+prove the exact source binding, generated link, native const ABI and reader UUID;
+derive the effective env winner for every final inherited owner; and preserve
+the caller cells visible to the initializer before its local binding. A carrier
+must also retain shared lazy evaluation when several readers consume the same
+env value. Existing list-fragment witnesses prove list construction only and
+cannot certify this transformation. Matching public names alone proves none
+of those conditions. Keep this case blocked until row replay and execution
+both establish the complete connection.
+
 A `:checked` graph has completed supported analysis, not necessarily validated
 all runtime values. Deferred checks are explicit `:obligations` with stable
 scope/path/kind identities and `:field-read` or `:container-materialization`

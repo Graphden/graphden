@@ -128,3 +128,26 @@
            (code #(verify (assoc-in snapshot [:bindings occupied-id] occupied) analyze)))))
   (let [{:keys [entry snapshot]} (fixture 4 false)]
     (is (= :types/check-failed (code #(scope/verify-binding entry [:args :deep] snapshot analyze))))))
+
+
+(deftest binding-replay-retains-exact-field-checks-without-discharging-them
+  (let [{:keys [entry owner snapshot]} (fixture "text" false)
+        address [[owner []] [(ids/slot-id (demo-id :sink) :right)]]
+        obligation {:id [address :value-type :field-read] :address address :scope (first address) :path (second address)
+                    :kind :value-type :trigger :field-read :expected-type :text}
+        with-checks (fn [s id] (assoc (analyze s id) :obligations [obligation]))
+        certificate (scope/verify-binding entry [:args :deep] snapshot with-checks)]
+    (is (= [obligation] (:obligations certificate)))
+    (doseq [transform [empty
+                       #(conj % (assoc obligation :expected-type :int))
+                       #(mapv (fn [check] (assoc check :expected-type :int)) %)]]
+      (let [tampered (fn [s id]
+                       (cond-> (with-checks s id)
+                         (not= (:snapshot-id s) (:snapshot-id snapshot)) (update :obligations transform)))]
+        (is (= :scope-replay-mismatch
+               (code #(scope/verify-binding entry [:args :deep] snapshot tampered))))))
+    (let [container (fn [s id]
+                      (assoc (analyze s id) :obligations [(assoc obligation :kind :container-type
+                                                                 :trigger :container-materialization)]))]
+      (is (= :incomplete-reference-analysis
+             (code #(scope/verify-binding entry [:args :deep] snapshot container)))))))

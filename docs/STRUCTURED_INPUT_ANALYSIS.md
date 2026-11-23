@@ -229,6 +229,12 @@ identities or changed types do not supply that relation; independent uses stay
 separately instantiated. The relation removes duplicate obligations while
 preserving the remaining runtime check.
 
+A source-only scoped binding replay may retain field-read obligations when
+the complete obligation set is identical before and after adding the proved
+rows. The certificate carries that set. Dropping, adding or changing a check,
+or requiring container materialization, refuses the replay. This preserves the
+existing validation boundary; it does not grant executable admission.
+
 Approving a pure native type callback does not make every composite obligation executable;
 the compiler must still consume its supported checks or refuse the plan.
 Marked and refined identity inputs remain identity edges; the checker receives

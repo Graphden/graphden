@@ -75,21 +75,18 @@
 
 
 (defn- checked-graph
-  ([analyze snapshot owner] (checked-graph analyze snapshot owner false))
-  ([analyze snapshot owner retain-field-checks?]
-   (let [graph (analyze snapshot owner)
-         surface (:public-input graph)]
-     (when-not (and (some? (:snapshot-id snapshot)) (= (:snapshot-id snapshot) (:snapshot-id surface))
-                    (= owner (:fn-id graph) (:fn-id surface)))
-       (reject! :stale-input-surface))
-     (when-not (and (= :checked (:status graph)) (empty? (:diagnostics graph))
-                    (or (empty? (:obligations graph))
-                        (and retain-field-checks?
-                             (every? #(= [:value-type :field-read] ((juxt :kind :trigger) %)) (:obligations graph))))
-                    (true? (get-in graph [:coverage :recursive-availability]))
-                    (true? (get-in graph [:coverage :type-checker])))
-       (reject! :incomplete-reference-analysis))
-     graph)))
+  [analyze snapshot owner]
+  (let [graph (analyze snapshot owner)
+        surface (:public-input graph)]
+    (when-not (and (some? (:snapshot-id snapshot)) (= (:snapshot-id snapshot) (:snapshot-id surface))
+                   (= owner (:fn-id graph) (:fn-id surface)))
+      (reject! :stale-input-surface))
+    (when-not (and (= :checked (:status graph)) (empty? (:diagnostics graph))
+                   (every? #(= [:value-type :field-read] ((juxt :kind :trigger) %)) (:obligations graph))
+                   (true? (get-in graph [:coverage :recursive-availability]))
+                   (true? (get-in graph [:coverage :type-checker])))
+      (reject! :incomplete-reference-analysis))
+    graph))
 
 
 (defn- occurrence
@@ -197,7 +194,9 @@
 (defn verify-bindings
   "Check a group of legacy bindings whose complete omitted set is known.
    Resolve all addresses in one frozen baseline. Replay all rows together so
-   interdependent type constraints and occupancy use the completed graph."
+   interdependent type constraints and occupancy use the completed graph.
+   Existing field-read obligations must survive exactly; replay never
+   discharges, renames, strengthens or introduces a runtime check."
   [{owner :identity :as plan-entry} paths snapshot analyze]
   (let [omitted (legacy-omissions plan-entry paths snapshot)
         before (checked-graph analyze snapshot owner)
@@ -210,9 +209,10 @@
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (every? true? (map #(verified-addition? after (second %1) %2) omitted certificates))
-                     (preserves-occupancy? prior current certificates))
+                     (preserves-occupancy? prior current certificates)
+                     (= (set (:obligations before)) (set (:obligations after))))
         (reject! :scope-replay-mismatch))
-      certificates)))
+      (mapv #(assoc % :obligations (:obligations after)) certificates))))
 
 
 (defn verify-binding
@@ -285,13 +285,13 @@
    move to an equivalent checked source field; this never discharges them."
   [snapshot proofs analyze]
   (let [owner (only (distinct (map :owner-id proofs)) :unproved-forwarded-identity)
-        before (checked-graph analyze snapshot owner true)
+        before (checked-graph analyze snapshot owner)
         certificates (mapv #(forwarded-certificate snapshot before %) proofs)
         additions (into {} (map (juxt (comp :id :row) :row)) certificates)]
     (when-not (= (count proofs) (count additions) (count (set (map :address certificates))))
       (reject! :unproved-forwarded-identity))
     (let [updated (-> snapshot (assoc :snapshot-id (random-uuid)) (update :bindings merge additions))
-          after (checked-graph analyze updated owner true)
+          after (checked-graph analyze updated owner)
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (preserves-occupancy? prior current certificates)

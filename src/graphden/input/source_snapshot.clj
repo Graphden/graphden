@@ -12,6 +12,7 @@
     [graphden.input.source :as source]
     [graphden.input.source-annotations :as annotations]
     [graphden.input.source-context :as source-context]
+    [graphden.input.source-joint :as joint]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-primitive :as primitive]
@@ -599,6 +600,30 @@
   (migrate-forwarded-fields package owner [field] roots))
 
 
+(defn- migrate-joint-owner
+  [package owner roots]
+  (let [original (plan-entry package owner)
+        {:keys [fields paths]} (joint/groups original)
+        reduced-package (omit-arguments package owner (mapv second paths))
+        reduced (plan-entry reduced-package owner)
+        _ (joint/check-full-reference-origins! (:prepared package) original (:prepared reduced-package) reduced)
+        projected (migrate-forwarded-fields reduced-package owner fields roots)
+        baseline (assoc-in reduced-package [:closure-baselines owner] projected)
+        targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
+        {:keys [context options]} (freeze-closure baseline (into [owner] targets) roots)
+        certificates (scope/verify-bindings-after-forwarding original projected context
+                                                             #(analysis/analyze-effective-input %1 %2 options))
+        candidate (joint/replay-entry original projected certificates)
+        result (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package))))]
+    (when-not (= :authored-source-equivalent (:verification result))
+      (reject! :unverified-joint-declaration owner))
+    ;; Nothing is published until both graph replays and the complete authored
+    ;; source round trip succeed. A failed leaf leaves the caller's package intact.
+    (-> package
+        (assoc-in [:closure-baselines owner] result)
+        (update :prepared source/with-forwarded-parent result))))
+
+
 (defn with-migrated-bindings
   "Certify legacy binding owners in dependency order. Record the exact checked
    rows so later owners can freeze a closure containing those dependencies."
@@ -659,6 +684,9 @@
 
       (inherited-candidate? blockers)
       (certify-inherited package owner entry roots active)
+
+      (= #{:field-projection-required :ref-scope-required} (set (map :code blockers)))
+      (migrate-joint-owner package owner roots)
 
       (and (seq blockers) (every? #(= :ref-scope-required (:code %)) blockers))
       (with-migrated-bindings package [owner] roots)

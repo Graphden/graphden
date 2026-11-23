@@ -6,6 +6,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.input.source :as source]
     [graphden.input.source-certification :as certification]
+    [graphden.input.source-joint :as joint]
+    [graphden.input.source-scope :as scope]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -104,3 +106,72 @@
     (is (empty? (:blocked result)))
     (is (= #{owner parent (ids/fn-id "owner-proof" :b)} (:certified result)))
     (is (every? #(= :authored-source-equivalent (:verification %)) (get-in result [:plan :definitions])))))
+
+
+(defn- joint-fixture
+  [field-type scoped-value]
+  (let [{:keys [originals roots]} (fixture)
+        parent {:namespace "owner-proof" :name :with-extra :parent :_csv-escape-cell
+                :args {:extra {:type :text :required false}}}
+        owner {:namespace "owner-proof" :name :joint :parent :with-extra
+               :args {:value :to-json-string :extra :str-trim
+                      :data {:type field-type} :string scoped-value}}
+        originals (into (vec (take 3 originals)) [parent owner])
+        prepared (parse/prepare-module originals {} {})]
+    {:package (snapshot/package-index prepared originals) :originals originals :roots roots
+     :owner (ids/fn-id "owner-proof" :joint)}))
+
+
+(deftest one-owner-joins-forwarding-and-scoped-values-without-changing-declarations
+  (let [{:keys [package originals roots owner]} (joint-fixture :jsonb "unread")
+        original (last (:definitions (source/plan-module originals (:prepared package))))
+        evidence (atom nil)
+        verify scope/verify-bindings-after-forwarding
+        result (with-redefs [scope/verify-bindings-after-forwarding
+                             (fn [old projected ctx analyze]
+                               (reset! evidence [old projected ctx])
+                               (verify old projected ctx analyze))]
+                 (snapshot/with-certified-owner package owner roots))
+        entry (get-in result [:closure-baselines owner])
+        field (ids/slot-id owner :data)
+        old (some #(when (= field (:id %)) %) (get-in original [:legacy :records]))
+        current (some #(when (= field (:id %)) %) (get-in entry [:v2 :declaration-records]))]
+    (is (= {:fields [:data] :paths [[:args :string]]} (joint/groups original)))
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= [:project [:data]] (get-in entry [:proposed :bind [:value :data]])))
+    (is (= [:value "unread"] (get-in entry [:proposed :bind [:extra :string]])))
+    (is (= (dissoc old :source-slot-id) current))
+    (doseq [row (filter #(= :fn-slot (:kind %)) (get-in original [:legacy :records]))]
+      (is (some #{row} (get-in entry [:v2 :declaration-records]))))
+    (let [[_ projected] @evidence
+          projection (get-in projected [:v2 :scoped-inputs [:value :data] :row :id])]
+      (is (uuid? projection))
+      (doseq [edited [(assoc-in @evidence [0 :source :args :data :required] false)
+                      (update-in @evidence [1 :legacy :records] conj {:kind :slot :id (random-uuid)})
+                      (assoc-in @evidence [2 :bindings projection :projection-path] [(random-uuid)])]]
+        (is (= :joint-source-mismatch (failure-code #(apply joint/scope-view edited))))))
+    (is (not (contains? package :closure-baselines)))))
+
+
+(deftest either-joint-phase-failure-publishes-no-owner-or-parent-proof
+  (doseq [[type value expected-steps expected-code]
+          [[:input-stream "unread" [] :unproved-forwarded-target]
+           [:jsonb 42 [:projection :scope] :types/check-failed]]]
+    (let [{:keys [package originals roots owner]} (joint-fixture type value)
+          before (source/plan-module originals (:prepared package))
+          calls (atom [])
+          forward scope/verify-forwarded-projections
+          scoped scope/verify-bindings-after-forwarding
+          parents source/with-forwarded-parent
+          publications (atom 0)]
+      (with-redefs [scope/verify-forwarded-projections
+                    (fn [& args] (swap! calls conj :projection) (apply forward args))
+                    scope/verify-bindings-after-forwarding
+                    (fn [& args] (swap! calls conj :scope) (apply scoped args))
+                    source/with-forwarded-parent
+                    (fn [& args] (swap! publications inc) (apply parents args))]
+        (is (= expected-code (failure-code #(snapshot/with-certified-owner package owner roots))))
+        (is (= expected-steps @calls))
+        (is (zero? @publications)))
+      (is (not (contains? package :closure-baselines)))
+      (is (= before (source/plan-module originals (:prepared package)))))))

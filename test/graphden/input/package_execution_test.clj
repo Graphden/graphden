@@ -481,3 +481,32 @@
     (reset! calls [])
     (is (= "null" (canonical {})))
     (is (= [:selected] @calls))))
+
+
+(deftest same-owner-joint-proof-preserves-nil-false-and-unread-reference
+  (let [parent {:namespace "joint-runtime" :name :with-extra :parent :_csv-escape-cell
+                :args {:extra {:type :text :required false}}}
+        owner {:namespace "joint-runtime" :name :joint :parent :with-extra
+               :args {:value :to-json-string :extra :str-trim
+                      :data {:type :jsonb} :string "unread"}}
+        source (into (declarations "packages/core/strings/fns.edn" #{:_csv-escape-cell :str-trim})
+                     (concat (declarations "packages/core/system/fns.edn" #{:to-json-string}) [parent owner]))
+        root (ids/fn-id "joint-runtime" :joint)
+        calls (atom [])
+        original (get-in @loaded [:to-json-string :impl])
+        implementations (-> @loaded
+                            (assoc-in [:to-json-string :impl]
+                                      (fn [& args] (swap! calls conj :selected) (apply original args)))
+                            (assoc-in [:str-trim :impl]
+                                      (fn [& _] (swap! calls conj :unread) (throw (ex-info "Unread joint reference forced" {})))))
+        {:keys [canonical legacy analysis]}
+        (runtimes source root
+                  (fn [package id roots impls]
+                    (execution/compile-package (snapshot/with-certified-owner package id roots) id roots impls))
+                  implementations)]
+    (is (= :checked (:status analysis)))
+    (doseq [[value expected] [[nil "null"] [false "false"]]
+            run [legacy canonical]]
+      (reset! calls [])
+      (is (= expected (run {:data value})))
+      (is (= [:selected] @calls)))))

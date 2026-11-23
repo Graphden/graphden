@@ -7,6 +7,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
+    [graphden.input.source-joint :as joint]
     [graphden.input.source-rename :as rename]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
@@ -52,7 +53,7 @@
 
 
 (defn- legacy-omissions
-  [{owner-id :identity :keys [legacy blockers kind status]} paths snapshot]
+  [{owner-id :identity :keys [legacy blockers kind status]} paths snapshot projections]
   (when-not (and (= :composed kind) (= :blocked status) (uuid? owner-id)
                  (seq paths) (= (count paths) (count (set paths)) (count blockers))
                  (= (set (for [path paths] [path :ref-scope-required]))
@@ -65,7 +66,8 @@
                     :missing-owner-declaration)
         omitted (mapv #(legacy-origin owner-id (:arguments legacy) bindings %) paths)
         omitted-ids (into #{} (map (comp :id second)) omitted)
-        current (filter #(= owner-id (:fn-id %)) (vals (:bindings snapshot)))]
+        projected-ids (set (map (comp :id :row) projections))
+        current (filter #(and (= owner-id (:fn-id %)) (not (projected-ids (:id %)))) (vals (:bindings snapshot)))]
     (when-not (and (= (count omitted) (count omitted-ids))
                    (= (:parent-ids owner) (get-in snapshot [:fns owner-id :parent-ids]))
                    (not-any? (:bindings snapshot) omitted-ids)
@@ -245,14 +247,14 @@
          (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))))
 
 
-(defn verify-bindings
+(defn- verify-bindings*
   "Check a group of legacy bindings whose complete omitted set is known.
    Resolve all addresses in one frozen baseline. Replay all rows together so
    interdependent type constraints and occupancy use the completed graph.
    Existing field-read obligations must survive exactly; replay never
    discharges, renames, strengthens or introduces a runtime check."
-  [{owner :identity :as plan-entry} paths snapshot analyze]
-  (let [omitted (legacy-omissions plan-entry paths snapshot)
+  [{owner :identity :as plan-entry} paths snapshot analyze projections]
+  (let [omitted (legacy-omissions plan-entry paths snapshot projections)
         before (checked-graph analyze snapshot owner)
         certificates (mapv (partial binding-certificate snapshot before) omitted)
         additions (into {} (map (juxt :id identity)) (map :row certificates))]
@@ -263,10 +265,29 @@
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (every? true? (map #(verified-addition? after (second %1) %2) omitted certificates))
+                     (every? (fn [{:keys [address row]}]
+                               (= address (occurrence after (first (:target-path row))))) projections)
                      (preserves-occupancy? prior current certificates)
                      (= (set (:obligations before)) (set (:obligations after))))
         (reject! :scope-replay-mismatch))
       (mapv #(assoc % :obligations (:obligations after)) certificates))))
+
+
+(defn verify-bindings
+  "Check exactly the complete omitted binding group, preserving all existing
+   occupancy and runtime obligations. No forwarding declarations are admitted."
+  [entry paths snapshot analyze]
+  (verify-bindings* entry paths snapshot analyze []))
+
+
+(defn verify-bindings-after-forwarding
+  "Check the remaining scoped group after an exact authored forwarding proof.
+   Projection rows remain in the analyzed graph and their destinations must
+   still have one occurrence after every scoped value/reference is replayed."
+  [original projected snapshot analyze]
+  (let [{:keys [entry projections]} (joint/scope-view original projected snapshot)
+        {:keys [paths]} (joint/groups original)]
+    (verify-bindings* entry paths snapshot analyze projections)))
 
 
 (defn verify-binding

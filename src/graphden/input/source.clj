@@ -365,6 +365,29 @@
                             (and (empty? blockers) (= links (into {} (map (juxt :alias-id :field-id)) aliases)))))))))
 
 
+(defn- prepare-inherited-fields
+  [context]
+  (let [states (volatile! {})]
+    (letfn [(check
+              [ancestor]
+              (if-let [entry (find @states ancestor)]
+                (let [state (val entry)]
+                  (when (= ::checking state)
+                    (throw (ex-info "Cyclic inherited field proof"
+                                    {:type :input/inherited-field-proof-cycle})))
+                  state)
+                (do
+                  (vswap! states assoc ancestor ::checking)
+                  (try
+                    (let [state (inherited-fields (assoc context ::inherited-fields check) ancestor)]
+                      (vswap! states assoc ancestor state)
+                      state)
+                    (finally
+                      (when (= ::checking (get @states ancestor))
+                        (vswap! states dissoc ancestor)))))))]
+      (assoc context ::inherited-fields check))))
+
+
 (defn- shared-implementation?
   [lineage parent-ids]
   (let [owners (set (map :owner lineage))
@@ -586,7 +609,7 @@
                                                   (when-not more original)))
                                 ::ref-index (reference-index context)
                                 ::prepared prepared)
-        planning-context (assoc planning-context ::inherited-fields (memoize (partial inherited-fields planning-context)))
+        planning-context (prepare-inherited-fields planning-context)
         definitions
         (mapv (fn [source]
                 (let [key (definition-key source)

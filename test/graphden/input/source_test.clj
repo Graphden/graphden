@@ -1001,3 +1001,18 @@
     (is (= {:pin {:type :text :required false}} (get-in child [:inline-body :input])))
     (is (= (:fn-id grandchild) (get-in child [:list-builders [slot] :fragments 0 :items 2 :fn-id])))
     (is (= :blocked (:status (result (source/verify-module altered context) :host))))))
+
+
+(deftest imported-inherited-field-proof-can-plan-an-inline-list-operand
+  (let [ancestor {:name :ancestor :namespace "demo" :parent :sink
+                  :args {:x {:as :public-x}
+                         :items [{:parent :sink :args {:x false}}]}}
+        host {:name :host :namespace "demo" :parent :sink
+              :args {:x {:parent :ancestor :args {:public-x {:value nil}}}}}
+        definitions [base ancestor host]
+        originals (group-by #(ids/fn-id (:namespace %) (:name %)) definitions)
+        context (assoc (prepared definitions) ::source/originals-by-id originals)
+        entry (result (source/verify-module (source/plan-module [host] context) context) :host)]
+    (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
+    (is (= (ids/fn-id "demo" :host) (:identity entry)))
+    (is (= [:value nil] (get-in entry [:proposed :bind :x 1 :bind :public-x])))))

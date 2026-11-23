@@ -11,8 +11,8 @@
 
 (defn sources
   [path]
-  (let [{:keys [namespace fns]} (edn/read-string (slurp (io/resource path)))]
-    (mapv #(assoc % :namespace namespace) fns)))
+  (let [{ns-id :namespace :keys [fns]} (edn/read-string (slurp (io/resource path)))]
+    (mapv #(assoc % :namespace ns-id) fns)))
 
 
 (defn fixture

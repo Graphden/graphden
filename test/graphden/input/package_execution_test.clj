@@ -128,12 +128,12 @@
                      (declarations "packages/app/branches/fns.edn" #{:_approval-status-source-ref}))
         owner (ids/fn-id "app.branches" :_approval-status-source-ref)
         target (ids/slot-id (ids/fn-id "core.strings" :to-str) :value)
-        alias (ids/slot-id owner :source-branch-id)
+        alias-id (ids/slot-id owner :source-branch-id)
         {:keys [canonical legacy analysis]} (runtimes source owner)
         configured (some #(when (= target (:id %)) %) (get-in analysis [:scopes [] :configured-contract :fields]))]
     (is (= :checked (:status analysis)))
     (is (= "The proposal (source) branch to report on." (:description configured)))
-    (is (= alias (get-in analysis [:public-input :routes [:source-branch-id] :origin-field-id])))
+    (is (= alias-id (get-in analysis [:public-input :routes [:source-branch-id] :origin-field-id])))
     (is (= :text (get-in analysis [:scopes [] :signature :return])))
     (is (= "00112233-4455-6677-8899-aabbccddeeff"
            (legacy {:source-branch-id #uuid "00112233-4455-6677-8899-aabbccddeeff"})
@@ -489,14 +489,14 @@
                        [{:namespace "fixture" :name :map-result :map {:key :keyword :value value-type}} producer host])
           _ (sync/register-type-aliases! source)
           base (assoc producer :impl (fn [arguments _context] {:payload (encode (runtime/resolve-arg arguments :payload))}))
-          bases (assoc @loaded :generic-map-producer base)
+          base-definitions (assoc @loaded :generic-map-producer base)
           compile-certified (fn [package root roots implementations]
                               (let [migrated (snapshot/migrate-forwarded-field package root :payload roots)]
                                 (reset! retained {:verification (:verification migrated)
                                                   :certificate (some :scope-certificate (get-in migrated [:legacy :arguments]))})
                                 (execution/compile-package (snapshot/with-migrated-forwarding package root :payload roots)
                                                            root roots implementations)))]
-      (runtimes source (ids/fn-id "fixture" :generic-map-host) compile-certified bases))))
+      (runtimes source (ids/fn-id "fixture" :generic-map-host) compile-certified base-definitions))))
 
 
 (deftest generic-const-forwarding-executes-with-the-exact-named-map-return

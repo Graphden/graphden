@@ -26,11 +26,12 @@
                (= #{:value} (set (keys (:args base)))) (empty? (:effects base))
                (types/type-var? variable) (= variable (get-in base [:args :value :type]) (:return-type base))
                (= :value (get-in argument [:target :field])) (= field-id (:slot-id binding))
-               (qualified-keyword? type-ref) (uuid? type-id) (= type-id (:fn-id named))
+               (qualified-keyword? type-ref) (uuid? type-id) (= type-id (:fn-id named)) (uuid? (:fn-id return-owner))
                (map? (:map named)) (= #{:key :value} (set (keys (:map named))))
                (nil? (:parent named)) (empty? (:parents named)))
       {:version 1 :base-fn-id base-id :field-id field-id :variable variable
-       :binding-id (:id binding) :target-fn-id target-id :return-type-ref type-ref :return-type-id type-id})))
+       :binding-id (:id binding) :target-fn-id target-id :return-owner-id (:fn-id return-owner)
+       :return-type-ref type-ref :return-type-id type-id})))
 
 
 (defn- checked-read?
@@ -53,10 +54,11 @@
   (context/call-with-types
     snapshot
     (fn []
-      (let [{:keys [version base-fn-id field-id variable binding-id target-fn-id return-type-ref return-type-id]} witness
+      (let [{:keys [version base-fn-id field-id variable binding-id target-fn-id return-owner-id return-type-ref return-type-id]} witness
             type-origin (get-in snapshot [:type-origins return-type-id])
             _ (when-not (and (= 1 version) (= base-fn-id (ids/fn-id "core.logic" :const))
                              (= field-id (ids/slot-id base-fn-id :value)) (types/type-var? variable)
+                              (uuid? return-owner-id)
                              (some #{return-type-id} (vals (:alias-ids snapshot)))
                              (map? (:map type-origin)) (keyword? (:name type-origin))
                              (= return-type-ref (keyword (or (:namespace type-origin) "") (name (:name type-origin)))))
@@ -87,6 +89,8 @@
                           (get-in bound [:reference :actual-type]) (:return signature))
                        (= binding-id (:binding-id bound) (:binding-id edge))
                        (= target-fn-id (:target-fn-id edge) (:fn-id target))
+                       (some #{return-owner-id} (:declaration-order target))
+                       (= return-type-id (get-in snapshot [:fns return-owner-id :return-type-fn-id]))
                        (= :value (:mode edge) (get-in bound [:reference :mode]))
                        (checked-read? graph address named)
                        (= (:effects signature) (get-in root [:signature :effects]))

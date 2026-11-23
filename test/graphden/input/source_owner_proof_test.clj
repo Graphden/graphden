@@ -91,3 +91,16 @@
            (failure-code #(snapshot/with-certified-owner package owner roots))))
     (is (nil? (:closure-baselines package)))
     (is (= before (source/plan-module changed (:prepared package))))))
+
+
+(deftest joint-proof-completion-is-independent-of-owner-uuid-queue-order
+  (let [{:keys [originals roots]} (fixture)
+        changed (update originals (dec (count originals)) assoc :name :early)
+        prepared (parse/prepare-module changed {} {})
+        owner (ids/fn-id "owner-proof" :early)
+        parent (ids/fn-id "owner-proof" :a)
+        result (certification/verify-plan prepared changed {} roots)]
+    (is (neg? (compare owner parent)))
+    (is (empty? (:blocked result)))
+    (is (= #{owner parent (ids/fn-id "owner-proof" :b)} (:certified result)))
+    (is (every? #(= :authored-source-equivalent (:verification %)) (get-in result [:plan :definitions])))))

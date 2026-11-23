@@ -47,12 +47,22 @@
                        fn-id)}))))
 
 
+(defn- ready-candidates
+  [package candidates owner]
+  (into #{owner}
+        (keep (fn [[id entry]]
+                (when (and (contains? candidates id)
+                           (= :authored-source-equivalent (:verification entry)))
+                  id)))
+        (:closure-baselines package)))
+
+
 (defn- certify
   "From the ordinary source plan, verify supported scoped binding rewrites
-   using trusted native signatures. A source owner is retried only when the
-   exact dependency blocking its closure has since been certified. Cycles
-   and unproved owners stay blocked. The returned package contains private
-   replay evidence. :blocked holds sanitized diagnostics for attempted owners."
+   using trusted native signatures. An owner transaction may also certify
+   dependencies; wake all their waiters and never re-prove a completed owner.
+   Cycles and unproved owners stay blocked. :blocked contains only sanitized
+   diagnostics, not source payloads."
   [package entries roots]
   (let [by-id (into (sorted-map) (keep candidate) entries)]
     (loop [package package
@@ -61,16 +71,19 @@
            certified #{}
            blocked {}]
       (if-let [id (peek pending)]
-        (let [{next-package :package diagnostic :blocked dependency :dependency}
-              (attempt package roots id (get by-id id))]
-          (if next-package
-            (recur next-package (into (pop pending) (get waiting id)) (dissoc waiting id)
-                   (conj certified id) (dissoc blocked id))
-            (recur package (pop pending)
-                   (if (and (contains? by-id dependency) (not (contains? certified dependency)))
-                     (update waiting dependency (fnil conj []) id)
-                     waiting)
-                   certified (assoc blocked id diagnostic))))
+        (if (contains? certified id)
+          (recur package (pop pending) waiting certified blocked)
+          (let [{next-package :package diagnostic :blocked dependency :dependency}
+                (attempt package roots id (get by-id id))]
+            (if next-package
+              (let [ready (sort (remove certified (ready-candidates next-package by-id id)))]
+                (recur next-package (into (pop pending) (mapcat waiting ready)) (apply dissoc waiting ready)
+                       (into certified ready) (apply dissoc blocked ready)))
+              (recur package (pop pending)
+                     (if (and (contains? by-id dependency) (not (contains? certified dependency)))
+                       (update waiting dependency (fnil conj []) id)
+                       waiting)
+                     certified (assoc blocked id diagnostic)))))
         {:package package :certified certified :blocked blocked}))))
 
 

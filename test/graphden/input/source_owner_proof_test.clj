@@ -61,7 +61,7 @@
             [:ref-scope-required :inherited-projection-required]]
            (mapv #(mapv :code (:blockers %)) (take-last 3 (:definitions initial)))))
     (is (= :authored-source-equivalent (:verification c)) (:blockers c))
-    (is (= [:value " null "] (get-in c [:proposed :bind [:b :string]])))
+    (is (= [:value " null "] (get-in c [:proposed :bind [:extra :string]])))
     (is (= [:value nil] (get-in result [:closure-baselines (ids/fn-id "owner-proof" :b) :proposed :bind :data])))
     (is (every? #(= :authored-source-equivalent (:verification %)) (get-in all [:plan :definitions])))
     (is (nil? (:closure-baselines package)))

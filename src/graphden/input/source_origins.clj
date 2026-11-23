@@ -102,20 +102,28 @@
 
 
 (defn direct-inline-binding-blocker?
+  "Accept blocker paths made entirely of inline arguments. List-item and
+   other path segments need their own provenance checks."
   [{:keys [code source-path]}]
-  (when (vector? source-path)
-    (let [[args field child-args child-field] source-path]
-      (and (= :args args child-args) (simple-keyword? field)
-           (case code
-             :ref-scope-required (and (= 4 (count source-path)) (simple-keyword? child-field))
-             :inherited-projection-required (= 3 (count source-path))
-             false)))))
+  (when (and (vector? source-path) (< 2 (count source-path)))
+    (let [fields (case code
+                   :ref-scope-required source-path
+                   :inherited-projection-required (when (= :args (peek source-path)) (pop source-path))
+                   nil)]
+      (and (seq fields) (even? (count fields))
+           (every? (fn [[section field]] (and (= :args section) (simple-keyword? field)))
+                   (partition 2 fields))))))
 
 
 (defn child-at
-  "Require an exact enclosing owner and direct argument path."
+  "Require an exact enclosing owner and direct argument path, relative to
+   that owner's verified origin when it is itself an inline declaration."
   [origins owner path]
-  (let [[match & more] (into [] (comp cat (filter #(and (= owner (:root-owner-id %) (:enclosing-owner-id %))
-                                                        (= path (:source-path %))))) (vals origins))]
+  (let [parent (declaration origins owner)
+        root (get parent :root-owner-id owner)
+        source-path (into (get parent :source-path []) path)
+        [match & more] (into [] (comp cat (filter #(and (= root (:root-owner-id %))
+                                                        (= owner (:enclosing-owner-id %))
+                                                        (= source-path (:source-path %))))) (vals origins))]
     (when (seq more) (reject! :ambiguous-inline-owner owner))
     (when match (declaration origins (:fn-id match)))))

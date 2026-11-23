@@ -34,6 +34,8 @@
              [:args :value :append 1 :args :value]} (set (keys paths))))
     (is (= host (:enclosing-owner-id outer)))
     (is (= (:fn-id outer) (:enclosing-owner-id inner)))
+    (is (= inner (origins/child-at result (:fn-id outer) [:args :value])))
+    (is (nil? (origins/child-at result host [:args :value])))
     (is (not= (:fn-id inner) (:fn-id (get paths [:args :value :append 0]))))
     (is (every? #(= (:fn-id %) (ids/fn-id (get-in % [:declaration :namespace])
                                           (get-in % [:declaration :name]))) (mapcat val result)))))

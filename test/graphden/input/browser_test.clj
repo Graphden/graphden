@@ -12,6 +12,8 @@
     [graphden.input.compile :as jvm]
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.field-default :as field-default]
+    [graphden.input.inheritance :as inheritance]
+    [graphden.input.module :as module]
     [graphden.input.source-primitive :as primitive]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -369,3 +371,97 @@
            (try (browser/export-named graph options)
                 nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
+
+
+(def ^:private loaded-hiccup (delay (:base-fn-defs (loader/load-packages ["core" "web"]))))
+
+
+(defn- stored-default-projection
+  "A stored child of canonical hiccup projects an authored record into its
+   optional attributes. Only the shipped primitive carries native code."
+  [selected fallback]
+  (let [web-source (edn/read-string (slurp (io/resource "packages/web/html/fns.edn")))
+        web-def (fn [name] (assoc (some #(when (= name (:name %)) %) (:fns web-source)) :namespace (:namespace web-source)))
+        base (web-def :hiccup)
+        base-id (ids/fn-id (:namespace base) :hiccup)
+        owner (ids/fn-id "test.input" :render-record)
+        source (edn/read-string (slurp (io/resource "packages/nesteddefaultfixture/structured/fns.edn")))
+        source (-> source (assoc :namespace "test.input") (assoc-in [:fns 0 :name] :render-record)
+                   (assoc-in [:fns 0 :input :left :type :label :default] fallback))
+        shape {:id :text :label field-default/nullable-text}
+        parsed (primitive/prepare source owner {:left shape :right shape})
+        union (shipped-declaration "refinements" :nullable-text)
+        rows (group-by :kind (into (:declaration-records parsed) (parse/parse-module [union])))
+        declarations [(shipped-declaration "refinements" :keyword-or-text) (web-def :hiccup-node) base]
+        package (snapshot/package-index (parse/prepare-module declarations {} {}) declarations)
+        ctx (:context (snapshot/freeze-declarations package [base-id]))
+        definition {:name :render-record :namespace "test.input" :parent :hiccup
+                    :input (get-in source [:fns 0 :input])
+                    :bind {:tag [:value "span"] :children [:value []] :attrs [:project [selected]]}}
+        input-id (:input-type-id parsed)
+        owner-row (assoc (parse/composed-declaration-record definition [base-id] nil) :input-type-fn-id input-id)
+        index (fn [rs] (into {} (map (juxt :id identity)) rs))
+        ctx (-> ctx
+                (update :fns merge (index (:fn rows)))
+                (assoc-in [:fns owner] owner-row)
+                (update :fields merge (index (:slot rows)))
+                (update :members merge (group-by :fn-id (:fn-slot rows))))
+        binding-ctx {:fn-id owner :scope [owner []] :input-type-id input-id
+                     :contract (:contract (inheritance/declared-view ctx owner))
+                     :binding-id (fn [_ path] (ids/binding-id owner (peek path)))
+                     :name->id {:hiccup base-id} :origin-ledger {} :declaration-records [owner-row]}
+        authored (module/parse-module-v2 {:input-format 2 :namespace "test.input" :fns [definition]}
+                                         {:context-for (constantly binding-ctx)})
+        ctx (update ctx :bindings merge (index (get-in authored [:definitions 0 :bindings])))
+        native (get @loaded-hiccup :hiccup)
+        signature (binding [registry/*rich-types-override* (atom {})
+                            types/*type-aliases-override* (atom (:aliases ctx))]
+                    (get-in (registry/record-rich-types! base-id :hiccup native) [:by-id base-id]))
+        {:keys [analysis implementations]} (jvm/analyze-stored ctx owner {base-id {:signature signature :impl (:impl native)}})]
+    {:analysis analysis :context ctx :snapshot-id (:snapshot-id ctx) :implementations implementations
+     :allow-fn? #(contains? (:fns ctx) %) :owner owner :input (:input-type-id parsed)}))
+
+
+(deftest browser-checks-defaults-at-their-stored-occurrences
+  (doseq [[selected fallback] [[:left "Ada"] [:left nil] [:right "Ada"]]]
+    (let [{:keys [analysis] :as options} (stored-default-projection selected fallback)
+          invoke (jvm/compile-named analysis options)
+          plan (browser/export-named analysis options)
+          other (if (= selected :left) :right :left)
+          defaulted [:span {:id "S" :label (if (= selected :right) "Bea" fallback)}]
+          inputs [{} {selected {:id "S"}} {selected {:id "S" :label nil}} {selected {:id "S" :label "given"}}
+                  {other {:id "T"}} {selected {:id "S"} other {:id "T" :label "unrelated"}}]
+          expected [[:span] defaulted [:span {:id "S" :label nil}] [:span {:id "S" :label "given"}]
+                    [:span] defaulted]
+          invalid [{selected {}} {selected {:id "S" :label false}}]
+          results (run-browser plan (into inputs invalid))]
+      (is (= :checked (:status analysis)))
+      (is (= expected (mapv #(invoke % nil) inputs)))
+      (is (= (mapv wire/encode-value expected) (mapv :value (take (count inputs) results))))
+      (doseq [[bad result] (map vector invalid (drop (count inputs) results))]
+        (is (:error result))
+        (is (thrown? clojure.lang.ExceptionInfo (wire/encode-value (invoke bad nil))))))))
+
+
+(deftest browser-rechecks-occurrence-ownership-and-disclosure
+  (let [{:keys [analysis owner input context] :as options} (stored-default-projection :left "Ada")
+        left (ids/slot-id owner :left)
+        record (get-in context [:fields left :type-fn-id])
+        leaf (ids/slot-id record :label)
+        change-member (fn [opts type slot f]
+                        (update-in opts [:context :members type]
+                                   (fn [members] (mapv #(if (= slot (:slot-id %)) (f %) %) members))))
+        refusal (fn [opts]
+                  (try (browser/export-named analysis opts) nil
+                       (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    (doseq [id [owner input record field-default/nullable-text-id]]
+      (is (= :browser-field-default-unsupported (refusal (assoc options :allow-fn? #(not= id %)))))
+      (is (= :browser-field-default-unsupported (refusal (update-in options [:context :fns] dissoc id)))))
+    (doseq [opts [(assoc-in options [:context :snapshot-id] (random-uuid))
+                  (change-member options input left #(assoc-in % [:input-default :value] "different"))
+                  (change-member options input left #(assoc-in % [:input-default :target-path] [(str left)]))
+                  (change-member options input left #(assoc % :id (random-uuid)))
+                  (change-member options record leaf #(assoc % :input-default {:value "shared"}))
+                  (assoc-in options [:context :fns field-default/nullable-text-id :constraint] :any)
+                  (assoc-in options [:context :fields leaf :required] true)]]
+      (is (= :browser-field-default-unsupported (refusal opts))))))

@@ -110,16 +110,18 @@
     (is (= before (versions)))))
 
 
-(defn- stored-browser-rejection
+(defn- stored-browser-rejections
   [storage base-fns root]
   (let [ctx (view/collect storage root (tenancy/browser-source-policy storage))
         signature (get (::owned/native-signatures (meta base-fns)) root)
         trusted {root {:impl (get base-fns (:name signature)) :signature signature}}
-        {:keys [analysis implementations]} (compile/analyze-stored ctx root trusted)]
-    (try (browser/export-named analysis {:context ctx :snapshot-id (:snapshot-id ctx) :implementations implementations
-                                         :allow-fn? #(= root %)})
-         nil
-         (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))
+        {:keys [analysis implementations]} (compile/analyze-stored ctx root trusted)
+        refusal (fn [visible?]
+                  (try (browser/export-named analysis {:context ctx :snapshot-id (:snapshot-id ctx)
+                                                       :implementations implementations :allow-fn? visible?})
+                       nil
+                       (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    [(refusal #(= root %)) (refusal #(contains? (:fns ctx) %))]))
 
 
 (deftest pinned-defaults-follow-their-own-record-occurrences
@@ -150,7 +152,8 @@
                                         :headers {"authorization" (str "Bearer " token) "content-type" "application/json"}
                                         :body (json/generate-string {:fn-id root :args % :timeout-ms 20000})})
                   :body (json/parse-string true))]
-    (is (= :browser-field-default-unsupported (stored-browser-rejection storage base-fns root)))
+    (is (= [:browser-field-default-unsupported :unsupported-browser-primitive]
+           (stored-browser-rejections storage base-fns root)))
     (is (= [record record] types))
     (is (= [(str label) (str label)] (mapv #(get-in (sp/read-entity storage :fn-slot %) [:input-default :target-path 0]) members)))
     (is (= ["Ada" "Bea"] (mapv #(get-in (sp/read-entity storage :fn-slot %) [:input-default :value]) members)))

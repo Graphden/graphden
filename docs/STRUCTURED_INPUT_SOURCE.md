@@ -472,8 +472,14 @@ fields and their types.
 
 The JVM keeps an omitted optional record absent. When a caller supplies
 the record, its omitted optional member can take its fallback. An explicit
-nil retains its value. The browser exporter rejects nested stored defaults
-with `:browser-field-default-unsupported`.
+nil retains its value. A named browser entry can export this fallback for a
+public optional record supplied directly in the root invocation. The exporter checks the
+authorizing owner, its input type, the shared record and the nullable
+member type against the visible frozen snapshot. It matches the member
+path and fallback on the owner's input membership. A missing or changed
+membership, a shared-member default, or a callback-local record yields
+`:browser-field-default-unsupported`. Execution still requires a
+browser-supported primitive.
 
 ## Focused verification
 

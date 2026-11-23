@@ -7,6 +7,7 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
@@ -16,7 +17,8 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.sync :as sync]
-    [graphden.types.core :as types])
+    [graphden.types.core :as types]
+    [graphden.types.validator :as validator])
   (:import
     (java.nio.charset
       StandardCharsets)))
@@ -176,11 +178,14 @@
     (is (= {"flag" false "missing" nil} (legacy argument) (canonical argument)))))
 
 
-(deftest frozen-get-in-callback-preserves-nil-false-and-missing-defaults
+(deftest frozen-get-in-callback-retains-unconsumed-runtime-obligations
   (binding [types/*type-aliases-override* (atom {})]
     (let [base (into (declarations "packages/core/collections/fns.edn" #{:get-in})
-                     (declarations "packages/core/refinements/fns.edn" #{:path-segment}))]
+                     (declarations "packages/core/refinements/fns.edn" #{:path-segment}))
+          base-id (ids/fn-id "core.collections" :get-in)
+          native (get @loaded :get-in)]
       (sync/register-type-aliases! base)
+      (registry/record-rich-types! base-id :get-in native)
       (doseq [[value path default expected] [[{:leaf false} [:leaf] "fallback" false]
                                              [{:leaf nil} [:leaf] false nil]
                                              [{} [:leaf] false false]
@@ -188,13 +193,24 @@
                                              [{:leaf 7} ["leaf"] "fallback" "fallback"]]]
         (let [child {:namespace "fixture" :name :lookup :parent :get-in
                      :args {:map {:value value} :path {:value path} :default {:value default}}}
-              {:keys [canonical legacy analysis]} (runtimes (conj base child) (ids/fn-id "fixture" :lookup))]
-          (is (= :checked (:status analysis)))
-          (is (= expected (legacy {}) (canonical {})))))
+              source (conj base child)
+              owner (ids/fn-id "fixture" :lookup)
+              package (snapshot/package-index (parse/prepare-module source {} {}) source)
+              roots (:by-id @registry/*rich-types-override*)
+              {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+              checked (analysis/analyze-effective-input context owner options)
+              actual ((:impl native) {:map value :path path :default default} {})]
+          (is (= :checked (:status checked)))
+          (is (= expected actual))
+          (is (= actual (validator/validate! (get-in checked [:scopes [] :signature :return]) actual)))
+          (if (nil? value)
+            (is (= :runtime-obligations-required
+                   (rejection-code #(execution/compile-package package owner roots {base-id (:impl native)}))))
+            (let [compiled (execution/compile-package package owner roots {base-id (:impl native)})]
+              (is (= expected (executor/execute {:compiled-registry (atom {owner (:invoke compiled)})} owner {})))))))
       (let [without-proof (update @loaded :get-in dissoc :local-type-rules)]
         (is (= :rule-signature-view-required
-               (rejection-code #(runtimes base (ids/fn-id "core.collections" :get-in)
-                                          execution/compile-package without-proof))))))))
+               (rejection-code #(runtimes base base-id execution/compile-package without-proof))))))))
 
 
 (deftest generated-list-projection-reads-the-authored-outer-field

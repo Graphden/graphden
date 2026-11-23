@@ -212,6 +212,15 @@ scope/path/kind identities and `:field-read` or `:container-materialization`
 triggers. A compiler must consume a supported obligation or refuse it; a container
 obligation cannot eagerly force unrelated fields when one field is read.
 Runtime execution and signature publication are not activated by this API.
+
+Deferred checks at one address can carry independently scoped type variables,
+for example `[:union :null [:map a1 :any]]` and the same shape with `a2`.
+Their printed shapes do not prove that the variables have the same binding.
+Keep the conflict until projection/signature inference supplies that relation,
+or the validation boundary explicitly represents both checks. Erasing the
+variables or keeping only one check cannot establish a certificate. Approving
+a pure native type callback does not make every composite obligation executable;
+the compiler must still consume its supported checks or refuse the plan.
 Marked and refined identity inputs remain identity edges; the checker receives
 their target UUID as a known value for policy validation. Marked callable inputs
 use the existing invocation-signature projection. Refined callable policies

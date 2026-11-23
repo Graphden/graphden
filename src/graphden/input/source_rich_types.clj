@@ -21,16 +21,29 @@
        (supported-value-type? (types/fn-ret type))))
 
 
-(defn callable-field?
-  "The verified closure must contain the exact anonymous row for the field's
-   stored FK. Use the authored type form because the parser hashes its literal
-   shape. Nested callables and unresolved named types need additional evidence."
+(defn authored-callable-field?
+  "Prove the authored anonymous callable row and its exact FK. This is only
+   origin evidence: named leaves still require a frozen declaration closure."
   [rows-by-id type-id type]
-  (when (callable-shape? type)
+  (when (and (types/fn-type? type) (map? (types/fn-args type))
+             (every? #(format/collection-type? (fn [leaf] (or (keyword? leaf) (types/type-var? leaf))) %)
+                     (conj (vec (vals (types/fn-args type))) (types/fn-ret type))))
     (let [[row & more] (records/inline-fn-type-rows-from-form type)
           stored (get rows-by-id type-id)]
       (and (empty? more) (= type-id (:id row)) (seq stored)
            (every? #(migration/same-edn? row %) stored)))))
+
+
+(defn callable-field?
+  "Keep the literal authored callable ID; named leaves are admitted only with
+   independently verified frozen type IDs. Never accept an erased :fn FK."
+  ([rows-by-id type-id type] (callable-field? rows-by-id type-id type {}))
+  ([rows-by-id type-id type named-ids]
+   (and (authored-callable-field? rows-by-id type-id type)
+        (every? #(format/collection-type? (fn [leaf]
+                                            (or (types/primitive? leaf) (types/type-var? leaf)
+                                                (uuid? (get named-ids leaf)))) %)
+                (conj (vec (vals (types/fn-args type))) (types/fn-ret type))))))
 
 
 (defn erased-return?

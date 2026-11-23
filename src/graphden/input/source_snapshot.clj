@@ -269,7 +269,7 @@
       (assoc (dissoc named :type-rows)
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
-             :type-bodies inputs
+             :type-bodies (merge (:type-bodies named) inputs)
              :source-return-types
              (into {} (keep (fn [[id {:keys [owner source list-implementation]}]]
                               (let [type-id (:return-type-fn-id owner)
@@ -280,7 +280,7 @@
                    entries)
              :source-list-fragments (into {} (keep (fn [[id entry]]
                                                      (when-let [fragment (:list-fragment entry)] [id fragment]))) entries)
-             :source-field-types (source-field-types entries)
+             :source-field-types (merge (:source-field-types named) (source-field-types entries))
              :source-binding-types
              (into {}
                    (for [{:keys [owner contract configurations bindings]} (vals entries)
@@ -328,7 +328,7 @@
                                            (every? #{:type :required :description :value} (keys declaration))))
                                   (or (descriptor/stored-source-type? type type-id named-ids)
                                       (and (uuid? type-id) (= type-id (get named-ids type)))
-                                      (rich/callable-field? type-rows type-id type))))
+                                      (rich/callable-field? type-rows type-id type named-ids))))
                            (:fields contract)))
       (reject! :rich-type-source-required (:id owner)))))
 

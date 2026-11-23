@@ -7,6 +7,7 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
     [graphden.input.package-execution :as execution]
@@ -510,3 +511,36 @@
       (reset! calls [])
       (is (= expected (run {:data value})))
       (is (= [:selected] @calls)))))
+
+
+(deftest exact-named-callable-forwarding-preserves-graph-call-execution
+  (let [request {:value :text}
+        callable [:fn {:arg :request-shape} :response-shape]
+        definitions [{:namespace "callable-proof" :name :request-shape :type request}
+                     {:namespace "callable-proof" :name :response-shape :type request}
+                     {:namespace "callable-proof" :name :reader
+                      :args {:func {:type callable} :arg {:type :request-shape}}
+                      :return-type :response-shape}
+                     {:namespace "callable-proof" :name :echo
+                      :args {:arg {:type :request-shape}} :return-type :response-shape}
+                     {:namespace "callable-proof" :name :wrapper :parent :to-json-string
+                      :args {:data :reader :func {:type callable}}}
+                     {:namespace "callable-proof" :name :run :parent :wrapper
+                      :args {:func :echo :arg {:value {:value "checked"}}}}]
+        source (into (declarations "packages/core/system/fns.edn" #{:to-json-string}) definitions)
+        calls (atom 0)
+        bases (assoc @loaded
+                     :reader {:args {:func [:fn {:arg request} request] :arg request} :return request :effects #{}
+                              :impl (get-in @loaded [:invoke :impl])}
+                     :echo {:args {:arg request} :return request :effects #{}
+                            :impl (fn [args _] (swap! calls inc) (runtime/resolve-arg args :arg))})
+        {:keys [canonical legacy analysis]}
+        (runtimes source (ids/fn-id "callable-proof" :run)
+                  (fn [package id roots impls]
+                    (execution/compile-package (snapshot/with-certified-owner package id roots) id roots impls))
+                  bases)]
+    (is (= :checked (:status analysis)))
+    (doseq [run [legacy canonical]]
+      (reset! calls 0)
+      (is (= "{\"value\":\"checked\"}" (run {})))
+      (is (= 1 @calls)))))

@@ -1,10 +1,12 @@
 (ns graphden.input.source-named-types
   "Frozen evidence for named source declarations used by the offline checker."
   (:require
+    [graphden.input.descriptor :as descriptor]
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.types :as records]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
@@ -52,7 +54,7 @@
                    (= (* 2 (count form)) (count children) (count by-id)))
       (reject! :named-record-evidence-required id))
     (doseq [[position [field type]] (map-indexed vector form)]
-      (when-not (and (keyword? type) (field-membership? by-id id position field (type-id type)))
+      (when-not (field-membership? by-id id position field (type-id type))
         (reject! :named-record-evidence-required id)))
     form))
 
@@ -90,11 +92,13 @@
    through the package's prepared names, checking the original and row by UUID."
   [{:keys [prepared declarations]} plan-entry]
   (let [name->id (:name->id prepared)
-        primitive-ids (ids/primitive-fn-ids)
+        named-ids (into {} (filter (fn [[_ id]] (declaration-kind (get declarations id)))) name->id)
         type-id (fn [type]
-                  (let [id (get name->id type)]
-                    (or (get primitive-ids type)
-                        (when (declaration-kind (get declarations id)) id))))]
+                  (when (format/collection-type? #(or (types/primitive? %) (uuid? (get named-ids %))) type)
+                    (let [id (if (keyword? type)
+                               (or (get (ids/primitive-fn-ids) type) (get named-ids type))
+                               (records/resolve-type-ref type named-ids))]
+                      (when (and (uuid? id) (descriptor/stored-source-type? type id named-ids)) id))))]
     (memoize
       (fn [type]
         (let [id (get name->id type)
@@ -162,8 +166,15 @@
        (if-let [name (peek pending)]
          (if-let [{:keys [id body row rows origin]} (when-not (contains? seen name) (resolve-named name))]
            (recur (into (pop pending) (nested-type-names body)) (conj seen name)
-                  (-> frozen (assoc-in [:aliases name] body) (assoc-in [:alias-ids name] id)
-                      (assoc-in [:fns id] row) (assoc-in [:type-rows id] rows) (assoc-in [:type-origins id] origin)))
+                  (cond-> (-> frozen (assoc-in [:aliases name] body) (assoc-in [:alias-ids name] id)
+                              (assoc-in [:fns id] row) (assoc-in [:type-rows id] rows) (assoc-in [:type-origins id] origin))
+                    (map? body)
+                    (-> (assoc-in [:type-bodies id] body)
+                        (update :source-field-types merge
+                                (into {} (for [field rows :when (= :slot (:kind field))
+                                               :let [type (get body (keyword (:name field)))]
+                                               :when (not (keyword? type))]
+                                           [[(:id field) (:type-fn-id field)] type]))))))
            (recur (pop pending) (conj seen name) frozen))
          (rule-aliases frozen aliases))))))
 

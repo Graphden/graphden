@@ -60,3 +60,18 @@
     (is (= #{id} (set (keys (:type-origins frozen)))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"source and row evidence"
           (named/evidence {} resolve {:positive-int :missing/positive-int})))))
+
+
+(deftest named-callable-leaves-do-not-change-the-authored-anonymous-id
+  (let [type [:fn {:arg :request} :response]
+        [row] (records/inline-fn-type-rows-from-form type)
+        id (:id row)
+        rows {id [row]}
+        named-ids {:request (ids/fn-id "fixture" :request) :response (ids/fn-id "fixture" :response)}]
+    (is (rich/authored-callable-field? rows id type))
+    (is (not (rich/callable-field? rows id type)))
+    (is (rich/callable-field? rows id type named-ids))
+    (is (not (rich/callable-field? rows id type (dissoc named-ids :response))))
+    (is (not (rich/callable-field? rows id [:fn {:arg :fixture/request} :fixture/response] named-ids)))
+    (is (not (rich/callable-field? rows (ids/primitive-fn-id :fn) type named-ids)))
+    (is (not (rich/callable-field? {id [(assoc row :constraint [:fn {:arg :text} :text])]} id type named-ids)))))

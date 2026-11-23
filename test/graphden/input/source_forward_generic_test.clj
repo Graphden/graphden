@@ -39,6 +39,7 @@
               {:fields {field-id {:id field-id :name "value" :type-fn-id any-id}}
                :source-field-types {[field-id any-id] variable}
                :alias-ids {return-type-ref return-type-id}
+               :type-origins {return-type-id {:namespace "fixture" :name :named-map :map {:key :keyword :value :any}}}
                :type-bodies {return-type-id rich}})
         graph {:substitution {scoped rich}
                :dependencies [{:from address :to [owner [binding-id]] :binding-id binding-id
@@ -85,7 +86,7 @@
              (rejection #(generic/verify! context graph owner (merge witness patch))))))))
 
 
-(deftest shapes-and-unchecked-or-effectful-results-do-not-establish-binders
+(deftest shapes-and-unchecked-or-mismatched-effects-do-not-establish-binders
   (let [{:keys [context graph owner witness address scoped]} (proof-fixture)
         field-id (:field-id witness)
         binding-id (:binding-id witness)]
@@ -102,4 +103,12 @@
     (is (= :unproved-generic-forward-reference
            (rejection #(generic/verify! (assoc context :source-field-types {}) graph owner witness))))
     (is (= :unproved-generic-forward-reference
-           (rejection #(generic/verify! (assoc-in context [:fields field-id :id] (random-uuid)) graph owner witness))))))
+           (rejection #(generic/verify! (assoc-in context [:fields field-id :id] (random-uuid)) graph owner witness))))
+    (doseq [alter [#(assoc % :type-origins {})
+                   #(assoc-in % [:type-origins (:return-type-id witness) :namespace] "other")
+                   #(-> % (assoc-in [:fields field-id :type-fn-id] (ids/primitive-fn-id :text))
+                        (assoc-in [:source-field-types [field-id (ids/primitive-fn-id :text)]] 'a))
+                   #(assoc-in % [:type-bodies (:return-type-id witness)] [:map :keyword 'unbound])
+                   #(assoc-in % [:type-bodies (:return-type-id witness)] [:map :keyword [:fn {} :text]])]]
+      (is (= :unproved-generic-forward-reference
+             (rejection #(generic/verify! (alter context) graph owner witness)))))))

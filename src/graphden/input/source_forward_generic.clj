@@ -41,9 +41,12 @@
     snapshot
     (fn []
       (let [{:keys [version base-fn-id field-id variable binding-id target-fn-id return-type-ref return-type-id]} witness
+            type-origin (get-in snapshot [:type-origins return-type-id])
             _ (when-not (and (= 1 version) (= base-fn-id (ids/fn-id "core.logic" :const))
                              (= field-id (ids/slot-id base-fn-id :value)) (types/type-var? variable)
-                             (= return-type-id (get-in snapshot [:alias-ids return-type-ref])))
+                             (some #{return-type-id} (vals (:alias-ids snapshot)))
+                             (map? (:map type-origin)) (keyword? (:name type-origin))
+                             (= return-type-ref (keyword (or (:namespace type-origin) "") (name (:name type-origin)))))
                 (context/reject! :unproved-generic-forward-reference {:fn-id owner :binding-id binding-id}))
             scope [owner []]
             address [scope [field-id]]
@@ -63,6 +66,7 @@
         (when-not (and (= base-fn-id (:base-fn-id source)) (= {:value [field-id]} (:argument-paths source))
                        (= variable (:type declared) (get-in snapshot [:source-field-types [field-id (:type-fn-id field)]]))
                        (= field-id (:id declared) (:id configured) (:id field))
+                       (= (ids/primitive-fn-id :any) (:type-fn-id field))
                        (= scoped (get-in entry [:args :value]) (:return entry)) (= #{} (:effects entry))
                        (types/map-type? named) (not (types/type-any? types/type-var? named))
                        (not (types/type-any? types/callable-type? named))

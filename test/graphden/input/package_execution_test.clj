@@ -453,12 +453,11 @@
 
 
 (deftest untyped-positional-input-executes-with-its-original-any-slot
-  (let [directory {:namespace "fixture" :name :positional-directory :parent :zipmap
-                   :args {:keys {:append [{:value :prefix} {:value :upper}] :closed true}
-                          :vals {:append [{:value false} {:as :upper}] :closed true}}}
+  (let [directory {:namespace "fixture" :name :positional-directory :parent :str
+                   :args {:parts {:append [{:value false} {:as :upper}] :closed true}}}
         wrapper {:namespace "fixture" :name :positional-wrapper :parent :const :args {:value :positional-directory}}
         dependencies (into (declarations "packages/core/logic/fns.edn" #{:const})
-                           (declarations "packages/core/collections/fns.edn" #{:zipmap}))
+                           (declarations "packages/core/strings/fns.edn" #{:str}))
         owner (ids/fn-id "fixture" :positional-call)
         compile-certified (fn [package root roots implementations]
                             (execution/compile-package (snapshot/with-migrated-bindings package [root] roots)
@@ -469,4 +468,4 @@
             {:keys [canonical legacy analysis]} (runtimes source owner compile-certified)]
         (is (= :checked (:status analysis)))
         (is (empty? (:obligations analysis)))
-        (is (= {:prefix false :upper value} (legacy {}) (canonical {})))))))
+        (is (= (str false value) (legacy {}) (canonical {})))))))

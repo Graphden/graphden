@@ -73,7 +73,7 @@
   "Match the source witness to the current frozen slot and converted input
    membership. It applies only at the proved leaf, with an absent raw type."
   [{:keys [version owner-id field slot-id type-fn-id required membership-id membership-position
-           binding-id list-slot-id item-id item-position source-path] :as origin}
+           binding-id list-slot-id item-id item-position source-path] :as witness}
    target snapshot declaring]
   (let [slot (get-in snapshot [:fields slot-id])
         owner (get-in snapshot [:fns owner-id])
@@ -82,7 +82,7 @@
         expected (when (and (uuid? owner-id) (uuid? slot-id))
                    (migration/input-membership-record
                      owner {:id membership-id :fn-id owner-id :slot-id slot-id :position membership-position}))]
-    (and origin (= 1 version) (nil? (:type target)) (= field (:field target)) (= declaring owner-id)
+    (and witness (= 1 version) (nil? (:type target)) (= field (:field target)) (= declaring owner-id)
          (simple-keyword? field) (= slot-id (:id slot) (ids/slot-id owner-id field)) (= owner-id (:id owner))
          (= (ids/primitive-fn-id :any) type-fn-id (:type-fn-id slot))
          (= (name field) (:name slot)) (false? required) (false? (:required slot))

@@ -1,4 +1,4 @@
-(ns graphden.input.source-owner-proof-test
+(ns ^:serial graphden.input.source-owner-proof-test
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]

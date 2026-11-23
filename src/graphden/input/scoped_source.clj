@@ -67,7 +67,7 @@
 
 (defn- checked-route
   [{:keys [scope scoped-inputs declaration-records] :as ctx} local-state public-path]
-  (let [{:keys [address row edges field-owner owner-parents snapshot-id] :as certificate} (get scoped-inputs public-path)
+  (let [{:keys [address edges field-owner owner-parents snapshot-id] :as certificate} (get scoped-inputs public-path)
         [owner] scope
         parents (:parent-ids (some #(when (and (= :fn (:kind %)) (= owner (:id %))) %) declaration-records))]
     (when-not (and certificate (uuid? snapshot-id) (= (:public-path certificate) public-path)

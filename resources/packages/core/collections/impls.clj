@@ -14,7 +14,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check.literals :as lit]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.get-in :as get-in-type]))
 
 
 ;; === Validation Helpers ===
@@ -945,77 +946,9 @@
       default-ret)))
 
 
-;; --- :get-in ----------------------------------------------------------------
-;; Walk a record by literal-key path. When the path is a sequence of
-;; literal keys AND every intermediate is a record, return the
-;; deeply-nested field type. Any non-record intermediate or non-literal
-;; key falls back to default.
-;;
-;; The `:path` arg is a `:sequence`-typed slot — bindings-info has its
-;; literal items collected by check-fn-def!. We accept either a vector
-;; value (rare here, since sequence args travel through arg-chain) or
-;; fall through to default.
-
-(defn- get-in-walk
-  "Walk one non-union `t` through `segs` (a sequence of literal
-   keyword/string keys). Returns the deeply-nested type, or
-   `default-ret` on the first non-record / non-map / missing-key
-   step. `nullable?` accumulates: any `[:map K V]` intermediate
-   makes the final result nullable (key may be absent there).
-
-   Encountering a union mid-walk fans out: each member is walked
-   with the remaining segs and the results are unioned. `:null`
-   members of the union narrow to a `:null` leaf — `(get-in nil
-   anything)` is nil regardless of the path."
-  [t segs nullable? default-ret]
-  (cond
-    (empty? segs)
-    (if nullable? (types/make-union [:null t]) t)
-
-    (= :null t) :null
-
-    (types/union-type? t)
-    (->> (types/union-members t)
-         (mapv #(get-in-walk % segs nullable? default-ret))
-         types/make-union)
-
-    (types/record-type? t)
-    (let [k (field-keyword-from-literal (first segs))]
-      (if (and k (contains? t k))
-        (get-in-walk (get t k) (rest segs) nullable? default-ret)
-        default-ret))
-
-    (types/map-type? t)
-    (get-in-walk (types/map-val t) (rest segs) true default-ret)
-
-    :else default-ret))
-
-
-;; --- :get-in ----------------------------------------------------------------
-;; Walk a record by literal-key path. When the path is a sequence of
-;; literal keys AND every intermediate is a record, return the
-;; deeply-nested field type. Any non-record intermediate or non-literal
-;; key falls back to default.
-;;
-;; The `:path` arg is a `:sequence`-typed slot — bindings-info has its
-;; literal items collected by check-fn-def!. We accept either a vector
-;; value (rare here, since sequence args travel through arg-chain) or
-;; fall through to default.
-
 (defn get-in-return-rule
   [bindings-info default-ret]
-  (let [m-type    (get-in bindings-info [:map :type])
-        path-val  (get-in bindings-info [:path :value])]
-    (if (and (sequential? path-val)
-             (every? #(or (keyword? %) (string? %)) path-val))
-      ;; `nullable?` becomes true once the walk traverses a
-      ;; `[:map K V]` intermediate — the key MAY be absent there, so
-      ;; the final result is `[:union :null T]`. Records (closed,
-      ;; total) keep nullability false; navigating off a known record
-      ;; (missing field) falls through to default — the typo path
-      ;; the per-record rule already exercises.
-      (get-in-walk m-type path-val false default-ret)
-      default-ret)))
+  (get-in-type/return-type bindings-info default-ret))
 
 
 ;; === Registry ===
@@ -1037,7 +970,8 @@
    :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
    :get {:impl get-fn :return-type-rule get-return-rule
          :local-type-rules #{:return-type-rule} :taint-propagate? true}
-   :get-in {:impl get-in-fn :return-type-rule get-in-return-rule :taint-propagate? true}
+   :get-in {:impl get-in-fn :return-type-rule get-in-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :assoc {:impl assoc-any-fn
            :return-type-rule (with-meta assoc-return-rule {:graphden.input/local-type-rule true})
            :taint-propagate? true}

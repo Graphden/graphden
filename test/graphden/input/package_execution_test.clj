@@ -14,7 +14,9 @@
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse])
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.sync :as sync]
+    [graphden.types.core :as types])
   (:import
     (java.nio.charset
       StandardCharsets)))
@@ -172,6 +174,26 @@
         argument {:string "{\"flag\":false,\"missing\":null}"}]
     (is (= :checked (:status analysis)))
     (is (= {"flag" false "missing" nil} (legacy argument) (canonical argument)))))
+
+
+(deftest frozen-get-in-callback-preserves-nil-false-and-missing-defaults
+  (binding [types/*type-aliases-override* (atom {})]
+    (let [base (into (declarations "packages/core/collections/fns.edn" #{:get-in})
+                     (declarations "packages/core/refinements/fns.edn" #{:path-segment}))]
+      (sync/register-type-aliases! base)
+      (doseq [[value path default expected] [[{:leaf false} [:leaf] "fallback" false]
+                                             [{:leaf nil} [:leaf] false nil]
+                                             [{} [:leaf] false false]
+                                             [{:leaf 7} ["leaf"] "fallback" "fallback"]]]
+        (let [child {:namespace "fixture" :name :lookup :parent :get-in
+                     :args {:map {:value value} :path {:value path} :default {:value default}}}
+              {:keys [canonical legacy analysis]} (runtimes (conj base child) (ids/fn-id "fixture" :lookup))]
+          (is (= :checked (:status analysis)))
+          (is (= expected (legacy {}) (canonical {})))))
+      (let [without-proof (update @loaded :get-in dissoc :local-type-rules)]
+        (is (= :rule-signature-view-required
+               (rejection-code #(runtimes base (ids/fn-id "core.collections" :get-in)
+                                          execution/compile-package without-proof))))))))
 
 
 (deftest generated-list-projection-reads-the-authored-outer-field

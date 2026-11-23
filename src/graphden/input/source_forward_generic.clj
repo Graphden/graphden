@@ -33,9 +33,22 @@
        :binding-id (:id binding) :target-fn-id target-id :return-type-ref type-ref :return-type-id type-id})))
 
 
+(defn- checked-read?
+  [graph address expected]
+  ;; A closed gradual map still needs its existing field-read validation.
+  (let [proof (get-in graph [:scopes [] :proofs address])]
+    (or (= :checked (:status proof))
+        (and (= :deferred (:status proof)) (= :runtime-type-obligation (:reason proof))
+             (some #{{:id [address :value-type :field-read] :address address
+                      :scope (first address) :path (second address)
+                      :kind :value-type :trigger :field-read :expected-type expected}}
+                   (:obligations graph))))))
+
+
 (defn verify!
   "Require the original ABI field and the stock checker's closed substitution.
-   A source variable or equal inferred shape alone is insufficient."
+   A source variable or equal inferred shape alone is insufficient. Deferred
+   value validation must remain in the exact field-read obligation ledger."
   [snapshot graph owner witness]
   (context/call-with-types
     snapshot
@@ -75,7 +88,7 @@
                        (= binding-id (:binding-id bound) (:binding-id edge))
                        (= target-fn-id (:target-fn-id edge) (:fn-id target))
                        (= :value (:mode edge) (get-in bound [:reference :mode]))
-                       (= :checked (get-in root [:proofs address :status]))
+                       (checked-read? graph address named)
                        (= (:effects signature) (get-in root [:signature :effects]))
                        (set? (:effects signature)))
           (context/reject! :unproved-generic-forward-reference {:fn-id owner :binding-id binding-id}))

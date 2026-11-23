@@ -477,29 +477,44 @@
         (is (= (str false value) (legacy {}) (canonical {})))))))
 
 
-(deftest generic-const-forwarding-executes-with-the-exact-named-map-return
+(defn- generic-forward-runtimes
+  [value-type encode retained]
   (binding [types/*type-aliases-override* (atom {})]
     (let [producer {:namespace "fixture" :name :generic-map-producer
                     :args {:payload :any} :return-type :map-result}
           host {:namespace "fixture" :name :generic-map-host :parent :const
                 :args {:value :generic-map-producer :payload {:type :any}}}
           source (into (declarations "packages/core/logic/fns.edn" #{:const})
-                       [{:namespace "fixture" :name :map-result :map {:key :keyword :value :any}} producer host])
+                       [{:namespace "fixture" :name :map-result :map {:key :keyword :value value-type}} producer host])
           _ (sync/register-type-aliases! source)
-          base (assoc producer :impl (fn [{:keys [payload]}] {:payload payload}))
+          base (assoc producer :impl (fn [{:keys [payload]}] {:payload (encode payload)}))
           bases (assoc @loaded :generic-map-producer base)
-          retained (atom nil)
           compile-certified (fn [package root roots implementations]
                               (let [migrated (snapshot/migrate-forwarded-field package root :payload roots)]
-                                (reset! retained (get-in migrated [:legacy :arguments 1 :scope-certificate]))
+                                (reset! retained {:verification (:verification migrated)
+                                                  :certificate (some :scope-certificate (get-in migrated [:legacy :arguments]))})
                                 (execution/compile-package (snapshot/with-migrated-forwarding package root :payload roots)
-                                                           root roots implementations)))
-          {:keys [canonical legacy analysis]}
-          (runtimes source (ids/fn-id "fixture" :generic-map-host) compile-certified bases)]
-      (is (= :checked (:status analysis)))
-      (is (= [:map :keyword :any] (get-in analysis [:scopes [] :signature :return])))
-      (is (empty? (:obligations analysis)))
-      (is (= (ids/slot-id (ids/fn-id "core.logic" :const) :value)
-             (get-in @retained [:generic-reference :field-id])))
-      (doseq [value [nil false {:input [:as :data] :bind false :configure nil}]]
-        (is (= {:payload value} (legacy {:payload value}) (canonical {:payload value})))))))
+                                                           root roots implementations)))]
+      (runtimes source (ids/fn-id "fixture" :generic-map-host) compile-certified bases))))
+
+
+(deftest generic-const-forwarding-executes-with-the-exact-named-map-return
+  (let [retained (atom nil)
+        {:keys [canonical legacy analysis]} (generic-forward-runtimes :text pr-str retained)]
+    (is (= :checked (:status analysis)))
+    (is (= [:map :keyword :text] (get-in analysis [:scopes [] :signature :return])))
+    (is (= (ids/slot-id (ids/fn-id "core.logic" :const) :value)
+           (get-in @retained [:certificate :generic-reference :field-id])))
+    (is (= (set (:obligations analysis)) (set (get-in @retained [:certificate :obligations]))))
+    (doseq [value [nil false {:input [:as :data] :bind false :configure nil}]]
+      (is (= {:payload (pr-str value)} (legacy {:payload value}) (canonical {:payload value}))))))
+
+
+(deftest generic-const-forwarding-keeps-an-unsupported-named-map-read-boundary
+  (let [retained (atom nil)]
+    (is (= :runtime-obligations-required (rejection-code #(generic-forward-runtimes :any identity retained))))
+    (is (= :authored-source-equivalent (:verification @retained)))
+    (is (= [[:map :keyword :any]]
+           (mapv :expected-type
+                 (filter #(= (get-in @retained [:certificate :generic-reference :field-id]) (first (:path %)))
+                         (get-in @retained [:certificate :obligations])))))))

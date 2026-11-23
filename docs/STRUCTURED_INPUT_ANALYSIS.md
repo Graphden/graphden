@@ -240,9 +240,11 @@ and ABI path. A provisional source origin must refer to a named map return;
 the frozen verifier then requires the stock checker's closed substitution to
 equal that resolved named type, the configured field and the checked target
 return exactly. It also retains the value-reference mode and inferred effects.
-A different binder, unresolved variable, callable result or unchecked argument
-does not supply this proof. Occupancy and runtime-obligation replay guards
-still apply, and execution capabilities are unchanged.
+A different binder, unresolved variable, callable result or missing read proof
+does not supply this evidence. A deferred value check must retain the exact
+field-read obligation for the same named contract. Occupancy and obligation
+replay guards still apply. Unsupported map validation still refuses execution;
+execution capabilities are unchanged.
 
 Generated list operands retain the legacy list-item UUID and position. Frozen
 source fragments prove the list owner and actual attached use; compact origin

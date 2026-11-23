@@ -76,7 +76,7 @@
       (is (= :unproved-reference-binding (rejection #(forward/verify-forwarded-field prepared entry :data)))))))
 
 
-(deftest closed-stock-substitution-retains-the-exact-abi-field
+(deftest closed-substitution-retains-the-exact-abi-field
   (let [{:keys [context graph owner witness]} (proof-fixture)]
     (is (= witness (generic/verify! context graph owner witness)))
     (doseq [patch [{:version 2} {:field-id (random-uuid)} {:base-fn-id (random-uuid)}
@@ -112,3 +112,21 @@
                    #(assoc-in % [:type-bodies (:return-type-id witness)] [:map :keyword [:fn {} :text]])]]
       (is (= :unproved-generic-forward-reference
              (rejection #(generic/verify! (alter context) graph owner witness)))))))
+
+
+(deftest deferred-named-map-checks-require-the-exact-retained-read
+  (let [{:keys [context graph owner witness address]} (proof-fixture)
+        check {:id [address :value-type :field-read] :address address :scope (first address) :path (second address)
+               :kind :value-type :trigger :field-read :expected-type [:map :keyword :any]}
+        deferred (-> graph
+                     (assoc-in [:scopes [] :proofs address] {:status :deferred :reason :runtime-type-obligation})
+                     (assoc :obligations [check]))]
+    (is (= witness (generic/verify! context deferred owner witness)))
+    (doseq [alter [#(assoc % :obligations [])
+                   #(assoc-in % [:obligations 0 :expected-type] [:map :text :any])
+                   #(assoc-in % [:obligations 0 :kind] :container-type)
+                   #(assoc-in % [:obligations 0 :trigger] :container-materialization)
+                   #(assoc-in % [:obligations 0 :path] [(random-uuid)])
+                   #(assoc-in % [:scopes [] :proofs address :reason] :missing-actual-type)]]
+      (is (= :unproved-generic-forward-reference
+             (rejection #(generic/verify! context (alter deferred) owner witness)))))))

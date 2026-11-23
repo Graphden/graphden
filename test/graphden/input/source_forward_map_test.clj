@@ -8,6 +8,7 @@
     [graphden.input.context :as context]
     [graphden.input.signatures :as signatures]
     [graphden.input.source :as source]
+    [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -47,6 +48,7 @@
           {:keys [context options]} (snapshot/freeze-closure provisional [owner] roots)
           checked (analysis/analyze-effective-input context owner options)
           address [[owner []] [(ids/slot-id base :m)]]
+          witness (:generic-reference (first (:proofs baseline)))
           result (try (snapshot/with-migrated-forwarding package owner [:payload] roots)
                       (catch clojure.lang.ExceptionInfo error
                         {:failure (ex-data error)
@@ -56,8 +58,45 @@
                                     :proof (get-in checked [:scopes [] :proofs address])
                                     :obligations (:obligations checked)}}))]
       (is (= :checked (:status checked)))
+      (is (= :map (:kind witness)))
+      (is (= witness (generic/verify! context checked owner witness)))
       (is (= :authored-source-equivalent (get-in result [:closure-baselines owner :verification]))
           (select-keys result [:failure :observed]))
+      (doseq [patch [{:base-fn-id (random-uuid)} {:field-id (random-uuid)}
+                     {:argument :other} {:expected [:map 'other :any]}
+                     {:binding-id (random-uuid)} {:target-fn-id (random-uuid)}
+                     {:return-owner-id (random-uuid)} {:return-type-ref :other/shape}]]
+        (is (= :unproved-generic-map-reference
+               (try (generic/verify! context checked owner (merge witness patch))
+                    nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))
+      (doseq [edit [#(assoc % :substitution {})
+                    #(update % :dependencies into (:dependencies %))
+                    #(assoc-in % [:scopes [] :signature-source :argument-paths :m] [(random-uuid)])
+                    #(assoc-in % [:scopes [] :signature-source :root-entry :effects] #{:db})
+                    #(assoc-in % [:scopes [] :proofs address] {:status :unchecked})
+                    #(assoc-in % [:scopes [] :bindings address :reference :mode] :graph-callable)]]
+        (is (= :unproved-generic-map-reference
+               (try (generic/verify! context (edit checked) owner witness)
+                    nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))
+      (doseq [edit [#(assoc % :source-field-types {})
+                    #(assoc-in % [:fns (:return-owner-id witness) :return-type-fn-id] (random-uuid))]]
+        (is (= :unproved-generic-map-reference
+               (try (generic/verify! (edit context) checked owner witness)
+                    nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))
+      (let [expected (get-in checked [:scopes [] :bindings address :expected-type])
+            obligation {:id [address :value-type :field-read] :address address
+                        :scope (first address) :path (second address)
+                        :kind :value-type :trigger :field-read :expected-type expected}
+            deferred (-> checked
+                         (assoc-in [:scopes [] :proofs address] {:status :deferred :reason :runtime-type-obligation})
+                         (assoc :obligations [obligation]))]
+        (is (= witness (generic/verify! context deferred owner witness)))
+        (doseq [edit [#(assoc % :obligations [])
+                      #(assoc-in % [:obligations 0 :expected-type] :any)
+                      #(assoc-in % [:obligations 0 :trigger] :container-materialization)]]
+          (is (= :unproved-generic-map-reference
+                 (try (generic/verify! context (edit deferred) owner witness)
+                      nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
       (is (not (contains? package :closure-baselines))))))
 
 

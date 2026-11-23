@@ -257,6 +257,17 @@ A named record callback with a nested parameter route still fails explicitly
 with `:callback-parameter-shape-required`, even after its source transaction and
 analysis succeed. Record callback lowering is a separate compiler obligation.
 
+A generic plain-map input, optionally unioned with null, can retain a named
+record or dictionary value-reference result when the stock frozen checker
+solves its complete expected type. The source proof checks the original base
+argument, slot FK, named return owner, unique reference use and unchanged
+field-read evidence. Unresolved variables, callable contents, changed identities
+and missing runtime checks remain blocked. The shipped `update-in` callbacks
+are frozen by their original function identities after differential path,
+null and default tests; callback bodies and argument mapping are unchanged.
+This proves source equivalence for the checked route, not execution support
+for every surrounding callback graph.
+
 Audited native type callbacks run with the frozen signature view. A callback
 that introduces a named type records `:graphden.input/type-aliases` in its
 metadata, mapping the returned label to its qualified source declaration.
@@ -638,6 +649,7 @@ membership and projection against the verified baseline and frozen snapshot.
 The projection rows stay in the graph; adding the scoped values must preserve
 their occupancy, unique destinations and all runtime obligations. Only a full
 round trip of the combined source proposal publishes the owner and its parent
-forwarding links. The existing forwarding type admission still applies;
-inline callable fields such as `router-ring-response/:func` remain explicitly
-blocked by `:unproved-field-origin`.
+forwarding links. The existing forwarding type admission still applies:
+callable declarations require their exact authored origin, and a declaration
+that narrows an inherited field without a unique reference destination cannot
+be recast as a forwarding route.

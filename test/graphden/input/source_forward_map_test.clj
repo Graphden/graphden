@@ -9,7 +9,9 @@
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse]))
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.sync :as sync]
+    [graphden.types.core :as types]))
 
 
 (defn- shipped
@@ -19,7 +21,8 @@
 
 
 (deftest actual-update-in-map-slot-requires-a-frozen-closed-reference-proof
-  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
     (let [originals (into (shipped "collections" #{:update-in})
                           (concat (shipped "refinements" #{:path-segment})
                                   [{:namespace "map-forward" :name :shape :type {:value :text}}
@@ -31,6 +34,7 @@
           owner (ids/fn-id "map-forward" :host)
           producer (ids/fn-id "map-forward" :producer)
           base (ids/fn-id "core.collections" :update-in)
+          _ (sync/register-type-aliases! originals)
           _ (registry/record-rich-types! base :update-in (get-in (loader/load-packages ["core"]) [:base-fn-defs :update-in]))
           _ (registry/record-rich-types! producer :producer {:namespace "map-forward" :args {:payload {:type :text}}
                                                              :return-type {:value :text} :effects #{}})

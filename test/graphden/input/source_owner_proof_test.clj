@@ -20,8 +20,8 @@
 
 (defn- declarations
   [module names]
-  (let [{:keys [namespace fns]} (edn/read-string (slurp (io/resource (str "packages/core/" module "/fns.edn"))))]
-    (mapv #(assoc % :namespace namespace) (filter #(contains? names (:name %)) fns))))
+  (let [{ns-id :namespace :keys [fns]} (edn/read-string (slurp (io/resource (str "packages/core/" module "/fns.edn"))))]
+    (mapv #(assoc % :namespace ns-id) (filter #(contains? names (:name %)) fns))))
 
 
 (def ^:private implementations (delay (:base-fn-defs (loader/load-packages ["core"]))))
@@ -40,8 +40,8 @@
            :args {:extra :str-trim :string " null "}}
         originals (into base [a b c])
         prepared (parse/prepare-module originals {} {})]
-    (doseq [{:keys [namespace name]} base]
-      (registry/record-rich-types! (ids/fn-id namespace name) name (get @implementations name)))
+    (doseq [{ns-id :namespace :keys [name]} base]
+      (registry/record-rich-types! (ids/fn-id ns-id name) name (get @implementations name)))
     {:package (snapshot/package-index prepared originals) :originals originals
      :roots (:by-id @registry/*rich-types-override*) :owner (ids/fn-id "owner-proof" :c)}))
 
@@ -64,7 +64,7 @@
     (is (= [:value " null "] (get-in c [:proposed :bind [:extra :string]])))
     (is (= [:value nil] (get-in result [:closure-baselines (ids/fn-id "owner-proof" :b) :proposed :bind :data])))
     (is (every? #(= :authored-source-equivalent (:verification %)) (get-in all [:plan :definitions])))
-    (is (nil? (:closure-baselines package)))
+    (is (not (contains? package :closure-baselines)))
     (let [reordered (parse/prepare-module (vec (reverse originals)) {} {})
           other (snapshot/with-certified-owner (snapshot/package-index reordered (reverse originals)) owner roots)]
       (is (= (select-keys (:v2 c) [:fn-id :input-type-id :declaration-records :bindings])
@@ -78,7 +78,7 @@
         package (snapshot/package-index (parse/prepare-module changed {} {}) changed)]
     (is (= :unsupported-owner-certificate
            (failure-code #(snapshot/with-certified-owner package owner roots))))
-    (is (nil? (:closure-baselines package)))))
+    (is (not (contains? package :closure-baselines)))))
 
 
 (deftest failed-leaf-check-does-not-publish-successful-ancestor-certificates
@@ -89,7 +89,7 @@
         before (source/plan-module changed (:prepared package))]
     (is (= :types/check-failed
            (failure-code #(snapshot/with-certified-owner package owner roots))))
-    (is (nil? (:closure-baselines package)))
+    (is (not (contains? package :closure-baselines)))
     (is (= before (source/plan-module changed (:prepared package))))))
 
 

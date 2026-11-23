@@ -25,18 +25,47 @@
   (:value envelope))
 
 
+(defn occurrence-envelope
+  "Encode present member defaults in canonical slot UUID order. A single
+   fallback keeps its original on-disk shape."
+  [values]
+  (let [entries (mapv (fn [[id value]] {:target-path [id] :value value}) (sort-by key values))]
+    (case (count entries) 0 nil 1 (first entries) {:members entries})))
+
+
+(defn- member-entry?
+  [entry]
+  (and (map? entry) (= #{:target-path :value} (set (keys entry)))
+       (let [{:keys [target-path value]} entry]
+         (and (vector? target-path) (= 1 (count target-path)) (string? (first target-path))
+              (or (nil? value) (string? value))))))
+
+
+(defn member-values
+  "Read an old single path or a canonically ordered group of direct members.
+   Returns nil for malformed input. An explicit nil remains a present map key."
+  [envelope]
+  (let [entries (if (and (map? envelope) (= #{:members} (set (keys envelope))))
+                  (let [group (:members envelope)] (when (and (vector? group) (< 1 (count group))) group))
+                  [envelope])]
+    (when (and (seq entries) (every? member-entry? entries))
+      (let [ids (mapv (comp first :target-path) entries)]
+        (when (= ids (vec (sort (set ids))))
+          (zipmap ids (map :value entries)))))))
+
+
 (defn apply-envelope
-  "A path envelope belongs to the input type's own top-level membership.
-   Overlay its exact child on this resolved occurrence only."
+  "Overlay the exact child UUIDs on this resolved input occurrence only."
   [field node envelope own-input?]
-  (if (and (map? envelope) (contains? envelope :target-path))
-    (let [{:keys [target-path value]} envelope
-          target (when (and own-input? (map? (:type node)) (vector? target-path) (= 1 (count target-path)))
-                   (some #(when (= [(str (:id %))] target-path) %) (:fields node)))]
-      (when-not (and (= #{:target-path :value} (set (keys envelope)))
-                     target (= nullable-text-id (:type-id target))
-                     (not (contains? target :default))
-                     (supported? (:required target) (:type target) value))
+  (if (and (map? envelope) (or (contains? envelope :target-path) (contains? envelope :members)))
+    (let [values (member-values envelope)
+          fields (:fields node)
+          targets (filterv #(contains? values (str (:id %))) fields)]
+      (when-not (and own-input? (map? (:type node)) values (= (count values) (count targets))
+                     (every? #(and (= nullable-text-id (:type-id %)) (not (contains? % :default))
+                                   (supported? (:required %) (:type %) (get values (str (:id %))))) targets))
         (context/reject! :invalid-field-default {:field-id (:id field)}))
-      (update node :fields (fn [fields] (mapv #(if (= (:id target) (:id %)) (assoc % :default value) %) fields))))
+      (assoc node :fields (mapv (fn [child]
+                                  (if-let [entry (find values (str (:id child)))]
+                                    (assoc child :default (val entry)) child)) fields)))
     (assoc node :default (read-envelope field (:type node) envelope))))

@@ -9,17 +9,14 @@
 
 
 (defn- same-public-record?
-  [declared configured [outer leaf] fallback public-scalar?]
+  [declared configured outer allowed-field?]
   (let [parent (descriptor/find-node declared [outer])
-        nested (descriptor/find-node parent [leaf])
         effective (descriptor/find-node configured [outer])
-        same-field (juxt :id :name :type-id :type :required)]
+        same-field (juxt :id :name :type-id :type :required #(select-keys % [:default]))]
     (and (map? (:type parent)) (false? (:required parent))
          (= (same-field parent) (same-field effective))
          (= (mapv same-field (:fields parent)) (mapv same-field (:fields effective)))
-         (= field-default/nullable-text (:type nested))
-         (= {:default fallback} (select-keys nested [:default]))
-         (every? public-scalar? (vals (dissoc (:type parent) (:name nested)))))))
+         (every? allowed-field? (:fields parent)))))
 
 
 (defn- shared-member?
@@ -31,12 +28,11 @@
        (= field-default/nullable-text (get-in context [:fns field-default/nullable-text-id :constraint]))))
 
 
-(defn- owns-fallback?
-  [owner input outer field-name occurrence leaf fallback]
+(defn- owns-occurrence?
+  [owner input outer field-name occurrence]
   (and (= input (migration/derived-id :input-type owner))
        (= outer (ids/slot-id owner field-name)) (= input (:fn-id occurrence))
-       (= (:id occurrence) (migration/derived-id :membership owner (ids/fn-slot-id owner outer)))
-       (= {:target-path [(str leaf)] :value fallback} (:input-default occurrence))))
+       (= (:id occurrence) (migration/derived-id :membership owner (ids/fn-slot-id owner outer)))))
 
 
 (defn- stored-contract
@@ -60,15 +56,24 @@
                       (when (= 1 (count rows)) (first rows))))
         loaded? #(= % (get-in context [:fns % :id]))
         visible? #(and (loaded? %) (true? (allow-fn? %)))]
-    (fn [{:keys [fn-id declaration-order configured-contract]} [outer leaf :as path] fallback]
-      (let [{field-name :name record :type-fn-id :as field} (get-in context [:fields outer])]
-        (and (= snapshot-id (:snapshot-id context)) (loaded? fn-id)
-             (= outer (:id field)) (string? field-name)
-             (shared-member? context record leaf (get-in context [:fields leaf]) (member-at record leaf))
-             (every? loaded? declaration-order) (= declaration-order (lineage fn-id))
-             (some (fn [owner]
-                     (let [input (get-in context [:fns owner :input-type-fn-id])]
-                       (and (owns-fallback? owner input outer field-name (member-at input outer) leaf fallback)
-                            (every? visible? [owner input record field-default/nullable-text-id])
-                            (same-public-record? (contract owner) configured-contract path fallback public-scalar?))))
-                   declaration-order))))))
+    (letfn [(defaults-at
+              [{:keys [fn-id declaration-order configured-contract]} outer]
+              (let [{field-name :name record :type-fn-id :as field} (get-in context [:fields outer])
+                    allowed-field? (fn [{:keys [id type]}]
+                                     (or (public-scalar? type)
+                                         (and (= field-default/nullable-text type)
+                                              (shared-member? context record id (get-in context [:fields id]) (member-at record id)))))]
+                (when (and (= snapshot-id (:snapshot-id context)) (loaded? fn-id)
+                           (= outer (:id field)) (string? field-name)
+                           (every? loaded? declaration-order) (= declaration-order (lineage fn-id)))
+                  (some (fn [owner]
+                          (let [input (get-in context [:fns owner :input-type-fn-id])
+                                occurrence (member-at input outer)]
+                            (when (and (owns-occurrence? owner input outer field-name occurrence)
+                                       (every? visible? [owner input record field-default/nullable-text-id])
+                                       (same-public-record? (contract owner) configured-contract outer allowed-field?))
+                              (field-default/member-values (:input-default occurrence)))))
+                        declaration-order))))]
+      (let [verified (memoize defaults-at)]
+        (fn [scope [outer leaf] fallback]
+          (= [(str leaf) fallback] (find (verified scope outer) (str leaf))))))))

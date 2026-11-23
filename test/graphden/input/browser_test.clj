@@ -388,7 +388,7 @@
         source (edn/read-string (slurp (io/resource "packages/nesteddefaultfixture/structured/fns.edn")))
         source (-> source (assoc :namespace "test.input") (assoc-in [:fns 0 :name] :render-record)
                    (assoc-in [:fns 0 :input :left :type :label :default] fallback))
-        shape {:id :text :label field-default/nullable-text}
+        shape {:id :text :label field-default/nullable-text :hint field-default/nullable-text}
         parsed (primitive/prepare source owner {:left shape :right shape})
         union (shipped-declaration "refinements" :nullable-text)
         rows (group-by :kind (into (:declaration-records parsed) (parse/parse-module [union])))
@@ -428,12 +428,14 @@
           invoke (jvm/compile-named analysis options)
           plan (browser/export-named analysis options)
           other (if (= selected :left) :right :left)
-          defaulted [:span {:id "S" :label (if (= selected :right) "Bea" fallback)}]
+          attrs #(cond-> {:id "S" :label %} (= selected :left) (assoc :hint nil))
+          defaulted [:span (attrs (if (= selected :right) "Bea" fallback))]
           inputs [{} {selected {:id "S"}} {selected {:id "S" :label nil}} {selected {:id "S" :label "given"}}
-                  {other {:id "T"}} {selected {:id "S"} other {:id "T" :label "unrelated"}}]
-          expected [[:span] defaulted [:span {:id "S" :label nil}] [:span {:id "S" :label "given"}]
-                    [:span] defaulted]
-          invalid [{selected {}} {selected {:id "S" :label false}}]
+                  {other {:id "T"}} {selected {:id "S"} other {:id "T" :label "unrelated"}}
+                  {selected {:id "S" :hint "supplied"}}]
+          expected [[:span] defaulted [:span (attrs nil)] [:span (attrs "given")]
+                    [:span] defaulted [:span (assoc (peek defaulted) :hint "supplied")]]
+          invalid [{selected {}} {selected {:id "S" :label false}} {selected {:id "S" :hint false}}]
           results (run-browser plan (into inputs invalid))]
       (is (= :checked (:status analysis)))
       (is (= expected (mapv #(invoke % nil) inputs)))
@@ -458,8 +460,8 @@
       (is (= :browser-field-default-unsupported (refusal (assoc options :allow-fn? #(not= id %)))))
       (is (= :browser-field-default-unsupported (refusal (update-in options [:context :fns] dissoc id)))))
     (doseq [opts [(assoc-in options [:context :snapshot-id] (random-uuid))
-                  (change-member options input left #(assoc-in % [:input-default :value] "different"))
-                  (change-member options input left #(assoc-in % [:input-default :target-path] [(str left)]))
+                  (change-member options input left #(assoc-in % [:input-default :members 0 :value] "different"))
+                  (change-member options input left #(assoc-in % [:input-default :members 0 :target-path] [(str left)]))
                   (change-member options input left #(assoc % :id (random-uuid)))
                   (change-member options record leaf #(assoc % :input-default {:value "shared"}))
                   (assoc-in options [:context :fns field-default/nullable-text-id :constraint] :any)

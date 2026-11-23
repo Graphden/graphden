@@ -1,6 +1,8 @@
 {:input-format 2
  :namespace "nesteddefaultfixture.structured"
  :fns [{:name :defaulted-label-pair
-        :input {:left {:required false :type {:id :text :label {:type [:union :null :text] :required false :default "Ada"}}}
-                :right {:required false :type {:id :text :label {:type [:union :null :text] :required false :default "Bea"}}}}
+        :input {:left {:required false :type {:id :text :label {:type [:union :null :text] :required false :default "Ada"}
+                                              :hint {:type [:union :null :text] :required false :default nil}}}
+                :right {:required false :type {:id :text :label {:type [:union :null :text] :required false :default "Bea"}
+                                               :hint {:type [:union :null :text] :required false}}}}
         :return-type :text}]}

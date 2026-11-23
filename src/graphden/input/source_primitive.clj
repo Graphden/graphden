@@ -53,28 +53,32 @@
            (= #{} (peek type)) (record-of? (second type) data-type?) (data-type? (nth type 2)))))
 
 
-(defn- occurrence-layout
-  "Prepare a direct optional nullable-text member. Its shared type identity
-   depends on the declaration of the field and excludes the fallback value."
+(defn- member-spec?
   [spec]
-  (when (map? (:type spec))
-    (let [shape (:type spec)
-          members (filter (fn [[_ child]]
-                            (and (map? child) (contains? child :type)
-                                 (or (contains? child :default) (= field-default/nullable-text (:type child))))) shape)]
-      (when (seq members)
-        (let [[member child] (first members)]
-          (when-not (and (= 1 (count members)) (simple-keyword? member)
-                         (= #{:type :required} (set (keys spec))) (boolean? (:required spec))
-                         (not (contains? shape :type)) (every? simple-keyword? (keys shape)) (every? leaf-type? (vals (dissoc shape member)))
-                         (every? #{:type :required :default} (keys child))
-                         (field-default/supported? (:required child) (:type child) (:default child)))
-            (reject! :staged-record-member-default-unsupported))
-          (let [storage (assoc shape member {:type :core.refinements/nullable-text :required false})
-                record (ids/anonymous-fn-id (ids/shape-hash storage))]
-            (cond-> {:storage storage :type (assoc shape member field-default/nullable-text)}
-              (contains? child :default)
-              (assoc :envelope {:target-path [(str (ids/slot-id record member))] :value (:default child)}))))))))
+  (and (map? spec) (contains? spec :type)
+       (or (contains? spec :default) (= field-default/nullable-text (:type spec)))))
+
+
+(defn- occurrence-layout
+  "Compile direct optional members into one occurrence. The record identity
+   includes their required flags and types, independently of any fallback."
+  [{shape :type :as spec}]
+  (when (and (map? shape) (some member-spec? (vals shape)))
+    (when-not (and (= #{:type :required} (set (keys spec))) (boolean? (:required spec))
+                   (not (contains? shape :type)) (every? simple-keyword? (keys shape))
+                   (every? (fn [child]
+                             (or (leaf-type? child)
+                                 (and (member-spec? child) (every? #{:type :required :default} (keys child))
+                                      (field-default/supported? (:required child) (:type child) (:default child)))))
+                           (vals shape)))
+      (reject! :staged-record-member-default-unsupported))
+    (let [storage (update-vals shape #(if (member-spec? %) {:type :core.refinements/nullable-text :required false} %))
+          record (ids/anonymous-fn-id (ids/shape-hash storage))
+          values (into {} (keep (fn [[name child]]
+                                  (when (and (member-spec? child) (contains? child :default))
+                                    [(str (ids/slot-id record name)) (:default child)]))) shape)]
+      {:storage storage :type (update-vals shape #(if (member-spec? %) (:type %) %))
+       :envelope (field-default/occurrence-envelope values)})))
 
 
 (defn- exact-record?
@@ -145,8 +149,8 @@
 
 (defn prepare
   "Prepare a standalone pure-shape declaration. Scalar fields are the default.
-   The record ABI pins field types, including one optional nullable-text
-   member per record. A callable field
+   The record ABI pins field types, including direct optional nullable-text
+   members with occurrence-specific defaults. A callable field
    must have a closed effect-free signature and data-only call values.
    Results are scalar or an admitted data record. No bindings or parents."
   ([source root] (prepare source root nil))

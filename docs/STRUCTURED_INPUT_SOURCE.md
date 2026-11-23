@@ -544,17 +544,19 @@ parents, configuration, extra declarations and references.
 ### Defaults in pinned record inputs
 
 A scalar field can declare `{:type [:union :null :text] :required false
-:default "Ada"}`. The same declaration can appear on one direct member of
-a pinned record input. Other members of that record must have scalar
-primitive types. The operator pin and the independently registered native
+:default "Ada"}`. Each direct member of a pinned record input can declare
+its own optional nullable-text fallback. Other members of that record must
+have scalar primitive types. The operator pin and the independently registered native
 ABI must agree with the record shape.
 
 The owner’s top-level input membership carries a nested fallback as
 `{:target-path ["<member slot UUID>"] :value "Ada"}`. Two inputs of the
-same record type can supply different fallbacks. A missing envelope leaves
-the member without a default. A path envelope whose `:value` is nil
-supplies an explicit nil fallback. The shared record and its memberships describe the
-fields and their types.
+same record type can supply different fallbacks. For two or more fallback
+values the same membership stores `{:members [...]}` containing those
+path/value entries in ascending UUID string order. The reader rejects the
+whole group if a path repeats or fails validation. A member omitted from
+the group has no fallback. A present entry whose `:value` is nil supplies
+an explicit nil fallback. The shared record supplies field identities and types.
 
 The JVM keeps an omitted optional record absent. When a caller supplies
 the record, its omitted optional member can take its fallback. An explicit

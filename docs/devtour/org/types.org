@@ -80,13 +80,13 @@ Derives declared input contexts for supported rewrites using the frozen package 
 :PROPERTIES:
 :CUSTOM_ID: types/verify-plan
 :FILE: src/graphden/input/source_certification.clj
-:LINE: 102
+:LINE: 108
 :MINS: 2.2
 :END:
 
 Certifies scoped bindings and forwarded fields with trusted implementation signatures. A blocked source owner retries when its exact dependency is certified. The planner then rebuilds the requested package plan with the updated inherited field evidence.
 
-- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:102]]
+- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:108]]
 - see also :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 - referenced from :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
 
@@ -106,13 +106,13 @@ Matches each original owner's complete normalized inline expansion with preparat
 :PROPERTIES:
 :CUSTOM_ID: types/with-certified-owner
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 751
+:LINE: 752
 :MINS: 1.1
 :END:
 
 Proves one owner and its dependencies as an immutable transaction. Verified parent forwarding is available before replanning inherited inputs; scoped bindings still pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:751]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:752]]
 - see also :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/verify-bindings][verify-bindings]]
 - same file :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]

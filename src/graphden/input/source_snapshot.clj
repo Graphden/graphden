@@ -675,9 +675,8 @@
 
 
 (defn- certify-inline-children
-  [package owner blockers roots active]
-  (let [paths (into #{} (map #(subvec (:source-path %) 0 2)) blockers)
-        updated (reduce (fn [package path]
+  [package owner paths roots active]
+  (let [updated (reduce (fn [package path]
                           (let [origin (origins/child-at @(:inline-origins package) owner path)
                                 id (:fn-id origin)]
                             (when-not id (reject! :missing-inline-source-origin owner))
@@ -687,8 +686,10 @@
                                   proof (get-in with-child [:closure-baselines id])]
                               (-> with-child (update :originals dissoc id)
                                   (update :prepared source/with-certified-inline proof)))))
-                        package (sort paths))]
-    (when (some origins/direct-inline-binding-blocker? (:blockers (plan-entry updated owner)))
+                        package (sort-by pr-str paths))]
+    ;; An invalid list operand hides subsequent ones until its own proof is
+    ;; installed. A path that still fails after its proof made no progress.
+    (when (some (comp paths origins/inline-binding-path) (:blockers (plan-entry updated owner)))
       (reject! :unproved-inline-binding owner))
     (certify-owner updated owner roots (disj active owner))))
 
@@ -708,7 +709,7 @@
   [package owner roots active]
   (let [entry (plan-entry package owner)
         blockers (:blockers entry)
-        children (filterv origins/direct-inline-binding-blocker? blockers)]
+        children (into #{} (keep origins/inline-binding-path) blockers)]
     (cond
       (= :authored-source-equivalent (:verification entry))
       (assoc-in package [:closure-baselines owner] entry)

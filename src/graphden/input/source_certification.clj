@@ -21,13 +21,19 @@
       (and (every? argument-field blockers)
            (every? #(= :field-projection-required (:code %)) blockers))
       [id (mapv argument-field blockers)]
-      (every? (fn [blocker]
-                (or (origins/direct-inline-binding-blocker? blocker)
-                    (if (= :inherited-projection-required (:code blocker))
-                      (= [:args] (:source-path blocker))
-                      (and (#{:ref-scope-required :field-projection-required} (:code blocker))
-                           (argument-field blocker))))) blockers)
-      [id :joint])))
+      :else
+      (let [paths (into #{} (comp (keep origins/inline-binding-path)
+                                  (filter #(< 2 (count %)))
+                                  (map #(subvec % 0 2))) blockers)]
+        (when (every? (fn [{:keys [code source-path] :as blocker}]
+                        (or (origins/inline-binding-path blocker)
+                            (case code
+                              :inherited-projection-required (= [:args] source-path)
+                              :list-builder-required (contains? paths source-path)
+                              (:ref-scope-required :field-projection-required) (argument-field blocker)
+                              false)))
+                      blockers)
+          [id :joint])))))
 
 
 (defn- attempt

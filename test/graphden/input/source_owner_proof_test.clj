@@ -122,6 +122,38 @@
     (is (empty? (:closure-baselines invalid-package)))))
 
 
+(deftest inline-list-item-can-certify-its-own-scoped-binding
+  (let [{:keys [originals roots]} (fixture)
+        [vec-base] (declarations "collections" #{:vec})
+        child (dissoc (peek originals) :namespace :name)
+        later-child (assoc-in child [:args :string] " last ")
+        host {:namespace "owner-proof" :name :host :parent :vec
+              :args {:coll [{:value nil} child later-child]}}
+        owner (ids/fn-id "owner-proof" :host)
+        slot (ids/slot-id (ids/fn-id "core.collections" :vec) :coll)
+        verify (fn [owner-form]
+                 (let [forms (conj (pop originals) vec-base owner-form)
+                       prepared (parse/prepare-module forms {} {})]
+                   (certification/verify-plan prepared forms {} roots)))
+        {:keys [package blocked]} (verify host)
+        entry (get-in package [:closure-baselines owner])
+        inline (get-in entry [:v2 :inline-definitions [slot 1]])
+        scoped-row (get-in inline [:scoped-inputs [:extra :string] :row])
+        later (get-in entry [:v2 :inline-definitions [slot 2]])
+        invalid (verify (assoc-in host [:args :coll 1 :args :string] 42))]
+    (is (= :authored-source-equivalent (:verification entry)) (pr-str (get blocked owner)))
+    (is (= (ids/fn-id "owner-proof" (:name (parse/inline-declaration child [:host :coll 1] "owner-proof")))
+           (:fn-id inline)))
+    (is (uuid? (:id scoped-row)))
+    (is (= (ids/fn-id "owner-proof" (:name (parse/inline-declaration later-child [:host :coll 2] "owner-proof")))
+           (:fn-id later)))
+    (is (uuid? (get-in later [:scoped-inputs [:extra :string] :row :id])))
+    (is (= scoped-row
+           (get-in package [:closure-baselines (:fn-id inline) :v2 :scoped-inputs [:extra :string] :row])))
+    (is (= :types/check-failed (get-in invalid [:blocked owner :code])))
+    (is (nil? (get-in invalid [:package :closure-baselines owner])))))
+
+
 (deftest joint-proof-completion-is-independent-of-owner-uuid-queue-order
   (let [{:keys [originals roots]} (fixture)
         changed (update originals (dec (count originals)) assoc :name :early)

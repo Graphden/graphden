@@ -101,18 +101,29 @@
     origin))
 
 
-(defn direct-inline-binding-blocker?
-  "Accept blocker paths made entirely of inline arguments. List-item and
-   other path segments need their own provenance checks."
+(defn- argument-path?
+  [path]
+  (and (vector? path) (even? (count path))
+       (every? (fn [[section field]] (and (= :args section) (simple-keyword? field)))
+               (partition 2 path))))
+
+
+(defn inline-binding-path
+  "Locate the first child of a scoped binding blocker. A list operand may
+   occupy an exact vector or append position. The result must still resolve
+   through child-at and pass the ordinary frozen owner proof."
   [{:keys [code source-path]}]
-  (when (and (vector? source-path) (< 2 (count source-path)))
-    (let [fields (case code
-                   :ref-scope-required source-path
-                   :inherited-projection-required (when (= :args (peek source-path)) (pop source-path))
+  (when (and (vector? source-path) (< 2 (count source-path))
+             (argument-path? (subvec source-path 0 2)))
+    (let [position (if (= :append (get source-path 2)) 3 2)
+          end (if (nat-int? (get source-path position)) (inc position) 2)
+          remaining (subvec source-path end)
+          fields (case code
+                   :ref-scope-required (when (seq remaining) remaining)
+                   :inherited-projection-required (when (= :args (peek remaining)) (pop remaining))
                    nil)]
-      (and (seq fields) (even? (count fields))
-           (every? (fn [[section field]] (and (= :args section) (simple-keyword? field)))
-                   (partition 2 fields))))))
+      (when (argument-path? fields)
+        (subvec source-path 0 end)))))
 
 
 (defn child-at

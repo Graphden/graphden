@@ -71,3 +71,14 @@
       (is (= :ambiguous-inline-owner
              (try (origins/declaration index fn-id) nil
                   (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
+
+
+(deftest scoped-inline-paths-distinguish-list-positions-and-argument-maps
+  (let [locate #(origins/inline-binding-path {:code %1 :source-path %2})]
+    (is (= [:args :direct] (locate :ref-scope-required [:args :direct :args :x])))
+    (is (= [:args :items 1] (locate :ref-scope-required [:args :items 1 :args :x])))
+    (is (= [:args :items :append 2] (locate :inherited-projection-required [:args :items :append 2 :args])))
+    (is (nil? (locate :ref-scope-required [:args :items 1])))
+    (is (nil? (locate :ref-scope-required [:args :items -1 :args :x])))
+    (is (nil? (locate :ref-scope-required [:args :items :append :args :x])))
+    (is (nil? (locate :field-projection-required [:args :items 0 :args :x])))))

@@ -5,6 +5,8 @@
     [clojure.test :refer [deftest is]]
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
+    [graphden.input.context :as context]
+    [graphden.input.signatures :as signatures]
     [graphden.input.source :as source]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -57,3 +59,37 @@
       (is (= :authored-source-equivalent (get-in result [:closure-baselines owner :verification]))
           (select-keys result [:failure :observed]))
       (is (not (contains? package :closure-baselines))))))
+
+
+(deftest update-in-frozen-callbacks-preserve-path-null-and-default-behavior
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [original (get-in (loader/load-packages ["core"]) [:base-fn-defs :update-in])
+          base (ids/fn-id "core.collections" :update-in)
+          _ (sync/register-type-aliases! (shipped "refinements" #{:path-segment}))
+          _ (registry/record-rich-types! base :update-in original)
+          frozen (get-in @registry/*rich-types-override* [:by-id base])
+          shape {:headers {:token :text} :body :text}
+          facts [{:m {:type shape} :path {:value [{:value :headers} {:value :token}]}}
+                 {:m {:type shape} :path {:value [{:ref :dynamic}]}}
+                 {:m {:type :null} :path {:value nil}}
+                 {:m {:type [:map :keyword :any]} :path {:value false}}
+                 {:path {:value []}}]
+          expected [[shape {:path [:list :keyword]} {:path shape}]
+                    [shape {:path [:list :keyword]} {:path shape}]
+                    [:null {} {}] [[:map :keyword :any] {} {}] [:text {} {}]]
+          evaluate (fn [entry input]
+                     [((:return-type-rule entry) input :text)
+                      ((:slot-types-rule entry) input)
+                      ((:nav-types-rule entry) input)])
+          before (mapv #(evaluate original %) facts)
+          after (context/call-with-types (context/build-context {}) #(mapv (partial evaluate frozen) facts))]
+      (is (= expected before after))
+      (is (= base (:fn-id frozen)))
+      (is (signatures/local-type-rules? frozen))
+      (doseq [rule [:return-type-rule :slot-types-rule :nav-types-rule]]
+        (is (identical? (get original rule) (get-in frozen [:local-type-rule-evidence rule]))))
+      (doseq [entry [original frozen]]
+        (is (= :missing-field
+               (try ((:return-type-rule entry) {:m {:type shape} :path {:value [{:value :missing}]}} :any)
+                    nil (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))))

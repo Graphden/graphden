@@ -1,6 +1,7 @@
 (ns ^:integration ^:serial graphden.packages.profile-input-test
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as runtime]
@@ -127,10 +128,10 @@
 (deftest pinned-defaults-follow-their-own-record-occurrences
   (let [storage (:storage golden/*bootstrap*)
         root (ids/fn-id "nesteddefaultfixture.structured" :defaulted-label-pair)
-        shape {:id :text :label [:union :null :text]}
+        shape {:id :text :label [:union :null :text] :hint [:union :null :text]}
         admission {:module ["nesteddefaultfixture" "structured"] :fn-id root
                    :abi-fn-id (ids/fn-id "nesteddefaultfixture.native" :describe-label-pair)
-                   :sha256 "f1189b8270cc11cc7bdf3e5ec3159323b99d864c2abedc78f0eb54ea3e3fb7e8"
+                   :sha256 "fbef955b4767ede9475d43700b87d60c3d0e6c78e09f079ffc1bb69d698dc8ca"
                    :record-contract {:left shape :right shape}}
         packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "nesteddefaultfixture"]
                                              :primitive-input admission})
@@ -141,8 +142,9 @@
         record (first types)
         label (ids/slot-id record :label)
         members (mapv #(migration/derived-id :membership root (ids/fn-slot-id root %)) slots)
-        shared (ids/fn-slot-id record label)
-        versions #(resolution/resolve-version-ids (vs/unwrap storage) :fn-slot (conj members shared) (vs/current-branch-id storage))
+        hint (ids/slot-id record :hint)
+        shared (mapv #(ids/fn-slot-id record %) [label hint])
+        versions #(resolution/resolve-version-ids (vs/unwrap storage) :fn-slot (into members shared) (vs/current-branch-id storage))
         before (versions)
         token (str (random-uuid))
         ctx (exec/create-context {:storage storage :base-fns base-fns :auth-provider (auth/single-token-provider token)})
@@ -155,14 +157,19 @@
     (is (= [:browser-field-default-unsupported :unsupported-browser-primitive]
            (stored-browser-rejections storage base-fns root)))
     (is (= [record record] types))
-    (is (= [(str label) (str label)] (mapv #(get-in (sp/read-entity storage :fn-slot %) [:input-default :target-path 0]) members)))
-    (is (= ["Ada" "Bea"] (mapv #(get-in (sp/read-entity storage :fn-slot %) [:input-default :value]) members)))
-    (is (nil? (:input-default (sp/read-entity storage :fn-slot shared))))
-    (is (= "absent|absent" (:result (post {}))))
-    (is (= "Ada|Bea" (:result (post {:left {:id "1"} :right {:id "2"}}))))
-    (is (= "nil|given" (:result (post {:left {:id "1" :label nil} :right {:id "2" :label "given"}}))))
+    (is (= [{:members (vec (sort-by :target-path [{:target-path [(str label)] :value "Ada"}
+                                                  {:target-path [(str hint)] :value nil}]))}
+            {:target-path [(str label)] :value "Bea"}]
+           (mapv #(:input-default (sp/read-entity storage :fn-slot %)) members)))
+    (is (every? nil? (map #(:input-default (sp/read-entity storage :fn-slot %)) shared)))
+    (let [invoke #(edn/read-string (:result (post %)))]
+      (is (= [nil nil] (invoke {})))
+      (is (= [{:label "Ada" :hint nil} {:label "Bea"}] (invoke {:left {:id "1"} :right {:id "2"}})))
+      (is (= [{:label nil :hint "mine"} {:label "given" :hint nil}]
+             (invoke {:left {:id "1" :label nil :hint "mine"} :right {:id "2" :label "given" :hint nil}}))))
     (is (= "failed" (:status (post {:right {}}))))
     (is (= "failed" (:status (post {:right {:id "2" :label 7}}))))
-    (is (= (set (conj members shared)) (set (keys before))))
+    (is (= "failed" (:status (post {:left {:id "1" :hint 7}}))))
+    (is (= (set (into members shared)) (set (keys before))))
     (sync!)
     (is (= before (versions)))))

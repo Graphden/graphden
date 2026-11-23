@@ -167,3 +167,33 @@
     (doseq [bad [(assoc member :default [:ref :private]) (assoc member :required true :default "Ada")
                  (assoc member :type :text :default "Ada")]]
       (is (= :staged-record-member-default-unsupported (code #(prepare (assoc input :left (record bad)))))))))
+
+
+(deftest grouped-defaults-validate-the-entire-owner-membership
+  (let [optional {:type field-default/nullable-text :required false}
+        record {:required false :type {:label (assoc optional :default "Ada") :hint (assoc optional :default nil)}}
+        shape {:label field-default/nullable-text :hint field-default/nullable-text}
+        parsed (primitive/prepare (assoc-in module [:fns 0 :input] {:left record}) root {:left shape})
+        rows (group-by :kind (:declaration-records parsed))
+        index #(into {} (map (juxt :id identity)) %)
+        ctx (context/build-context {:fns (assoc (index (:fn rows)) field-default/nullable-text-id {:constraint field-default/nullable-text})
+                                    :fields (index (:slot rows)) :members (group-by :fn-id (:fn-slot rows))})
+        input-id (:input-type-id parsed)
+        slot (ids/slot-id root :left)
+        envelope (:input-default (first (get-in ctx [:members input-id])))
+        [a b] (:members envelope)
+        defaults (fn [envelope]
+                   (let [ctx (update-in ctx [:members input-id] #(mapv (fn [row] (assoc row :input-default envelope)) %))
+                         node (descriptor/node-at (descriptor/resolve-contract ctx root) [slot])]
+                     (into {} (map (juxt :name #(select-keys % [:default]))) (:fields node))))]
+    (is (= {:label {:default "Ada"} :hint {:default nil}} (defaults envelope)))
+    (is (= [a b] (sort-by :target-path [a b])))
+    (is (= :staged-record-member-default-unsupported
+           (code #(primitive/prepare (assoc-in module [:fns 0 :input] {:left (assoc-in record [:type :detail] {:child optional})})
+                                     root {:left (assoc shape :detail {:child field-default/nullable-text})}))))
+    (doseq [bad [{:members [b a]} {:members [a a]} {:members [b]} {:members []} {:members [a [:oops]]}
+                 {:members [a b] :value nil} {:members [a (dissoc b :value)]}
+                 {:members [a (assoc b :value [:ref :private])]}
+                 {:members (vec (sort-by :target-path [a (assoc b :target-path [(str slot)])]))}
+                 {:members [a (assoc b :target-path (into (:target-path a) (:target-path b)))]}]]
+      (is (= :invalid-field-default (code #(defaults bad)))))))

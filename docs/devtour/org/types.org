@@ -95,7 +95,7 @@ Certifies scoped bindings and forwarded fields with trusted implementation signa
 :CUSTOM_ID: types/index
 :FILE: src/graphden/input/source_origins.clj
 :LINE: 70
-:MINS: 1.9
+:MINS: 2.1
 :END:
 
 Matches each original owner's complete normalized inline expansion with preparation. Generated UUIDs retain their enclosing owner and exact nested or sequence path. These private source bodies are provenance, not checked runtime declarations.

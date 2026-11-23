@@ -55,3 +55,17 @@
     (is (= :ambiguous-inline-owner
            (try (origins/declaration duplicate id) nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
+
+
+(deftest conflicting-original-owner-is-ambiguous-even-if-only-one-body-matches-preparation
+  (let [definitions (fixture)
+        prepared (parse/prepare-module definitions {} {})
+        host (second definitions)
+        conflicting (assoc host :args {:value {:value "different body"}})
+        index (origins/index prepared (conj definitions conflicting))
+        children (filter #(= (ids/fn-id "fixture" :host) (:root-owner-id %)) (mapcat val index))]
+    (is (= 3 (count children)))
+    (doseq [{:keys [fn-id]} children]
+      (is (= :ambiguous-inline-owner
+             (try (origins/declaration index fn-id) nil
+                  (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))

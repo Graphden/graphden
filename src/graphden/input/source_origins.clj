@@ -74,19 +74,22 @@
    are opaque, and sequence positions follow the legacy parser's identity.
    Private entries contain source payloads and must not be logged."
   [prepared originals]
-  (reduce (fn [origins original]
-            (try
-              (let [normalized (rebase/rewrite-references
-                                 original #(parse/normalize-ref % (:name->id prepared) (:namespace original)))
-                    _ (checked-expansion! prepared normalized)
-                    entries (declaration-origins normalized normalized [])]
-                (reduce #(update %1 (:fn-id %2) (fnil conj []) %2) origins entries))
-              (catch clojure.lang.ExceptionInfo failure
-                (if (#{:input/source-origin :packages/unresolved-ref :packages/ambiguous-ref}
-                     (:type (ex-data failure)))
-                  origins
-                  (throw failure)))))
-          {} originals))
+  (let [owner-counts (frequencies (map definition-id originals))]
+    (reduce (fn [origins original]
+              (try
+                (let [normalized (rebase/rewrite-references
+                                   original #(parse/normalize-ref % (:name->id prepared) (:namespace original)))
+                      _ (checked-expansion! prepared normalized)
+                      ambiguous? (> (get owner-counts (definition-id original)) 1)
+                      entries (cond->> (declaration-origins normalized normalized [])
+                                ambiguous? (map #(assoc % :ambiguous-owner? true)))]
+                  (reduce #(update %1 (:fn-id %2) (fnil conj []) %2) origins entries))
+                (catch clojure.lang.ExceptionInfo failure
+                  (if (#{:input/source-origin :packages/unresolved-ref :packages/ambiguous-ref}
+                       (:type (ex-data failure)))
+                    origins
+                    (throw failure)))))
+            {} originals)))
 
 
 (defn declaration
@@ -94,5 +97,5 @@
    preparation. Duplicate originals or conflicting owners are never guessed."
   [origins id]
   (let [[origin & more] (get origins id)]
-    (when (seq more) (reject! :ambiguous-inline-owner id))
+    (when (or (seq more) (:ambiguous-owner? origin)) (reject! :ambiguous-inline-owner id))
     origin))

@@ -284,6 +284,7 @@
         return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
+    ;; A base field's documenting :value stays metadata, never a binding/default.
     (when-not (every? (fn [{:keys [row target-path] :as config}]
                         (if row
                           (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
@@ -300,7 +301,7 @@
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))
-                                           (every? #{:type :required :description} (keys declaration))))
+                                           (every? #{:type :required :description :value} (keys declaration))))
                                   (or (descriptor/stored-source-type? type type-id named-ids)
                                       (and (uuid? type-id) (= type-id (get named-ids type)))
                                       (rich/callable-field? type-rows type-id type))))

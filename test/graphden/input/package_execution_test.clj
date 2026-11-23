@@ -7,6 +7,7 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
@@ -14,7 +15,10 @@
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse])
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.sync :as sync]
+    [graphden.types.core :as types]
+    [graphden.types.validator :as validator])
   (:import
     (java.nio.charset
       StandardCharsets)))
@@ -116,6 +120,97 @@
         {:keys [canonical legacy analysis]} (runtimes source (ids/fn-id "fixture" :total))]
     (is (= :checked (:status analysis)))
     (is (= 88 (legacy {}) (canonical {})))))
+
+
+(deftest shipped-described-rename-retains-binding-metadata-and-runtime-values
+  (let [source (into (declarations "packages/core/strings/fns.edn" #{:to-str})
+                     (declarations "packages/app/branches/fns.edn" #{:_approval-status-source-ref}))
+        owner (ids/fn-id "app.branches" :_approval-status-source-ref)
+        target (ids/slot-id (ids/fn-id "core.strings" :to-str) :value)
+        alias (ids/slot-id owner :source-branch-id)
+        {:keys [canonical legacy analysis]} (runtimes source owner)
+        configured (some #(when (= target (:id %)) %) (get-in analysis [:scopes [] :configured-contract :fields]))]
+    (is (= :checked (:status analysis)))
+    (is (= "The proposal (source) branch to report on." (:description configured)))
+    (is (= alias (get-in analysis [:public-input :routes [:source-branch-id] :origin-field-id])))
+    (is (= :text (get-in analysis [:scopes [] :signature :return])))
+    (is (= "00112233-4455-6677-8899-aabbccddeeff"
+           (legacy {:source-branch-id #uuid "00112233-4455-6677-8899-aabbccddeeff"})
+           (canonical {:source-branch-id #uuid "00112233-4455-6677-8899-aabbccddeeff"})))))
+
+
+(deftest described-rename-keeps-unrepresented-runtime-intersections-blocked
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:empty?})
+                     (declarations "packages/web/crud-delete/fns.edn" #{:_owner-fn-ids-empty?}))]
+    (is (= :conflicting-runtime-obligations
+           (rejection-code #(runtimes source (ids/fn-id "web.crud" :_owner-fn-ids-empty?)))))))
+
+
+(deftest shipped-documenting-value-does-not-install-a-default-binding
+  (let [source (declarations "packages/core/system/fns.edn" #{:parse-json})
+        owner (ids/fn-id "core.system" :parse-json)
+        field (ids/slot-id owner :keywordize)
+        {:keys [canonical legacy analysis]} (runtimes source owner)
+        node (some #(when (= field (:id %)) %) (get-in analysis [:scopes [] :configured-contract :fields]))
+        package (snapshot/package-index (parse/prepare-module source {} {}) source)
+        frozen (snapshot/freeze-declarations package [owner] (:by-id @registry/*rich-types-override*))
+        declared (some #(when (= field (:id %)) %) (get-in frozen [:entries owner :contract :fields]))]
+    (is (= :checked (:status analysis)))
+    (is (= {:type :bool :required false :value true
+            :description "When true, convert string keys to keywords."} (:declaration declared)))
+    (is (false? (:required node)))
+    (is (empty? (get-in frozen [:entries owner :bindings])))
+    (is (= [[[owner []] [(ids/slot-id owner :string)]]] (:required-addresses analysis)))
+    (doseq [[arguments expected] [[{:string "{\"flag\":false,\"missing\":null}"} {"flag" false "missing" nil}]
+                                  [{:string "{\"flag\":false}" :keywordize false} {"flag" false}]
+                                  [{:string "{\"flag\":false}" :keywordize true} {:flag false}]]]
+      (is (= expected (legacy arguments) (canonical arguments))))))
+
+
+(deftest documenting-value-does-not-hide-an-explicit-inherited-false
+  (let [child {:namespace "fixture" :name :string-keys :parent :parse-json
+               :args {:keywordize {:value false}}}
+        source (conj (declarations "packages/core/system/fns.edn" #{:parse-json}) child)
+        owner (ids/fn-id "fixture" :string-keys)
+        {:keys [canonical legacy analysis]} (runtimes source owner)
+        argument {:string "{\"flag\":false,\"missing\":null}"}]
+    (is (= :checked (:status analysis)))
+    (is (= {"flag" false "missing" nil} (legacy argument) (canonical argument)))))
+
+
+(deftest frozen-get-in-callback-retains-unconsumed-runtime-obligations
+  (binding [types/*type-aliases-override* (atom {})]
+    (let [base (into (declarations "packages/core/collections/fns.edn" #{:get-in})
+                     (declarations "packages/core/refinements/fns.edn" #{:path-segment}))
+          base-id (ids/fn-id "core.collections" :get-in)
+          native (get @loaded :get-in)]
+      (sync/register-type-aliases! base)
+      (registry/record-rich-types! base-id :get-in native)
+      (doseq [[value path default expected] [[{:leaf false} [:leaf] "fallback" false]
+                                             [{:leaf nil} [:leaf] false nil]
+                                             [{} [:leaf] false false]
+                                             [nil [:leaf] false false]
+                                             [{:leaf 7} ["leaf"] "fallback" "fallback"]]]
+        (let [child {:namespace "fixture" :name :lookup :parent :get-in
+                     :args {:map {:value value} :path {:value path} :default {:value default}}}
+              source (conj base child)
+              owner (ids/fn-id "fixture" :lookup)
+              package (snapshot/package-index (parse/prepare-module source {} {}) source)
+              roots (:by-id @registry/*rich-types-override*)
+              {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+              checked (analysis/analyze-effective-input context owner options)
+              actual ((:impl native) {:map value :path path :default default} {})]
+          (is (= :checked (:status checked)))
+          (is (= expected actual))
+          (is (= actual (validator/validate! (get-in checked [:scopes [] :signature :return]) actual)))
+          (if (nil? value)
+            (is (= :runtime-obligations-required
+                   (rejection-code #(execution/compile-package package owner roots {base-id (:impl native)}))))
+            (let [compiled (execution/compile-package package owner roots {base-id (:impl native)})]
+              (is (= expected (executor/execute {:compiled-registry (atom {owner (:invoke compiled)})} owner {})))))))
+      (let [without-proof (update @loaded :get-in dissoc :local-type-rules)]
+        (is (= :rule-signature-view-required
+               (rejection-code #(runtimes base base-id execution/compile-package without-proof))))))))
 
 
 (deftest generated-list-projection-reads-the-authored-outer-field

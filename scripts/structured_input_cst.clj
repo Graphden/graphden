@@ -251,12 +251,15 @@
         spans (mapv #(if (= :as (:field %))
                        (update % :text (fn [text] (str ":project" (subs text (count ":as")))))
                        %) spans)
-        parts (into {} (field-chunks source raw spans))]
-    (when-not (and (contains? #{#{:as} #{:as :type}} (set (keys parts))) (simple-keyword? (:as form))
-                   (or (not (contains? form :type)) (format/configuration-type? (:type form))))
+        chunks (field-chunks source raw spans)
+        parts (into {} chunks)
+        configuration (remove #(= :as (first %)) chunks)]
+    (when-not (and (contains? parts :as) (every? #{:as :type :description} (keys parts)) (simple-keyword? (:as form))
+                   (or (not (contains? form :type)) (format/configuration-type? (:type form)))
+                   (or (not (contains? form :description)) (string? (:description form))))
       (refuse :unsupported-projection {}))
     (cond-> (assoc raw :after (str "[" (:as parts) "]"))
-      (:type parts) (assoc :configuration (str "{" (:type parts) "}")))))
+      (seq configuration) (assoc :configuration (str "{" (str/join (map second configuration)) "}")))))
 
 
 (defn- typed-leaf
@@ -468,10 +471,13 @@
   (let [projections (mapv (fn [[field exposed]]
                             (let [spec (get input exposed)
                                   target (value-at loc [:args field])
+                                  form (z/sexpr target)
                                   pin (:configuration (projection-leaf source starts target))]
                               (when-not (and (map? spec) (= #{:type :required} (set (keys spec)))
                                              (format/projection-input-type? (:type spec)) (false? (:required spec))
-                                             (= (cond-> {:as exposed} pin (assoc :type (:type spec))) (z/sexpr target)))
+                                             (= (cond-> {:as exposed}
+                                                  (contains? form :type) (assoc :type (:type spec))
+                                                  (contains? form :description) (assoc :description (:description form))) form))
                                 (refuse :invalid-projection-declaration {:definition definition}))
                               {:field field :exposed exposed :pin pin}))
                           fields)
@@ -542,8 +548,12 @@
 (defn- projection-operation
   [source {:keys [source-path origin expression rename policy]}]
   (let [{exposed :alias :keys [alias-id field-id pin-id declaration]} rename]
-    (when-not (and (simple-keyword? exposed) (= (cond-> {:as exposed} pin-id (assoc :type (:type declaration))) (get-in source source-path))
-                   (= [:project [exposed]] expression) (= (cond-> {} pin-id (assoc :type-override-fn-id pin-id)) policy)
+    (when-not (and (simple-keyword? exposed)
+                   (= (cond-> {:as exposed} pin-id (assoc :type (:type declaration))
+                              (contains? rename :description) (assoc :description (:description rename))) (get-in source source-path))
+                   (= [:project [exposed]] expression)
+                   (= (cond-> {} pin-id (assoc :type-override-fn-id pin-id)
+                              (contains? rename :description) (assoc :description (:description rename))) policy)
                    (uuid? alias-id) (= field-id (:slot-id origin)) (uuid? field-id))
       (refuse :planner-ledger-mismatch {:path source-path}))
     {:op :local-projection :definition (:name source) :path source-path}))
@@ -673,8 +683,10 @@
             operations (mapv (partial binding-operation source) binds)
             configuration (into {} (keep (fn [{:keys [op path]}]
                                            (when (or (= :typed-expression op)
-                                                     (and (#{:local-projection :inline-ref} op) (contains? (get-in source path) :type)))
-                                             [[(second path)] (select-keys (get-in source path) [:type])])))
+                                                     (and (= :inline-ref op) (contains? (get-in source path) :type))
+                                                     (and (= :local-projection op)
+                                                          (some #(contains? (get-in source path) %) [:type :description])))
+                                             [[(second path)] (select-keys (get-in source path) (if (= :local-projection op) [:type :description] [:type]))])))
                                 operations)]
         (when-not (and (or (not has-args?) (map? (:args source)))
                        (vector? arguments) (= (count paths) (count (set paths)))

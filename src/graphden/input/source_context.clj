@@ -187,12 +187,23 @@
   (let [{:keys [owner] :as entry} (scope-entry definition records)
         id (:id owner)
         original (get-in source-environment [:definition-by-id id])
+        grouped (group-by :kind records)
         field-annotations (into {} (keep (fn [field-name]
                                            (when-let [annotation (annotations/annotation (:context source-environment) original records field-name)]
                                              [[field-name] annotation])))
                                 (keys (:args original)))
+        binding-descriptions (into {}
+                                   (keep (fn [[field-name spec]]
+                                           (when-let [origin (rename/origin (:context source-environment) original owner
+                                                                           grouped field-name spec)]
+                                             (when (contains? origin :description)
+                                               [[field-name] {:description (:description origin)
+                                                         :target-path [(:field-id origin)]
+                                                         :binding-id (ids/binding-id id (:field-id origin))}]))))
+                                   (:args original))
         common {:fn-id id :declaration-records (into [] (filter #(contains? #{:fn :slot :fn-slot} (:kind %))) records)
                 :field-annotations field-annotations
+                :binding-descriptions binding-descriptions
                 :origin-ledger {:source-owner id}}]
     (if (or (:return-type-fn-id owner) (seq (:parent-ids owner)))
       (let [declared (declared-input source-environment entry binding-origins)

@@ -582,6 +582,40 @@
       (is (= id (:fn-id rejected))))))
 
 
+(deftest a-locally-equivalent-root-remap-changes-inherited-env-shadowing
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [child {:namespace "fixture" :name :derived :parent :web.crud/_search-normalized
+                 :args {:string {:value "  ORIGINAL/CASE  "}}}
+          definitions (vec (concat (filter #(= :nullable-text (:name %)) (sources "refinements"))
+                                   (filter #(contains? #{:str-trim :str-lower :str-replace} (:name %)) (sources "strings"))
+                                   (filter #(= :coalesce (:name %)) (sources "logic"))
+                                   (fixtures/declarations "packages/web/crud/fns.edn" #{:_search-normalized})
+                                   [child]))
+          prepared (parse/prepare-module definitions {} {})
+          grouped (group-by :kind (parse/parse-prepared-module prepared))
+          graph {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+                 :bindings (:binding grouped) :list-items (:binding-list-item grouped)}
+          owner (ids/fn-id "web.crud" :_search-normalized)
+          derived (ids/fn-id "fixture" :derived)
+          binding (some #(when (and (= owner (:fn-id %)) (:ref-fn-id %)) %) (:bindings graph))
+          destination (ids/slot-id (ids/fn-id "core.strings" :str-replace) :string)
+          remapped (update graph :bindings
+                           #(mapv (fn [row] (if (= (:id row) (:id binding)) (assoc row :slot-id destination) row)) %))
+          compile-graph #(eager/compile-all (assoc (lookups/build-lookups %) :base-fns (registry/compute-base-fns-map @loaded-bases)))
+          before (compile-graph graph)
+          after (compile-graph remapped)
+          refused (failure #(snapshot/verify-binding (snapshot/package-index prepared definitions) owner {}))]
+      (is (= (ids/slot-id (ids/fn-id "core.strings" :str-trim) :string) (:slot-id binding)))
+      (is (= (dissoc binding :slot-id)
+             (dissoc (some #(when (= (:id binding) (:id %)) %) (:bindings remapped)) :slot-id)))
+      (is (= "app.fn" ((before owner) {:q "  APP/Fn  "} {}) ((after owner) {:q "  APP/Fn  "} {})))
+      (is (= "  ORIGINAL.CASE  " ((before derived) {} {})))
+      (is (= "" ((after derived) {} {})))
+      (is (= :missing-reference-use (:code refused)))
+      (is (= owner (:fn-id refused))))))
+
+
 (deftest existing-web-reference-keeps-its-core-field-identity-test
   (let [core (filterv #(contains? #{:cell :deref} (:name %)) (sources "concurrency"))
         module (edn/read-string (slurp (io/resource "packages/web/http/fns.edn")))

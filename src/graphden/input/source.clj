@@ -181,7 +181,8 @@
                     ;; declaration or another same-named field in the ref tree.
                     rename (when (and rename (= arg field) (= slot-id (:field-id rename))
                                       (= (:id binding) (ids/binding-id (:id own) slot-id))
-                                      (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename)))
+                                      (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename))
+                                                 (contains? rename :description) (assoc :description (:description rename)))
                                          (binding-policy binding)))
                              rename)
                     pin (when (and (= arg field) (= #{:type-override-fn-id} (set (keys (binding-policy binding)))))
@@ -222,9 +223,9 @@
   [definition arguments]
   (into {} (keep (fn [{:keys [rename self-pin annotation source-path]}]
                    (let [spec (get-in definition source-path)]
-                     (when (or self-pin annotation (:pin-id rename) (typed-binding? spec))
+                     (when (or self-pin annotation (:pin-id rename) (contains? rename :description) (typed-binding? spec))
                        [[(second source-path)] (if annotation (annotations/configuration annotation)
-                                                   (select-keys spec [:type]))])))) arguments))
+                                                   (select-keys spec (if rename [:type :description] [:type])))])))) arguments))
 
 
 (defn- authored-own-field?
@@ -292,7 +293,8 @@
       (and typed? (not (uuid? (:type-override-fn-id policy))))
       (conj (problem :unresolved-binding-type))
       (or (and (contains? policy :type-override-fn-id) (not typed?))
-          (and (not (:annotation entry)) (some #(contains? policy %) [:required :terminal :description])))
+          (and (not (:annotation entry)) (not (:rename entry))
+               (some #(contains? policy %) [:required :terminal :description])))
       (conj (problem :binding-metadata-required))
       (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? (:annotation entry)) (nil? expression)
            (not (or (:list-append policy) (:list-closed policy))))

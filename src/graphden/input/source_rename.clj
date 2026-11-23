@@ -85,7 +85,9 @@
   "Match the true inherited field, alias, membership and authored rich type.
    A shared storage primitive alone cannot justify a rich field projection."
   [{:keys [name->id defs-by-name] :as context} definition owner records field spec]
-  (when (and (= 1 (count (:parent-ids owner))) (map? spec) (contains? #{#{:as} #{:as :type}} (set (keys spec)))
+  (when (and (= 1 (count (:parent-ids owner))) (map? spec) (contains? spec :as)
+             (every? #{:as :type :description} (keys spec))
+             (or (not (contains? spec :description)) (string? (:description spec)))
              (simple-keyword? (:as spec)) (not= field (:as spec)))
     (let [author (slots/own-ref definition defs-by-name)
           prepared (get-in definition [:args field])
@@ -104,12 +106,13 @@
                      (= target-type alias-type))
                  (= field-id (:source-slot-id slot))
                  (= (:type-fn-id slot) (records/resolve-type-ref alias-type name->id))
-                 (= (name exposed) (:name slot)) (false? (:required slot))
+                 (= (name exposed) (:name slot)) (false? (:required slot)) (nil? (:description slot))
                  (some #(and (= alias-id (:slot-id %)) (= (:id owner) (:fn-id %))
                              (= (ids/fn-slot-id (:id owner) alias-id) (:id %))) (:fn-slot records)))
         (cond-> {:alias exposed :alias-id alias-id :field-id field-id
                  :declaration {:type (if pin? (:type spec) alias-type) :required false}}
-          pin? (assoc :pin-id (:type-fn-id slot)))))))
+          pin? (assoc :pin-id (:type-fn-id slot))
+          (contains? spec :description) (assoc :description (:description spec)))))))
 
 
 (defn legacy-binding

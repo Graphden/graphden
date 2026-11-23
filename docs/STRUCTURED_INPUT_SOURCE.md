@@ -213,6 +213,13 @@ the prepared type expression, including type variables. Supported pins retain
 the original binding UUID and a separate `:configure` assertion. Ambiguous
 names, conflicting pins and occupied ancestor fields remain diagnostics.
 
+An authored `:description` on a scalar rename belongs to its original binding,
+not the new alias slot. The planner keeps it under `:configure` at the original
+destination alongside any type assertion. The reader requires the exact
+source-backed description, target path and binding UUID before adding that
+metadata to the projection row. Changing or moving the description fails the
+source comparison. The CST writer retains its original string bytes and comments.
+
 Descendants may bind the alias slot through a common inheritance root. Each
 declaring ancestor's local projection must account for the stored source-slot
 link. Ancestor rows must occupy distinct slot addresses across the lineage.
@@ -291,8 +298,10 @@ Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-t
 --focus graphden.input.source-snapshot-test`.
 
 A base argument's documenting `:value` annotation remains a free input;
-conversion does not create a new binding or runtime default. Existing
-implementation fallback behavior is preserved. Ordinary fields named
+conversion does not create a new binding or runtime default. Frozen source
+analysis retains that annotation after checking the original declaration and
+field type UUID; it does not add an occupied input. Existing implementation
+fallback behavior is preserved. Ordinary fields named
 `value`, `ref` or `default` do not introduce new control semantics.
 
 ## Expression grammar and source edits

@@ -172,6 +172,7 @@
           rows (parse/parse-prepared-module (assoc context :fn-defs [child]))
           original (assoc (get-in page [:args :hiccup]) :name (:name child) :namespace (:namespace child))
           annotations (mapv #(annotations/annotation context original rows %) [:title :head :scripts])
+          body-evidence (annotations/reference-annotation context original rows :body)
           planned (first (:definitions (source/plan-module [page] context)))
           paths (set (map :source-path (:blockers planned)))]
       (is (every? some? annotations))
@@ -180,6 +181,15 @@
               "End-of-body `<script>` hiccup nodes — typically `:graphden-runtime-scripts` for the standard dispatcher bundle, or `{:value []}` for none."]
              (mapv :description annotations)))
       (is (nil? (annotations/annotation context original rows :body)))
+      (is (nil? (annotations/reference-annotation context original rows :title)))
+      (is (= (ids/fn-id "web.html" :_html-body-children-head) (:declaring-id body-evidence)))
+      (is (= {:type :hiccup-node :description "Page body hiccup tree."}
+             (annotations/configuration body-evidence)))
+      (is (= {:id (ids/binding-id (:fn-id child) (first (:target-path body-evidence)))
+              :expression-kind nil :value-present false}
+             (select-keys (:row body-evidence) [:id :expression-kind :value-present])))
+      (is (nil? (annotations/reference-annotation context (assoc-in original [:args :body :type] :any) rows :body)))
       (is (not-any? paths [[:args :hiccup :args :title] [:args :hiccup :args :head] [:args :hiccup :args :scripts]]))
-      (is (contains? paths [:args :hiccup :args :body]))
+      (is (= [:ref-scope-required]
+             (mapv :code (filter #(= [:args :hiccup :args :body] (:source-path %)) (:blockers planned)))))
       (is (= :blocked (:status planned))))))

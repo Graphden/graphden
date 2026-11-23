@@ -193,6 +193,7 @@
                     pin (when (and (= arg field) (= #{:type-override-fn-id} (set (keys (binding-policy binding)))))
                           (rich/self-pin definition arg rows binding target-type))
                     annotation (annotations/annotation context source rows arg)
+                    scoped-annotation (when-not annotation (annotations/reference-annotation context source rows arg))
                     inline-body (format/inline-binding-body body)
                     inline-ref (prepared-inline-ref value)
                     inline-id (when (and inline-body (keyword? inline-ref))
@@ -214,6 +215,7 @@
                   positional-origin (assoc :target-type-origin positional-origin)
                   pin (assoc :self-pin pin)
                   annotation (assoc :annotation annotation)
+                  scoped-annotation (assoc :scoped-annotation scoped-annotation)
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
           (:args definition))))
 
@@ -265,10 +267,11 @@
 
 (defn- argument-blockers
   [source entry ancestor-ids]
-  (let [{:keys [source-path origin expression policy target]} entry
+  (let [{:keys [source-path origin expression policy target annotation scoped-annotation]} entry
         problem #(blocker source % source-path)
         raw (get-in source source-path)
-        typed? (or (:self-pin entry) (contains? (:annotation entry) :type) (get-in entry [:rename :pin-id]) (typed-binding? raw))
+        typed? (or (:self-pin entry) (contains? annotation :type) (contains? scoped-annotation :type)
+                   (get-in entry [:rename :pin-id]) (typed-binding? raw))
         inline-body (format/inline-binding-body raw)
         unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
@@ -299,10 +302,10 @@
       (and typed? (not (uuid? (:type-override-fn-id policy))))
       (conj (problem :unresolved-binding-type))
       (or (and (contains? policy :type-override-fn-id) (not typed?))
-          (and (not (:annotation entry)) (not (:rename entry))
+          (and (not annotation) (not scoped-annotation) (not (:rename entry))
                (some #(contains? policy %) [:required :terminal :description])))
       (conj (problem :binding-metadata-required))
-      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? (:annotation entry)) (nil? expression)
+      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? annotation) (nil? scoped-annotation) (nil? expression)
            (not (or (:list-append policy) (:list-closed policy))))
       (conj (problem :non-value-binding-required))
       (and (= :ref (first expression)) (nil? (second expression)))
@@ -329,8 +332,12 @@
                                  (not-any? #(or (= :declaration (:kind %))
                                                 (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
+        explained-fields (into (set rename-fields)
+                               (keep #(when (or (:self-pin %) (:annotation %) (:scoped-annotation %))
+                                        (peek (:source-path %))))
+                               arguments)
         blockers (concat (when collision? [(blocker source :rename-field-collision [:args])])
-                         (source-argument-blockers source (into (set rename-fields) (keep #(when (or (:self-pin %) (:annotation %)) (peek (:source-path %)))) arguments))
+                         (source-argument-blockers source explained-fields)
                          (mapcat #(argument-blockers source % chain) arguments))]
     {:arguments arguments :aliases aliases :blockers blockers}))
 

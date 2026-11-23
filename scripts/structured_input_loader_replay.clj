@@ -15,6 +15,8 @@
     [structured-input-inventory :as inventory]
     [structured-input-stage :as stage])
   (:import
+    (java.io
+      InputStream)
     (java.net
       URL
       URLClassLoader)))
@@ -43,7 +45,7 @@
   ;; The package itself is an immutable git archive. Resolve its resources
   ;; exclusively from those directories, including optional impls files.
   (let [thread (Thread/currentThread)
-        original (.getContextClassLoader thread)
+        original (Thread/.getContextClassLoader thread)
         urls (into-array URL (map #(-> % fs/file .toURI .toURL) resources))]
     (with-open [loader (proxy [URLClassLoader] [urls original]
                          (getResource
@@ -52,9 +54,9 @@
                              (proxy-super findResource name)
                              (proxy-super getResource name))))]
       (try
-        (.setContextClassLoader thread loader)
+        (Thread/.setContextClassLoader thread loader)
         (f)
-        (finally (.setContextClassLoader thread original))))))
+        (finally (Thread/.setContextClassLoader thread original))))))
 
 
 (def ^:private inputs
@@ -89,7 +91,7 @@
   []
   (let [root (ids/fn-id "core.arithmetic" :floor)
         module (with-open [stream (io/input-stream (io/resource module-path))]
-                 (staged/read-pinned (.readAllBytes stream) target-sha))
+                 (staged/read-pinned (InputStream/.readAllBytes stream) target-sha))
         entries (:fns module)
         owners (set (map #(ids/fn-id (:namespace module) (:name %)) entries))
         alias-admission {:module ["core" "arithmetic"] :fn-id root :abi-fn-id root :sha256 target-sha}
@@ -151,6 +153,9 @@
                                 :results (update-vals legacy :result)}))))))
 
 
+;; The replay is a standalone process and converts even assertion errors
+;; into an exit status so the HTTP watchdog cannot keep the JVM alive.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/catch-throwable]}
 (defn check
   "Standalone -X entry point. The real HTTP handler starts a process-wide watchdog."
   [opts]
@@ -160,5 +165,5 @@
       (flush)
       0
       (catch Throwable error
-        (.printStackTrace error)
+        (Throwable/.printStackTrace error)
         1))))

@@ -12,6 +12,8 @@
     [graphden.packages.records.parse :as parse]
     [graphden.util.hex :as hex])
   (:import
+    (java.io
+      InputStream)
     (java.nio.charset
       StandardCharsets)
     (java.security
@@ -32,7 +34,7 @@
 (defn- resource-bytes
   [file]
   (if-let [resource (io/resource (str package-path file))]
-    (with-open [stream (io/input-stream resource)] (.readAllBytes stream))
+    (with-open [stream (io/input-stream resource)] (InputStream/.readAllBytes stream))
     (reject!)))
 
 
@@ -69,7 +71,7 @@
     (reject!))
   (let [source (staged/read-pinned (resource-bytes "fns.edn") source-sha)
         impl (resource-bytes "impls.clj")
-        _ (when-not (= impl-sha (hex/encode (.digest (MessageDigest/getInstance "SHA-256") impl))) (reject!))
+        _ (when-not (= impl-sha (hex/encode (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") impl))) (reject!))
         parsed (:definitions (module/parse-module-v2 source {:context-for declaration-context}))
         by-name (into {} (map (juxt (comp :name :source) identity)) parsed)
         ;; Each list descriptor is emitted once for the whole ledger.
@@ -83,11 +85,15 @@
                               (String. ^bytes impl StandardCharsets/UTF_8))}))
 
 
+;; The sealed witnesses are generated deftype fields. Uniform field syntax
+;; resolves them as methods.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
 (defn- require-module!
   [module]
   (when-not (and (instance? PinnedModule module) (identical? seal (.-token ^PinnedModule module))) (reject!)))
 
 
+^{:splint/disable [lint/prefer-method-values]}
 (defn register-module
   [^PinnedModule module]
   (require-module! module)
@@ -109,6 +115,7 @@
                  (with-meta audited {::registration (Registration. seal d audited)})))}))
 
 
+^{:splint/disable [lint/prefer-method-values]}
 (defn evidence
   [definition]
   (when-let [receipt (::registration (meta definition))]
@@ -116,6 +123,7 @@
     {:parsed (.-parsed ^Registration receipt) :in-place-definition (.-definition ^Registration receipt)}))
 
 
+^{:splint/disable [lint/prefer-method-values]}
 (defn assert-ledgers!
   [packages]
   (doseq [^PinnedModule module (::modules (meta packages))]

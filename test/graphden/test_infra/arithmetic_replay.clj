@@ -57,15 +57,15 @@
             (do
               (expect! [200 :succeeded Double native] [(:status response) (keyword (:status payload))
                                                        (class native) (:result payload)])
-              [name {:native (.getName (class native)) :json (:result payload)}])))))
+              [name {:native (Class/.getName (class native)) :json (:result payload)}])))))
 
 
 (defn- scalar-checks!
   []
-  (doseq [v [(float 0.25) (double -0.0) Double/MIN_VALUE Double/MAX_VALUE]]
+  (doseq [v [(float 0.25) -0.0 Double/MIN_VALUE Double/MAX_VALUE]]
     (expect! v (#'run/project-result :numeric v)))
   (doseq [[type value] [[:numeric Double/NaN] [:numeric Double/POSITIVE_INFINITY] [:numeric Float/NEGATIVE_INFINITY]
-                        [:int (double 1.5)] [:numeric 9007199254740992N] [[:list :numeric] [1.5]]
+                        [:int 1.5] [:numeric 9007199254740992N] [[:list :numeric] [1.5]]
                         [[:refine :numeric [:>= 0]] -1.5]]]
     (expect! :rejected (try (#'run/project-result type value) :accepted (catch clojure.lang.ExceptionInfo _ :rejected)))))
 

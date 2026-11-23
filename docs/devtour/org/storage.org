@@ -13,13 +13,13 @@ after: executor
 :PROPERTIES:
 :CUSTOM_ID: storage/extend-builder
 :FILE: src/graphden/schema/input/schema.clj
-:LINE: 70
+:LINE: 73
 :MINS: 0.8
 :END:
 
 Adds the inactive structured-input storage: stable UUID field paths and a separate input-binding entity. Functions point to existing record-type descriptors through a versioned input-type field. Production continues using v1; generic public access to these entities remains denied. See the [[file:../../../docs/STRUCTURED_INPUT_STORAGE.md][offline storage contract]].
 
-- source :: [[file:../../../src/graphden/schema/input/schema.clj::(defn extend-builder][src/graphden/schema/input/schema.clj:70]]
+- source :: [[file:../../../src/graphden/schema/input/schema.clj::(defn extend-builder][src/graphden/schema/input/schema.clj:73]]
 
 * 2. apply!
 :PROPERTIES:
@@ -52,13 +52,13 @@ Matches the scalar rename to its parent field, alias membership and original bin
 :PROPERTIES:
 :CUSTOM_ID: storage/validate-view!
 :FILE: src/graphden/versioning/storage/input.clj
-:LINE: 91
+:LINE: 96
 :MINS: 2.2
 :END:
 
 Checks scoped field paths and occupied-prefix conflicts among supplied rows, including inherited origins. The offline writer and merge transaction call this validator under locks. It deliberately leaves recursive reference availability, type/HOF classification and execution to later transition stages; it is not the effective remaining-input calculation.
 
-- source :: [[file:../../../src/graphden/versioning/storage/input.clj::(defn validate-view!][src/graphden/versioning/storage/input.clj:91]]
+- source :: [[file:../../../src/graphden/versioning/storage/input.clj::(defn validate-view!][src/graphden/versioning/storage/input.clj:96]]
 - see also :: [[file:types.org::#types/remaining-input][remaining-input]]
 - referenced from :: [[file:storage.org::#storage/apply!][apply!]]
 
@@ -132,13 +132,13 @@ Implements ~DataSchema~ with immutable maps of entities, enums, entity UUIDs, an
 :PROPERTIES:
 :CUSTOM_ID: storage/extend-builder~2
 :FILE: src/graphden/schema/graph/schema.clj
-:LINE: 643
+:LINE: 645
 :MINS: 11.5
 :END:
 
 Declares the graph entities, their fields, reference edges, and uniqueness constraints. The schema builder turns these declarations into database tables and indexes. Retired-field declarations prevent obsolete columns such as ~binding.rename-to~ from being recreated.
 
-- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:643]]
+- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:645]]
 
 * 11. valid-type?
 :PROPERTIES:

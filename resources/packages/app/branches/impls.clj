@@ -275,7 +275,7 @@
                 (merge-policy/validate-approval-policy! step-storage bid))
         t1 (System/nanoTime)
         record (merge-policy/merge-transitively! storage source-branch-id
-                                                 {:conflict-resolutions resolutions}
+                                                 {:conflict-resolutions resolutions :structured-context ctx}
                                                  gate!)]
     ;; Phase timings — the merge is the slowest write in the product
     ;; (~2 s on a 5k-fn self-host graph, ~8 s on the cloud demo) and

@@ -50,13 +50,13 @@ Resolves the requested branch by UUID or name before writing. The resulting bran
 :PROPERTIES:
 :CUSTOM_ID: crud/read-input
 :FILE: src/graphden/crud/structured_input.clj
-:LINE: 191
+:LINE: 196
 :MINS: 2.8
 :END:
 
 Reads the selected v2 declaration and its reachable owners under one decorated branch snapshot and source policy. Bounded owner batches feed the existing analyzer. The graph subtree attaches only a viewer-safe projection to its root row.
 
-- source :: [[file:../../../src/graphden/crud/structured_input.clj::(defn read-input][src/graphden/crud/structured_input.clj:191]]
+- source :: [[file:../../../src/graphden/crud/structured_input.clj::(defn read-input][src/graphden/crud/structured_input.clj:196]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]], [[file:editor.org::#editor/appendStructuredInputStrip][appendStructuredInputStrip]]
 - referenced from :: [[file:crud.org::#crud/with-plan][with-plan]], [[file:editor.org::#editor/appendStructuredInputStrip][appendStructuredInputStrip]]
 
@@ -64,13 +64,13 @@ Reads the selected v2 declaration and its reachable owners under one decorated b
 :PROPERTIES:
 :CUSTOM_ID: crud/with-plan
 :FILE: src/graphden/crud/structured_input_bind.clj
-:LINE: 140
+:LINE: 194
 :MINS: 0.8
 :END:
 
 Preview and bind use the same decorated branch writer. It locks structured bindings before capturing a fresh authorized closure. The apply command compares the winning version basis, checks the proposed literal with the analyzer and inserts one row.
 
-- source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:140]]
+- source :: [[file:../../../src/graphden/crud/structured_input_bind.clj::(defn- with-plan][src/graphden/crud/structured_input_bind.clj:194]]
 - see also :: [[file:crud.org::#crud/read-input][read-input]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - referenced from :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/dispatch][dispatch]], [[file:editor.org::#editor/openStructuredInputPopover][openStructuredInputPopover]]
 
@@ -78,13 +78,13 @@ Preview and bind use the same decorated branch writer. It locks structured bindi
 :PROPERTIES:
 :CUSTOM_ID: crud/with-current-binding!
 :FILE: src/graphden/input/storage.clj
-:LINE: 52
+:LINE: 87
 :MINS: 1.2
 :END:
 
 Opens the semantic graph writer transaction before acquiring the structured binding lock. Resolves the winner for this branch with fresh memos and checks the expected version. A failure rolls back the entire callback and leaves that basis reusable.
 
-- source :: [[file:../../../src/graphden/input/storage.clj::(defn with-current-binding!][src/graphden/input/storage.clj:52]]
+- source :: [[file:../../../src/graphden/input/storage.clj::(defn with-current-binding!][src/graphden/input/storage.clj:87]]
 - see also :: [[file:crud.org::#crud/with-plan][with-plan]]
 - referenced from :: [[file:crud.org::#crud/dispatch][dispatch]]
 
@@ -92,13 +92,13 @@ Opens the semantic graph writer transaction before acquiring the structured bind
 :PROPERTIES:
 :CUSTOM_ID: crud/dispatch
 :FILE: src/graphden/crud/structured_input_http.clj
-:LINE: 29
+:LINE: 33
 :MINS: 2.0
 :END:
 
 The graph route fixes the phase and supplies the authenticated request context. A direct child of a boot-certified package input inherits its immutable fields. Each named write requires fresh source and branch authorization. Bind, edit and remove have separate preview bases, and stale or unavailable commands receive value-free errors.
 
-- source :: [[file:../../../src/graphden/crud/structured_input_http.clj::(defn dispatch][src/graphden/crud/structured_input_http.clj:29]]
+- source :: [[file:../../../src/graphden/crud/structured_input_http.clj::(defn dispatch][src/graphden/crud/structured_input_http.clj:33]]
 - see also :: [[file:crud.org::#crud/with-current-binding!][with-current-binding!]], [[file:crud.org::#crud/with-plan][with-plan]]
 
 * 8. create-entity

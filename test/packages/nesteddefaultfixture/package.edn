@@ -1,0 +1,4 @@
+{:name "nesteddefaultfixture"
+ :version "1.0.0"
+ :dependencies ["core"]
+ :modules ["native" "structured"]}

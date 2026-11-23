@@ -97,13 +97,13 @@
           _ (sync/register-type-aliases! declarations)
           base (get @fixtures/web-base-definitions :hiccup)
           _ (registry/record-rich-types! (ids/fn-id "web.html" :hiccup) :hiccup base)
-          roots (:by-id @registry/*rich-types-override*)
+          signatures (:by-id @registry/*rich-types-override*)
           prepared (parse/prepare-module definitions {} {})
           package (snapshot/package-index prepared definitions)
           owner (ids/fn-id "fixture" :head-annotation)
           field (ids/slot-id (ids/fn-id "web.html" :hiccup) :children)
           binding (ids/binding-id owner field)
-          {:keys [context options]} (snapshot/freeze-closure package [owner] roots)
+          {:keys [context options]} (snapshot/freeze-closure package [owner] signatures)
           graph (analysis/analyze-effective-input context owner options)
           child-field (some #(when (= field (:id %)) %) (get-in graph [:scopes [] :configured-contract :fields]))]
       (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
@@ -113,7 +113,7 @@
       (is (= [:list :hiccup-node] (get-in context [:source-binding-types [binding (ids/primitive-fn-id :sequence)]])))
       (is (= [:list (types/resolve-alias :hiccup-node)] (:type child-field)))
       (is (= "Extra head elements" (:description child-field)))
-      (is (= nil (get-in context [:bindings binding :expression-kind])))
+      (is (nil? (get-in context [:bindings binding :expression-kind])))
       (is (not (contains? (get-in graph [:public-input :bindings]) [[owner []] [field]]))))))
 
 
@@ -127,9 +127,9 @@
           definitions (into (vec core) html)
           declared-ids (set (map #(ids/fn-id (:namespace %) (:name %)) definitions))
           _ (sync/register-type-aliases! definitions)
-          _ (doseq [[name {:keys [namespace] :as base}] @fixtures/web-base-definitions
-                    :when (contains? declared-ids (ids/fn-id namespace name))]
-              (registry/record-rich-types! (ids/fn-id namespace name) name base))
+          _ (doseq [[name {fn-ns :namespace :as base}] @fixtures/web-base-definitions
+                    :when (contains? declared-ids (ids/fn-id fn-ns name))]
+              (registry/record-rich-types! (ids/fn-id fn-ns name) name base))
           prepared (parse/prepare-module definitions {} {})
           package (snapshot/package-index prepared definitions)
           owner (ids/fn-id "web.html" :html-page)
@@ -159,8 +159,6 @@
           source-links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
                                          [(:id %) (:source-slot-id %)]))
                              (get-in legacy-entry [:legacy :records]))]
-      (.mkdirs (io/file "target"))
-      (spit "target/input-html-page-type-conflict.edn" (pr-str @conflict))
       (is (= :authored-source-equivalent (:verification entry)) (:blockers entry))
       (is (= (select-keys (:args original) fields) (get-in entry [:proposed :input])))
       (is (= (set fields) (set (map (comp peek :source-path) proofs))))
@@ -182,12 +180,12 @@
         nullable [:union :null :text]
         facts {:test {:type :bool :ref predicate}
                :then {:type nullable :ref target} :else {:type :text}}
-        bases @fixtures/web-base-definitions]
+        base-definitions @fixtures/web-base-definitions]
     (binding [registry/*rich-types-override*
               (atom {:by-name {} :by-id {predicate {:primary-parent :some? :resolved-bindings {:value {:ref target}}}}})
               registry/*per-org-rich-override* (atom {})]
       (let [id (ids/fn-id "core.logic" :if)
-            _ (registry/record-rich-types! id :if (get bases :if))
+            _ (registry/record-rich-types! id :if (get base-definitions :if))
             entry (registry/rich-type-of-id id)
             result (check/infer-input-signature {:fn-id id :root-entry entry :bindings-info facts
                                                  :argument-effects {} :free-arguments #{}
@@ -213,13 +211,13 @@
 
 (deftest shipped-generic-return-retains-per-use-substitutions-and-legacy-values
   (let [const (some #(when (= :const (:name %)) %) (sources "logic"))
-        zipmap (some #(when (= :zipmap (:name %)) %) (sources "collections"))
+        zipmap-definition (some #(when (= :zipmap (:name %)) %) (sources "collections"))
         number {:namespace "fixture" :name :number :parent :const :args {:value 7}}
         text {:namespace "fixture" :name :text :parent :const :args {:value "seven"}}
         directory {:namespace "fixture" :name :directory :parent :zipmap
                    :args {:keys {:append [{:value :number} {:value :text}] :closed true}
                           :vals {:append [:fixture/number :fixture/text] :closed true}}}
-        definitions [const zipmap number text directory]
+        definitions [const zipmap-definition number text directory]
         prepared (parse/prepare-module definitions {} {})
         package (snapshot/package-index prepared definitions)
         owner (ids/fn-id "fixture" :directory)
@@ -928,3 +926,48 @@
       (doseq [changed [shifted detached]]
         (is (= :blocked (replay migrated (parse/prepare-module
                                            (mapv #(if (= directory %) changed %) declarations) {} {}))))))))
+
+
+(deftest untyped-positional-input-requires-the-exact-original-type-origin
+  (let [directory {:namespace "fixture" :name :positional-directory :parent :str
+                   :args {:parts {:append [{:value false} {:as :upper}] :closed true}}}
+        wrapper {:namespace "fixture" :name :positional-wrapper :parent :const :args {:value :positional-directory}}
+        child {:namespace "fixture" :name :positional-call :parent :positional-wrapper :args {:upper {:value nil}}}
+        declarations (into (filterv #(= :const (:name %)) (sources "logic"))
+                           (concat (filter #(= :str (:name %)) (sources "strings")) [directory wrapper child]))
+        prepared (parse/prepare-module declarations {} {})
+        package (snapshot/package-index prepared declarations)
+        owner (ids/fn-id "fixture" :positional-call)
+        migrated (snapshot/migrate-binding package owner @roots)
+        certificate (get-in migrated [:legacy :arguments 0 :scope-certificate])
+        origin (:target-type-origin certificate)
+        replay #(get-in (source/verify-module {:definitions [%1]} %2) [:definitions 0 :status])]
+    (is (= :authored-source-equivalent (:verification migrated)) (:blockers migrated))
+    (is (nil? (get-in migrated [:legacy :arguments 0 :target :type])))
+    (is (= [:value :upper] (:public-path certificate)))
+    (is (= [:args :parts :append 1] (:source-path origin)))
+    (is (= (ids/primitive-fn-id :any) (:type-fn-id origin)))
+    (is (false? (:required origin)))
+    (is (= :supported (replay migrated prepared)))
+    (doseq [patch [{:version 2} {:slot-id (random-uuid)} {:type-fn-id (ids/primitive-fn-id :text)}
+                   {:required true} {:source-path [:args :keys :append 1]}]]
+      (is (= :blocked (replay (update-in migrated [:legacy :arguments 0 :scope-certificate :target-type-origin] merge patch)
+                              prepared))))
+    (let [shifted (assoc-in directory [:args :parts :append] [{:as :upper} {:value false}])
+          changed (parse/prepare-module (mapv #(if (= directory %) shifted %) declarations) {} {})]
+      (is (= :blocked (replay migrated changed))))))
+
+
+(deftest a-positional-type-witness-cannot-bypass-the-polymorphic-replay-guard
+  (let [directory {:namespace "fixture" :name :positional-directory :parent :zipmap
+                   :args {:keys {:append [{:value :prefix} {:value :upper}] :closed true}
+                          :vals {:append [{:value false} {:as :upper}] :closed true}}}
+        wrapper {:namespace "fixture" :name :positional-wrapper :parent :const :args {:value :positional-directory}}
+        child {:namespace "fixture" :name :positional-call :parent :positional-wrapper :args {:upper {:value nil}}}
+        declarations (into (filterv #(= :const (:name %)) (sources "logic"))
+                           (concat (filter #(= :zipmap (:name %)) (sources "collections")) [directory wrapper child]))
+        prepared (parse/prepare-module declarations {} {})
+        package (snapshot/package-index prepared declarations)]
+    (is (= :scope-replay-mismatch
+           (try (snapshot/migrate-binding package (ids/fn-id "fixture" :positional-call) @roots)
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))

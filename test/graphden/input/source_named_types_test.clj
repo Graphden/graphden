@@ -51,11 +51,11 @@
 (deftest shipped-named-list-retains-element-and-items-row-identities
   (let [[package entries] (package-entries
                             (declarations "packages/app/ui-inspector/fns.edn" #{:_inspector-request :_inspector-request-list}))
-        resolve (named-types/lookup package entries)
+        lookup-type (named-types/lookup package entries)
         list-id (ids/fn-id "app.ui-inspector" :_inspector-request-list)
         element-id (ids/fn-id "app.ui-inspector" :_inspector-request)
-        {:keys [body row rows]} (resolve :_inspector-request-list)
-        frozen (named-types/evidence {:root {:source {:return-type :_inspector-request-list}}} resolve)
+        {:keys [body row rows]} (lookup-type :_inspector-request-list)
+        frozen (named-types/evidence {:root {:source {:return-type :_inspector-request-list}}} lookup-type)
         grouped (group-by :kind (mapcat val (:type-rows frozen)))
         ctx (context/build-context (assoc frozen :fields (into {} (map (juxt :id identity)) (:slot grouped))
                                           :members (group-by :fn-id (:fn-slot grouped))))
@@ -65,7 +65,7 @@
     (is (= [(ids/slot-id list-id :items)] (mapv :id (filter #(= :slot (:kind %)) rows))))
     (is (= [:list {:kind :text :tab :text}] type))
     (is (= {:namespace "app.ui-inspector" :name :_inspector-request-list :list :_inspector-request}
-           (:origin (resolve :_inspector-request-list))))))
+           (:origin (lookup-type :_inspector-request-list))))))
 
 
 (deftest named-lists-resolve-elements-within-their-original-namespace

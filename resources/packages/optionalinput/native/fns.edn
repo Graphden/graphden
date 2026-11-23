@@ -1,0 +1,4 @@
+{:namespace "optionalinput.native"
+ :fns [{:name :render-nullable-label
+        :args {:label {:type [:union :null :text] :required false}}
+        :return-type :text}]}

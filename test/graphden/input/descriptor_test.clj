@@ -115,3 +115,23 @@
           (descriptor/resolve-descriptor (assoc-in ctx [:source-field-types [generic any-id]] '[:union :null [:list b]]) root)))
     (is (thrown? clojure.lang.ExceptionInfo
           (descriptor/resolve-descriptor (assoc-in ctx [:fields generic :type-fn-id] (ids/primitive-fn-id :int)) root)))))
+
+
+(deftest stored-field-defaults-require-the-declared-optional-type
+  (let [[owner input slot] (repeatedly 3 random-uuid)
+        nullable (ids/fn-id "core.refinements" :nullable-text)
+        ctx (context/build-context {:fns {owner {:input-type-fn-id input}
+                                          nullable {:constraint [:union :null :text]}}
+                                    :fields {slot {:id slot :name "label" :required false :type-fn-id nullable}}
+                                    :members {input [{:slot-id slot :position 0 :input-default {:value nil}}]}})
+        read-field #(first (:fields (descriptor/resolve-contract % owner)))]
+    (is (= {:default nil} (select-keys (read-field ctx) [:default])))
+    (let [without (update-in ctx [:members input 0] dissoc :input-default)]
+      (is (not (contains? (read-field without) :default)))
+      (is (not (contains? (read-field (assoc-in without [:fields slot :input-default] {:value "other"})) :default))))
+    (doseq [changed [(assoc-in ctx [:fields slot :required] true)
+                     (assoc-in ctx [:members input 0 :input-default] {})
+                     (assoc-in ctx [:members input 0 :input-default :value] false)
+                     (assoc-in ctx [:fns nullable :constraint] [:union :null :int])]]
+      (is (= :invalid-field-default
+             (try (read-field changed) nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))

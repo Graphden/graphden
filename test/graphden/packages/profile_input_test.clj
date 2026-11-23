@@ -1,17 +1,23 @@
 (ns ^:integration ^:serial graphden.packages.profile-input-test
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.interface :as exec]
+    [graphden.input.browser :as browser]
+    [graphden.input.compile :as compile]
     [graphden.input.migration :as migration]
+    [graphden.input.read-view :as view]
     [graphden.packages.owned :as owned]
     [graphden.packages.primitive-input :as primitive]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
     [graphden.system.init.packages]
+    [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.closed-input :as closed]
     [graphden.test-infra.golden-app :as golden]
     [graphden.test-infra.lesson-profile :as lesson]
     [graphden.versioning.storage.core :as vs]
@@ -79,3 +85,91 @@
     (is (= "forbidden" (get-in (post profile) [:error-data :reason])))
     (sync!)
     (is (= original (versions)))))
+
+
+(deftest pinned-package-boot-keeps-nested-callable-identity-and-contract
+  (let [storage (:storage golden/*bootstrap*)
+        root closed/root
+        input (migration/derived-id :input-type root)
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "closedinputfixture"]
+                                             :primitive-input closed/admission})
+        sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
+        {:keys [base-fns]} (sync!)
+        payload (sp/read-entity storage :slot (ids/slot-id root :payload))
+        record (:type-fn-id payload)
+        field (sp/read-entity storage :slot (ids/slot-id record :callback))
+        callable (:type-fn-id field)
+        versioned-ids [root input record callable]
+        versions #(resolution/resolve-version-ids (vs/unwrap storage) :fn versioned-ids (vs/current-branch-id storage))
+        before (versions)]
+    (is (identical? (:closed-apply-text base-fns) (:fixture-closed-apply-text base-fns)))
+    (is (owned/owned-impl? root (:fixture-closed-apply-text base-fns)))
+    (is (= input (:input-type-fn-id (sp/read-entity storage :fn root))))
+    (is (= closed/callback (:constraint (sp/read-entity storage :fn callable))))
+    (is (= (set versioned-ids) (set (keys before))))
+    (sync!)
+    (is (= before (versions)))))
+
+
+(defn- stored-browser-rejections
+  [storage base-fns root]
+  (let [ctx (view/collect storage root (tenancy/browser-source-policy storage))
+        signature (get (::owned/native-signatures (meta base-fns)) root)
+        trusted {root {:impl (get base-fns (:name signature)) :signature signature}}
+        {:keys [analysis implementations]} (compile/analyze-stored ctx root trusted)
+        refusal (fn [visible?]
+                  (try (browser/export-named analysis {:context ctx :snapshot-id (:snapshot-id ctx)
+                                                       :implementations implementations :allow-fn? visible?})
+                       nil
+                       (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    [(refusal #(= root %)) (refusal #(contains? (:fns ctx) %))]))
+
+
+(deftest pinned-defaults-follow-their-own-record-occurrences
+  (let [storage (:storage golden/*bootstrap*)
+        root (ids/fn-id "nesteddefaultfixture.structured" :defaulted-label-pair)
+        shape {:id :text :label [:union :null :text] :hint [:union :null :text]}
+        admission {:module ["nesteddefaultfixture" "structured"] :fn-id root
+                   :abi-fn-id (ids/fn-id "nesteddefaultfixture.native" :describe-label-pair)
+                   :sha256 "fbef955b4767ede9475d43700b87d60c3d0e6c78e09f079ffc1bb69d698dc8ca"
+                   :record-contract {:left shape :right shape}}
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "nesteddefaultfixture"]
+                                             :primitive-input admission})
+        sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
+        {:keys [base-fns]} (sync!)
+        slots (mapv #(ids/slot-id root %) [:left :right])
+        types (mapv #(:type-fn-id (sp/read-entity storage :slot %)) slots)
+        record (first types)
+        label (ids/slot-id record :label)
+        members (mapv #(migration/derived-id :membership root (ids/fn-slot-id root %)) slots)
+        hint (ids/slot-id record :hint)
+        shared (mapv #(ids/fn-slot-id record %) [label hint])
+        versions #(resolution/resolve-version-ids (vs/unwrap storage) :fn-slot (into members shared) (vs/current-branch-id storage))
+        before (versions)
+        token (str (random-uuid))
+        ctx (exec/create-context {:storage storage :base-fns base-fns :auth-provider (auth/single-token-provider token)})
+        _ (runtime/rebuild! ctx)
+        app (router/create-router ctx "_app-ring-response")
+        post #(-> (router/dispatch app {:request-method :post :uri "/api/execute"
+                                        :headers {"authorization" (str "Bearer " token) "content-type" "application/json"}
+                                        :body (json/generate-string {:fn-id root :args % :timeout-ms 20000})})
+                  :body (json/parse-string true))]
+    (is (= [:browser-field-default-unsupported :unsupported-browser-primitive]
+           (stored-browser-rejections storage base-fns root)))
+    (is (= [record record] types))
+    (is (= [{:members (vec (sort-by :target-path [{:target-path [(str label)] :value "Ada"}
+                                                  {:target-path [(str hint)] :value nil}]))}
+            {:target-path [(str label)] :value "Bea"}]
+           (mapv #(:input-default (sp/read-entity storage :fn-slot %)) members)))
+    (is (every? nil? (map #(:input-default (sp/read-entity storage :fn-slot %)) shared)))
+    (let [invoke #(edn/read-string (:result (post %)))]
+      (is (= [nil nil] (invoke {})))
+      (is (= [{:label "Ada" :hint nil} {:label "Bea"}] (invoke {:left {:id "1"} :right {:id "2"}})))
+      (is (= [{:label nil :hint "mine"} {:label "given" :hint nil}]
+             (invoke {:left {:id "1" :label nil :hint "mine"} :right {:id "2" :label "given" :hint nil}}))))
+    (is (= "failed" (:status (post {:right {}}))))
+    (is (= "failed" (:status (post {:right {:id "2" :label 7}}))))
+    (is (= "failed" (:status (post {:left {:id "1" :hint 7}}))))
+    (is (= (set (into members shared)) (set (keys before))))
+    (sync!)
+    (is (= before (versions)))))

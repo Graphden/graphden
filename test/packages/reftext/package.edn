@@ -1,0 +1,4 @@
+{:name "reftext"
+ :version "1.0.0"
+ :dependencies ["core"]
+ :modules ["upper"]}

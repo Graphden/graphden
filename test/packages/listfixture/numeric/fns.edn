@@ -1,0 +1,9 @@
+{:input-format 2
+ :namespace "listfixture.numeric"
+ :fns [{:name :list-difference
+        :input {:nums {:type [:list :numeric] :required true}}
+        :return-type :numeric}
+       {:name :difference-prefix :parent :list-difference
+        :bind {:nums [:list-builder {:items [[:value 20] [:value 3]] :tail :open}]}}
+       {:name :difference-complete :parent :difference-prefix
+        :bind {:nums [:list-builder {:items [[:value 2] [:value 4]] :tail :closed}]}}]}

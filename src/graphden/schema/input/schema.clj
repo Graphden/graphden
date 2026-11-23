@@ -53,7 +53,10 @@
 
 
 (def version-framework
-  {:input-binding-id {:uuid #uuid "adb68e0e-0934-54eb-aa09-592018cf4071" :type :ref :ref-entity :input-binding}
+  {:merge-edge-id {:uuid #uuid "3e25b755-826a-4076-9842-81dce06adace" :type :ref :ref-entity :branch-merge :nullable? true :indexed? true}
+   :merge-selected-version-id {:uuid #uuid "4b30e0d0-3822-44ef-8ce0-ad569c20cb6d" :type :ref :ref-entity :input-binding-version :nullable? true}
+   :merge-source-version-id {:uuid #uuid "72118178-c5ee-4f9f-bbda-0e4bfcaaabf7" :type :ref :ref-entity :input-binding-version :nullable? true}
+   :input-binding-id {:uuid #uuid "adb68e0e-0934-54eb-aa09-592018cf4071" :type :ref :ref-entity :input-binding}
    :branch-id {:uuid #uuid "7fbfe9d6-4838-5621-aed2-b1d179b4f7e6" :type :ref :ref-entity :branch}
    :created-at {:uuid #uuid "9fa76d2f-91da-5caa-ac22-26ac5d15d4a7" :type :timestamptz}
    :deleted-at {:uuid #uuid "0b765d0b-2e6f-51a9-83fd-0f6f3c2c94c9" :type :timestamptz :nullable? true}

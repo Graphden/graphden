@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.structured-input :as structured]
+    [graphden.crud.structured-input-bind :as bind]
     [graphden.input.context :as context]))
 
 
@@ -21,7 +22,7 @@
         ctx (-> (context/build-context {:bindings {binding-id row}})
                 (assoc-in [:markers :hidden-fixture] {:hide-result? true}))
         project (fn [candidate view]
-                  (context/call-with-types candidate #(#'structured/visible-occupied-leaves candidate view)))]
+                  (context/call-with-types candidate #(#'structured/visible-occupied-fields candidate view)))]
     (is (= [{:path [:profile :name] :type :text :binding-id binding-id}] (project ctx graph)))
     (testing "secret leaf and ancestor markers, including refined and declared containers"
       (is (empty? (project ctx (-> graph
@@ -39,3 +40,11 @@
       (is (empty? (project ctx (assoc-in graph [:scopes [] :proofs address :status] :deferred))))
       (is (empty? (project ctx (assoc-in graph [:scopes [] :bindings address :origin-fn-id] (random-uuid)))))
       (is (empty? (project (assoc-in ctx [:bindings binding-id :resolver-fn-id] (random-uuid)) graph))))))
+
+
+(deftest named-bind-cannot-author-a-field-default
+  (let [target {:fn-id (random-uuid) :path ["profile" "label"]}]
+    (doseq [proposal [(assoc target :default "Ada") (assoc target :value nil :default "Ada")]]
+      (is (= :input/invalid-command
+             (try (bind/preview {} proposal) nil
+                  (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))

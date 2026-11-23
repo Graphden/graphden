@@ -90,6 +90,8 @@ async function _tourEnd(nextLessonId = null) {
   // leak one tutorial-* branch per run.
   if (ownedBranch) {
     const branch = ownedBranch;
+    const branchSample = ['43', '44', '45', '46', '47'].includes(lessonId) && typeof _tourStructuredChild === 'function'
+      ? _tourStructuredChild(_tourState, lesson?.['template-id']) : null;
     // `thenStart` — a lesson id to open once the rollback lands. It cannot be
     // started here: the rollback ends in a branch switch, and a branch switch
     // is a page load. Park it and let `maybeStartTutorial` pick it up on the
@@ -138,13 +140,17 @@ async function _tourEnd(nextLessonId = null) {
             _tourState.cleanupBranch = 'main';
             _tourState.activeBranch = 'main';
             _tourSaveState();
-            const options = {headers: {'X-Graphden-Branch': 'main'}};
-            const remaining = created.filter(row => !['branch', 'package-install'].includes(row.type));
-            const result = await _tourDeleteCreated(remaining, options);
-            if (result.failed.length) {
-              _tourReport(false, 'Kept tutorial items: exact cleanup could not finish. Return through Lessons to retry.');
-              if (typeof switchToBranch === 'function') switchToBranch(null, {clearSelection: true});
-              return;
+            // Deleting the scratch branch purges its versionless sample ID.
+            const remaining = created.filter(row => row !== branchSample
+              && !['branch', 'package-install'].includes(row.type));
+            if (remaining.length || !branchSample) {
+              const options = {headers: {'X-Graphden-Branch': 'main'}};
+              const result = await _tourDeleteCreated(remaining, options);
+              if (result.failed.length) {
+                _tourReport(false, 'Kept tutorial items: exact cleanup could not finish. Return through Lessons to retry.');
+                if (typeof switchToBranch === 'function') switchToBranch(null, {clearSelection: true});
+                return;
+              }
             }
           }
         } catch (_) { ok = false; }

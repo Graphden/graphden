@@ -6,6 +6,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.source-annotations :as annotations]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
@@ -189,18 +190,18 @@
         id (:id owner)
         original (get-in source-environment [:definition-by-id id])
         grouped (group-by :kind records)
-        field-annotations (into {} (keep (fn [field]
-                                           (when-let [annotation (annotations/annotation (:context source-environment) original records field)]
-                                             [[field] annotation])))
+        field-annotations (into {} (keep (fn [field-name]
+                                           (when-let [annotation (annotations/annotation (:context source-environment) original records field-name)]
+                                             [[field-name] annotation])))
                                 (keys (:args original)))
         binding-descriptions (into {}
-                                   (keep (fn [[field spec]]
-                                           (when-let [alias (rename/origin (:context source-environment) original owner
-                                                                           grouped field spec)]
-                                             (when (contains? alias :description)
-                                               [[field] {:description (:description alias)
-                                                         :target-path [(:field-id alias)]
-                                                         :binding-id (ids/binding-id id (:field-id alias))}]))))
+                                   (keep (fn [[field-name spec]]
+                                           (when-let [origin (rename/origin (:context source-environment) original owner
+                                                                            grouped field-name spec)]
+                                             (when (contains? origin :description)
+                                               [[field-name] {:description (:description origin)
+                                                              :target-path [(:field-id origin)]
+                                                              :binding-id (ids/binding-id id (:field-id origin))}]))))
                                    (:args original))
         common {:fn-id id :declaration-records (into [] (filter #(contains? #{:fn :slot :fn-slot} (:kind %))) records)
                 :field-annotations field-annotations
@@ -275,7 +276,7 @@
 
 
 (defn- check-descendants!
-  [env {:keys [edges field-owner public-path row]}]
+  [env {:keys [edges field-owner public-path row target-type-origin]}]
   (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id source-list-fragment source-list-operand] :as edge}]
           (partition 2 1 edges)]
     (if source-list-operand
@@ -290,7 +291,13 @@
   (let [scope (certified-lineage env (:target-fn-id (peek edges)))
         origin (some #(when (= field-owner (get-in % [:owner :id])) %) scope)]
     (when-not (some #(= (:target-path row) [(:slot-id %)]) (get-in origin [:records :fn-slot]))
-      (reject! :reference-field-drift public-path))))
+      (reject! :reference-field-drift public-path))
+    (when target-type-origin
+      (let [definition (:definition origin)
+            actual (positional-type/origin (:context env) definition definition
+                                           ((:records-of env) definition) (peek public-path))]
+        (when-not (and (= target-type-origin actual) (= (:target-path row) [(:slot-id actual)]))
+          (reject! :reference-field-drift public-path))))))
 
 
 (defn scoped-reference-context
@@ -323,18 +330,18 @@
   [{:keys [context records-of definition-by-id]} definition source]
   (let [id (ids/fn-id (:namespace definition) (:name definition))
         original (get definition-by-id id)]
-    (reduce (fn [source [[field :as path] spec]]
-              (if (or (not= 1 (count path)) (contains? (:bind definition) field))
+    (reduce (fn [source [[field-name :as path] spec]]
+              (if (or (not= 1 (count path)) (contains? (:bind definition) field-name))
                 source
                 (if-let [annotation (when original
-                                      (annotations/annotation context original (records-of original) field))]
+                                      (annotations/annotation context original (records-of original) field-name))]
                   (let [normalize #(cond-> % (contains? % :type)
                                            (update :type (fn [type]
                                                            (rebase/rewrite-type-references
                                                              type (fn [ref] (parse/normalize-ref ref (:name->id context) (:namespace definition)))))))]
                     (when-not (= (normalize spec) (normalize (annotations/configuration annotation)))
                       (reject! :unverified-field-annotation [:configure path]))
-                    (assoc-in source [:args field] (get-in original [:args field])))
+                    (assoc-in source [:args field-name] (get-in original [:args field-name])))
                   source)))
             source (:configure definition))))
 
@@ -343,7 +350,7 @@
   "Temporary offline compatibility with the existing declaration lowerer.
    The new syntax reader handles :bind separately. Remove this legacy
    lowering adapter when the v2 package loader replaces the v1 loader."
-  [{:keys [context definition-by-id] :as environment} definition]
+  [{:keys [context definition-by-id] :as source-environment} definition]
   (let [projections (into (array-map) (keep (fn [[arg form]]
                                               (when (and (simple-keyword? arg) (format/local-projection? form))
                                                 [arg (first (second form))])))
@@ -360,7 +367,7 @@
                    (assoc source :args (into (apply dissoc declaration (vals projections))
                                              (map (fn [[arg exposed]] [arg (rename-form arg exposed)])) projections)))
                  source)
-        source (restore-field-annotations environment definition source)
+        source (restore-field-annotations source-environment definition source)
         ;; Preserve the anonymous type declaration emitted by the legacy
         ;; owner. An unrelated authored shape cannot supply this evidence.
         original (get definition-by-id (ids/fn-id (:namespace definition) (:name definition)))

@@ -335,16 +335,18 @@
 
 (defn- rule-type-aliases
   [entries roots]
-  (reduce (fn [aliases callback]
-            (reduce-kv (fn [aliases alias-name qualified]
-                         (when (and (contains? aliases alias-name) (not= qualified (get aliases alias-name)))
+  (reduce (fn [aliases declared-aliases]
+            (reduce-kv (fn [aliases type-alias qualified]
+                         (when (and (contains? aliases type-alias) (not= qualified (get aliases type-alias)))
                            (reject! :conflicting-rule-type-alias nil))
-                         (assoc aliases alias-name qualified))
-                       aliases (:graphden.input/type-aliases (meta callback) {})))
+                         (assoc aliases type-alias qualified))
+                       aliases declared-aliases))
           {}
           (for [id (keys entries)
-                callback (vals (select-keys (get roots id) [:return-type-rule :slot-types-rule :nav-types-rule]))]
-            callback)))
+                :let [signature (get roots id)]
+                :when (and (seq (:local-type-rule-evidence signature))
+                           (signatures/local-type-rules? signature))]
+            (:local-type-rule-aliases signature {}))))
 
 
 (defn- verified-context

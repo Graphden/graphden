@@ -60,7 +60,7 @@
                                :whole-bindable? (and (= :free (:state node))
                                                      (or (nil? fields)
                                                          (and (= (count fields) (count (:fields node)))
-                                                              (every? #(= :input-field (:kind %)) fields))))}]
+                                                              (every? :whole-bindable? fields))))}]
                     (when-not (and (seq (:fields node)) (empty? fields))
                       (cond-> route fields (assoc :fields fields)))))))]
       (or (visit node []) {:kind :input-record :type {} :fields []}))))

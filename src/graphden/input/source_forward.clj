@@ -3,6 +3,7 @@
   (:require
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
+    [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -81,26 +82,28 @@
       {:target-id target-id :field-id (ids/slot-id declaring-id field)
        :direct? (boolean (some #{declaring-ref} target-lineage))
        :field-type (slots/slot-type-of declaring-ref field defs-by-name)
+       :return-owner-ref (some #(when (get-in defs-by-name [% :return-type]) %) target-lineage)
        :return-type (some #(get-in defs-by-name [% :return-type]) target-lineage)})))
 
 
 (defn- checked-reference-binding
-  [{owner-id :identity :keys [legacy]} {:keys [target-id return-type]} name->id]
+  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]} {:keys [target-id return-type] :as target}]
   (let [row (single (filter #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %)))
                             (:records legacy)) :missing-direct-reference-binding)
         argument (single (filter #(= (:id row) (get-in % [:origin :binding-id])) (:arguments legacy))
                          :missing-direct-reference-binding)
         [op ref] (:expression argument)
-        expected (get-in argument [:target :type])]
+        expected (get-in argument [:target :type])
+        origin (when-not (format/configuration-type? expected) (generic/origin prepared argument row target))]
     (when-not (and (= op :ref) (= target-id (get name->id ref))
                    (= owner-id (:fn-id row) (get-in argument [:origin :fn-id]))
                    (= (:slot-id row) (get-in argument [:origin :slot-id]))
                    (uuid? (:slot-id row)) (= (:id row) (ids/binding-id owner-id (:slot-id row)))
                    (not (:value-present row)) (empty? (:policy argument))
-                   (format/configuration-type? expected) (format/configuration-type? return-type)
+                   (or (format/configuration-type? expected) origin) (format/configuration-type? return-type)
                    (= :value (:mode (reference/classify expected {:return return-type}))))
       (reject! :unproved-reference-binding))
-    (:id row)))
+    (cond-> {:binding-id (:id row)} origin (assoc :generic-reference origin))))
 
 
 (defn verify-forwarded-field
@@ -114,15 +117,16 @@
     (reject! :missing-field-origin))
   (let [{:keys [slot membership type]} (linked-declaration entry field name->id)
         {:keys [field-id field-type target-id direct?] :as target} (reference-occurrence prepared entry field)
-        binding-id (checked-reference-binding entry target name->id)
+        {:keys [binding-id generic-reference]} (checked-reference-binding prepared entry target)
         type (qualified-type prepared (:source entry) type)]
     (when-not (and (= field-id (:source-slot-id slot))
                    (or (= type field-type)
                        (and (primitive-field? type) (primitive-field? field-type) (types/subtype? type field-type))))
       (reject! :unproved-forwarded-target))
-    {:owner-id owner-id :field-id (:id slot) :membership-id (:id membership)
-     :source-path [:args field] :target-fn-id target-id :target-field-id field-id :root-use-id binding-id
-     :source-type type :target-type field-type
-     :projection-id (migration/derived-id :forwarded-field owner-id binding-id field-id)
-     :source-address [[owner-id []] [(:id slot)]]
-     :target-address (when direct? [[owner-id [binding-id]] [field-id]])}))
+    (cond-> {:owner-id owner-id :field-id (:id slot) :membership-id (:id membership)
+             :source-path [:args field] :target-fn-id target-id :target-field-id field-id :root-use-id binding-id
+             :source-type type :target-type field-type
+             :projection-id (migration/derived-id :forwarded-field owner-id binding-id field-id)
+             :source-address [[owner-id []] [(:id slot)]]
+             :target-address (when direct? [[owner-id [binding-id]] [field-id]])}
+      generic-reference (assoc :generic-reference generic-reference))))

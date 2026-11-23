@@ -1,0 +1,5 @@
+{:input-format 2
+ :namespace "optionalinput.structured"
+ :fns [{:name :optional-label
+        :input {:label {:type [:union :null :text] :required false :default "automatic"}}
+        :return-type :text}]}

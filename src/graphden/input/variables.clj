@@ -32,11 +32,11 @@
   [from-scope to-scope rich]
   (let [renaming (volatile! {})]
     (types/freshen-with rich
-                        (fn [sort variable]
-                          (when (= :value sort)
+                        (fn [variable-sort variable]
+                          (when (= :value variable-sort)
                             (vswap! renaming assoc
-                                    (variable-name from-scope sort variable)
-                                    (variable-name to-scope sort variable)))
+                                    (variable-name from-scope variable-sort variable)
+                                    (variable-name to-scope variable-sort variable)))
                           variable))
     @renaming))
 

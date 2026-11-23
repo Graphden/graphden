@@ -184,6 +184,21 @@
                                         :fn-defs {:type "string" :description "EDN vector of fn-def maps."}
                                         :allow-platform-overwrite {:type "boolean" :description "Explicitly allow shadowing platform (package-synced) fn-defs on the branch. Default false."}}
                            :required ["branch" "fn-defs"]}}
+            {:name "configure-input"
+             :description "Preview or apply Bind, Edit or Remove for a structured input on a working branch. Read the field names with describe-fn. Apply repeats the same command with the preview's expected-state and, for Edit or Remove, expected-version."
+             :inputSchema {:type "object"
+                           :properties {:branch {:type "string"}
+                                        :phase {:enum ["preview" "apply"]}
+                                        :action {:enum ["bind" "edit" "remove"]}
+                                        :fn-id {:type "string"}
+                                        :path {:type "array" :items {:type "string"}}
+                                        :binding-id {:type "string"}
+                                        :value {}
+                                        :ref-fn-id {:type "string"}
+                                        :expected-state {:type "string"}
+                                        :expected-version {:type "string"}}
+                           :required ["branch" "phase" "action" "fn-id"]
+                           :additionalProperties false}}
             {:name "run-tests"
              :description "Run the branch's tests (the `tests`-namespace fns) through the standard execute pipeline and get {total passed failed other results}. Run after upsert-fn-defs to close the write→verify loop."
              :inputSchema {:type "object"
@@ -654,6 +669,29 @@
    :args {:text {:parent :to-json-string
                  :args {:data :_list-branches-data}}}}
 
+  {:name :_mcp-configure-input
+   :parent :_structured-input-mcp-command
+   :args {:command {:ref :_mcp-tool-args :type :keyword-map}}}
+
+  {:name :_mcp-configure-input-error
+   :parent :get
+   :args {:coll :_mcp-configure-input :key {:value :error}
+          :default {:value "The structured input operation is unavailable"}}}
+
+  {:name :_mcp-err-configure-input
+   :parent :_mcp-err
+   :args {:code {:value -32602}
+          :message {:ref :_mcp-configure-input-error :type :text}}}
+
+  {:name :_mcp-tool-configure-input
+   :parent :if
+   :args {:test {:parent :equal?
+                 :args {:a {:parent :get :args {:coll :_mcp-configure-input :key {:value :ok} :default {:value false}}}
+                        :b {:value true}}}
+          :then {:parent :_mcp-tool-ok
+                 :args {:text {:parent :to-json-string :args {:data :_mcp-configure-input}}}}
+          :else :_mcp-err-configure-input}}
+
   ;; --- tools/call dispatch ---------------------------------------------------
   {:name :_mcp-tools-call
    :description "Dispatch tools/call on params.name."
@@ -672,6 +710,8 @@
                     :_mcp-tool-create-branch
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "upsert-fn-defs"}}}
                     :_mcp-tool-upsert
+                    {:parent :equal? :args {:a :_mcp-tool-name :b {:value "configure-input"}}}
+                    :_mcp-tool-configure-input
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "run-tests"}}}
                     :_mcp-tool-run-tests
                     {:parent :equal? :args {:a :_mcp-tool-name :b {:value "list-branches"}}}

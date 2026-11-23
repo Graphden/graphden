@@ -651,7 +651,8 @@
    :fn-slot {:identity-fields #{:org-id}
              :uuids {:fn-id fn-slot-version-fn-id-field-uuid
                      :slot-id fn-slot-version-slot-id-field-uuid
-                     :position fn-slot-version-position-field-uuid}
+                     :position fn-slot-version-position-field-uuid
+                     :input-default #uuid "bb8e2ba4-4d4a-48e0-bb5c-641ca6d6b061"}
              ;; Bounded source reads find candidates by owner on ANY version.
              ;; Demoted refs need explicit indexes on the version table.
              :tweaks {:fn-id {:indexed? true}}}
@@ -823,7 +824,7 @@
   (let [mirror (get version-entity-for base)
         id-field (get version-id-field-for base)]
     (into #{}
-          (remove (conj framework-fields id-field))
+          (remove (into (conj framework-fields id-field) (when (= base :input-binding) [:merge-edge-id :merge-source-version-id :merge-selected-version-id])))
           (keys (get mirror-fields mirror)))))
 
 
@@ -896,7 +897,8 @@
       ;; branch-merge
       ;; -----------------------------------------------------------------
       (ds/add-entity :branch-merge branch-merge-entity-uuid
-                     {:source-branch-id {:uuid branch-merge-source-branch-id-field-uuid
+                     {:input-versions-materialized? {:uuid #uuid "ee720934-cfbb-4dfe-912e-e2b1dbc2f291" :type :bool :nullable? true}
+                      :source-branch-id {:uuid branch-merge-source-branch-id-field-uuid
                                          :type :ref :ref-entity :branch}
                       :source-timestamp {:uuid branch-merge-source-timestamp-field-uuid
                                          :type :timestamptz}

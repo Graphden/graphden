@@ -223,11 +223,14 @@
                    (or (not (contains? check :name)) (and (string? name) (not (str/blank? name)))))
               (str "lesson " (:id l) " / “" (:title s) "”: result-value needs :value and an optional function name")))
         "structured-input-path"
-        (let [{:keys [name path state]} (:check s)]
+        (let [{:keys [name path state reference-inputs?] record-target? :record? :as check} (:check s)]
           (is (and (string? name) (not (str/blank? name))
                    (vector? path) (<= 1 (count path) 64)
                    (every? #(and (string? %) (not (str/blank? %))) path)
-                   (contains? #{"remaining" "occupied"} state))
+                   (contains? #{"remaining" "occupied"} state)
+                   (or (not (contains? check :record?)) (boolean? record-target?))
+                   (or (not (contains? check :reference-inputs?))
+                       (and (= state "occupied") (boolean? reference-inputs?))))
               (str "lesson " (:id l) " / “" (:title s) "”: structured-input-path needs a name, path and state")))
         "owned-entity"
         (is (and (contains? #{"ns" "fn"} (get-in s [:check :type]))

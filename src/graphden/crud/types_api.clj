@@ -242,7 +242,7 @@
    Exposed for tests — the wire shape of `/api/types` depends on this
    projector being applied to every entry."
   [entry]
-  (dissoc entry :return-type-rule :slot-types-rule :nav-types-rule))
+  (dissoc entry :return-type-rule :slot-types-rule :nav-types-rule :local-type-rule-evidence :local-type-rule-aliases))
 
 
 (defonce ^:private rich-types-with-type-rows-cache

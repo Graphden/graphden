@@ -135,7 +135,7 @@
 
 
 (deftest frozen-field-identity-connects-declaration-and-abi-binders
-  (let [[owner base field other use] (repeatedly 5 random-uuid)
+  (let [[owner base field other use-id] (repeatedly 5 random-uuid)
         rich '[:union :null [:map a :any]]
         declaration {:id field :name :coll :type rich}
         implementation {:base-fn-id base :root-entry {:args {:coll rich} :return 'a}
@@ -158,7 +158,7 @@
                   @seen))
         scope [owner []]
         linked (infer scope identity implementation)
-        separate (infer [owner [use]] identity implementation)
+        separate (infer [owner [use-id]] identity implementation)
         source-variable (variables/type-in-scope scope 'a)]
     (is (= source-variable (get-in linked [:root-entry :return])
            (get-in linked [:declaration :return-type])))

@@ -506,11 +506,11 @@
    :assert-eq {:impl assert-eq-fn :taint-propagate? true}
    ;; In structured inference predicate lookups see only the supplied frozen
    ;; signature view. An absent predicate keeps default-ret; no graph is run.
-   :if {:impl if-fn :return-type-rule
-        (with-meta if-return-rule
-          {:graphden.input/type-aliases {:positive-int :core.refinements/positive-int
-                                         :non-negative-int :core.refinements/non-negative-int}})
-        :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :if {:impl if-fn :return-type-rule if-return-rule
+        :local-type-rules #{:return-type-rule}
+        :local-type-rule-aliases {:positive-int :core.refinements/positive-int
+                                  :non-negative-int :core.refinements/non-negative-int}
+        :taint-propagate? true}
    :cond {:impl cond-fn
           :return-type-rule cond-return-rule :taint-propagate? true
           :lazy-seq-args #{:clauses}}

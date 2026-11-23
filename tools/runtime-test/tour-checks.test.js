@@ -173,6 +173,23 @@ test('structured input checks observe the current checked root without changing 
   projection = {...remaining, fields: [{name: 'profile', fields: [{...leaf, 'bind-path': undefined}]}]};
   assert(!checkIn(state, check), 'a visible label alone is not a checked bind path');
 
+  const profilePath = ['profile'];
+  const whole = {kind: 'input-field', name: 'profile', type: {name: 'text'}, fields: [leaf], 'bind-path': profilePath};
+  const wholeCheck = {...check, path: profilePath, 'record?': true};
+  projection = {...remaining, fields: [whole]};
+  assert(checkIn(state, wholeCheck), 'an explicitly bindable record can complete a whole-record step');
+  assert(!checkIn(state, {...wholeCheck, 'record?': false}), 'record offers do not satisfy legacy leaf-only steps');
+  projection = {...remaining, fields: [{...whole, 'bind-path': undefined}]};
+  assert(!checkIn(state, wholeCheck), 'a group without the server Bind offer cannot complete the step');
+  projection = {...occupied, occupied: [{...field, type: whole.type, path: profilePath}]};
+  assert(checkIn(state, {...wholeCheck, state: 'occupied'}), 'a whole binding removes its record from the residual projection');
+  assert(!checkIn(state, check), 'a bound whole record leaves no descendant Bind offer');
+  projection = {...projection, fields: [{kind: 'reference-inputs', name: 'profile', fields: [whole]}]};
+  assert(checkIn(state, {...wholeCheck, state: 'occupied', 'reference-inputs?': true}),
+    'a checked occupied record may expose the input surface of its reference');
+  assert(!checkIn(state, {...wholeCheck, state: 'occupied'}),
+    'the ordinary occupied check still rejects other surfaces at that path');
+
   projection = occupied;
   const legacy = {kind: 'binding-value', name: FN.name, slot: SLOT.name, value: 'Ada'};
   assert(!checkIn(state, legacy), 'a v2 occupied path cannot satisfy the legacy literal check');

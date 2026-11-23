@@ -9,6 +9,7 @@
  "asset-overrides" {:version 7, :steps "ac8da4a5236a7203a65228d5dc6377058415d36b"}
  "branches" {:version 3, :steps "90d46a43c26c026b58471c97d05dd20c20a79587"}
  "components-and-pages" {:version 2, :steps "1edd3031e8453661c3c921a32fcfe7de89195ec7"}
+ "computed-record-and-callback" {:version 1, :steps "c4a2a2eed7903792e502cf9237813ee4192a5da1"}
  "custom-script-escape-hatch" {:version 1, :steps "6888c73f5709486153de1f056cea1c220e0fa128"}
  "debugging-traces" {:version 3, :steps "212c4351fd848770decc1fcd0619ec69cebb9868"}
  "distributing-packages" {:version 2, :steps "b967dcb151ecaebf10c96c0339d44619293b4cfc"}
@@ -21,9 +22,11 @@
  "grants" {:version 1, :steps "f54a1f416cbe54f9ddb654a87f4a423b1e62a72a"}
  "higher-order-functions" {:version 5, :steps "b4a51f3c9a660c9021c4ca439605f91bc307217e"}
  "htmx-fragments" {:version 2, :steps "1cd2796d19a85bbd9085544ec72126a73303e3ae"}
+ "independent-contact-records" {:version 1, :steps "97527369f27df640e6d437f9b34dce5f569a90db"}
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
  "lists" {:version 4, :steps "db22c172d0e3246ea91ee13854ebca56dca9ff89"}
  "marketplace-themes-keymaps" {:version 3, :steps "1d5b8b9cda2428d3b2ca516498afee74c8d40246"}
+ "optional-input-default" {:version 1, :steps "f92b53ca3a23813d407ddea5edf49c08512d29ce"}
  "optional-required-sealed" {:version 4, :steps "6e5a2f73fc4a2c21bdd67a327a28428cc91ecd3b"}
  "package-lifecycle" {:version 1, :steps "9ace44ea1d51bd711eab11b5a5876b29f0a45e12"}
  "packages" {:version 1, :steps "aa8fd0ba8ae3001d5142f4d1e9717218509012f3"}
@@ -39,10 +42,11 @@
  "signing-up-and-in" {:version 2, :steps "3befd16fd917f072cf85d883b2a064a63ee46826"}
  "slots-and-bindings" {:version 3, :steps "bc6e60a3b2f32bc0b6abd077286ce1d117071bca"}
  "state-cells-and-caches" {:version 5, :steps "ea15244b98e956f5a4a5c5d856d7f92dd47aabeb"}
- "structured-input" {:version 1, :steps "ce8c7f0889dd1952910d3deafcb9d3fe987bbbc5"}
+ "structured-input" {:version 2, :steps "4be7f351d5c1f146acc6d9c9eb6ab596b6eda4d4"}
  "tests" {:version 1, :steps "f7418ce3b2e656ab68d3114eb9a041270720fa11"}
  "types" {:version 1, :steps "cf035f8d069e7cc531e0549c70ca90a9ac0e8877"}
  "users-admin" {:version 1, :steps "7be1e4b9306c3e9aaeb12a9a0f14ab38d0984ad7"}
  "version-history" {:version 3, :steps "bb65ddf8965314bc3fa64413e0821a8b81879564"}
+ "whole-record-binding" {:version 1, :steps "1a3ad4654664bcd42ec1086abd0ccc5f9b86cdc9"}
  "working-across-orgs" {:version 1, :steps "994aa5a41c991aeee76b21bf592fe0da21bd9893"}
  "workspaces" {:version 3, :steps "d4dc6616f846ed882d066673ba2a89049e0fa6e1"}}

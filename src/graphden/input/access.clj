@@ -17,6 +17,34 @@
 (def ^:dynamic ^:private *command* nil)
 
 
+(def ^:dynamic ^:private *merge-edge* nil)
+
+
+(defn with-merge-snapshot
+  "Scope framework provenance to the single merge record being published."
+  [edge f]
+  (let [active (volatile! true)]
+    (binding [*merge-edge* {:edge edge :thread (Thread/currentThread) :active active}]
+      (try (f) (finally (vreset! active false))))))
+
+
+(defn- current-edge
+  []
+  (when (and *merge-edge* (identical? (Thread/currentThread) (:thread *merge-edge*)) @(:active *merge-edge*))
+    (:edge *merge-edge*)))
+
+
+(def ^:dynamic ^:private *branch-deletes* nil)
+
+
+(defn with-branch-binding-deletes
+  "Admit the exact binding rows collected by the locked branch cascade."
+  [binding-ids version-ids operation]
+  (binding [*branch-deletes* {:input-binding (set binding-ids)
+                              :input-binding-version (set version-ids)}]
+    (operation)))
+
+
 (defn with-binding-write
   [owner id operation]
   (binding [*command* {:owner owner :binding id}] (operation)))
@@ -36,8 +64,16 @@
 
 (defn assert-write!
   [entity data]
+  (when (or (and (= entity :branch-merge) (:input-versions-materialized? data)
+                 (not= (dissoc data :input-versions-materialized?) (current-edge)))
+            (and (= entity :input-binding-version) (some #(some? (get data %)) [:merge-edge-id :merge-source-version-id :merge-selected-version-id])
+                 (not (and (current-edge) (= (:id (current-edge)) (:merge-edge-id data))
+                           (= (:target-branch-id (current-edge)) (:branch-id data)) (uuid? (:merge-source-version-id data)) (uuid? (:merge-selected-version-id data))))))
+    (throw (ex-info "Structured merge provenance is owned by the branch writer" {:type :authz/forbidden})))
   (when (and (not *offline?*)
              (or (contains? offline-entities entity)
+                 (and (#{:fn-slot :fn-slot-version} entity) (some? (:input-default data))
+                      (not-any? #{(:fn-id data)} (vals *package-input-types*)))
                  (and (contains? #{:fn :fn-version} entity)
                       (some? (:input-type-fn-id data))
                       (not= (:input-type-fn-id data)
@@ -53,3 +89,10 @@
   (when (contains? offline-entities entity)
     (throw (ex-info "Structured input entities are not public yet"
                     {:type :authz/forbidden :entity entity}))))
+
+
+(defn assert-delete!
+  "Admit named input deletion only for a server command or a locked cascade."
+  [entity id]
+  (when-not (contains? (get *branch-deletes* entity) id)
+    (assert-write! entity {:id id})))

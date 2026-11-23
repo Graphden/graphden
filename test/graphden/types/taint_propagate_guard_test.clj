@@ -47,6 +47,7 @@
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Inheritance commands and their outcomes retain caller-selected content.
     :_preview-inheritance-model :_apply-inheritance-operation :_structured-input-command
+    :_structured-input-mcp-command :_structured-lesson-available? :_attach-structured-lesson-templates
     ;; The selected function determines which input contract is returned.
     :structured-input-contract
     ;; Returns caller entry identities and their selected graph content;
@@ -256,6 +257,7 @@
     ;; Parsing echoes command fields; preview/apply derive descriptors and
     ;; outcomes from those fields. None is a declassification boundary.
     :_preview-inheritance-model :_apply-inheritance-operation :_structured-input-command
+    :_structured-input-mcp-command :_structured-lesson-available? :_attach-structured-lesson-templates
     ;; The selected function determines which input contract is returned.
     :structured-input-contract
     ;; Entry identities select the exported content and also appear in it.

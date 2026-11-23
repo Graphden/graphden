@@ -145,14 +145,14 @@
 
 (defn- rule-aliases
   [frozen aliases]
-  (reduce-kv (fn [frozen alias qualified]
+  (reduce-kv (fn [frozen type-alias qualified]
                (let [id (get-in frozen [:alias-ids qualified])
-                     prior (get-in frozen [:alias-ids alias])]
-                 (when-not (and (simple-keyword? alias) (qualified-keyword? qualified) (uuid? id)
+                     prior (get-in frozen [:alias-ids type-alias])]
+                 (when-not (and (simple-keyword? type-alias) (qualified-keyword? qualified) (uuid? id)
                                 (or (nil? prior) (= id prior)))
                    (reject! :rule-type-source-required id))
-                 (-> frozen (assoc-in [:aliases alias] (get-in frozen [:aliases qualified]))
-                     (assoc-in [:alias-ids alias] id))))
+                 (-> frozen (assoc-in [:aliases type-alias] (get-in frozen [:aliases qualified]))
+                     (assoc-in [:alias-ids type-alias] id))))
              frozen aliases))
 
 

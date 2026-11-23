@@ -153,6 +153,10 @@ shows the free-arg list; an unexpected `else` there is this.
    When a visible function has a checked structured input, the
    `structured-input` result shows its remaining nested fields. Each field's
    `required-now?` flag tells you whether it needs a value before execution.
+   To Bind, Edit or Remove a field, call `configure-input` on your working
+   branch. Send `phase: "preview"`, then repeat the command with
+   `phase: "apply"` and the returned `expected-state`. Edit and Remove
+   also use the binding ID and the preview's `expected-version`.
 3. **`create-branch`** — ALWAYS, before any mutation. Name it for the
    task, e.g. `ai/add-order-total`. `main` is the human's; you work on a
    branch and never touch main.

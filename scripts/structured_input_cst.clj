@@ -137,7 +137,7 @@
 
 
 (defn- inline-field-edits
-  [source starts loc {:keys [bind input configure legacy-forms legacy-order legacy-args-order]} path]
+  [source starts loc {:keys [bind input configure legacy-forms legacy-order legacy-args-order legacy-scope-names] :as body} path]
   (if legacy-args-order
     (do
       (when-not (and (empty? bind) (empty? input)
@@ -147,11 +147,18 @@
                             (str ":bind {} :legacy-forms " (migration/stable-edn legacy-forms)
                                  " :legacy-args-order " (migration/stable-edn legacy-args-order) " "
                                  (when legacy-order (str ":legacy-order " (migration/stable-edn legacy-order) " "))))])
-    (let [fields (mapv (fn [[field form]]
-                         (let [arg-path [:args field]]
-                           [field (inline-binding-edit source starts (value-at loc arg-path) form
-                                                       (get legacy-forms field) (contains? configure [field])
-                                                       (into path arg-path))]))
+    (let [source-fields (format/inline-source-fields body)
+          args (value-at loc [:args])
+          fields (mapv (fn [[target form]]
+                         (let [field (get source-fields target)
+                               arg-path [:args field]
+                               edit (inline-binding-edit source starts (value-at loc arg-path) form
+                                                         (get legacy-forms field) (contains? configure [field])
+                                                         (into path arg-path))
+                               key-edit (when (vector? target)
+                                          (node-edit source starts (key-loc args field)
+                                                     (constantly (migration/stable-edn target))))]
+                           [field edit key-edit]))
                        bind)
           configurations (keep (fn [[field edit]]
                                  (when-let [spec (:configuration edit)]
@@ -161,9 +168,10 @@
       (cons (assoc key :after (str (when (seq input) (str ":input " (migration/stable-edn input) " "))
                                    (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
                                    (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
+                                   (when (seq legacy-scope-names) (str ":legacy-scope-names " (migration/stable-edn legacy-scope-names) " "))
                                    (when (seq legacy-order) (str ":legacy-order " (migration/stable-edn legacy-order) " "))
                                    ":bind"))
-            (keep second fields)))))
+            (into [] (comp (mapcat rest) (remove nil?)) fields)))))
 
 
 (defn- inline-type-edit

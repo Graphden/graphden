@@ -143,7 +143,13 @@
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))
                    (uuid? (:input-type-id child)) (= (:input-type-id child) (get-in entry [:owner :input-type-fn-id]))
                    (= 1 (count (get-in entry [:owner :parent-ids])))
-                   (empty? (:scoped-inputs child))
+                   (or (empty? (:scoped-inputs child))
+                       (let [proof (get-in package [:closure-baselines id])
+                             evidence [:fn-id :input-type-id :declaration-records :contract
+                                       :binding-state :bindings :scoped-inputs :configurations]]
+                         (and (= :authored-source-equivalent (:verification proof))
+                              (migration/same-edn? (select-keys (:v2 proof) evidence)
+                                                   (select-keys child evidence)))))
                    (every? (fn [{:keys [target-path] :as config}]
                              (annotations/exact? (:owner entry)
                                                  (some #(when (= [(:id %)] target-path) %) (get-in child [:contract :fields]))
@@ -665,6 +671,25 @@
 (declare certify-owner)
 
 
+(defn- certify-inline-children
+  [package owner blockers roots active]
+  (let [paths (into #{} (map #(subvec (:source-path %) 0 2)) blockers)
+        updated (reduce (fn [package path]
+                          (let [origin (origins/child-at @(:inline-origins package) owner path)
+                                id (:fn-id origin)]
+                            (when-not id (reject! :missing-inline-source-origin owner))
+                            (when (contains? (:originals package) id)
+                              (reject! :conflicting-inline-declaration id))
+                            (let [with-child (certify-owner (declaration-package package id) id roots active)
+                                  proof (get-in with-child [:closure-baselines id])]
+                              (-> with-child (update :originals dissoc id)
+                                  (update :prepared source/with-certified-inline proof)))))
+                        package (sort paths))]
+    (when (some origins/direct-inline-binding-blocker? (:blockers (plan-entry updated owner)))
+      (reject! :unproved-inline-binding owner))
+    (certify-owner updated owner roots (disj active owner))))
+
+
 (defn- certify-inherited
   [package owner entry roots active]
   (let [parents (some #(when (and (= :fn (:kind %)) (= owner (:id %))) (:parent-ids %))
@@ -679,10 +704,14 @@
 (defn- certify-owner-step
   [package owner roots active]
   (let [entry (plan-entry package owner)
-        blockers (:blockers entry)]
+        blockers (:blockers entry)
+        children (filterv origins/direct-inline-binding-blocker? blockers)]
     (cond
       (= :authored-source-equivalent (:verification entry))
       (assoc-in package [:closure-baselines owner] entry)
+
+      (seq children)
+      (certify-inline-children package owner children roots active)
 
       (inherited-candidate? blockers)
       (certify-inherited package owner entry roots active)

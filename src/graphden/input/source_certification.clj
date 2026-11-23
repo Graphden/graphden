@@ -2,6 +2,7 @@
   "Certify supported legacy scope rewrites in the order their proofs require."
   (:require
     [graphden.input.source :as source]
+    [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]))
 
 
@@ -21,10 +22,11 @@
            (every? #(= :field-projection-required (:code %)) blockers))
       [id (mapv argument-field blockers)]
       (every? (fn [blocker]
-                (if (= :inherited-projection-required (:code blocker))
-                  (= [:args] (:source-path blocker))
-                  (and (#{:ref-scope-required :field-projection-required} (:code blocker))
-                       (argument-field blocker)))) blockers)
+                (or (origins/direct-inline-binding-blocker? blocker)
+                    (if (= :inherited-projection-required (:code blocker))
+                      (= [:args] (:source-path blocker))
+                      (and (#{:ref-scope-required :field-projection-required} (:code blocker))
+                           (argument-field blocker))))) blockers)
       [id :joint])))
 
 

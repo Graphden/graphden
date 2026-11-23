@@ -411,6 +411,29 @@
 (declare ^:private lower-inlines)
 
 
+(defn with-certified-inline
+  "Use a verified child proposal when its exact enclosing body is replanned."
+  [context {child-id :identity :keys [verification] :as child}]
+  (when-not (and (uuid? child-id) (= :authored-source-equivalent verification))
+    (throw (ex-info "Unverified inline source certificate"
+                    {:type :input/source-verification :code :unverified-inline-certificate :fn-id child-id})))
+  (assoc-in context [::certified-inlines child-id] child))
+
+
+(defn- certified-inline-plan
+  [source child context]
+  (when-let [{:keys [proposed legacy] :as certificate} (get-in context [::certified-inlines (:fn-id child)])]
+    (let [original (assoc source :description (or (:description source) (:description child)))
+          arguments (:arguments legacy)
+          names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
+                                 (when scope-certificate
+                                   [(:public-path scope-certificate) (second source-path)]))) arguments)]
+      (when (and (seq names)
+                 (migration/same-edn? (normalize-source original context)
+                                      (normalize-source (:source certificate) context)))
+        {:proposed (assoc proposed :legacy-scope-names names) :arguments arguments :blockers []}))))
+
+
 (defn- inline-child-plan
   [body child context]
   (let [source (assoc body :name (:name child) :namespace (:namespace child))
@@ -419,8 +442,10 @@
                                                (if (= (:fn-id child) (:fn-id definition))
                                                  source
                                                  (original-for definition))))
-        plan (composed-plan source child context ((::records-of context) child))]
-    (lower-inlines source child context plan)))
+        certified (certified-inline-plan source child context)]
+    (or certified
+        (lower-inlines source child context
+                       (composed-plan source child context ((::records-of context) child))))))
 
 
 (defn- prepared-inline-child

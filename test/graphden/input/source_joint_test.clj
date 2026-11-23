@@ -31,7 +31,7 @@
       (is (= :joint-source-mismatch (code #(joint/groups entry)))))))
 
 
-(deftest actual-ring-owner-requires-generic-reference-evidence-after-callable-origin
+(deftest actual-ring-owner-retains-complete-callable-and-map-reference-origins
   (binding [types/*type-aliases-override* (atom {})
             shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})]
     (let [core (mapcat #(read-module (str "packages/core/" % "/fns.edn"))
@@ -48,8 +48,8 @@
           reduced-entry (first (:definitions (source/plan-module [baseline-entry] reduced-context)))]
       (is (= {:fields [:func] :paths [[:args :defaults]]} (joint/groups entry)))
       (is (= :fn (first (get-in original [:args :func :type]))))
-      (is (= :unproved-reference-binding
-             (code #(joint/check-full-reference-origins! prepared entry reduced-prepared reduced-entry)))))))
+      (is (nil?
+            (code #(joint/check-full-reference-origins! prepared entry reduced-prepared reduced-entry)))))))
 
 
 (deftest omitted-scoped-ref-cannot-hide-a-second-forwarding-occurrence

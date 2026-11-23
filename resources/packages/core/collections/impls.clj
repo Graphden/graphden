@@ -1002,6 +1002,7 @@
                  :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :postwalk {:impl postwalk-fn :taint-propagate? true}
    :update-in {:impl update-in-fn
+               :local-type-rules #{:return-type-rule :slot-types-rule :nav-types-rule}
                :return-type-rule update-in-return-rule :taint-propagate? true
                :slot-types-rule update-in-slot-rule
                :nav-types-rule update-in-nav-rule}

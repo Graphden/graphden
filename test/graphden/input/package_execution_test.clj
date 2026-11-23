@@ -7,6 +7,7 @@
     [graphden.executor.compile-runtime :as executor]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
     [graphden.input.package-execution :as execution]
@@ -487,7 +488,7 @@
           source (into (declarations "packages/core/logic/fns.edn" #{:const})
                        [{:namespace "fixture" :name :map-result :map {:key :keyword :value value-type}} producer host])
           _ (sync/register-type-aliases! source)
-          base (assoc producer :impl (fn [{:keys [payload]}] {:payload (encode payload)}))
+          base (assoc producer :impl (fn [arguments _context] {:payload (encode (runtime/resolve-arg arguments :payload))}))
           bases (assoc @loaded :generic-map-producer base)
           compile-certified (fn [package root roots implementations]
                               (let [migrated (snapshot/migrate-forwarded-field package root :payload roots)]

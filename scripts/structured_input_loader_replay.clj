@@ -15,9 +15,6 @@
     [structured-input-inventory :as inventory]
     [structured-input-stage :as stage])
   (:import
-    (clojure.lang
-      Compiler
-      RT)
     (java.net
       URL
       URLClassLoader)))
@@ -45,14 +42,19 @@
   [resources f]
   ;; The package itself is an immutable git archive. Resolve its resources
   ;; exclusively from those directories, including optional impls files.
-  (let [urls (into-array URL (map #(-> % fs/file .toURI .toURL) resources))]
-    (with-open [loader (proxy [URLClassLoader] [urls (RT/baseLoader)]
+  (let [thread (Thread/currentThread)
+        original (.getContextClassLoader thread)
+        urls (into-array URL (map #(-> % fs/file .toURI .toURL) resources))]
+    (with-open [loader (proxy [URLClassLoader] [urls original]
                          (getResource
                            [name]
                            (if (str/starts-with? name "packages/core/")
                              (proxy-super findResource name)
                              (proxy-super getResource name))))]
-      (with-bindings {Compiler/LOADER loader} (f)))))
+      (try
+        (.setContextClassLoader thread loader)
+        (f)
+        (finally (.setContextClassLoader thread original))))))
 
 
 (defn- original!

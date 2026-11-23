@@ -12,6 +12,7 @@
     [graphden.input.source-context :as source-context]
     [graphden.input.source-forward :as forward]
     [graphden.input.source-list :as source-list]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
@@ -172,6 +173,10 @@
                     body (get-in source [:args arg])
                     target-type (or (slots/slot-type-of owner field defs-by-name)
                                     (slots/rename-source-type owner field defs-by-name))
+                    declaring (get defs-by-name owner)
+                    positional-origin (when (and (nil? target-type) declaring)
+                                        (positional-type/origin context (or ((::original-of context) declaring) declaring)
+                                                                declaring ((::records-of context) declaring) field))
                     builder (when (or (:list-append binding) (:list-closed binding))
                               (source-list/trace (assoc context :inline-list-item inline-list-item)
                                                  (::records-of context) (::original-of context)
@@ -206,6 +211,7 @@
                   (assoc :list-inputs (positions/authored-inputs (:id own) grouped name->id body))
                   builder (merge {:list-builder (dissoc builder :inline-items)}
                                  (source-list/contribution-expression builder body (:namespace source) name->id))
+                  positional-origin (assoc :target-type-origin positional-origin)
                   pin (assoc :self-pin pin)
                   annotation (assoc :annotation annotation)
                   rename (assoc :rename rename :expression [:project [(:alias rename)]])))))

@@ -3,13 +3,16 @@
   (:require
     [cheshire.core :as json]
     [graphden.auth.provider :as auth]
+    [graphden.crud.structured-comparison :as comparison]
     [graphden.crud.structured-run :as run]
+    [graphden.executor.browser-server-values :as server-values]
     [graphden.executor.browser-source :as source]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.interface :as executor]
     [graphden.input.compile :as compile]
     [graphden.input.migration :as migration]
     [graphden.input.read-view :as view]
+    [graphden.packages.arithmetic-input :as arithmetic]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
@@ -40,32 +43,61 @@
                               ((:invoke prepared) args ctx))))))
 
 
+(defn- post-run
+  [app token name args]
+  (let [response (router/dispatch app {:request-method :post :uri "/api/execute"
+                                       :headers {"authorization" (str "Bearer " token) "content-type" "application/json"}
+                                       :body (json/generate-string {:fn-id (ids/fn-id "core.arithmetic" name)
+                                                                    :args args :timeout-ms 30000})})]
+    [(:status response) (json/parse-string (:body response) true)]))
+
+
 (defn- http-results
-  [storage natives samples]
+  [storage natives samples typed?]
   (let [token (str (random-uuid))
         ctx (executor/create-context {:storage storage :base-fns natives :auth-provider (auth/single-token-provider token)})
         _ (runtime/rebuild! ctx)
-        app (router/create-router ctx "_app-ring-response")]
+        app (router/create-router ctx "_app-ring-response")
+        cases (into {:neq-equal [:neq {:values [1.25 1.25]}]
+                     :neq-mixed [:neq {:values [nil false true 3.5 "3.5"]}]}
+                    (map (fn [name] [name [name (get samples name)]])) [:round :sqrt :pow :neq])]
+    (when typed?
+      (doseq [values [[{:ref "example"}] [{:secret "example"}] [["nested"]] [] [9007199254740992]]]
+        (let [[status payload] (post-run app token :neq {:values values})]
+          (expect! [400 "invalid-comparison-values"] [status (get-in payload [:error-data :code])]))))
     (into (sorted-map)
-          (for [name [:round :sqrt :pow] :let [args (get samples name) id (ids/fn-id "core.arithmetic" name)
-                                               response (router/dispatch app {:request-method :post :uri "/api/execute"
-                                                                              :headers {"authorization" (str "Bearer " token)
-                                                                                        "content-type" "application/json"}
-                                                                              :body (json/generate-string {:fn-id id :args args :timeout-ms 30000})})
-                                               payload (json/parse-string (:body response) true)
-                                               native ((get natives name) args ctx)]]
+          (for [[label [name args]] cases
+                :let [[status payload] (post-run app token name args)
+                      native ((get natives name) args ctx)]]
             (do
-              (expect! [200 :succeeded Double native] [(:status response) (keyword (:status payload))
-                                                       (class native) (:result payload)])
-              [name {:native (Class/.getName (class native)) :json (:result payload)}])))))
+              (expect! [200 "succeeded" (if (= :neq name) Boolean Double) native]
+                       [status (:status payload) (class native) (:result payload)])
+              [label {:native (.getName (class native)) :json (:result payload)}])))))
+
+
+(defn- comparison-checks!
+  [ctx sample]
+  (let [owner (ids/fn-id "core.arithmetic" :neq)
+        plan (run/plan ctx owner sample)
+        code (fn [f] (try (f) :accepted (catch clojure.lang.ExceptionInfo e (select-keys (ex-data e) [:type :code :reason]))))
+        invalid {:type :input/compile-rejected :code :invalid-comparison-values}
+        unpinned (update ctx :base-fns vary-meta dissoc ::arithmetic/scalar-comparison)]
+    (doseq [v [[identity] [(random-uuid)] (first {"key" "value"}) [:ref] [Double/NaN] [Float/POSITIVE_INFINITY] [-9007199254740992]
+               (repeat 4 "not a JSON array") [(apply str (repeat 262145 "x"))]]]
+      (expect! invalid (code #(comparison/check-args! {:values v}))))
+    (expect! invalid (code #((:invoke plan) {:values [identity]} ctx)))
+    (doseq [t [:any [:list :any] [:secret :text]]]
+      (expect! {:type :browser-plan/unsupported :reason :server-value} (code #(server-values/contract t))))
+    (expect! {:type :browser-plan/unsupported :reason :server-value}
+             (code #(run/plan unpinned owner sample)))))
 
 
 (defn- scalar-checks!
   []
-  (doseq [v [(float 0.25) -0.0 Double/MIN_VALUE Double/MAX_VALUE]]
+  (doseq [v [(float 0.25) (double -0.0) Double/MIN_VALUE Double/MAX_VALUE]]
     (expect! v (#'run/project-result :numeric v)))
   (doseq [[type value] [[:numeric Double/NaN] [:numeric Double/POSITIVE_INFINITY] [:numeric Float/NEGATIVE_INFINITY]
-                        [:int 1.5] [:numeric 9007199254740992N] [[:list :numeric] [1.5]]
+                        [:int (double 1.5)] [:numeric 9007199254740992N] [[:list :numeric] [1.5]]
                         [[:refine :numeric [:>= 0]] -1.5]]]
     (expect! :rejected (try (#'run/project-result type value) :accepted (catch clojure.lang.ExceptionInfo _ :rejected)))))
 
@@ -78,7 +110,7 @@
        (let [{:keys [storage base-fns]} golden/*bootstrap*
              _ (scalar-checks!)
              _ (expect! nil (:input-type-fn-id (sp/read-entity storage :fn (ids/fn-id "core.arithmetic" :round))))
-             legacy-http (http-results storage base-fns samples)
+             legacy-http (http-results storage base-fns samples false)
              sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
              info (sync!)
              _ (ig/init-key :exec/fn-entities {:storage storage :packages packages :base-fns info})
@@ -88,9 +120,10 @@
              original (set (versions))
              _ (sync!)
              actual-natives (with-meta (merge base-fns (:base-fns info)) (meta (:base-fns info)))
-             typed-http (http-results storage actual-natives samples)
+             typed-http (http-results storage actual-natives samples true)
              rows (sp/read-entities storage :fn owners)
              ctx (executor/create-context {:storage storage :base-fns (:base-fns info)})]
+         (comparison-checks! ctx (:neq samples))
          (expect! legacy-http typed-http)
          (expect! inputs (mapv #(get-in rows [% :input-type-fn-id]) owners))
          (expect! original (set (versions)))
@@ -108,7 +141,7 @@
                expected (into {} (map (fn [[name args]] [name ((get-in info [:base-fns name]) args ctx)])) samples)
                compiled (into (sorted-map) (map (fn [[name args]] [name (stored-result ctx name args)])) samples)]
            (expect! expected compiled)
-           (expect! (assoc expected :neq {:type :browser-plan/unsupported :reason :server-value}) outputs)
+           (expect! expected outputs)
            (reset! result {:stored-owners (count owners) :stable-versions (count original)
                            :compiled-values compiled :public-results outputs :http {:v1 legacy-http :v2 typed-http}})))))
     @result))

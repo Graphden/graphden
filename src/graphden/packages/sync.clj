@@ -383,6 +383,8 @@
           :all-name->id all-name->id
           :base-fns (vary-meta base-fns-map assoc
                                ::owned/native-signatures (::registry-core/registered-signatures (meta written))
+                               ::arithmetic/scalar-comparison (when (get-in primitives [:neq :in-place-definition])
+                                                                (:neq base-fn-defs))
                                ::owned/list-implementations (when-let [modules (seq (keep :list-module (vals primitives)))]
                                                               (into {} (mapcat (requiring-resolve 'graphden.input.pinned-list-runtime/implementations)) modules))
                                ::owned/primitive-input-types (primitive-input-types primitives))})))))

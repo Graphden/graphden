@@ -124,7 +124,8 @@ routes. Free leaf addresses remain invocation parameters. Whole record inputs,
 projection into an opaque producer's descendant, sequence builders and container
 obligations require separate lowering. Supported primitive `:value-type` and
 `:field-read` obligations run through the existing validator inside the once-cell,
-which also memoizes failures.
+which also memoizes failures. A checked list literal or evaluated reference
+can use the list validator when the consumer's union admits any list.
 
 `input.frame/instantiate` allocates and freezes the outer cell table before any
 field can execute. A base implementation receives a plain map of outer

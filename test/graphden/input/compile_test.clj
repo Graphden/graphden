@@ -438,6 +438,32 @@
                     (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))))
 
 
+(deftest computed-list-retains-a-field-read-validator-for-its-union-arm
+  (let [collection-type '[:union :null [:list :any] [:map a :any]]
+        root {:input {:x collection-type} :return :any :bindings {[:x] {:ref :child}}}
+        definitions {:root root :child {:input {} :return [:list :any]}}
+        result (atom [1 "two"])
+        calls (atom 0)
+        functions {:root echo :child (fn [_ _] (swap! calls inc) @result)}
+        {:keys [closure analysis]} (compiled definitions functions)
+        address (fixture/address :root [] :root [:x])]
+    (is (= :field-read (:trigger (first (:obligations analysis)))))
+    (is (= address (:address (first (:obligations analysis)))))
+    (is (zero? @calls))
+    (is (= [1 "two"] (invoke closure)))
+    (doseq [invalid [nil {:key "value"} 42]]
+      (reset! result invalid)
+      (is (= :execution-error/type-mismatch
+             (try (invoke closure) nil
+                  (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))
+    (is (= 4 @calls))
+    (is (= :runtime-obligations-required
+           (try (compiled (assoc-in definitions [:child :return] :any) functions) nil
+                (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))
+    (let [literal (assoc-in definitions [:root :bindings [:x]] {:value []})]
+      (is (= [] (invoke (:closure (compiled literal functions))))))))
+
+
 (deftest optional-absence-remains-distinct-from-explicit-nil
   (let [definitions {:root {:input {:x :any} :optional #{[:x]} :return :any}}
         {:keys [closure]} (compiled definitions {:root (fn [args _]

@@ -22,21 +22,40 @@
     (reject! :snapshot-mismatch {})))
 
 
+(defn- field-read-type
+  [analysis [[_ scope] :as address] expected op]
+  (cond
+    (contains? #{:any :null :bool :text :int :float :decimal :numeric
+                 :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected) expected
+    ;; A checked list literal or producer selects the list arm. Keep the read
+    ;; check without interpreting variables in the other arms.
+    (and (types/union-type? expected) (some #{[:list :any]} (types/union-members expected)))
+    (let [{:keys [mode actual-type]} (get-in analysis [:scopes scope :bindings address :reference])]
+      (when (and (#{[:invoke :value] [:literal :literal]} [op mode])
+                 (types/list-type? actual-type))
+        [:list :any]))))
+
+
+(defn- read-validator
+  [analysis expressions closures {:keys [address kind trigger expected-type]}]
+  (let [op (get-in expressions [address :op])
+        details {:address address :kind kind :trigger trigger}
+        closure (get closures address)
+        check (when (and op (= :value-type kind) (= :field-read trigger))
+                (if closure
+                  (when (= expected-type (:type closure)) expected-type)
+                  (field-read-type analysis address expected-type op)))]
+    (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type) (= :supplied op))
+      (reject! :supplied-callable-validation-required details))
+    (when-not check (reject! :runtime-obligations-required details))
+    (when-not closure [address check])))
+
+
 (defn- value-obligations
   [analysis expressions closures]
   (let [obligations (distinct (concat (:obligations analysis)
-                                      (mapcat :obligations (vals (:scopes analysis)))))]
-    (doseq [{:keys [address kind trigger expected-type]} obligations]
-      (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type)
-                 (= :supplied (get-in expressions [address :op])))
-        (reject! :supplied-callable-validation-required {:address address :kind kind :trigger trigger}))
-      (when-not (and (= :value-type kind) (= :field-read trigger)
-                     (if-let [closure (get closures address)]
-                       (= expected-type (:type closure))
-                       (contains? #{:any :null :bool :text :int :float :decimal :numeric
-                                    :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected-type))
-                     (contains? expressions address))
-        (reject! :runtime-obligations-required {:address address :kind kind :trigger trigger})))
+                                      (mapcat :obligations (vals (:scopes analysis)))))
+        validators (into {} (keep (partial read-validator analysis expressions closures)) obligations)]
     (let [by-address (group-by :address obligations)]
       (doseq [[address entries] by-address]
         (when-not (= 1 (count entries))
@@ -44,9 +63,7 @@
       ;; The closure is built by the compiler with the already-proved
       ;; invocation contract. Validating an arbitrary host function cannot
       ;; establish a structural callable type.
-      (into {} (keep (fn [[address entries]]
-                       (when-not (contains? closures address)
-                         [address (:expected-type (first entries))]))) by-address))))
+      validators)))
 
 
 (defn- lower-binding

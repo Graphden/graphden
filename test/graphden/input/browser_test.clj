@@ -265,7 +265,7 @@
         args (fn [capture] {:coll ["Ada" "Bea" "Ada"] :func {:b capture}})
         cases (mapv args ["Ada" "Bea" "Ada"])
         expected [[true false true] [false true false] [true false true]]
-        results (run-browser plan (conj cases {:coll ["Ada"]}))]
+        results (vec (run-browser plan (conj cases {:coll ["Ada"]})))]
     (is (= expected (mapv #(invoke % nil) cases)))
     (is (= (mapv #(hash-map :value (wire/encode-result %) :sequence true) expected)
            (pop results)))

@@ -125,13 +125,33 @@
           [(apply array-map (mapcat (juxt identity raw) fields))])))))
 
 
+(defn legacy-literal-marker?
+  "An explicit legacy value with its redundant literal marker."
+  [form]
+  (and (map? form) (= #{:value :literal?} (set (keys form))) (true? (:literal? form))))
+
+
+(defn- marked-literal-spelling
+  [form]
+  (if (= :literal? (ffirst form)) :literal-marker-first :literal-marker-last))
+
+
+(defn- original-marked-literal
+  [spelling value]
+  (case spelling
+    :literal-marker-first [(array-map :literal? true :value value)]
+    :literal-marker-last [(array-map :value value :literal? true)]
+    nil))
+
+
 (defn- list-origin?
   [spelling]
   (and (vector? spelling) (= 3 (count spelling)) (= :list-origin (first spelling))
        (contains? #{:vector [:append] [:append :closed] [:closed :append]} (second spelling))
        (map? (peek spelling))
        (every? nat-int? (keys (peek spelling)))
-       (every? #(or (#{:value-wrapper :ref-wrapper} %) (positional-spelling? %))
+       (every? #(or (#{:value-wrapper :ref-wrapper :literal-marker-first :literal-marker-last} %)
+                    (positional-spelling? %))
                (vals (peek spelling)))))
 
 
@@ -143,7 +163,10 @@
         (original-position item spelling input)
         (when (= 2 (count item))
           (case op
-            :value (case spelling nil [value] :value-wrapper [{:value value}] nil)
+            :value (case spelling
+                     nil [value]
+                     :value-wrapper [{:value value}]
+                     (original-marked-literal spelling value))
             :ref (case spelling
                    nil (cond (keyword? value) [value]
                              (map? value) (when-let [origin (inline-origin value)] [origin]))
@@ -180,7 +203,7 @@
         :value (case spelling
                  nil [{:value value}]
                  :bare-value (when (or scoped? (coll? value)) [value])
-                 nil)
+                 (original-marked-literal spelling value))
         :ref (case spelling
                nil (cond
                      (keyword? value) [value]
@@ -299,7 +322,7 @@
                    (or (not (contains? body :legacy-forms))
                        (and (map? legacy-forms)
                             (every? #(or (contains? source-names %) (annotation-spelling? (get legacy-forms %))) (keys legacy-forms))
-                            (every? #(or (#{:bare-value :ref-wrapper :type-first} %)
+                            (every? #(or (#{:bare-value :ref-wrapper :type-first :literal-marker-first :literal-marker-last} %)
                                          (inline-type-position? %) (list-origin? %) (annotation-spelling? %))
                                     (vals legacy-forms)))))
           (let [annotation-paths (into {} (map (fn [[path field]] [field path])) (:legacy-scope-names body))
@@ -341,6 +364,8 @@
                              (case (set (keys item))
                                #{:value} [position :value-wrapper]
                                #{:ref} [position :ref-wrapper]
+                               #{:value :literal?} (when (legacy-literal-marker? item)
+                                                     [position (marked-literal-spelling item)])
                                (when (contains? item :as)
                                  [position [:position (vec (keys item))]])))))
            items)]))
@@ -354,6 +379,7 @@
       :list-builder [expression (list-spelling raw)]
       :value (cond
                (and (map? raw) (= #{:value} (set (keys raw)))) [expression nil]
+               (legacy-literal-marker? raw) [expression (marked-literal-spelling raw)]
                (coll? raw) [expression :bare-value]
                :else [raw nil])
       :ref (cond

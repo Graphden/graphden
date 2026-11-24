@@ -338,6 +338,22 @@
     (is (str/includes? target ":bind {:pin ; bound text\r\n [:value \"one\r\ntwo\"] ; pin tail\r\n :flag [:value false] ; flag tail\r\n"))))
 
 
+(deftest explicit-scalar-literal-markers-preserve-inline-identity-and-comments
+  (let [text (str "{:namespace \"demo.main\" :fns ["
+                  "{:name :sink :args {:x :any :y :any} :return-type :any} "
+                  "{:name :child :parent :sink :args "
+                  "{:x {:parent :sink :args {:x {:literal? ; inline marker\r\n true :value \"a\r\nb\"}}}"
+                  " :y {:value ; outer payload\r\n :sink :literal? true}}}]}")
+        target (migrate-child text)
+        child (peek (:fns (edn/read-string target)))]
+    (is (= [:value :sink] (get-in child [:bind :y])))
+    (is (= [:value "a\r\nb"] (get-in child [:bind :x 1 :bind :x])))
+    (is (= :literal-marker-first (get-in child [:bind :x 1 :legacy-forms :x])))
+    (is (str/includes? target "; inline marker\r\n"))
+    (is (str/includes? target "; outer payload\r\n"))
+    (is (not (str/includes? target ":literal?")))))
+
+
 (deftest inline-source-location-keeps-comments-qualification-and-literal-bytes
   (let [body "{ ; вложенная функция\r\n :parent ; qualified\r\n :demo.main/producer}"
         literal "{:parent :producer :text \"one\r\ntwo\"}"
@@ -672,7 +688,8 @@
   (let [text (str "{:namespace \"demo.main\" :fns [{:name :sink :args {:x :any :items :sequence} :return-type :any}"
                   "{:name :producer :return-type :any}"
                   "{:name :child :parent :sink :args {:items [{:parent :sink :args {:items "
-                  "{:closed false ; keep tail\r\n :append [{:value nil} {:ref ; qualified\r\n :demo.main/producer}"
+                  "{:closed false ; keep tail\r\n :append [{:value nil :literal? true}"
+                  " {:literal? ; literal first\r\n true :value :producer} {:ref ; qualified\r\n :demo.main/producer}"
                   " {:parent :sink :args {:x 7}} {:type ; positional type\r\n :text :as :pin}]}}}]}}]}")
         target (migrate-child text)]
     (is (str/includes? target ":tail :open ; keep tail\r\n :items"))
@@ -680,6 +697,9 @@
     (is (str/includes? target ":legacy-forms {:items [:list-origin [:closed :append]"))
     (is (str/includes? target ":input {:pin {:type :text, :required false}}"))
     (is (str/includes? target "; positional type\r\n"))
+    (is (str/includes? target "; literal first\r\n"))
+    (is (str/includes? target ":literal-marker-first"))
+    (is (str/includes? target ":literal-marker-last"))
     (is (not (str/includes? target "_anon-")))))
 
 

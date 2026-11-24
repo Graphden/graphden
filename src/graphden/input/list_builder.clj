@@ -2,6 +2,7 @@
   "Ordered list fragments for the offline source migration. Item references
    retain their own occurrences and the consumer's existing delivery policy."
   (:require
+    [graphden.input.format :as format]
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
@@ -100,21 +101,12 @@
                   items)}]))
 
 
-(defn explicit-literal-item?
-  "The legacy list parser unwraps an explicit value before recording an item.
-   Its optional literal marker does not create a storage flag."
-  [item]
-  (and (map? item)
-       (or (= #{:value} (set (keys item)))
-           (and (= #{:value :literal?} (set (keys item))) (true? (:literal? item))))))
-
-
 (defn- source-item
   [name->id value]
   (cond
     (and (keyword? value) (contains? name->id value)) [:ref value]
     (not (map? value)) [:value value]
-    (explicit-literal-item? value) [:value (:value value)]
+    (or (= #{:value} (set (keys value))) (format/legacy-literal-marker? value)) [:value (:value value)]
     (= #{:ref} (set (keys value))) [:ref (:ref value)]
     (positions/marker? value) (positions/expression (:as value) value)
     (:as value) (reject! :positional-list-annotation-required)

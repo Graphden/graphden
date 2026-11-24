@@ -202,6 +202,18 @@
         type-edit (assoc :configuration (:configuration type-edit))))))
 
 
+(defn- marked-literal-edit
+  [source starts loc]
+  (let [{:keys [start before] :as span} (node-edit source starts loc identity)
+        key (key-loc loc :literal?)
+        remove-marker (mapv #(-> (node-edit source starts % (constantly ""))
+                                 (update :start - start)
+                                 (update :end - start))
+                            [key (z/right key)])
+        after (patched-text before remove-marker)]
+    (assoc span :after (str "[" (subs after 1 (dec (count after))) "]"))))
+
+
 (defn- leaf-edit
   [source starts leaf op path]
   (case op
@@ -214,11 +226,14 @@
       (node-edit source starts leaf #(str "[:ref " % "]")))
     :map-expression-to-vector
     (let [nodes (when (= :map (z/tag leaf)) (children leaf))]
-      (when-not (and (= 2 (count nodes)) (#{:value :ref} (z/sexpr (first nodes)))
-                     (or (= :value (z/sexpr (first nodes)))
-                         (keyword? (z/sexpr (second nodes)))))
-        (refuse :unsupported-expression-map {:path path}))
-      (node-edit source starts leaf #(str "[" (subs % 1 (dec (count %))) "]")))
+      (if (and nodes (key-loc leaf :literal?) (format/legacy-literal-marker? (z/sexpr leaf)))
+        (marked-literal-edit source starts leaf)
+        (do
+          (when-not (and (= 2 (count nodes)) (#{:value :ref} (z/sexpr (first nodes)))
+                         (or (= :value (z/sexpr (first nodes)))
+                             (keyword? (z/sexpr (second nodes)))))
+            (refuse :unsupported-expression-map {:path path}))
+          (node-edit source starts leaf #(str "[" (subs % 1 (dec (count %))) "]")))))
     (refuse :unknown-operation {:op op})))
 
 
@@ -410,25 +425,10 @@
     (assoc span :after (str "[" (text false) (when (get groups true) (str " {" (text true) "}")) "]"))))
 
 
-(defn- list-literal-wrapper-edit
-  [source starts loc]
-  (let [{:keys [start before] :as span} (node-edit source starts loc identity)
-        key (key-loc loc :literal?)
-        remove-marker (mapv #(-> (node-edit source starts % (constantly ""))
-                                 (update :start - start)
-                                 (update :end - start))
-                            [key (z/right key)])
-        after (patched-text before remove-marker)]
-    (assoc span :after (str "[" (subs after 1 (dec (count after))) "]"))))
-
-
 (defn- list-item-edit
   [source starts path node [operator payload]]
   (cond
     (= :project operator) (position-item-edit source starts node)
-    (and (= :value operator) (= :map (z/tag node)) (key-loc node :literal?)
-         (list-builder/explicit-literal-item? (z/sexpr node)))
-    (list-literal-wrapper-edit source starts node)
     (and (= :ref operator) (map? payload)) (inline-edit source starts node payload path)
     :else (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))
                 op (if wrapped? :map-expression-to-vector (if (= :ref operator) :wrap-ref :wrap-value))]
@@ -630,7 +630,8 @@
                    (or (= :value operator) (qualified-keyword? payload) inline?))
       (refuse :unsupported-source-argument {:path source-path}))
     (when-not (if wrapper?
-                (and (or typed? (= 1 (count raw))) (contains? raw operator)
+                (and (or typed? (= 1 (count raw)) (format/legacy-literal-marker? raw))
+                     (contains? raw operator)
                      (if (= :value operator) (= payload (get raw operator))
                          (keyword? (get raw operator))))
                 (if (= :value operator) (= payload raw) (or (keyword? raw) inline?)))

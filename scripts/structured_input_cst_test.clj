@@ -556,6 +556,31 @@
              (reason #(cst/list-builder-operation (assoc (peek definitions) :name :other) :xs fragment (:name->id ctx))))))))
 
 
+(deftest list-literal-marker-is-removed-without-changing-data-or-comments
+  (let [text (str "{:namespace \"demo.main\" :fns ["
+                  "{:name :sink :args {:xs {:type [:list :any]}} :return-type :any} "
+                  "{:name :read :args {} :return-type :int} "
+                  "{:name :child :parent :sink :args {:xs ["
+                  "{:literal? ; first marker\r\n true :value :read} "
+                  "{:value ; multi-line payload\r\n \"a\r\nb\" ; second marker\r\n :literal? true}]}}]}")
+        definitions (mapv #(assoc % :namespace "demo.main") (:fns (edn/read-string text)))
+        ctx (parse/prepare-module definitions {} {})
+        plan (source/verify-module (source/plan-module definitions ctx) ctx)
+        entry (peek (:definitions plan))
+        fragment (-> entry :legacy :arguments first :list-builder :fragments peek)
+        op (cst/list-builder-operation (peek definitions) :xs fragment (:name->id ctx))
+        patch (cst/plan text (request {:op :rename-bind :definition :child :path [:args]} op))
+        after (:text (cst/apply-text patch text))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= [[:value :read] [:value "a\r\nb"]]
+           (get-in (edn/read-string after) [:fns 2 :bind :xs 1 :items])))
+    (is (str/includes? after "; first marker\r\n"))
+    (is (str/includes? after "; second marker\r\n"))
+    (is (str/includes? after "; multi-line payload\r\n \"a\r\nb\""))
+    (is (not (str/includes? after ":literal?")))
+    (is (= :already-applied (:status (cst/apply-text patch after))))))
+
+
 (deftest mixed-list-contributions-retain-field-trivia-and-configuration
   (let [text (str "{:namespace \"demo.main\" :fns [{:name :base :args {:xs :sequence :flag :bool} :return-type :any}\r\n"
                   "{:name :child :parent :base :args {:xs ; list\r\n [{:value \"line one\r\nline two\"} false] ; end\r\n"

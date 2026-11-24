@@ -410,10 +410,25 @@
     (assoc span :after (str "[" (text false) (when (get groups true) (str " {" (text true) "}")) "]"))))
 
 
+(defn- list-literal-wrapper-edit
+  [source starts loc]
+  (let [{:keys [start before] :as span} (node-edit source starts loc identity)
+        key (key-loc loc :literal?)
+        remove-marker (mapv #(-> (node-edit source starts % (constantly ""))
+                                 (update :start - start)
+                                 (update :end - start))
+                            [key (z/right key)])
+        after (patched-text before remove-marker)]
+    (assoc span :after (str "[" (subs after 1 (dec (count after))) "]"))))
+
+
 (defn- list-item-edit
   [source starts path node [operator payload]]
   (cond
     (= :project operator) (position-item-edit source starts node)
+    (and (= :value operator) (= :map (z/tag node)) (key-loc node :literal?)
+         (list-builder/explicit-literal-item? (z/sexpr node)))
+    (list-literal-wrapper-edit source starts node)
     (and (= :ref operator) (map? payload)) (inline-edit source starts node payload path)
     :else (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))
                 op (if wrapped? :map-expression-to-vector (if (= :ref operator) :wrap-ref :wrap-value))]

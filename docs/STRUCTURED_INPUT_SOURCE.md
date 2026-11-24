@@ -197,6 +197,11 @@ floats, booleans and lists. A union with an unresolved named member requires
 further declaration evidence. A known literal must fit a union member. A
 reference whose return is too broad retains its runtime validation obligation.
 
+An explicit list item `{:value V :literal? true}` lowers to `[:value V]`.
+The legacy package parser stores the same item value and no literal flag.
+The writer checks the item rows, retains the original payload and keeps
+comments around the removed annotation.
+
 A named record with bare primitive fields can also supply a typed projection.
 The snapshot retains its original field map and checks every slot and membership
 against the record UUID, ordinal, field name and primitive type UUID. A

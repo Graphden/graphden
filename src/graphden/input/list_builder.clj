@@ -100,12 +100,21 @@
                   items)}]))
 
 
+(defn explicit-literal-item?
+  "The legacy list parser unwraps an explicit value before recording an item.
+   Its optional literal marker does not create a storage flag."
+  [item]
+  (and (map? item)
+       (or (= #{:value} (set (keys item)))
+           (and (= #{:value :literal?} (set (keys item))) (true? (:literal? item))))))
+
+
 (defn- source-item
   [name->id value]
   (cond
     (and (keyword? value) (contains? name->id value)) [:ref value]
     (not (map? value)) [:value value]
-    (= #{:value} (set (keys value))) [:value (:value value)]
+    (explicit-literal-item? value) [:value (:value value)]
     (= #{:ref} (set (keys value))) [:ref (:ref value)]
     (positions/marker? value) (positions/expression (:as value) value)
     (:as value) (reject! :positional-list-annotation-required)

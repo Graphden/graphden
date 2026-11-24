@@ -106,6 +106,29 @@
     (is (= :already-applied (:status (cst/apply-text patch edited))))))
 
 
+(deftest scoped-metadata-only-fields-are-written-at-the-confirmed-path
+  (let [raw (str "{:namespace \"demo.main\" :fns [{:name :host :parent :wrapper "
+                 ":args {:flag ; retained field comment\r\n {:as :flag :type :bool}}}]}")
+        original (first (:fns (edn/read-string raw)))
+        path [:child :flag]
+        proposed (-> original (dissoc :args) (assoc :bind {} :configure {path {:type :bool}}))
+        edge-id (random-uuid)
+        slot-id (random-uuid)
+        binding-id (random-uuid)
+        certificate {:source-path [:args :flag] :public-path path :configuration {:type :bool}
+                     :edges [{:binding-id edge-id}]
+                     :row {:id binding-id :target-path [slot-id] :scope-path [edge-id]}}
+        argument {:source-path [:args :flag] :origin {:slot-id slot-id :binding-id binding-id}
+                  :scope-certificate certificate}
+        entry {:source original :proposed proposed :kind :composed :status :supported
+               :legacy {:arguments [argument]}}
+        edit (cst/plan raw {:namespace "demo.main" :operations (cst/entry-operations entry)})
+        target (:target-text edit)]
+    (is (= proposed (first (:fns (edn/read-string target)))))
+    (is (str/includes? target "[:child :flag] ; retained field comment\r\n"))
+    (is (= :already-applied (:status (cst/apply-text edit target))))))
+
+
 (deftest rename-preserves-declaration-style-test
   (let [source "; module\n{:namespace \"demo.main\", :fns\n [{:name :base\n   :args ; owned declaration comment\n   {:x {:type :any :value {:args 9 :input 2}}}}]} ; end\n"
         patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}))

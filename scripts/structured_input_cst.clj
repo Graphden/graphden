@@ -597,7 +597,9 @@
   (let [loc (or (get definitions definition)
                 (refuse :missing-definition {:definition definition}))]
     (case op
-      :field-annotations (annotation-map-edit source starts loc (:configuration operation) "")
+      :field-annotations (annotation-map-edit source starts loc (:configuration operation)
+                                              (if (:empty-bind? operation) ":bind {} " "")
+                                              (:scope-names operation))
       :self-pin (self-pin-edit source starts loc operation)
       :list-builder (list-builder-edit source starts (argument-loc loc path) operation)
       :scope-key
@@ -794,6 +796,36 @@
       :else (into (into (rename :rename-bind) scopes) operations))))
 
 
+(defn- annotation-only-operations
+  [source proposed arguments]
+  (let [scoped (into {} (keep (fn [{:keys [scope-certificate source-path origin]}]
+                                (when-let [{:keys [public-path row edges] :as certificate} scope-certificate]
+                                  (when-not (and (= source-path (:source-path certificate))
+                                                 (vector? public-path) (every? simple-keyword? public-path)
+                                                 (= (inc (count edges)) (count public-path))
+                                                 (seq edges) (= (peek source-path) (peek public-path))
+                                                 (uuid? (:id row)) (= (:id row) (:binding-id origin))
+                                                 (nil? (:expression-kind row))
+                                                 (= [(:slot-id origin)] (:target-path row))
+                                                 (= (mapv :binding-id edges) (:scope-path row)))
+                                    (refuse :planner-ledger-mismatch {:path source-path}))
+                                  [public-path (peek source-path)]))) arguments)
+        by-name (set/map-invert scoped)
+        config (into {} (map (fn [{:keys [source-path annotation scope-certificate]}]
+                               (let [field (peek source-path)]
+                                 [(get by-name field [field])
+                                  (if scope-certificate (:configuration scope-certificate)
+                                      (annotations/configuration annotation))]))) arguments)
+        empty-bind? (= {} (:bind proposed))]
+    (when-not (and (= (count config) (count arguments))
+                   (= proposed (cond-> (assoc (dissoc source :args) :configure config)
+                                 empty-bind? (assoc :bind {}))))
+      (refuse :planner-ledger-mismatch {}))
+    [(cond-> {:op :field-annotations :definition (:name source) :path [:args] :configuration config}
+       (seq scoped) (assoc :scope-names scoped)
+       empty-bind? (assoc :empty-bind? true))]))
+
+
 (defn entry-operations
   "Bridge one SUPPORTED graphden.input.source/plan-module entry to CST operations.
    The semantic planner owns reference resolution. Ref spellings are retained;
@@ -807,17 +839,14 @@
   (let [has-args? (contains? source :args)
         pin (:self-pin (first (:arguments legacy)))
         annotations (filter :annotation (:arguments legacy))
+        annotation-only? (every? #(or (:annotation %) (contains? (:scope-certificate %) :configuration))
+                                 (:arguments legacy))
         rename (fn [op] (if has-args? [{:op op :definition (:name source) :path [:args]}] []))]
-    (case (cond (and (= :composed kind) (seq annotations)
-                     (= (count annotations) (count (:arguments legacy)))) :annotations
+    (case (cond (and (= :composed kind) (seq (:arguments legacy)) annotation-only?) :annotations
                 (and (= :composed kind) pin) :self-pin
                 :else kind)
       :annotations
-      (let [config (into {} (map (fn [{:keys [source-path annotation]}]
-                                   [[(second source-path)] (annotations/configuration annotation)])) annotations)]
-        (when-not (= proposed (assoc (dissoc source :args) :configure config))
-          (refuse :planner-ledger-mismatch {}))
-        [{:op :field-annotations :definition (:name source) :path [:args] :configuration config}])
+      (annotation-only-operations source proposed (:arguments legacy))
 
       :self-pin (self-pin-operation source proposed (:arguments legacy) pin)
 

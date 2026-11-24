@@ -2526,9 +2526,13 @@ train_run() {
   gate_base="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   local reuse_from=""
   if [ -n "$previous_train_ts" ] && [ "$resume_from" = "$LOG_DIR/_train-$previous_train_ts" ] \
-    && (cd "$TRAIN_WT" && bb scripts/ci_resume_cli.clj eligible gate \
-       "$resume_from.report.edn" "$resume_from.ci-expected.edn" \
-       "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$gate_base"); then
+    && { (cd "$TRAIN_WT" && bb scripts/ci_resume_cli.clj eligible gate \
+            "$resume_from.report.edn" "$resume_from.ci-expected.edn" \
+            "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$gate_base") \
+         || { [ "$WTQ_GATE_MODE" = validate ] && [ "${WTQ_RETRY_INTEGRATION_HEAP:-}" = 1 ] \
+              && bb "$SCRIPT_DIR/heap_interruption.clj" "$resume_from" \
+                   "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$gate_base" \
+              && echo "  verified JVM heap interruption in automatic integration"; }; }; then
     reuse_from="$resume_from"
     echo "  exact-candidate interrupted checkpoint: $reuse_from"
   fi

@@ -106,13 +106,13 @@ Matches each original owner's complete normalized inline expansion with preparat
 :PROPERTIES:
 :CUSTOM_ID: types/with-certified-owner
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 764
+:LINE: 789
 :MINS: 1.1
 :END:
 
 Proves one owner and its dependencies as an immutable transaction. Verified parent forwarding is available before replanning inherited inputs; scoped bindings still pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:764]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:789]]
 - see also :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/verify-bindings][verify-bindings]]
 - same file :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]
@@ -178,13 +178,13 @@ Checks the anonymous callable row against its literal authored form and stored F
 :PROPERTIES:
 :CUSTOM_ID: types/migrate-forwarded-field
 :FILE: src/graphden/input/source_snapshot.clj
-:LINE: 620
+:LINE: 645
 :MINS: 0.9
 :END:
 
 Freezes both endpoints of an authored field passed to a value-producing reference. The checker replays the exact projection and verifies that the original local field remains available. A successful replay supplies a source proposal with the scoped path and its original field identity.
 
-- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:620]]
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:645]]
 - see also :: [[file:types.org::#types/verify-module][verify-module]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/authored-callable-field?][authored-callable-field?]]
@@ -283,13 +283,13 @@ Builds an offline graph of evaluated reference uses. Each use has a binding-ID s
 :PROPERTIES:
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
-:LINE: 242
+:LINE: 247
 :MINS: 1.0
 :END:
 
 Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. A checked callback runs in a fresh local frame with its enclosing cells still visible. Source authorization precedes export.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:242]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:247]]
 - see also :: [[file:types.org::#types/export-named][export-named]]
 - same file :: [[file:types.org::#types/export-named][export-named]]
 
@@ -297,13 +297,13 @@ Lowers the checked input IR to browser format 2 for closed pure graphs. A field 
 :PROPERTIES:
 :CUSTOM_ID: types/export-named
 :FILE: src/graphden/input/browser.clj
-:LINE: 250
+:LINE: 255
 :MINS: 1.1
 :END:
 
 Includes checked named residual routes and the wire type for each supported supplied field. Browser and JVM both defer validation until the field is read. Lists validate their elements and opaque dictionaries validate keys and values as a whole field. Absent fields stay outside the record, including when an explicit nil is allowed. A supplied empty record is present. Supplying an optional record also activates its required fields.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:250]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:255]]
 - same file :: [[file:types.org::#types/export-closed][export-closed]]
 - referenced from :: [[file:types.org::#types/export-closed][export-closed]]
 

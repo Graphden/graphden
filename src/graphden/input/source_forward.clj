@@ -61,64 +61,75 @@
     {:slot slot :membership membership :type (:type spec)}))
 
 
-(defn- reference-occurrence
+(defn- reference-occurrences
   [prepared {owner-id :identity :keys [source]} field]
   (let [{:keys [defs-by-name name->id]} prepared
         owner-ref (slots/own-ref source defs-by-name)
         owner (get defs-by-name owner-ref)]
     (when-not (= owner-id (get name->id owner-ref) (:fn-id owner))
       (reject! :missing-prepared-owner))
-    (let [[target-ref [declaring-ref n]]
-          (single (keep (fn [target]
-                          (when-let [field-origin (slots/resolve-slot-owner-strict target field defs-by-name #{})]
-                            [target field-origin]))
-                        (slots/ref-targets-of owner defs-by-name))
-                  :nonunique-reference-use)
-          target-lineage (slots/chain-of target-ref defs-by-name)
-          declaring-id (get name->id declaring-ref)
-          target-id (get name->id target-ref)]
-      (when-not (and (= field n) (uuid? declaring-id) (uuid? target-id))
-        (reject! :unsupported-reference-field-origin))
-      {:target-id target-id :field-id (ids/slot-id declaring-id field)
-       :direct? (boolean (some #{declaring-ref} target-lineage))
-       :field-type (slots/slot-type-of declaring-ref field defs-by-name)
-       :return-owner-ref (some #(when (get-in defs-by-name [% :return-type]) %) target-lineage)
-       :return-type (some #(get-in defs-by-name [% :return-type]) target-lineage)})))
+    (into []
+          (keep (fn [target-ref]
+                  (when-let [[declaring-ref name] (slots/resolve-slot-owner-strict target-ref field defs-by-name #{})]
+                    (let [lineage (slots/chain-of target-ref defs-by-name)
+                          declaring-id (get name->id declaring-ref)
+                          target-id (get name->id target-ref)
+                          return-owner (some #(when (get-in defs-by-name [% :return-type]) %) lineage)]
+                      (when-not (and (= field name) (uuid? declaring-id) (uuid? target-id))
+                        (reject! :unsupported-reference-field-origin))
+                      {:target-id target-id :field-id (ids/slot-id declaring-id field)
+                       :direct? (boolean (some #{declaring-ref} lineage))
+                       :field-type (slots/slot-type-of declaring-ref field defs-by-name)
+                       :return-owner-ref return-owner
+                       :return-type (get-in defs-by-name [return-owner :return-type])}))))
+          (slots/ref-targets-of owner defs-by-name))))
+
+
+(defn- conditional-branch?
+  [prepared {:keys [target]} binding]
+  (let [base-id (ids/fn-id "core.logic" :if)
+        base (get-in prepared [:defs-by-name (:owner target)])
+        field (:field target)
+        variable ({:then 'a :else 'b} field)]
+    (and variable (= base-id (:fn-id base))
+         (= (:slot-id binding) (ids/slot-id base-id field))
+         (= variable (:type target) (get-in base [:args field :type]))
+         (= '[:union a b] (:return-type base)))))
 
 
 (defn- checked-reference-binding
-  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]} {:keys [target-id return-type] :as target}]
+  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]}
+   {:keys [target-id return-type multiple-readers?] :as target}]
   (let [row (single (filter #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %)))
                             (:records legacy)) :missing-direct-reference-binding)
         argument (single (filter #(= (:id row) (get-in % [:origin :binding-id])) (:arguments legacy))
                          :missing-direct-reference-binding)
         [op ref] (:expression argument)
         expected (get-in argument [:target :type])
-        origin (when-not (format/configuration-type? expected) (generic/origin prepared argument row target))]
-    (when-not (and (= op :ref) (= target-id (get name->id ref))
+        origin (when-not (format/configuration-type? expected) (generic/origin prepared argument row target))
+        ;; The stock checker instantiates the independent :if branch types.
+        ;; The frozen replay must still prove a value edge and retain checks.
+        conditional? (and multiple-readers? (conditional-branch? prepared argument row))]
+    (when-not (and (= op :ref)
+                   (or (= target-id (get name->id ref))
+                       (and multiple-readers? (map? ref) (= target-id (:inline-fn-id argument))
+                            (format/inline-origin ref)))
                    (= owner-id (:fn-id row) (get-in argument [:origin :fn-id]))
                    (= (:slot-id row) (get-in argument [:origin :slot-id]))
                    (uuid? (:slot-id row)) (= (:id row) (ids/binding-id owner-id (:slot-id row)))
                    (not (:value-present row)) (empty? (:policy argument))
-                   (or (format/configuration-type? expected) origin) (format/configuration-type? return-type)
-                   (= :value (:mode (reference/classify expected {:return return-type}))))
+                   (or conditional?
+                       (and (or (format/configuration-type? expected) origin)
+                            (format/configuration-type? return-type)
+                            (= :value (:mode (reference/classify expected {:return return-type}))))))
       (reject! :unproved-reference-binding))
     (cond-> {:binding-id (:id row)} origin (assoc :generic-reference origin))))
 
 
-(defn verify-forwarded-field
-  "Prove the slot and direct value-reference occurrence behind one blocked
-   authored field. Uses the prepared legacy context and source-plan ledger.
-   Deep occurrence addresses are resolved by the frozen graph verifier.
-   Repeated uses of the same ref are ambiguous. Does not write source or
-   claim that the full surrounding graph has a checked runtime contract."
-  [{:keys [name->id] :as prepared} {owner-id :identity :as entry} field]
-  (when-not (and (uuid? owner-id) (simple-keyword? field))
-    (reject! :missing-field-origin))
-  (let [{:keys [slot membership type]} (linked-declaration entry field name->id)
-        {:keys [field-id field-type target-id direct?] :as target} (reference-occurrence prepared entry field)
-        {:keys [binding-id generic-reference]} (checked-reference-binding prepared entry target)
-        type (qualified-type prepared (:source entry) type)]
+(defn- proof
+  [prepared {owner-id :identity :as entry} field {:keys [slot membership type]}
+   {:keys [field-id field-type target-id direct? multiple-readers?] :as target}]
+  (let [{:keys [binding-id generic-reference]} (checked-reference-binding prepared entry target)]
     (when-not (and (= field-id (:source-slot-id slot))
                    (or (= type field-type)
                        (and (primitive-field? type) (primitive-field? field-type) (types/subtype? type field-type))))
@@ -129,4 +140,33 @@
              :projection-id (migration/derived-id :forwarded-field owner-id binding-id field-id)
              :source-address [[owner-id []] [(:id slot)]]
              :target-address (when direct? [[owner-id [binding-id]] [field-id]])}
-      generic-reference (assoc :generic-reference generic-reference))))
+      generic-reference (assoc :generic-reference generic-reference)
+      multiple-readers? (assoc :multiple-readers? true))))
+
+
+(defn verify-forwarded-uses
+  "Find the original slot and candidate reference uses for one declared field.
+   Distinct references can reach the same declared slot. The frozen graph
+   must locate one exact reader under each reference and account for all readers."
+  [{:keys [name->id] :as prepared} {owner-id :identity :as entry} field]
+  (when-not (and (uuid? owner-id) (simple-keyword? field))
+    (reject! :missing-field-origin))
+  (let [{:keys [slot type] :as declaration} (linked-declaration entry field name->id)
+        targets (reference-occurrences prepared entry field)
+        multiple? (> (count targets) 1)
+        declaration (assoc declaration :type (qualified-type prepared (:source entry) type))]
+    (when-not (and (seq targets)
+                   (or (not multiple?)
+                       (and (format/configuration-type? type)
+                            (= (count targets) (count (set (map :target-id targets))))
+                            (every? #(and (= (:source-slot-id slot) (:field-id %))
+                                          (= type (:field-type %))) targets))))
+      (reject! :nonunique-reference-use))
+    (mapv #(proof prepared entry field declaration (cond-> % multiple? (assoc :multiple-readers? true)))
+          targets)))
+
+
+(defn verify-forwarded-field
+  "Prove one unambiguous value-reference occurrence for a field."
+  [prepared entry field]
+  (single (verify-forwarded-uses prepared entry field) :nonunique-reference-use))

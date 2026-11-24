@@ -121,13 +121,13 @@ Proves one owner and its dependencies as an immutable transaction. Verified pare
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 299
+:LINE: 300
 :MINS: 0.9
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:299]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:300]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/with-certified-owner][with-certified-owner]]
@@ -150,13 +150,13 @@ Checks the exact boundary between one owner's two proof groups. The projected ba
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings-after-forwarding
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 306
+:LINE: 307
 :MINS: 1.1
 :END:
 
 Replays the remaining scoped group with the verified projections still in the graph. Their occupied addresses and unique destinations must survive, and the runtime checks must remain exactly equal. The complete source round trip precedes publication.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:306]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:307]]
 - see also :: [[file:types.org::#types/scope-view][scope-view]], [[file:types.org::#types/verify-module][verify-module]]
 - same file :: [[file:types.org::#types/verify-bindings][verify-bindings]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]
@@ -193,13 +193,13 @@ Freezes both endpoints of an authored field passed to a value-producing referenc
 :PROPERTIES:
 :CUSTOM_ID: types/plan-verified-module
 :FILE: scripts/structured_input_cst.clj
-:LINE: 887
+:LINE: 935
 :MINS: 2.2
 :END:
 
 Builds replacement text only when every definition in a module has a verified source plan. Edits retain comments and literal payloads, and repeat verification on the patched text. The artifact records the original and replacement byte digests.
 
-- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:887]]
+- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:935]]
 - see also :: [[file:types.org::#types/stage!][stage!]]
 
 * 15. stage!

@@ -705,15 +705,16 @@
 
 (defn- forwarded-bindings
   [fields]
-  (into {} (keep (fn [{:keys [source-path scope-certificate]}]
-                   (when-let [{:keys [public-path row source-names edges]} scope-certificate]
-                     (when-not (and (= [(peek source-path)] source-names) (vector? public-path)
-                                    (= (inc (count edges)) (count public-path)) (seq edges)
-                                    (= (mapv :binding-id edges) (:scope-path row))
-                                    (= (peek public-path) (peek source-path))
-                                    (= "projection" (:expression-kind row)) (uuid? (:id row)))
-                       (refuse :planner-ledger-mismatch {:path source-path}))
-                     [public-path [:project source-names]]))) fields))
+  (into {} (mapcat (fn [{:keys [source-path scope-certificate forwarded-certificates]}]
+                     (map (fn [{:keys [public-path row source-names edges]}]
+                            (when-not (and (= [(peek source-path)] source-names) (vector? public-path)
+                                           (= (inc (count edges)) (count public-path)) (seq edges)
+                                           (= (mapv :binding-id edges) (:scope-path row))
+                                           (= (peek public-path) (peek source-path))
+                                           (= "projection" (:expression-kind row)) (uuid? (:id row)))
+                              (refuse :planner-ledger-mismatch {:path source-path}))
+                            [public-path [:project source-names]])
+                          (or forwarded-certificates (some-> scope-certificate vector))))) fields))
 
 
 (defn- self-pin-operation

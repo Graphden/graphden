@@ -842,7 +842,7 @@
                  (= (count fields) (count (:blockers entry))))
     (throw (ex-info "Every implicit local forwarding must be proved together"
                     {:type :input/source-verification :code :incomplete-forwarded-fields})))
-  (mapv #(forward/verify-forwarded-field context entry %) fields))
+  (into [] (mapcat #(forward/verify-forwarded-uses context entry %)) fields))
 
 
 (defn forwarded-fields-baseline
@@ -859,6 +859,9 @@
    The structural proof identifies the only implicit link omitted from these rows."
   [context entry field]
   (let [{:keys [proofs entry]} (forwarded-fields-baseline context entry [field])]
+    (when-not (= 1 (count proofs))
+      (throw (ex-info "Expected one forwarded field occurrence"
+                      {:type :input/source-verification :code :nonunique-reference-use})))
     {:proof (first proofs) :entry entry}))
 
 
@@ -887,16 +890,22 @@
     (when-not (= (count proofs) (count certificates))
       (throw (ex-info "Every forwarded field needs its checked projection"
                       {:type :input/source-verification :code :forwarded-certificate-mismatch})))
-    (run! (fn [[proof field certificate]] (checked-forwarded-certificate! proof field certificate))
-          (map vector proofs fields certificates))
-    (let [by-path (into {} (map (fn [proof certificate] [(:source-path proof) certificate]) proofs certificates))
+    (run! (fn [[proof certificate]] (checked-forwarded-certificate! proof (peek (:source-path proof)) certificate))
+          (map vector proofs certificates))
+    (let [by-path (reduce (fn [acc [proof certificate]]
+                            (update acc (:source-path proof) (fnil conj []) certificate))
+                          {} (map vector proofs certificates))
           candidate (-> (forwarded-candidate entry (set (map :field-id proofs)))
                         (update-in [:proposed :bind] into (map (fn [{:keys [public-path source-names]}]
                                                                  [public-path [:project source-names]]) certificates))
                         (update-in [:legacy :arguments]
                                    (fn [arguments]
-                                     (mapv #(cond-> % (contains? by-path (:source-path %))
-                                                    (assoc :scope-certificate (get by-path (:source-path %)))) arguments))))]
+                                     (mapv (fn [argument]
+                                             (let [[one & more :as reads] (get by-path (:source-path argument))]
+                                               (cond
+                                                 (seq more) (assoc argument :forwarded-certificates reads)
+                                                 one (assoc argument :scope-certificate one)
+                                                 :else argument))) arguments))))]
       (first (:definitions (verify-module {:definitions [candidate]} context))))))
 
 
@@ -912,10 +921,11 @@
   [context {owner-id :identity :keys [verification v2]}]
   (let [projections (filter :source-names (vals (:scoped-inputs v2)))
         rows (set (:bindings v2))
-        links (into {} (map (fn [{:keys [row]}] [(first (:projection-path row)) (first (:target-path row))]))
-                    projections)]
+        pairs (into #{} (map (fn [{:keys [row]}] [(first (:projection-path row)) (first (:target-path row))]))
+                    projections)
+        links (into {} pairs)]
     (when-not (and (= :authored-source-equivalent verification) (uuid? owner-id) (seq links)
-                   (= (count links) (count projections))
+                   (= (count links) (count pairs))
                    (every? (fn [{:keys [row]}]
                              (and (contains? rows row) (= "projection" (:expression-kind row))
                                   (= owner-id (:fn-id row)) (empty? (:projection-scope-path row))

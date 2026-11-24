@@ -304,7 +304,7 @@
   "Check inherited root links, descendant references and the leaf membership
    against the current prepared package's declaration and binding rows."
   [env definition records args]
-  (let [certificates (keep :scope-certificate args)]
+  (let [certificates (mapcat #(or (:forwarded-certificates %) (some-> (:scope-certificate %) vector)) args)]
     (when (seq certificates)
       (let [own (scope-entry definition records)
             lineage (rest (parent-order env own))

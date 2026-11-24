@@ -167,6 +167,27 @@
           (scope/verify-forwarded-projection repeated proof analyze)))))
 
 
+(deftest forwarding-multiple-readers-requires-the-complete-reader-set
+  (let [[prepared entry] (fixture {:left :encode-body :right :encode-other :data {:type :text}}
+                                  [{:name :encode-other :parent :encode}])
+        [left right :as readers] (forward/verify-forwarded-uses prepared entry :data)
+        snapshot (checked-snapshot left)
+        left-id (:target-fn-id left)
+        right-id (:target-fn-id right)
+        right-use (:root-use-id right)
+        owner (:owner-id left)
+        slot (ids/slot-id (ids/fn-id "fixture" :combine) :right)
+        snapshot (-> snapshot
+                     (assoc-in [:fns right-id] (assoc (get-in snapshot [:fns left-id]) :id right-id))
+                     (assoc-in [:signatures right-id] (get-in snapshot [:signatures left-id]))
+                     (assoc-in [:bindings right-use] {:id right-use :fn-id owner :scope-path [] :target-path [slot]
+                                                      :expression-kind "ref" :ref-fn-id right-id}))]
+    (is (= #{[:left :data] [:right :data]}
+           (set (map :public-path (scope/verify-forwarded-projections snapshot readers analyze)))))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (scope/verify-forwarded-projections snapshot [left] analyze)))))
+
+
 (deftest forwarding-cannot-discard-retained-field-read-checks
   (let [[prepared entry] (fixture {:left :encode-body :data {:type :text}})
         {:keys [owner-id field-id target-field-id target-fn-id projection-id] :as proof}

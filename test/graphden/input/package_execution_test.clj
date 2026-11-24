@@ -74,6 +74,56 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest forwarded-input-reaches-two-distinct-uses-of-one-legacy-slot
+  (let [base {:namespace "fixture" :name :combine
+              :args {:left {:type :text} :right {:type :text}} :return-type :text}
+        native (assoc base :impl (fn [args _]
+                                   (str (runtime/resolve-arg args :left) "/" (runtime/resolve-arg args :right))))
+        owner (ids/fn-id "fixture" :both)
+        source (into (declarations "packages/core/strings/fns.edn" #{:str-upper})
+                     [base
+                      {:namespace "fixture" :name :left-reader :parent :str-upper}
+                      {:namespace "fixture" :name :right-reader :parent :str-upper}
+                      {:namespace "fixture" :name :both :parent :combine
+                       :args {:left :left-reader :right :right-reader :string {:type :text}}}])
+        compile-package (fn [package root roots impls]
+                          (let [migrated (snapshot/with-migrated-forwarding package root :string roots)
+                                receipt (get-in migrated [:closure-baselines root])]
+                            (is (= :authored-source-equivalent (:verification receipt)))
+                            (is (= {[:left :string] [:project [:string]] [:right :string] [:project [:string]]}
+                                   (select-keys (get-in receipt [:proposed :bind]) [[:left :string] [:right :string]])))
+                            (execution/compile-package migrated root roots impls)))
+        {:keys [legacy canonical]} (runtimes source owner compile-package (assoc @loaded :combine native))]
+    (is (= "AB/AB" (legacy {:string "Ab"}) (canonical {:string "Ab"})))
+    (is (= "/" (legacy {:string ""}) (canonical {:string ""})))))
+
+
+(deftest forwarded-input-preserves-lazy-conditional-branches
+  (let [owner (ids/fn-id "fixture" :choose)
+        source (into [{:namespace "fixture" :name :left-reader :parent :str-upper}
+                      {:namespace "fixture" :name :right-reader :parent :str-upper}
+                      {:namespace "fixture" :name :choose :parent :if
+                       :args {:then :left-reader :else :right-reader :string {:type :text}}}]
+                     cat [(declarations "packages/core/strings/fns.edn" #{:str-upper})
+                          (declarations "packages/core/logic/fns.edn" #{:if})
+                          (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})])
+        calls (atom 0)
+        implementations (update-in @loaded [:str-upper :impl]
+                                   (fn [impl]
+                                     (fn [args context]
+                                       (swap! calls inc)
+                                       (impl args context))))
+        compile-package (fn [package root roots impls]
+                          (let [migrated (snapshot/with-migrated-forwarding package root :string roots)]
+                            (execution/compile-package migrated root roots impls)))
+        {:keys [legacy canonical]} (runtimes source owner compile-package implementations)]
+    (doseq [test [true false]
+            run [legacy canonical]]
+      (reset! calls 0)
+      (is (= "DATA" (run {:test test :string "data"})))
+      (is (= 1 @calls)))))
+
+
 (defn- staged-options
   [legacy proposed visible]
   (let [text (pr-str proposed)]

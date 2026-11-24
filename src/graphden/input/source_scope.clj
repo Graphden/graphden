@@ -102,11 +102,12 @@
 
 
 (defn- occurrence
-  [graph slot-id]
+  [graph slot-id & [root-use-id]]
   ;; Look at every declared scope, including occupied/hidden occurrences.
   ;; Picking the sole FREE route would conflate a shared target's uses.
   (let [candidates (for [[scope contract] (get-in graph [:public-input :scope-contracts])
-                         :when (some #(= slot-id (:id %)) (:fields contract))]
+                         :when (and (or (nil? root-use-id) (= root-use-id (first (second scope))))
+                                    (some #(= slot-id (:id %)) (:fields contract)))]
                      [scope [slot-id]])]
     (when (empty? candidates) (reject! :missing-reference-input))
     (only candidates :nonunique-reference-input)))
@@ -331,8 +332,9 @@
 
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
-                           field-id source-type target-type target-fn-id target-field-id root-use-id generic-reference]}]
-  (let [address (occurrence before target-field-id)
+                           field-id source-type target-type target-fn-id target-field-id root-use-id
+                           multiple-readers? generic-reference]}]
+  (let [address (occurrence before target-field-id (when multiple-readers? root-use-id))
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
         target-type (context/call-with-types snapshot #(types/resolve-alias target-type))]
@@ -363,6 +365,19 @@
         generic-reference (assoc :generic-reference generic-reference)))))
 
 
+(defn- check-forwarded-readers!
+  [graph proofs certificates]
+  (doseq [[source readers] (group-by (comp :source-address first)
+                                     (filter (comp :multiple-readers? first) (map vector proofs certificates)))]
+    (let [name (peek (:source-path (ffirst readers)))
+          addresses (set (for [[scope contract] (get-in graph [:public-input :scope-contracts])
+                               field (:fields contract)
+                               :when (= name (:name field))]
+                           [scope [(:id field)]]))]
+      (when-not (= addresses (into #{source} (map (comp :address second)) readers))
+        (reject! :unproved-forwarded-readers)))))
+
+
 (defn- preserved-field-checks?
   [before after certificates]
   (let [prior (set (:obligations before))
@@ -388,6 +403,7 @@
         before (checked-graph analyze snapshot owner)
         certificates (mapv #(forwarded-certificate snapshot before %) proofs)
         additions (into {} (map (juxt (comp :id :row) :row)) certificates)]
+    (check-forwarded-readers! before proofs certificates)
     (when-not (= (count proofs) (count additions) (count (set (map :address certificates))))
       (reject! :unproved-forwarded-identity))
     (let [updated (-> snapshot (assoc :snapshot-id (random-uuid)) (update :bindings merge additions))

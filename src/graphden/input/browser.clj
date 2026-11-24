@@ -61,13 +61,22 @@
    :required (vec (sort (map address-ids required-addresses)))})
 
 
+(declare ^:private input-fields)
+
+
 (defn- closure-expr
-  [{:keys [scope call-sites]} {:keys [scope-ids layouts address-ids]}]
-  (when (> (count call-sites) 1)
+  [{:keys [scope parameters call-sites parameter-surface]}
+   {:keys [scope-ids layouts address-ids encode]}]
+  (when (> (count parameters) 1)
     (ir/reject! :unsupported-browser-callback-arity {}))
-  (merge {:kind "checked-closure" :fn (get scope-ids scope)
-          :slots (mapv (comp address-ids :address) call-sites)}
-         (wire-presence (get layouts scope) address-ids)))
+  (let [{:keys [record-inputs] :as layout} (get layouts scope)
+        record-param (when parameter-surface
+                       (first (input-fields (get-in parameter-surface [:root :fields])
+                                            address-ids record-inputs encode)))]
+    (merge (cond-> {:kind "checked-closure" :fn (get scope-ids scope)
+                    :slots (if record-param [] (mapv (comp address-ids :address) call-sites))}
+             record-param (assoc :record (select-keys record-param [:fields :slot])))
+           (wire-presence layout address-ids))))
 
 
 (defn- browser-expression

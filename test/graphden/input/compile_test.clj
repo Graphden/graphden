@@ -134,6 +134,60 @@
                                                    :implementations (fixture/implementations definitions functions)}))))))
 
 
+(deftest exposed-callback-capture-keeps-its-scope-and-surrounding-invocation
+  (let [definitions {:root {:input {:style {:callback [:fn {:item :text} :text #{}] :mark :text}}
+                            :return :any :bindings {[:style :callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:item :text :mark :text} :return :text}}
+        functions {:root (fn [args _]
+                           (let [callback (:callback (runtime/resolve-arg args :style))]
+                             [(callback "Ada") (callback "Ben")]))
+                   :child (fn [args _]
+                            (str (runtime/resolve-arg args :item)
+                                 (runtime/resolve-arg args :mark)))}
+        {:keys [analysis context]} (fixture/model definitions :root)
+        callback (compile/compile-named analysis {:context context
+                                                  :implementations (fixture/implementations definitions functions)})
+        arguments (fn [mark] {:style {:mark "independent outer field" :callback {:mark mark}}})]
+    (is (= ["Ada!" "Ben!"] (invoke callback (arguments "!") {})))
+    (is (= ["Ada?" "Ben?"] (invoke callback (arguments "?") {})))
+    (is (= ["Ada!" "Ben!"] (invoke callback (arguments "!") {})))
+    (is (= :missing-required-input
+           (rejection-code #(invoke callback {:style {:mark "not a capture"}} {}))))))
+
+
+(deftest callback-routes-a-single-record-argument-by-declared-fields
+  (let [item {:value :any :unused :any :details {:flag :any :note :any}}
+        definitions {:root {:input {:callback [:fn {:item item} :any #{}]} :return :any
+                            :bindings {[:callback] {:ref :child}}}
+                     :child {:input {:item item} :return :any
+                             :optional #{[:item :unused] [:item :details] [:item :details :note]}}}
+        {:keys [closure]} (compiled definitions
+                                    {:root (fn [args _]
+                                             (let [callback (runtime/resolve-arg args :callback)]
+                                               [(callback {:value nil})
+                                                (callback {:value false :details {:flag nil :note false}})
+                                                (callback {:value "next" :details {:flag true}})
+                                                (callback (input/record-view
+                                                            {:value (input/value-cell "lazy")
+                                                             :unused (input/field-cell #(throw (ex-info "Unused field" {})))}))
+                                                (rejection-code #(callback {:details {:flag true}}))
+                                                (rejection-code #(callback {:value nil :details {}}))
+                                                (rejection-code #(callback {:value nil :details {:extra 1}}))
+                                                (rejection-code #(callback {:value nil :details nil}))
+                                                (rejection-code #(callback 1))]))
+                                     :child (fn [args _]
+                                              (let [{:keys [value details] :as item} (runtime/resolve-arg args :item)]
+                                                [value (contains? item :details) (:flag details)
+                                                 (contains? details :note) (:note details)]))})]
+    (is (= [[nil false nil false nil]
+            [false true nil true false]
+            ["next" true true false nil]
+            ["lazy" false nil false nil]
+            :missing-required-input :missing-required-input :unknown-input-field
+            :record-input-required :record-input-required]
+           (invoke closure)))))
+
+
 (deftest callback-map-presence-and-lifetime-remain-explicit
   (let [definitions {:root {:input {:callback [:fn {:item :any :flag :any} :any #{}]} :return :any
                             :bindings {[:callback] {:ref :child}}}

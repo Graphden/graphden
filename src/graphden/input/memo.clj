@@ -18,7 +18,7 @@
    Thus repeated named S uses share local definitions, while a new enclosing
    invocation cannot reuse a stale captured result from a shared request memo.
    Known eager literals/parameters retain value equality through projections."
-  [{:keys [ir supplied present cells scopes invocation-key]}]
+  [{:keys [ir supplied input-sources present cells scopes invocation-key]}]
   (let [result (volatile! {})]
     (letfn [(arguments
               [anchor scope]
@@ -45,6 +45,7 @@
                                 (if (inside? anchor (first address))
                                   [:computation binding-id target-id type (arguments anchor scope)]
                                   [:cell type (get cells address)])
+                                (contains? input-sources address) [:cell type (get input-sources address)]
                                 (capture/safe-value? known) [:value type known]
                                 :else (ir/reject! :opaque-input-key-required {:address address}))]
                     (vswap! result assoc memo-address value)

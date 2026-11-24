@@ -249,6 +249,58 @@
     (is (= "Value does not match the required graph input type" (:error bad-member)))))
 
 
+(deftest exposed-callback-captures-match-in-browser-and-jvm
+  (let [source {:root {:input {:func [:fn {:a :text} :bool #{}] :coll [:list :text]}
+                       :return [:list :bool] :bindings {[:func] {:ref :callback}}}
+                :callback {:input {:a :text :b :text} :return :bool}}
+        {:keys [analysis context]} (fixture/model source :root)
+        functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:equal? :impl])}
+        implementations (-> (fixture/implementations source functions)
+                            (assoc-in [(fixture/id :root) :base-fn-id] (ids/fn-id "core.hof" :map))
+                            (assoc-in [(fixture/id :callback) :base-fn-id] (ids/fn-id "core.logic" :equal?)))
+        options {:context context :snapshot-id (:snapshot-id context)
+                 :implementations implementations :allow-fn? (constantly true)}
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        args (fn [capture] {:coll ["Ada" "Bea" "Ada"] :func {:b capture}})
+        cases (mapv args ["Ada" "Bea" "Ada"])
+        expected [[true false true] [false true false] [true false true]]
+        results (vec (run-browser plan (conj cases {:coll ["Ada"]})))]
+    (is (= expected (mapv #(invoke % nil) cases)))
+    (is (= (mapv #(hash-map :value (wire/encode-result %) :sequence true) expected)
+           (pop results)))
+    (is (some? (:error (peek results))))))
+
+
+(deftest browser-and-jvm-route-the-same-record-callback-argument
+  (let [item {:value :any :details {:flag :any}}
+        source {:root {:input {:func [:fn {:coll item} :any #{}] :coll [:list :any]}
+                       :return [:list :any] :bindings {[:func] {:ref :callback}}}
+                :callback {:input {:coll item :key :keyword :default :any}
+                           :optional #{[:coll :details]} :return :any
+                           :bindings {[:key] {:value :value} [:default] {:value "missing"}}}}
+        {:keys [analysis context]} (fixture/model source :root)
+        functions {:root (get-in @loaded [:map :impl]) :callback (get-in @loaded [:get :impl])}
+        implementations (-> (fixture/implementations source functions)
+                            (assoc-in [(fixture/id :root) :base-fn-id] (ids/fn-id "core.hof" :map))
+                            (assoc-in [(fixture/id :callback) :base-fn-id] (ids/fn-id "core.collections" :get)))
+        options {:context context :snapshot-id (:snapshot-id context)
+                 :implementations implementations :allow-fn? (constantly true)}
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        valid {:coll [{:value nil} {:value false :details {:flag nil}} {:value "next"}]}
+        missing {:coll [{:value nil :details {}}]}
+        unknown {:coll [{:value nil :extra false}]}
+        expected [nil false "next"]
+        [result missing-member unknown-member] (run-browser plan [valid missing unknown])]
+    (is (= expected (invoke valid nil)))
+    (is (= :missing-required-input (invocation-error invoke missing)))
+    (is (= :unknown-input-field (invocation-error invoke unknown)))
+    (is (= {:value (wire/encode-result expected) :sequence true} result))
+    (is (= "Missing graph input field" (:error missing-member)))
+    (is (= "Unknown graph input field" (:error unknown-member)))))
+
+
 (deftest named-browser-map-input-is-an-opaque-value
   (let [source (-> definitions
                    (assoc-in [:root :input :coll] [:map :keyword :any])

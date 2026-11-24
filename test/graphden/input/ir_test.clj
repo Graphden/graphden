@@ -1,6 +1,7 @@
 (ns graphden.input.ir-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.input.arguments :as arguments]
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.ir :as ir]))
 
@@ -103,6 +104,36 @@
     (is (= (fixture/address :root [] :root [:config]) (get-in plan [:expressions capture :source])))))
 
 
+(deftest exposed-callback-captures-are-supplied-by-the-enclosing-frame
+  (let [definitions {:root {:input {:style {:callback [:fn {:item :text} :text #{}]}} :return :text
+                            :bindings {[:style :callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:item :text :mark :text} :return :text}}
+        model (structural-model definitions)
+        plan (lower model definitions)
+        style (fixture/address :root [] :root [:style])
+        callback (fixture/address :root [] :root [:style :callback])
+        item (fixture/address :root [:callback-use] :child [:item])
+        mark (fixture/address :root [:callback-use] :child [:mark])
+        closure (get-in plan [:closures callback])
+        fail (fn [changed]
+               (try (lower changed definitions)
+                    (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))]
+    (is (= [:item] (:parameters closure)))
+    (is (= #{mark} (:external-addresses closure) (:parameters plan) (:required-addresses plan)))
+    (is (= {style {} mark "!"}
+           (arguments/route-values (get-in model [:analysis :public-input]) {:style {:callback {:mark "!"}}})))
+    (is (= #{item} (get-in plan [:frame-layouts (:scope closure) :parameters])))
+    (is (= #{item} (get-in plan [:frame-layouts (:scope closure) :required-addresses])))
+    (is (true? (get (ir/present-addresses (get-in plan [:frame-layouts (:root-scope plan) :presence-program])
+                                          {mark "!"})
+                    mark)))
+    (is (= :unsupported-closure-scope
+           (fail (assoc-in model [:analysis :closures callback :external-captures]
+                           [{:target mark :value-path [:nested]}]))))
+    (is (= :unsupported-closure-scope
+           (fail (update-in model [:analysis :public-input :routes] dissoc [:style :callback :mark]))))))
+
+
 (deftest special-base-semantics-and-missing-abi-provenance-reject
   (let [{:keys [analysis context]} (structural-model)
         impls (fixture/implementations base-definitions {:root (fn [_ _]) :child (fn [_ _])})
@@ -116,3 +147,33 @@
            (code (assoc-in impls [target :root-entry :compile-time-value?] true))))
     (is (= :lazy-sequence-abi-required
            (code (assoc-in impls [target :root-entry :lazy-seq-args] #{:x}))))))
+
+
+(deftest callback-record-uses-identity-stable-routes-and-explicit-presence
+  (let [item {:value :any :details {:flag :any}}
+        definitions {:root {:input {:callback [:fn {:item item} :any #{}]} :return :any
+                            :bindings {[:callback] {:ref :child :id :use}}}
+                     :child {:input {:item item} :optional #{[:item :details]} :return :any}}
+        model (structural-model definitions)
+        callback (fixture/address :root [] :root [:callback])
+        address (partial fixture/address :root [:use] :child)
+        item-address (address [:item])
+        detail-address (address [:item :details])
+        value-address (address [:item :value])
+        flag-address (address [:item :details :flag])
+        plan (lower model definitions)
+        closure (get-in plan [:closures callback])
+        layout (get-in plan [:frame-layouts (:scope closure)])]
+    (is (= #{item-address} (:required-addresses layout)))
+    (is (= #{item-address detail-address} (:record-inputs layout)))
+    (is (= #{value-address flag-address} (:parameters layout)))
+    (is (= {item-address {} value-address nil detail-address {} flag-address false}
+           (arguments/route-values (:parameter-surface closure) {:item {:value nil :details {:flag false}}})))
+    (is (= {item-address {} value-address nil}
+           (arguments/route-values (:parameter-surface closure) {:item {:value nil}})))
+    (is (false? (get (ir/present-addresses (:presence-program layout) {item-address {} value-address false})
+                     detail-address)))
+    (is (= :callback-parameter-shape-required
+           (try
+             (lower (update-in model [:analysis :closures callback :call-sites] pop) definitions)
+             (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure))))))))

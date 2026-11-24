@@ -51,7 +51,7 @@
 
 (def ^:private computed-greeting-refs
   {:builder (ids/fn-id "lesson-compute.builder" :build-greeting-profile)
-   :callback (ids/fn-id "lesson-compute.callback" :mark-greeting)})
+   :callback (ids/fn-id "lesson-compute.callback" :decorate-greeting-input)})
 
 
 (defn- structured-lesson-ready?

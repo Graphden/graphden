@@ -220,15 +220,15 @@ async function exerciseComputed(page, reach, sampleCard, sample, branch) {
   assert.deepEqual(await readInput(page, sample.id), initial);
   await openDisclosure(sampleCard.getByRole('button', {name: 'Remaining inputs', exact: true}), 'Enter');
   await openDisclosure(page.getByRole('button', {name: /^style — Type:/}));
-  const callback = await bindFunction(page, reach, 'style.callback', 'Bind the callback', 'mark-greeting', refs.callback);
+  const callback = await bindFunction(page, reach, 'style.callback', 'Bind the callback', 'decorate-greeting-input', refs.callback);
   await reach('Find the builder destination');
   await openDisclosure(sampleCard.getByRole('button', {name: 'Structured inputs', exact: true}), 'Enter');
   const builder = await bindFunction(page, reach, 'profile', 'Bind the profile builder', 'build-greeting-profile', refs.builder);
-  await reach('Run from two named inputs');
+  await reach('Run from three named inputs');
   assert.notEqual(builder, callback);
 
   await page.reload({waitUntil: 'domcontentloaded'});
-  await reach('Run from two named inputs');
+  await reach('Run from three named inputs');
   assert.equal(new URL(page.url()).searchParams.get('branch'), branch);
   const projection = await readInput(page, sample.id);
   assert.equal(projection['run-available'], true);
@@ -237,15 +237,25 @@ async function exerciseComputed(page, reach, sampleCard, sample, branch) {
   const input = projection.fields.find(row => row.name === 'profile');
   assert.equal(input.kind, 'reference-inputs');
   assert.deepEqual(input.fields[0].fields.map(field => field.name), ['name']);
-  assert.deepEqual(projection.fields.find(row => row.name === 'style').fields.map(field => field.name), ['suffix']);
+  const style = projection.fields.find(row => row.name === 'style');
+  const exposed = style.fields.find(row => row.name === 'callback');
+  assert.equal(style.fields.filter(row => row.name === 'suffix').length, 1);
+  assert.equal(exposed.kind, 'reference-inputs');
+  assert.deepEqual(exposed.fields.map(field => field.name), ['mark']);
 
   await sampleCard.locator('.ancestor-line[data-level="0"] .fn-run-trigger').click();
   const form = page.getByRole('form', {name: 'Run function'});
   await form.getByRole('textbox', {name: 'name', exact: true}).fill('Ada');
   await form.getByRole('textbox', {name: 'suffix', exact: true}).fill('team');
-  assert.equal(await form.getByRole('textbox').count(), 2);
-  const args = {profile: {profile: {name: 'Ada'}}, style: {suffix: 'team'}};
+  const mark = form.getByRole('textbox', {name: 'mark', exact: true});
+  await mark.fill('!');
+  assert.equal(await form.getByRole('textbox').count(), 3);
+  const args = {profile: {profile: {name: 'Ada'}}, style: {suffix: 'team', callback: {mark: '!'}}};
   assert.equal(await runWithArgs(page, form, sample.id, args), 'Hello Ada! · team');
+  await reach('Run again with a different mark');
+  await mark.fill('?');
+  assert.equal(await runWithArgs(page, form, sample.id, {...args, style: {...args.style, callback: {mark: '?'}}}),
+    'Hello Ada? · team');
 }
 
 async function exerciseRecord(page, reach, sampleCard, sample, branch) {

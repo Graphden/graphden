@@ -3487,7 +3487,7 @@
             {:id "47"
              :slug "computed-record-and-callback"
              :chapter "Structured input"
-             :version 1
+             :version 2
              :requires "structured-input-run"
              :template-id "5d81665d-2de6-54e5-af98-95cece5cd938"
              :title "Build a record and supply a callback"
@@ -3517,11 +3517,11 @@
                        :path ["style" "callback"] :state "remaining"
                        :selector ".arg-value-edit-popover[aria-label=\"Bind style.callback\"]"}}
               {:title "Bind the callback"
-               :body "Click [[Choose function]], select [[lesson-compute.callback/mark-greeting]] and click [[Bind]]. The callback adds its saved `!` binding to the call argument."
+               :body "Click [[Choose function]], select [[lesson-compute.callback/decorate-greeting-input]] and click [[Bind]]. The renderer supplies the callback’s string. Its mark remains a separate input."
                :target ".arg-value-edit-popover[aria-label=\"Bind style.callback\"]"
                :targets [".arg-value-edit-popover[aria-label=\"Bind style.callback\"]" ".fn-picker-popover"]
                :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
-                       :path ["style" "callback"] :state "occupied" :run? true}}
+                       :path ["style" "callback"] :state "occupied" :reference-inputs? true :run? true}}
               {:title "Find the builder destination"
                :body "Open [[Structured inputs]] and click [[Bind]] beside profile. This field can take a complete record."
                :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
@@ -3536,15 +3536,20 @@
                :targets [".arg-value-edit-popover[aria-label=\"Bind profile\"]" ".fn-picker-popover"]
                :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
                        :path ["profile"] :state "occupied" :reference-inputs? true}}
-              {:title "Run from two named inputs"
-               :body "Open [[▶ Run]]. In the builder’s profile group, enter `Ada` for name. Enter `team` for style’s suffix and click [[Run]]. The renderer supplies the callback’s string from the built profile."
+              {:title "Run from three named inputs"
+               :body "Open [[▶ Run]]. In the builder’s profile group, enter `Ada` for name. Enter `team` for style’s suffix, then `!` for the callback’s mark and click [[Run]]. The renderer passes the profile’s greeting as the callback string."
                :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
                          ".execute-popover.visible .execute-run-btn"]
                :check {:kind "result-value" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
                        :value "Hello Ada! · team"}}
+              {:title "Run again with a different mark"
+               :body "Keep the name and suffix. Change the callback’s mark to `?` and click [[Run]] again."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :value "Hello Ada? · team"}}
               {:title "Finish the lesson"
-               :body "Name is a builder input. Suffix belongs to the renderer. The invocation supplies the callback’s string, and the callback keeps its saved mark. Click [[Finish]] to clean up the lesson branch."
+               :body "The builder takes a name. The renderer takes a suffix and passes the greeting to the callback. The mark is an input for each Run. Click [[Finish]] to clean up the lesson branch."
                :target nil
                :check {:kind "manual"}}]}]}}}
 

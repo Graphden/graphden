@@ -504,10 +504,10 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 :CUSTOM_ID: editor/mountStructuredRunInputs
 :FILE: resources/packages/app/editor/editor-execute-inputs.js
 :LINE: 184
-:MINS: 3.1
+:MINS: 3.3
 :END:
 
-The Run pane builds named record inputs from the authorized residual descriptor for the selected root when its Run capability is true. Required fields surface a focused error before submission. Optional fields preserve the distinction between omission and explicit values such as false, null and empty text. Legacy slot-based value forms still use their existing route. Both forms submit through the same execution handler. Structured Repeat matches the saved run's identity and branch source fingerprint with a fresh authorized subtree before restoring any fields.
+The Run pane builds named record inputs from the authorized residual descriptor for the selected root when its Run capability is true. Required fields surface a focused error before submission. Optional fields preserve the distinction between omission and explicit values such as false, null and empty text. A bound callback can expose remaining named fields while its caller supplies the invocation value. The computed greeting lesson uses this distinction to change the callback mark between runs. Both structured and legacy forms submit through the same execution handler. Structured Repeat matches the saved run's identity and branch source fingerprint with a fresh authorized subtree before restoring any fields.
 
 - source :: [[file:../../../resources/packages/app/editor/editor-execute-inputs.js::function mountStructuredRunInputs(body, descriptor) {][resources/packages/app/editor/editor-execute-inputs.js:184]]
 - see also :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:crud.org::#crud/apply-execute][apply-execute]]

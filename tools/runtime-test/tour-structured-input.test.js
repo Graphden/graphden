@@ -190,7 +190,8 @@ async function run() {
   assert.deepEqual(Array.from((await t.ctx._tourScopeStructuredLesson(noReferences, () => true)).lessons), []);
   const computed = {...initial, 'run-available': true, fields: [
     {name: 'profile', kind: 'reference-inputs', fields: [profile]},
-    {...style, fields: [field('suffix')]},
+    {...style, fields: [field('suffix'), {name: 'callback', kind: 'reference-inputs',
+      fields: [{...field('mark'), kind: 'input-field', required: true}]}]},
   ], occupied: [
     {path: ['profile'], 'binding-id': 'profile-binding', 'version-id': 'profile-version'},
     {path: ['style', 'callback'], 'binding-id': 'callback-binding', 'version-id': 'callback-version'},
@@ -199,6 +200,9 @@ async function run() {
   assert.equal(t.ctx._tourStructuredComputedGreeting(callbackBound, true), true,
     'the callback opens Run while the plain profile can still receive its builder');
   assert.equal(t.ctx._tourStructuredComputedGreeting(computed, true), true);
+  assert.equal(t.ctx._tourStructuredComputedGreeting({...computed, fields: [
+    computed.fields[0], {...style, fields: [field('suffix')]},
+  ]}, true), false, 'an occupied callback must expose the expected mark');
   assert.equal(t.ctx._tourStructuredComputedGreeting({...computed, 'run-available': false}, true), false);
   console.log('✓ structured tutorials: exact templates, sandbox ownership, independent and optional fields, and resume');
 }

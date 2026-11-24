@@ -103,10 +103,15 @@ function _tourStructuredComputedGreeting(input, editable) {
   if (editable && !builderBound && JSON.stringify(profile['bind-path']) !== '["profile"]') return false;
   if (style.fields.find(field => field?.name === 'suffix')?.type !== 'text') return false;
   const callback = style.fields.find(field => field?.name === 'callback');
-  if (callback) return style.fields.length === 2 && callback.type?.[0] === 'fn'
+  if (style.fields.length !== 2) return false;
+  if (callback?.kind === 'reference-inputs') {
+    const [mark] = callback.fields || [];
+    return editable && input['run-available'] === true && occupiedPath('["style","callback"]')
+      && callback.fields?.length === 1 && mark?.kind === 'input-field' && mark.name === 'mark'
+      && mark.type === 'text' && mark.required === true;
+  }
+  return callback?.type?.[0] === 'fn'
     && (!editable || JSON.stringify(callback['bind-path']) === '["style","callback"]');
-  return editable && style.fields.length === 1 && input['run-available'] === true
-    && occupiedPath('["style","callback"]');
 }
 
 async function _tourScopeStructuredLesson(payload, current) {

@@ -1826,8 +1826,10 @@
      :say "The Run pane builds named record inputs from the authorized residual descriptor for the
            selected root when its Run capability is true. Required fields surface a focused error
            before submission. Optional fields preserve the distinction between omission and explicit
-           values such as false, null and empty text. Legacy slot-based value forms still use their
-           existing route. Both forms submit through the same execution handler. Structured Repeat
+           values such as false, null and empty text. A bound callback can expose remaining named
+           fields while its caller supplies the invocation value. The computed greeting lesson uses
+           this distinction to change the callback mark between runs. Both structured and legacy
+           forms submit through the same execution handler. Structured Repeat
            matches the saved run's identity and branch source fingerprint with a fresh authorized
            subtree before restoring any fields."
      :see [[:editor "submitExecution"] [:crud "apply-execute"]]}

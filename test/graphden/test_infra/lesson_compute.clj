@@ -1,12 +1,12 @@
 (ns graphden.test-infra.lesson-compute
-  "Operator pins for the renderer, builder and the callback with a saved mark."
+  "Operator pins for the renderer, builder and the callback with an exposed mark."
   (:require
     [graphden.packages.records.ids :as ids]))
 
 
 (def root (ids/fn-id "lesson-compute.structured" :lesson-computed-greeting))
 (def builder (ids/fn-id "lesson-compute.builder" :build-greeting-profile))
-(def callback (ids/fn-id "lesson-compute.callback" :mark-greeting))
+(def callback (ids/fn-id "lesson-compute.callback" :decorate-greeting-input))
 
 
 (def admissions

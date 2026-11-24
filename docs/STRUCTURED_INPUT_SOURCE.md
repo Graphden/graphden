@@ -88,7 +88,11 @@ configurations use the same frozen row checks as named declarations.
 A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
 The reader uses the original namespace, host name, field and normalized
 reference spellings to reproduce each legacy child UUID. The host name of
-a nested child is the legacy synthetic name of its enclosing child.
+a nested child is the legacy synthetic name of its enclosing child. A checked
+scoped argument can also introduce an inline reference. Its certificate
+identifies the original argument key for the anonymous UUID and the separate
+target address for the binding row. The reader and emitter retain that inline
+body and refuse drift in either identity.
 The CST edit preserves the authored reference spelling and argument order.
 
 Children can bind multiple fields and contain direct inline descendants.

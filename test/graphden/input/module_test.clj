@@ -2,9 +2,11 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.core :as input]
+    [graphden.input.format :as format]
     [graphden.input.list-records :as list-records]
     [graphden.input.module :as module]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as records]))
 
 
 (defn- field-id
@@ -293,3 +295,42 @@
     (is (= [2] (mapv :value (get-in (recover (:fn-id right) (conj records overlay)) [:fragments 0 :items]))))
     (is (= :list-declaration-mismatch
            (error-code #(recover (:fn-id left) (remove (fn [row] (= (:id edge) (:id row))) records)))))))
+
+
+(deftest scoped-inline-reference-reuses-the-legacy-host-field
+  (let [namespace-id "fixture"
+        owner (ids/fn-id namespace-id :main)
+        parent (ids/fn-id namespace-id :base)
+        root-slot (field-id :value)
+        remote-fn (ids/fn-id namespace-id :leaf)
+        remote-slot (ids/slot-id remote-fn :remote)
+        edge (ids/binding-id owner root-slot)
+        body {:parent :fixture/base :bind {:value [:value 42]}}
+        inline (records/inline-declaration (format/inline-origin body) [:main :remote] namespace-id)
+        inline-id (ids/fn-id namespace-id (:name inline))
+        path [:value :remote]
+        row {:kind :input-binding :id (ids/binding-id owner remote-slot) :fn-id owner
+             :scope-path [edge] :target-path [remote-slot]
+             :expression-kind "ref" :ref-fn-id inline-id :value-present false}
+        certificate {:public-path path :source-path [:args :remote] :snapshot-id (random-uuid)
+                     :address [[owner [edge]] [remote-slot]] :edges [{:from [[owner []] [root-slot]]
+                                                                      :name :value :origin-fn-id owner
+                                                                      :target-fn-id remote-fn :binding-id edge}]
+                     :field-owner remote-fn :owner-parents [parent] :row row}
+        context (fn [{:keys [name] :as source}]
+                  (let [ctx (context-for source)]
+                    (cond-> (assoc ctx :binding-id (fn [[id] [slot]] (ids/binding-id id slot)))
+                      (= :main name) (-> (assoc-in [:declaration-records 0 :parent-ids] [parent])
+                                         (assoc :scoped-inputs {path certificate})))))
+        options {:context-for context :normalize-inline-parent (fn [_ ref] ref)}
+        source (source-module {:bind {:value [:ref :leaf] path [:ref body]}})
+        parsed (module/parse-module-v2 source options)
+        [root] (:definitions parsed)]
+    (is (= inline-id (get-in root [:inline-definitions [remote-slot] :fn-id])))
+    (is (= row (get-in root [:scoped-inputs path :row])))
+    (is (= [:ref body] (get-in (module/emit-module-v2 parsed options) [:fns 0 :bind path])))
+    (is (= :scoped-inline-origin-mismatch
+           (error-code #(module/parse-module-v2 (assoc-in source [:fns 0 :bind path 1 :bind :value] [:value 43])
+                                                options))))
+    (is (= :unsupported-scoped-inline-declaration
+           (error-code #(module/parse-module-v2 source (assoc options :context-for context-for)))))))

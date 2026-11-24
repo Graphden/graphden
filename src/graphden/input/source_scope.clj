@@ -44,8 +44,10 @@
         [operator payload] (:expression arg)
         expected-expression (case operator
                               :value (and (:value-present binding) (migration/same-edn? payload (:value binding)))
-                              :ref (and (qualified-keyword? payload)
-                                        (= (:ref-fn-id binding) (ids/fn-id (namespace payload) (keyword (name payload)))))
+                              :ref (let [target (cond
+                                                  (qualified-keyword? payload) (ids/fn-id (namespace payload) (keyword (name payload)))
+                                                  (map? payload) (:inline-fn-id arg))]
+                                     (and (uuid? target) (= target (:ref-fn-id binding))))
                               nil (when-let [row (get-in arg [:scoped-annotation :row])]
                                     (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding row))))
                               false)]

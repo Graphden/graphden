@@ -204,20 +204,36 @@
     (rebase/rewrite-references origin #(or (resolve-ref %) %))))
 
 
+(defn- inline-site
+  [{:keys [contract scope scoped-inputs]} field position]
+  (if (vector? field)
+    (let [{:keys [source-path row]} (get scoped-inputs field)
+          field-name (peek source-path)
+          path (:target-path row)]
+      (when-not (and (nil? position) (= [:args field-name] source-path)
+                     (simple-keyword? field-name) (= field-name (peek field))
+                     (vector? path) (= 1 (count path)) (uuid? (first path))
+                     (= "ref" (:expression-kind row)) (uuid? (:ref-fn-id row)))
+        (reject! :unsupported-scoped-inline-declaration))
+      {:legacy-field field-name :path path :target-id (:ref-fn-id row)})
+    {:legacy-field field :path (:path (input/resolve-address contract scope [field]))}))
+
+
 (defn- inline-definition
-  [source module-namespace {:keys [contract scope]}
-   {:keys [normalize-inline-parent] :as options} [field position expression]]
+  [source module-namespace ctx {:keys [normalize-inline-parent] :as options} [field position expression]]
   (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
     (let [body (second expression)
           origin (format/inline-origin body)]
       (when-not (and (= 2 (count expression)) origin (or (:parent source) (:parents source)))
         (reject! :unsupported-inline-declaration))
       (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
-      (let [normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
-            host (cond-> [(:name source) field] (some? position) (conj position))
+      (let [{:keys [legacy-field path target-id]} (inline-site ctx field position)
+            normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
+            host (cond-> [(:name source) legacy-field] (some? position) (conj position))
             named (parse/inline-declaration normalized host module-namespace)
-            child (merge (dissoc named :args) (select-keys body [:bind :input :configure]))
-            path (:path (input/resolve-address contract scope [field]))]
+            child (merge (dissoc named :args) (select-keys body [:bind :input :configure]))]
+        (when (and target-id (not= target-id (ids/fn-id module-namespace (:name named))))
+          (reject! :scoped-inline-origin-mismatch))
         [(cond-> path (some? position) (conj position))
          (assoc (parse-definition child module-namespace options) :inline-body body)]))))
 
@@ -231,9 +247,13 @@
 
 (defn- inline-definitions
   [source module-namespace ctx options]
-  (into (sorted-map)
-        (comp (mapcat inline-sites) (keep (partial inline-definition source module-namespace ctx options)))
-        (when (map? (:bind source)) (:bind source))))
+  (let [entries (into [] (comp (mapcat inline-sites)
+                               (keep (partial inline-definition source module-namespace ctx options)))
+                      (when (map? (:bind source)) (:bind source)))
+        definitions (into (sorted-map) entries)]
+    (when-not (= (count entries) (count definitions))
+      (reject! :duplicate-inline-site))
+    definitions))
 
 
 (defn- list-inline-at
@@ -265,11 +285,10 @@
       (let [bind (get source :bind {})
             local (scoped/local-form bind)
             local-source (assoc source :bind local)
-            inlines (inline-definitions local-source module-namespace ctx options)
-            ctx (assoc ctx :list-inline-at (list-inline-at inlines))
+            inlines (inline-definitions source module-namespace ctx options)
+            ctx (assoc ctx :inline-at inlines :list-inline-at (list-inline-at inlines))
             builders (list-builders local-source ctx)
-            expression (syntax/parse-expression (:contract ctx) (:scope ctx) local
-                                                (assoc ctx :inline-at inlines :list-at builders))
+            expression (syntax/parse-expression (:contract ctx) (:scope ctx) local (assoc ctx :list-at builders))
             state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
                                                      (:scope ctx) builders)
             routes (scoped/parse-bindings ctx state bind)

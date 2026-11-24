@@ -19,14 +19,17 @@
 
 
 (defn- read-leaf
-  [{:keys [name->id contract scope]} {:keys [source-names]} path form]
+  [{:keys [name->id contract scope inline-at]} {:keys [source-names field-id]} path form]
   (when-not (and (vector? form) (= 2 (count form))) (reject! :unsupported-scoped-expression path))
   (let [[op payload] form]
     (case op
       :value {:kind :value :value payload}
-      :ref (if-let [id (and (keyword? payload) (get name->id payload))]
-             {:kind :ref :fn-id id}
-             (reject! :unresolved-scoped-reference path))
+      :ref (let [{:keys [inline-body fn-id]} (get inline-at [field-id])
+                 target (if (keyword? payload) (get name->id payload)
+                            (when (and (map? payload) (migration/same-edn? inline-body payload)) fn-id))]
+             (if (uuid? target)
+               {:kind :ref :fn-id target}
+               (reject! :unresolved-scoped-reference path)))
       :project (do
                  (when-not (and (= payload source-names) (vector? payload)
                                 (= 1 (count payload)) (simple-keyword? (first payload)))
@@ -104,6 +107,7 @@
       (when-not (migration/same-edn? parsed row)
         (reject! :scoped-origin-mismatch public-path))
       (cond-> {:address address :row parsed :expression expression}
+        (and (= :ref (:kind expression)) (map? (second form))) (assoc :inline-body (second form))
         projection? (assoc :source-names (:source-names certificate))))))
 
 
@@ -142,9 +146,9 @@
 
 (defn emit-bindings
   [local routes id->name]
-  (reduce-kv (fn [form path {:keys [expression source-names]}]
+  (reduce-kv (fn [form path {:keys [expression source-names inline-body]}]
                (assoc form path (case (:kind expression)
                                   :value [:value (:value expression)]
-                                  :ref [:ref (or (get id->name (:fn-id expression)) (reject! :unresolved-scoped-reference path))]
+                                  :ref [:ref (or inline-body (get id->name (:fn-id expression)) (reject! :unresolved-scoped-reference path))]
                                   :projection [:project source-names])))
              local routes))

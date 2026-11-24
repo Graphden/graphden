@@ -93,6 +93,25 @@
     (assoc frozen :execute #(executor/execute {:compiled-registry (atom {root (:invoke frozen)})} root %))))
 
 
+(deftest runtime-matches-when-a-scoped-argument-introduces-an-inline-reference
+  (let [strings (declarations "packages/core/strings/fns.edn" #{:_csv-escape-cell :str-upper :str-trim})
+        inline {:parent :str-trim :args {:string " Ada "}}
+        host {:namespace "fixture" :name :host :parent :_csv-escape-cell
+              :args {:value :str-upper :string inline}}
+        declarations (conj strings host)
+        owner (ids/fn-id "fixture" :host)
+        slot (ids/slot-id (ids/fn-id "core.strings" :str-upper) :string)
+        compile-with-proof (fn [package root roots implementations]
+                             (let [verified (snapshot/with-certified-owner package root roots)
+                                   entry (get-in verified [:closure-baselines root])
+                                   child (get-in entry [:v2 :inline-definitions [slot]])]
+                               (is (= :authored-source-equivalent (:verification entry)))
+                               (is (= (:fn-id child) (get-in entry [:v2 :scoped-inputs [:value :string] :row :ref-fn-id])))
+                               (execution/compile-package verified root roots implementations)))
+        {:keys [legacy canonical]} (runtimes declarations owner compile-with-proof)]
+    (is (= "ADA" (legacy {}) (canonical {})))))
+
+
 (deftest checked-polymorphic-list-execution-matches-the-legacy-graph
   (let [child {:namespace "fixture" :name :directory :parent :zipmap
                :args {:keys {:append [{:value :first} {:value :second}] :closed true}

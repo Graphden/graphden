@@ -786,5 +786,31 @@
     (is (= {[:value] {:description "Body"}} (:configure child)))))
 
 
+(deftest mixed-free-annotations-stage-with-value-bindings-and-original-comments
+  (let [text (str "{:namespace \"demo.main\" :fns [\r\n"
+                  " {:name :base :args {:target :any :request :any} :return-type :any}\r\n"
+                  " {:name :resolve :args {} :return-type :any}\r\n"
+                  " {:name :route :parent :base :args ; call inputs\r\n"
+                  "  {:target :resolve ; value binding\r\n"
+                  "   ; request configuration\r\n"
+                  "   :request {:as ; same public name\r\n"
+                  "             :request :description \"Inbound\r\nrequest\"}}}]}\r\n")
+        definitions (mapv #(assoc % :namespace "demo.main") (:fns (edn/read-string text)))
+        prepared (parse/prepare-module definitions {} {})
+        verify (fn [entries] (:definitions (source/verify-module {:definitions entries} prepared)))
+        entries (verify (:definitions (source/plan-module definitions prepared)))
+        patch (cst/plan-verified-module text entries verify)
+        applied (cst/apply-text patch text)
+        target (:text applied)
+        route (peek (:fns (edn/read-string target)))]
+    (is (= :applied (:status applied)))
+    (is (= {:target [:ref :resolve]} (:bind route)))
+    (is (= {[:request] {:description "Inbound\r\nrequest"}} (:configure route)))
+    (is (not (contains? route :args)))
+    (doseq [comment ["; call inputs\r\n" "; value binding\r\n" "; request configuration\r\n" "; same public name\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern comment) target)))))
+    (is (= :already-applied (:status (cst/apply-text patch target))))))
+
+
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]
   (when (pos? (+ fail error)) (System/exit 1)))

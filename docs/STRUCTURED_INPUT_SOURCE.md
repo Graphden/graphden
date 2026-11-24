@@ -74,9 +74,10 @@ When the authored type is unchanged, it becomes
 `:configure {[:title] {:type :text :description "Document title"}}`.
 The original binding UUID and description survive, and the field stays free.
 Narrowing assertions, extra policies and fields supplied through reference
-scopes still require separate evidence. The CST writer supports an argument
-map containing only these annotations without moving its entries; mixed
-annotation/value maps retain an explicit writer blocker.
+scopes still require separate evidence. The CST writer keeps annotation-only
+maps in place. For mixed argument maps it moves each original entry, including
+its comments, into the appropriate `:bind`, `:input` or `:configure` map.
+The whole module still goes through exact source replay before staging.
 
 A same-name `{:as :field}` with no type also emits an empty legacy binding
 row. Its source-backed `:configure {[:field] {}}` retains that UUID without

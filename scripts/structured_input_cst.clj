@@ -289,6 +289,19 @@
            :configuration (str "{" (:type parts) "}"))))
 
 
+(defn- annotation-spec-edit
+  [source starts leaf field configuration]
+  (let [span (node-edit source starts leaf identity)
+        spec (inventory/read-edn [:args field] (:before span))]
+    (when-not (and (annotations/source-form? field spec)
+                   (= configuration (select-keys spec [:type :description])))
+      (refuse :annotation-origin-mismatch {:path [:args field]}))
+    (let [edits [(node-edit source starts (key-loc leaf :as) (constantly ""))
+                 (node-edit source starts (value-at leaf [:as]) (constantly ""))]
+          local (map #(-> % (update :start - (:start span)) (update :end - (:start span))) edits)]
+      (assoc span :after (patched-text (:before span) local)))))
+
+
 (defn- partition-composed-edit
   [source starts loc {:keys [definition path declarations position-inputs operators forwarded-bindings]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
@@ -306,6 +319,8 @@
         extra-fields (map (fn [[field spec]] (str (pr-str field) " " (pr-str spec))) position-inputs)
         key-edit (rename-edit source starts loc definition path (if input? :input :bind))
         map-span (node-edit source starts args identity)
+        annotation-fields (into #{} (keep (fn [[field {:keys [op]}]]
+                                            (when (= :field-annotation op) field))) operators)
         spans (field-spans source starts args
                            (fn [field value]
                              (let [operation (get operators field)
@@ -313,12 +328,18 @@
                                (case op
                                  nil (node-edit source starts value identity)
                                  :typed-expression (typed-leaf source starts value)
+                                 :field-annotation (annotation-spec-edit source starts value field (:configuration operation))
                                  :list-builder (do
                                                  (when-not (and (= definition (:definition operation)) (= [:args field] (:path operation)))
                                                    (refuse :invalid-field-partition {:definition definition}))
                                                  (list-builder-edit source starts value operation))
                                  :inline-ref (inline-edit source starts value (:body operation) [:args field])
                                  (leaf-edit source starts value op [:args field])))))
+        spans (mapv (fn [{:keys [field] :as span}]
+                      (if (annotation-fields field)
+                        (update span :text #(str "[" field "]" (subs % (count (str field)))))
+                        span))
+                    spans)
         chunks (field-chunks source map-span spans)
         by-field (into {} chunks)
         owns? (set declarations)
@@ -327,10 +348,12 @@
         ;; original slot positions when the smaller :input becomes an array map.
         ordered (if (= declarations (vec (keys (into {} own-chunks))))
                   (map second own-chunks) (map by-field declarations))
-        binds (concat (map second (remove (comp owns? first) chunks))
+        bindable? (complement (into owns? annotation-fields))
+        binds (concat (map second (filter (comp bindable? first) chunks))
                       (map (fn [[target expression]] (str " " (pr-str target) " " (pr-str expression)))
                            (sort-by (comp pr-str key) forwarded-bindings)))
-        configs (keep :configuration spans)]
+        configs (concat (map second (filter (comp annotation-fields first) chunks))
+                        (keep :configuration spans))]
     (when-not (and (= :map (z/tag args)) (= (set (keys by-field)) (into owns? (keys operators))))
       (refuse :invalid-field-partition {:definition definition}))
     {:start (:start key-edit) :end (:end map-span)
@@ -466,8 +489,8 @@
                                 [(node-edit source starts key (if-let [path (get scoped-paths (z/sexpr key))]
                                                                 (constantly (migration/stable-edn path))
                                                                 #(str "[" % "]")))
-                                 (node-edit source starts (key-loc spec :as) (constantly ""))
-                                 (node-edit source starts (value-at spec [:as]) (constantly ""))]))
+                                 (annotation-spec-edit source starts spec (z/sexpr key)
+                                                       (get configuration (path-for (z/sexpr key))))]))
                       (partition 2 (children args)))
           start (:start key-edit)
           end (:end (node-edit source starts args identity))
@@ -656,15 +679,15 @@
         pin (:self-pin (first (:arguments legacy)))
         annotations (filter :annotation (:arguments legacy))
         rename (fn [op] (if has-args? [{:op op :definition (:name source) :path [:args]}] []))]
-    (case (cond (and (= :composed kind) (seq annotations)) :annotations
+    (case (cond (and (= :composed kind) (seq annotations)
+                     (= (count annotations) (count (:arguments legacy)))) :annotations
                 (and (= :composed kind) pin) :self-pin
                 :else kind)
       :annotations
       (let [config (into {} (map (fn [{:keys [source-path annotation]}]
                                    [[(second source-path)] (annotations/configuration annotation)])) annotations)]
-        (when-not (and (= (count annotations) (count (:arguments legacy)))
-                       (= proposed (assoc (dissoc source :args) :configure config)))
-          (refuse :unsupported-annotation-mix {}))
+        (when-not (= proposed (assoc (dissoc source :args) :configure config))
+          (refuse :planner-ledger-mismatch {}))
         [{:op :field-annotations :definition (:name source) :path [:args] :configuration config}])
 
       :self-pin (self-pin-operation source proposed (:arguments legacy) pin)
@@ -681,7 +704,8 @@
       :composed
       (let [arguments (:arguments legacy)
             paths (mapv :source-path arguments)
-            {fields :declaration binds :binding} (group-by :kind arguments)
+            {fields :declaration binding-entries :binding} (group-by :kind arguments)
+            binds (remove :annotation binding-entries)
             declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
             alias-entries (filterv :rename binds)
             alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
@@ -695,28 +719,36 @@
                                             (= [(:slot-id origin)] (:target-path row)))
                                (refuse :planner-ledger-mismatch {:path source-path}))
                              {:op :scope-key :definition (:name source) :path source-path :public-path public-path})) binds)
-            operations (mapv (partial binding-operation source) binds)
-            configuration (into {} (keep (fn [{:keys [op path]}]
-                                           (when (or (= :typed-expression op)
-                                                     (and (= :inline-ref op) (contains? (get-in source path) :type))
-                                                     (and (= :local-projection op)
-                                                          (some #(contains? (get-in source path) %) [:type :description])))
+            operations (mapv (fn [{:keys [source-path annotation] :as argument}]
+                               (if annotation
+                                 {:op :field-annotation :definition (:name source) :path source-path
+                                  :configuration (annotations/configuration annotation)}
+                                 (binding-operation source argument)))
+                             binding-entries)
+            configuration (into {} (keep (fn [{:keys [op path configuration]}]
+                                           (cond
+                                             (= :field-annotation op) [[(second path)] configuration]
+                                             (or (= :typed-expression op)
+                                                 (and (= :inline-ref op) (contains? (get-in source path) :type))
+                                                 (and (= :local-projection op)
+                                                      (some #(contains? (get-in source path) %) [:type :description])))
                                              [[(second path)] (select-keys (get-in source path) (if (= :local-projection op) [:type :description] [:type]))])))
                                 operations)]
         (when-not (and (or (not has-args?) (map? (:args source)))
                        (vector? arguments) (= (count paths) (count (set paths)))
-                       (= (count arguments) (+ (count fields) (count binds)))
+                       (= (count arguments) (+ (count fields) (count binding-entries)))
                        (= (set paths) (set (for [field (keys (:args source))] [:args field])))
                        (= (+ (count forwarded) (count binds)) (count bindings))
                        (every? #(= (:spec %) (get-in source (:source-path %))) fields)
                        (= proposed (cond-> (dissoc source :args)
                                      (seq declarations) (assoc :input declarations)
-                                     (or (seq binds) (and has-args? (empty? fields))) (assoc :bind bindings)
+                                     (or (seq binds) (and has-args? (empty? fields) (empty? annotations))) (assoc :bind bindings)
                                      (seq configuration) (assoc :configure configuration))))
           (refuse :planner-ledger-mismatch {}))
         (cond
           (seq alias-entries)
           (do
+            (when (seq annotations) (refuse :unsupported-annotation-mix {}))
             (when-not (and (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
               (refuse :unsupported-projection-mix {}))
             (into [{:op :declare-projection-input :definition (:name source) :path [:args]

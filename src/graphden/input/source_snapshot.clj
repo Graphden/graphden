@@ -322,7 +322,7 @@
                                     return (:return-type source)]
                                 (cond
                                   list-implementation [[id type-id] (get-in list-implementation [:root-entry :return])]
-                                  (rich/erased-return? type-id return) [[id type-id] return]))))
+                                  (rich/erased-return? type-id return (:alias-ids named)) [[id type-id] return]))))
                    entries)
              :source-list-fragments (into {} (keep (fn [[id entry]]
                                                      (when-let [fragment (:list-fragment entry)] [id fragment]))) entries)
@@ -366,7 +366,8 @@
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
                             (= (get type-ids return) (:return-type-fn-id owner)))
-                       (rich/erased-return? (:return-type-fn-id owner) return))
+                       (rich/erased-return? (:return-type-fn-id owner) return named-ids)
+                       (rich/inline-record-return? type-rows (:return-type-fn-id owner) return type-ids))
                    (every? (fn [{:keys [type type-id declaration]}]
                              (and (or (= type declaration)
                                       (and (map? declaration) (= type (:type declaration))
@@ -397,10 +398,9 @@
 (defn- verified-context
   [package entries resolve-named roots]
   (let [named (named-types/evidence entries resolve-named (rule-type-aliases entries roots))
-        type-rows (into [] (comp (mapcat :declaration-records) (filter #(= :fn (:kind %)))) (vals entries))
-        by-type-id (group-by :id type-rows)]
+        rows-by-id (group-by :id (mapcat :declaration-records (vals entries)))]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
-      (check-type-provenance! (:alias-ids named) by-type-id entry))
+      (check-type-provenance! (:alias-ids named) rows-by-id entry))
     (snapshot entries (:markers package) named)))
 
 

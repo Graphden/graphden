@@ -103,7 +103,7 @@
         (map-indexed vector entries)))))
 
 
-(defn- inline-record-rows-for-return-type
+(defn inline-record-rows-for-return-type
   "When a fn-def's `:return-type` is an inline composite map
    (`{:status :int :body :text …}`, no `:type` discriminator),
    `resolve-type-ref` returns an anonymous-fn-id keyed by shape-hash

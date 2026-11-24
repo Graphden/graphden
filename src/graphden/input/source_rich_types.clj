@@ -5,6 +5,7 @@
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as records]
     [graphden.types.core :as types]))
 
@@ -48,11 +49,27 @@
 
 (defn erased-return?
   "Recover a generic, bottom, collection or union return erased by storage.
-   Its frozen rich implementation entry must still match the authored type."
-  [type-id type]
-  (and (or (types/type-var? type) (= :never type)
-           (and (vector? type) (contains? #{:list :map :union} (first type))))
-       (descriptor/stored-source-type? type type-id)))
+   Its frozen rich implementation entry must still match the authored type.
+   Named leaves require independently verified type identities."
+  ([type-id type] (erased-return? type-id type {}))
+  ([type-id type named-ids]
+   (and (or (types/type-var? type) (= :never type)
+            (and (vector? type) (contains? #{:list :map :union} (first type))))
+        (descriptor/stored-source-type? type type-id named-ids))))
+
+
+(defn inline-record-return?
+  "Verify the exact anonymous record rows and stable field IDs for a return.
+   Each field must resolve directly to its verified stored type."
+  [rows-by-id type-id type type-ids]
+  (and (types/record-type? type) (seq type) (every? simple-keyword? (keys type))
+       (every? #(and (keyword? %) (uuid? (get type-ids %))) (vals type))
+       (let [[record :as expected] (parse/inline-record-rows-for-return-type type type-ids)]
+         (and (uuid? type-id) (= type-id (:id record))
+              (every? (fn [{:keys [id] :as row}]
+                        (let [stored (get rows-by-id id)]
+                          (and (seq stored) (every? #(migration/same-edn? row %) stored))))
+                      expected)))))
 
 
 (defn- pin-row

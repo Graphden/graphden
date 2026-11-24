@@ -45,6 +45,30 @@
   (is (not (rich/erased-return? (ids/primitive-fn-id :any) :unverified-typedef))))
 
 
+(deftest erased-union-return-requires-frozen-named-members
+  (let [form [:union :null :fixture/entry]
+        aliases {:fixture/entry (ids/fn-id "fixture" :entry)}
+        any-id (ids/primitive-fn-id :any)]
+    (is (rich/erased-return? any-id form aliases))
+    (is (not (rich/erased-return? any-id form)))
+    (is (not (rich/erased-return? (ids/primitive-fn-id :jsonb) form aliases)))))
+
+
+(deftest inline-record-return-requires-the-exact-stored-fields
+  (let [type {:status :text :message :nullable-text}
+        alias-id (ids/fn-id "fixture" :nullable-text)
+        aliases (assoc (ids/primitive-fn-ids) :nullable-text alias-id)
+        [record :as rows] (parse/inline-record-rows-for-return-type type aliases)
+        return-id (:id record)
+        field-id (ids/slot-id return-id :message)
+        rows-by-id (group-by :id rows)]
+    (is (rich/inline-record-return? rows-by-id return-id type aliases))
+    (is (not (rich/inline-record-return? rows-by-id return-id type (dissoc aliases :nullable-text))))
+    (is (not (rich/inline-record-return? rows-by-id return-id (assoc type :message :text) aliases)))
+    (is (not (rich/inline-record-return? (assoc-in rows-by-id [field-id 0 :type-fn-id] (ids/primitive-fn-id :any))
+                                         return-id type aliases)))))
+
+
 (deftest callback-type-dependencies-pin-qualified-source-identities
   (let [definitions [{:namespace "core.refinements" :name :positive-int :refine {:base :int :constraint [:> 0]}}
                      {:namespace "other" :name :positive-int :refine {:base :text :constraint [:!= ""]}}]

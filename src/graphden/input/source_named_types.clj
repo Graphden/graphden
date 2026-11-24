@@ -1,15 +1,18 @@
 (ns graphden.input.source-named-types
   "Frozen evidence for named source declarations used by the offline checker."
   (:require
+    [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as records]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
-    [graphden.types.core.shapes :as shapes]))
+    [graphden.types.core.shapes :as shapes]
+    [graphden.types.expansion :as expansion]))
 
 
 (defn- reject!
@@ -19,11 +22,20 @@
 
 
 (defn- union-body
-  [members id]
+  [members id type-id]
   (when-not (and (vector? members) (seq members)
-                 (every? (partial format/collection-type? types/primitive?) members))
+                 (every? (partial format/collection-type? #(or (types/primitive? %) (uuid? (type-id %)))) members))
     (reject! :named-union-evidence-required id))
   (into [:union] members))
+
+
+(defn- normalize-form
+  [kind form name->id module-ns]
+  (let [resolve-ref #(parse/normalize-ref % name->id module-ns)]
+    (case kind
+      :list (if (and (keyword? form) (not (types/primitive? form))) (resolve-ref form) form)
+      :union (if (vector? form) (mapv #(rebase/rewrite-type-references % resolve-ref) form) form)
+      form)))
 
 
 (defn- declaration-kind
@@ -107,15 +119,13 @@
           (when kind
             (let [{:keys [verification v2 source]} (plan-entry id)
                   form (get-in v2 [:source kind])
-                  normalized-form (if (and (= :list kind) (keyword? form) (not (types/primitive? form)))
-                                    (parse/normalize-ref form name->id (:namespace definition))
-                                    form)
+                  normalized-form (normalize-form kind form name->id (:namespace definition))
                   [row & children :as rows] (:declaration-records v2)
                   body (case kind
                          :type (record-body id form row children type-id)
                          :refine (refinement-body id form row children)
                          :list (list-body id normalized-form row children type-id)
-                         :union (union-body form id)
+                         :union (union-body normalized-form id type-id)
                          :map (let [{:keys [key value]} form]
                                 (when-not (every? types/primitive? [key value]) (reject! :named-dictionary-evidence-required id))
                                 [:map key value]))
@@ -156,6 +166,14 @@
              frozen aliases))
 
 
+(defn- union-constraints
+  [frozen]
+  (keep (fn [[id origin]]
+          (when (:union origin)
+            (get-in frozen [:fns id :constraint])))
+        (:type-origins frozen)))
+
+
 (defn evidence
   ([entries resolve-named] (evidence entries resolve-named {}))
   ([entries resolve-named aliases]
@@ -176,7 +194,10 @@
                                                :when (not (keyword? type))]
                                            [[(:id field) (:type-fn-id field)] type]))))))
            (recur (pop pending) (conj seen name) frozen))
-         (rule-aliases frozen aliases))))))
+         (let [frozen (rule-aliases frozen aliases)]
+           (context/call-with-types frozen
+                                    #(run! expansion/assert-finite! (union-constraints frozen)))
+           frozen))))))
 
 
 (defn checked-expression
@@ -185,7 +206,8 @@
    cannot supply an absent required field. Preserve prior obligations."
   [ctx check]
   (let [origins (vals (:type-origins ctx))
-        unions (into #{} (comp (keep :union) (map types/make-union)) origins)
+        unions (context/call-with-types ctx
+                                        #(into #{} (map types/resolve-alias) (union-constraints ctx)))
         records (into #{} (keep :type) origins)]
     (if (and (empty? records) (empty? unions))
       check

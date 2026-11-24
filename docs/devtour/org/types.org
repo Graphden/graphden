@@ -165,13 +165,13 @@ Replays the remaining scoped group with the verified projections still in the gr
 :PROPERTIES:
 :CUSTOM_ID: types/authored-callable-field?
 :FILE: src/graphden/input/source_rich_types.clj
-:LINE: 24
+:LINE: 25
 :MINS: 1.4
 :END:
 
 Checks the anonymous callable row against its literal authored form and stored FK. Named argument and result leaves need a separate frozen declaration closure; alias expansion must not mint a replacement identity. Source evidence does not discharge callable field-read obligations or admit unsupported nested callback parameters.
 
-- source :: [[file:../../../src/graphden/input/source_rich_types.clj::(defn authored-callable-field?][src/graphden/input/source_rich_types.clj:24]]
+- source :: [[file:../../../src/graphden/input/source_rich_types.clj::(defn authored-callable-field?][src/graphden/input/source_rich_types.clj:25]]
 - see also :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 
 * 13. migrate-forwarded-field

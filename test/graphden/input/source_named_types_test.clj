@@ -102,6 +102,40 @@
           ((named-types/lookup package entries) :fixture/ids)))))
 
 
+(deftest named-union-members-keep-their-declaring-namespace-and-stored-constraint
+  (let [[package entries] (package-entries
+                            [{:namespace "left" :name :row :map {:key :keyword :value :text}}
+                             {:namespace "right" :name :row :map {:key :keyword :value :int}}
+                             {:namespace "left" :name :result :union [:null :row]}
+                             {:namespace "right" :name :result :union [:null :row]}])
+        roots {:root {:source {:return-type [:union :left/result :right/result]}}}
+        id (ids/fn-id "left" :result)
+        frozen (named-types/evidence roots (named-types/lookup package entries))
+        ctx (context/build-context frozen)
+        resolved (context/call-with-types ctx #(mapv types/resolve-alias [:left/result :right/result]))
+        check (named-types/checked-expression ctx (constantly {:status :checked}))]
+    (is (= [:union :null :left/row] (get-in frozen [:fns id :constraint])))
+    (is (= [:null :row] (get-in frozen [:type-origins id :union])))
+    (is (= [(ids/fn-id "left" :row) (ids/fn-id "right" :row)]
+           (mapv (:alias-ids frozen) [:left/row :right/row])))
+    (is (= [[:union :null [:map :keyword :text]] [:union :null [:map :keyword :int]]] resolved))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not match"
+          (context/call-with-types ctx #(check {:expected :left/result :actual :right/row
+                                                :expression {:kind :value :value {:a 5}}}))))
+    (doseq [changed [(assoc-in entries [id :v2 :declaration-records 0 :constraint 2] :right/row)
+                     (assoc-in entries [(ids/fn-id "right" :row) :verification] nil)]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
+            (named-types/evidence roots (named-types/lookup package changed)))))))
+
+
+(deftest named-union-evidence-refuses-recursive-expansion
+  (let [[package entries] (package-entries [{:namespace "fixture" :name :one :union [:null :two]}
+                                            {:namespace "fixture" :name :two :union [:text :one]}])]
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"recursive or exceeds"
+          (named-types/evidence {:root {:source {:return-type :one}}}
+                                (named-types/lookup package entries))))))
+
+
 (deftest shipped-request-retains-its-erased-union-and-field-identities
   (let [[package entries] (package-entries
                             (into (declarations "packages/core/refinements/fns.edn" #{:http-status :text-map})

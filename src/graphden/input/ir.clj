@@ -27,13 +27,16 @@
   (cond
     (contains? #{:any :null :bool :text :int :float :decimal :numeric
                  :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected) expected
-    ;; A checked list literal or producer selects the list arm. Keep the read
-    ;; check without interpreting variables in the other arms.
-    (and (types/union-type? expected) (some #{[:list :any]} (types/union-members expected)))
+    ;; A checked literal or producer can select a concrete arm without
+    ;; interpreting variables in the other arms. Keep the check at the read.
+    (types/union-type? expected)
     (let [{:keys [mode actual-type]} (get-in analysis [:scopes scope :bindings address :reference])]
-      (when (and (#{[:invoke :value] [:literal :literal]} [op mode])
-                 (types/list-type? actual-type))
-        [:list :any]))))
+      (when (#{[:invoke :value] [:literal :literal]} [op mode])
+        (let [arm (cond
+                    (= :null actual-type) :null
+                    (types/list-type? actual-type) [:list :any])]
+          (when (some #{arm} (types/union-members expected))
+            arm))))))
 
 
 (defn- read-validator

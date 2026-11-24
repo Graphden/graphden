@@ -464,6 +464,20 @@
       (is (= [] (invoke (:closure (compiled literal functions))))))))
 
 
+(deftest computed-null-retains-a-field-read-validator-for-its-union-arm
+  (let [definitions {:root {:input {:x '[:union :null [:map a :any]]}
+                            :return :any :bindings {[:x] {:ref :child}}}
+                     :child {:input {} :return :null}}
+        result (atom nil)
+        functions {:root echo :child (fn [_ _] @result)}
+        {:keys [closure]} (compiled definitions functions)]
+    (is (nil? (invoke closure)))
+    (reset! result {:key :value})
+    (is (= :execution-error/type-mismatch
+           (try (invoke closure) nil
+                (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))
+
+
 (deftest optional-absence-remains-distinct-from-explicit-nil
   (let [definitions {:root {:input {:x :any} :optional #{[:x]} :return :any}}
         {:keys [closure]} (compiled definitions {:root (fn [args _]

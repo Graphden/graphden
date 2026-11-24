@@ -223,11 +223,8 @@
           (is (= :checked (:status checked)))
           (is (= expected actual))
           (is (= actual (validator/validate! (get-in checked [:scopes [] :signature :return]) actual)))
-          (if (nil? value)
-            (is (= :runtime-obligations-required
-                   (rejection-code #(execution/compile-package package owner roots {base-id (:impl native)}))))
-            (let [compiled (execution/compile-package package owner roots {base-id (:impl native)})]
-              (is (= expected (executor/execute {:compiled-registry (atom {owner (:invoke compiled)})} owner {})))))))
+          (let [compiled (execution/compile-package package owner roots {base-id (:impl native)})]
+            (is (= expected (executor/execute {:compiled-registry (atom {owner (:invoke compiled)})} owner {}))))))
       (let [without-proof (update @loaded :get-in dissoc :local-type-rules)]
         (is (= :rule-signature-view-required
                (rejection-code #(runtimes base base-id execution/compile-package without-proof))))))))

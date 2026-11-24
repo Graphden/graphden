@@ -677,7 +677,7 @@
       (is (= 1 @calls)))))
 
 
-(deftest exact-named-record-callable-retains-nested-parameter-refusal
+(deftest exact-named-record-callable-executes-through-the-checked-parameter-path
   (let [retained (atom nil)
         capture (fn [package id roots impls]
                   (let [{:keys [context options]} (snapshot/freeze-closure package [id] roots)
@@ -685,8 +685,12 @@
                     (reset! retained {:verification (get-in package [:closure-baselines id :verification])
                                       :status (:status checked)
                                       :call-sites (mapcat :call-sites (vals (:closures checked)))})
-                    (execution/compile-package package id roots impls)))]
-    (is (= :callback-parameter-shape-required (rejection-code #(named-callable-runtime true capture))))
+                    (execution/compile-package package id roots impls)))
+        {:keys [canonical legacy calls]} (named-callable-runtime true capture)]
     (is (= :authored-source-equivalent (:verification @retained)))
     (is (= :checked (:status @retained)))
-    (is (= [[:value]] (mapv :value-path (:call-sites @retained))))))
+    (is (= [[:value]] (mapv :value-path (:call-sites @retained))))
+    (doseq [run [legacy canonical]]
+      (reset! calls 0)
+      (is (= "{\"value\":\"checked\"}" (run {})))
+      (is (= 1 @calls)))))

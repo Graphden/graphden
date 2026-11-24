@@ -132,10 +132,23 @@
     (annotations/exact? owner (some #(when (= [(:id %)] target-path) %) (:fields contract)) config)))
 
 
+(defn- inline-binding?
+  [{:keys [fn-id scoped-inputs]} field edge child]
+  (let [{:keys [scope-path target-path ref-fn-id]} edge]
+    (and (= [field] target-path) (= (:fn-id child) ref-fn-id)
+         (or (empty? scope-path)
+             (some (fn [{:keys [address row expression inline-body]}]
+                     (and (= [[fn-id scope-path] target-path] address)
+                          (= {:kind :ref :fn-id ref-fn-id} expression)
+                          (migration/same-edn? edge row)
+                          (migration/same-edn? (:inline-body child) inline-body)))
+                   (vals scoped-inputs))))))
+
+
 (defn- inline-entry
   "The verified parent's round trip compared the child's original body, use-site
-   UUID and authored rows. Match its local field or stored list position."
-  [package {:keys [fn-id]} edges fragments [path child]]
+   UUID and authored rows. Match its local or scoped field or stored list position."
+  [package {:keys [fn-id] :as parent} edges fragments [path child]]
   (let [[field position] path
         id (:fn-id child)
         entry (owned-declaration child)
@@ -143,8 +156,7 @@
     (when-not (and (uuid? id) (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge))
                    (= (ids/binding-id fn-id field) (:id edge))
                    (case (count path)
-                     1 (and (= id (:ref-fn-id edge))
-                            (empty? (:scope-path edge)) (= [field] (:target-path edge)))
+                     1 (inline-binding? parent field edge child)
                      2 (list-signature/inline-operand? (get fragments (:ref-fn-id edge)) edge position id)
                      false)
                    (= id (get-in entry [:owner :id]) (get-in package [:declarations id :fn-id]))

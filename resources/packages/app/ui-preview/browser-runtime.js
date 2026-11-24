@@ -554,7 +554,8 @@
         root.present = structuredPresence(structured, slots, tick);
       }
       let open = true;
-      const available = (address, frame) => address === undefined || frame.present?.has(address);
+      const available = (address, frame) => address === undefined
+        || frame.present?.has(address) || frame.parent?.present?.has(address);
       function assertLiveCallback() {
         if (!open) throw new Error('Graph callback is outside its invocation');
       }

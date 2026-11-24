@@ -2,6 +2,7 @@
   "Disposable PostgreSQL half of the pinned arithmetic source replay."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [graphden.auth.provider :as auth]
     [graphden.crud.structured-comparison :as comparison]
     [graphden.crud.structured-run :as run]
@@ -72,7 +73,7 @@
             (do
               (expect! [200 "succeeded" (if (= :neq name) Boolean Double) native]
                        [status (:status payload) (class native) (:result payload)])
-              [label {:native (.getName (class native)) :json (:result payload)}])))))
+              [label {:native (Class/.getName (class native)) :json (:result payload)}])))))
 
 
 (defn- comparison-checks!
@@ -83,7 +84,7 @@
         invalid {:type :input/compile-rejected :code :invalid-comparison-values}
         unpinned (update ctx :base-fns vary-meta dissoc ::arithmetic/scalar-comparison)]
     (doseq [v [[identity] [(random-uuid)] (first {"key" "value"}) [:ref] [Double/NaN] [Float/POSITIVE_INFINITY] [-9007199254740992]
-               (repeat 4 "not a JSON array") [(apply str (repeat 262145 "x"))]]]
+               (repeat 4 "not a JSON array") [(str/join (repeat 262145 "x"))]]]
       (expect! invalid (code #(comparison/check-args! {:values v}))))
     (expect! invalid (code #((:invoke plan) {:values [identity]} ctx)))
     (doseq [t [:any [:list :any] [:secret :text]]]
@@ -94,10 +95,10 @@
 
 (defn- scalar-checks!
   []
-  (doseq [v [(float 0.25) (double -0.0) Double/MIN_VALUE Double/MAX_VALUE]]
+  (doseq [v [(float 0.25) -0.0 Double/MIN_VALUE Double/MAX_VALUE]]
     (expect! v (#'run/project-result :numeric v)))
   (doseq [[type value] [[:numeric Double/NaN] [:numeric Double/POSITIVE_INFINITY] [:numeric Float/NEGATIVE_INFINITY]
-                        [:int (double 1.5)] [:numeric 9007199254740992N] [[:list :numeric] [1.5]]
+                        [:int 1.5] [:numeric 9007199254740992N] [[:list :numeric] [1.5]]
                         [[:refine :numeric [:>= 0]] -1.5]]]
     (expect! :rejected (try (#'run/project-result type value) :accepted (catch clojure.lang.ExceptionInfo _ :rejected)))))
 

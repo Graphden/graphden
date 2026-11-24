@@ -55,15 +55,15 @@
   [analysis expressions closures]
   (let [obligations (distinct (concat (:obligations analysis)
                                       (mapcat :obligations (vals (:scopes analysis)))))
-        validators (into {} (keep (partial read-validator analysis expressions closures)) obligations)]
-    (let [by-address (group-by :address obligations)]
-      (doseq [[address entries] by-address]
-        (when-not (= 1 (count entries))
-          (reject! :conflicting-runtime-obligations {:address address})))
-      ;; The closure is built by the compiler with the already-proved
-      ;; invocation contract. Validating an arbitrary host function cannot
-      ;; establish a structural callable type.
-      validators)))
+        validators (into {} (keep (partial read-validator analysis expressions closures)) obligations)
+        by-address (group-by :address obligations)]
+    (doseq [[address entries] by-address]
+      (when-not (= 1 (count entries))
+        (reject! :conflicting-runtime-obligations {:address address})))
+    ;; The closure is built by the compiler with the already-proved
+    ;; invocation contract. Validating an arbitrary host function cannot
+    ;; establish a structural callable type.
+    validators))
 
 
 (defn- lower-binding
@@ -216,14 +216,14 @@
 (defn- parameter-node!
   [scope expressions field path]
   (let [address [scope path]
-        record? (contains? field :fields)
-        expected-op (if record? :record :supplied)]
+        structured? (contains? field :fields)
+        expected-op (if structured? :record :supplied)]
     (when-not (= expected-op (get-in expressions [address :op]))
       (reject! :callback-parameter-shape-required {:scope scope}))
     (cond-> {:kind :input-field :name (:name field)
              :address address :type (:type field) :required? (:required field)}
-      record? (assoc :fields (mapv #(parameter-node! scope expressions % (conj path (:id %)))
-                                   (:fields field))))))
+      structured? (assoc :fields (mapv #(parameter-node! scope expressions % (conj path (:id %)))
+                                       (:fields field))))))
 
 
 (defn- parameter-routes

@@ -145,13 +145,13 @@
                   {:m {:type [:map :keyword :int]} :f {:type [:fn {:value :int} :text]}} [:map :keyword :text]]
                  ["core.strings" :name {:value {:type [:union :null :keyword]}} [:union :null :text]]]
           context (context/build-context {})]
-      (doseq [[namespace name binding-facts expected] facts]
-        (let [base (ids/fn-id namespace name)
+      (doseq [[module-ns name binding-facts expected] facts]
+        (let [base (ids/fn-id module-ns name)
               original (get native name)
               callback (:return-type-rule original)
               _ (registry/record-rich-types! base name original)
               frozen (get-in @registry/*rich-types-override* [:by-id base])]
-          (is (signatures/local-type-rules? frozen) (str namespace "/" name))
+          (is (signatures/local-type-rules? frozen) (str module-ns "/" name))
           (is (identical? callback (get-in frozen [:local-type-rule-evidence :return-type-rule])))
           (is (= expected (callback binding-facts :any)
                  (context/call-with-types context #((:return-type-rule frozen) binding-facts :any))))

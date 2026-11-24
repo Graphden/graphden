@@ -852,8 +852,8 @@
     (is (= {:target [:ref :resolve]} (:bind route)))
     (is (= {[:request] {:description "Inbound\r\nrequest"}} (:configure route)))
     (is (not (contains? route :args)))
-    (doseq [comment ["; call inputs\r\n" "; value binding\r\n" "; request configuration\r\n" "; same public name\r\n"]]
-      (is (= 1 (count (re-seq (re-pattern comment) target)))))
+    (doseq [comment-text ["; call inputs\r\n" "; value binding\r\n" "; request configuration\r\n" "; same public name\r\n"]]
+      (is (= 1 (count (re-seq (re-pattern comment-text) target)))))
     (is (= :already-applied (:status (cst/apply-text patch target))))))
 
 

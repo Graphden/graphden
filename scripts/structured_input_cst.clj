@@ -681,6 +681,71 @@
     [{:op :self-pin :definition (:name source) :path path :type (:type pin)}]))
 
 
+(defn- composed-entry-operations
+  [source proposed legacy annotations has-args? rename]
+  (let [arguments (:arguments legacy)
+        paths (mapv :source-path arguments)
+        {fields :declaration binding-entries :binding} (group-by :kind arguments)
+        binds (remove :annotation binding-entries)
+        declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
+        alias-entries (filterv :rename binds)
+        alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
+        position-inputs (positions/declarations arguments)
+        declarations (merge declarations alias-input position-inputs)
+        forwarded (forwarded-bindings fields)
+        bindings (into forwarded (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
+        scopes (keep (fn [{:keys [scope-certificate source-path origin]}]
+                       (when-let [{:keys [public-path row]} scope-certificate]
+                         (when-not (and (= source-path (:source-path scope-certificate)) (= (:id row) (:binding-id origin))
+                                        (= [(:slot-id origin)] (:target-path row)))
+                           (refuse :planner-ledger-mismatch {:path source-path}))
+                         {:op :scope-key :definition (:name source) :path source-path :public-path public-path})) binds)
+        operations (mapv (fn [{:keys [source-path annotation] :as argument}]
+                           (if annotation
+                             {:op :field-annotation :definition (:name source) :path source-path
+                              :configuration (annotations/configuration annotation)}
+                             (binding-operation source argument)))
+                         binding-entries)
+        configuration (into {} (keep (fn [{:keys [op path configuration]}]
+                                       (cond
+                                         (= :field-annotation op) [[(second path)] configuration]
+                                         (or (= :typed-expression op)
+                                             (and (= :inline-ref op) (contains? (get-in source path) :type))
+                                             (and (= :local-projection op)
+                                                  (some #(contains? (get-in source path) %) [:type :description])))
+                                         [[(second path)] (select-keys (get-in source path) (if (= :local-projection op) [:type :description] [:type]))])))
+                            operations)]
+    (when-not (and (or (not has-args?) (map? (:args source)))
+                   (vector? arguments) (= (count paths) (count (set paths)))
+                   (= (count arguments) (+ (count fields) (count binding-entries)))
+                   (= (set paths) (set (for [field (keys (:args source))] [:args field])))
+                   (= (+ (count forwarded) (count binds)) (count bindings))
+                   (every? #(= (:spec %) (get-in source (:source-path %))) fields)
+                   (= proposed (cond-> (dissoc source :args)
+                                 (seq declarations) (assoc :input declarations)
+                                 (or (seq binds) (and has-args? (empty? fields) (empty? annotations))) (assoc :bind bindings)
+                                 (seq configuration) (assoc :configure configuration))))
+      (refuse :planner-ledger-mismatch {}))
+    (cond
+      (seq alias-entries)
+      (do
+        (when (seq annotations) (refuse :unsupported-annotation-mix {}))
+        (when-not (and (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
+          (refuse :unsupported-projection-mix {}))
+        (into [{:op :declare-projection-input :definition (:name source) :path [:args]
+                :input alias-input :position-inputs position-inputs
+                :fields (mapv (fn [{:keys [source-path rename]}] [(second source-path) (:alias rename)]) alias-entries)}]
+              operations))
+
+      (or (seq fields) (seq configuration) (seq position-inputs))
+      [{:op :partition-composed-args :definition (:name source) :path [:args]
+        :declarations (vec (remove (set (keys position-inputs)) (keys declarations)))
+        :position-inputs position-inputs
+        :forwarded-bindings forwarded
+        :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
+      :else (into (into (rename :rename-bind) scopes) operations))))
+
+
 (defn entry-operations
   "Bridge one SUPPORTED graphden.input.source/plan-module entry to CST operations.
    The semantic planner owns reference resolution. Ref spellings are retained;
@@ -718,67 +783,7 @@
       (do (when-not (= source proposed) (refuse :planner-ledger-mismatch {})) [])
 
       :composed
-      (let [arguments (:arguments legacy)
-            paths (mapv :source-path arguments)
-            {fields :declaration binding-entries :binding} (group-by :kind arguments)
-            binds (remove :annotation binding-entries)
-            declarations (into (array-map) (map (juxt (comp second :source-path) :spec)) fields)
-            alias-entries (filterv :rename binds)
-            alias-input (into {} (map (comp (juxt :alias :declaration) :rename)) alias-entries)
-            position-inputs (positions/declarations arguments)
-            declarations (merge declarations alias-input position-inputs)
-            forwarded (forwarded-bindings fields)
-            bindings (into forwarded (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
-            scopes (keep (fn [{:keys [scope-certificate source-path origin]}]
-                           (when-let [{:keys [public-path row]} scope-certificate]
-                             (when-not (and (= source-path (:source-path scope-certificate)) (= (:id row) (:binding-id origin))
-                                            (= [(:slot-id origin)] (:target-path row)))
-                               (refuse :planner-ledger-mismatch {:path source-path}))
-                             {:op :scope-key :definition (:name source) :path source-path :public-path public-path})) binds)
-            operations (mapv (fn [{:keys [source-path annotation] :as argument}]
-                               (if annotation
-                                 {:op :field-annotation :definition (:name source) :path source-path
-                                  :configuration (annotations/configuration annotation)}
-                                 (binding-operation source argument)))
-                             binding-entries)
-            configuration (into {} (keep (fn [{:keys [op path configuration]}]
-                                           (cond
-                                             (= :field-annotation op) [[(second path)] configuration]
-                                             (or (= :typed-expression op)
-                                                 (and (= :inline-ref op) (contains? (get-in source path) :type))
-                                                 (and (= :local-projection op)
-                                                      (some #(contains? (get-in source path) %) [:type :description])))
-                                             [[(second path)] (select-keys (get-in source path) (if (= :local-projection op) [:type :description] [:type]))])))
-                                operations)]
-        (when-not (and (or (not has-args?) (map? (:args source)))
-                       (vector? arguments) (= (count paths) (count (set paths)))
-                       (= (count arguments) (+ (count fields) (count binding-entries)))
-                       (= (set paths) (set (for [field (keys (:args source))] [:args field])))
-                       (= (+ (count forwarded) (count binds)) (count bindings))
-                       (every? #(= (:spec %) (get-in source (:source-path %))) fields)
-                       (= proposed (cond-> (dissoc source :args)
-                                     (seq declarations) (assoc :input declarations)
-                                     (or (seq binds) (and has-args? (empty? fields) (empty? annotations))) (assoc :bind bindings)
-                                     (seq configuration) (assoc :configure configuration))))
-          (refuse :planner-ledger-mismatch {}))
-        (cond
-          (seq alias-entries)
-          (do
-            (when (seq annotations) (refuse :unsupported-annotation-mix {}))
-            (when-not (and (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
-              (refuse :unsupported-projection-mix {}))
-            (into [{:op :declare-projection-input :definition (:name source) :path [:args]
-                    :input alias-input :position-inputs position-inputs
-                    :fields (mapv (fn [{:keys [source-path rename]}] [(second source-path) (:alias rename)]) alias-entries)}]
-                  operations))
-
-          (or (seq fields) (seq configuration) (seq position-inputs))
-          [{:op :partition-composed-args :definition (:name source) :path [:args]
-            :declarations (vec (remove (set (keys position-inputs)) (keys declarations)))
-            :position-inputs position-inputs
-            :forwarded-bindings forwarded
-            :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
-          :else (into (into (rename :rename-bind) scopes) operations)))
+      (composed-entry-operations source proposed legacy annotations has-args? rename)
 
       (refuse :unsupported-source-entry {}))))
 

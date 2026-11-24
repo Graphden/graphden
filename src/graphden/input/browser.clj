@@ -80,10 +80,15 @@
 
 
 (defn- browser-expression
-  [{:keys [op value source scope fields type] :as expression} address {:keys [address-ids scope-ids encode closures] :as wire}]
+  [{:keys [op value source scope fields type nil-when-absent?] :as expression}
+   address {:keys [address-ids scope-ids encode closures] :as wire}]
   (case op
     :literal {:kind "literal" :value (encode value)}
-    :read (call-expr (get address-ids source))
+    :read (let [source-id (get address-ids source)
+                source-call (call-expr source-id)]
+            (if nil-when-absent?
+              {:kind "optional-rename" :present source-id :expr source-call}
+              source-call))
     :invoke (call-expr (get scope-ids scope))
     :closure (closure-expr (get closures address) wire)
     :supplied (cond-> {:kind "supplied" :slot (get address-ids address) :type (supplied-type! type)}

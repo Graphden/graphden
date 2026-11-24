@@ -71,7 +71,8 @@
   (case (:mode reference)
     :literal {:op :literal :value (:value expression)}
     :identity {:op :literal :value (:fn-id expression)}
-    :projection {:op :read :source (:source reference)}
+    :projection (cond-> {:op :read :source (:source reference)}
+                  (:nil-when-absent? reference) (assoc :nil-when-absent? true))
     (:value :callable-producer :graph-callable)
     (let [dependency (get (::dependencies analysis) address)]
       (when-not (= 1 (count dependency))
@@ -173,7 +174,7 @@
                                         (into #{} (filter #(contains? (get expressions %) :default)) sources))
                       kind (case (:op expression)
                              :supplied :supplied
-                             :read :any-present
+                             :read (if (:nil-when-absent? expression) :always :any-present)
                              :record (cond
                                        (= address [root-scope []]) :always
                                        (contains? record-inputs address) :supplied-record

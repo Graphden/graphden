@@ -280,6 +280,30 @@
          (descriptor/stored-source-type? type type-override-fn-id type-ids))))
 
 
+(defn- optional-rename-bindings
+  [entries fields]
+  (let [any-id (ids/primitive-fn-id :any)]
+    (into {}
+          (for [{:keys [owner bindings declaration-records]} (vals entries)
+                :let [owner-id (:id owner)
+                      owned-fields (into #{}
+                                         (keep #(when (= owner-id (:fn-id %)) (:slot-id %)))
+                                         declaration-records)]
+                {:keys [id fn-id target-path projection-path scope-path projection-scope-path expression-kind]} bindings
+                :let [[source-id] projection-path
+                      [target-id] target-path
+                      source (get fields source-id)]
+                :when (and (= "projection" expression-kind)
+                           (= owner-id fn-id) (= [] scope-path projection-scope-path)
+                           (= [source-id] projection-path) (= [target-id] target-path)
+                           (uuid? target-id) (contains? owned-fields source-id)
+                           (= id (ids/binding-id owner-id target-id))
+                           (= target-id (:source-slot-id source))
+                           (false? (:required source))
+                           (= any-id (:type-fn-id source) (get-in fields [target-id :type-fn-id])))]
+            [id {:origin-fn-id owner-id :source-id source-id :target-id target-id}]))))
+
+
 (defn- snapshot
   [entries markers named]
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
@@ -289,6 +313,7 @@
     (context/build-context
       (assoc (dissoc named :type-rows)
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
+             :source-optional-renames (optional-rename-bindings entries fields)
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
              :type-bodies (merge (:type-bodies named) inputs)
              :source-return-types

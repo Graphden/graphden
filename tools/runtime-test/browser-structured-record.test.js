@@ -104,6 +104,17 @@ assert.throws(() => runCallback(suppliedDefault({kind: 'call', fn: 'other'})), /
 assert.throws(() => runCallback(suppliedDefault(['int', 3])), /Invalid browser field default/);
 const localDefault = {...suppliedDefault(['string', 'Ada']), id: 'callback', frame: 'callback'};
 assert.throws(() => [...runCallback(namedMap, {items: [false]}, localDefault)], /Unsupported browser expression/);
+const optionalRename = scopedFn('entry', 'entry', 'const', {
+  value: {
+    kind: 'optional-rename', present: 'items',
+    expr: {kind: 'supplied', slot: 'items', type: {anyOf: ['null', 'bool']}},
+  },
+});
+assert.equal(runCallback(optionalRename), null);
+assert.equal(runCallback(optionalRename, {items: null}), null);
+assert.equal(runCallback(optionalRename, {items: false}), false);
+assert.throws(() => runCallback(optionalRename, {items: 7}), /does not match/);
+assert.throws(() => run('const', {value: optionalRename.args[0].expr}, {format: 1}), /Unsupported browser expression/);
 const opaqueMap = scopedFn('entry', 'entry', 'const', {
   value: {kind: 'supplied', slot: 'items', type: {mapOf: ['keyword', 'any']}},
 });

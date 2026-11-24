@@ -63,21 +63,35 @@
         result))))
 
 
+(defn- optional-rename?
+  [renames {:keys [binding-id origin-fn-id address]} [source-scope [source-id :as source-path]] source-node target]
+  (let [[target-scope [target-id :as target-path]] address]
+    (and (= source-scope target-scope)
+         (= [source-id] source-path) (= [target-id] target-path)
+         (false? (:required source-node)) (= :any (:type source-node) (:type target))
+         (= {:origin-fn-id origin-fn-id :source-id source-id :target-id target-id}
+            (get renames binding-id)))))
+
+
 (defn prepare
   "Resolve every projection to an existing typed source address. Dependency
    cycles include paths that cross evaluated reference uses. No source value
    is read and no shared declaration is modified."
-  [graph]
+  [graph optional-renames]
   (let [routes (into []
-                     (keep (fn [[address {:keys [expression]}]]
+                     (keep (fn [[address {:keys [expression] :as entry}]]
                              (when (= :projection (:kind expression))
                                (let [source [(:scope expression) (:path expression)]
                                      source-contract (contract-at graph (first source))
                                      target (descriptor/node-at (contract-at graph (first address))
-                                                                (second address))]
-                                 {:from address :source source
-                                  :actual-type (descriptor/read-type-at source-contract (second source))
-                                  :required? (or (empty? (second address)) (:required target))}))))
+                                                                (second address))
+                                     alias? (optional-rename? optional-renames entry source
+                                                              (descriptor/node-at source-contract (second source)) target)]
+                                 (cond-> {:from address :source source
+                                          :actual-type (descriptor/read-type-at source-contract (second source))
+                                          :required? (and (not alias?)
+                                                          (or (empty? (second address)) (:required target)))}
+                                   alias? (assoc :nil-when-absent? true))))))
                      (sort-by (comp context/address-sort-key key) (entries graph)))
         input-routes (mapv (fn [{:keys [source] :as route}]
                              (assoc route :actual-type
@@ -85,9 +99,10 @@
                            (:input-routes graph))
         graph (assoc graph :input-routes input-routes)]
     (value-order (value-dependencies graph (concat routes input-routes)))
-    (reduce (fn [result {:keys [from source actual-type]}]
+    (reduce (fn [result {:keys [from source actual-type nil-when-absent?]}]
               (assoc-in result [:scopes (second (first from)) :bindings from :reference]
-                        {:mode :projection :actual-type actual-type :source source}))
+                        (cond-> {:mode :projection :actual-type actual-type :source source}
+                          nil-when-absent? (assoc :nil-when-absent? true))))
             (assoc graph :projections routes) routes)))
 
 

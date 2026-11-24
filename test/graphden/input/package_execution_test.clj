@@ -363,6 +363,40 @@
              (rejection-code #(run (staged-options legacy changed #{root floor}))))))))
 
 
+(deftest staged-legacy-rename-keeps-omission-and-nil-at-the-original-reader
+  (let [path "packages/examples/regression/migrate-on-fn-ref/fns.edn"
+        module (edn/read-string (slurp (io/resource path)))
+        module-ns (:namespace module)
+        core (declarations "packages/core/collections/fns.edn" #{:list :conj})
+        source (into core (map #(assoc % :namespace module-ns)) (:fns module))
+        owners (mapv #(ids/fn-id module-ns (:name %)) (:fns module))
+        visible (into #{} (map #(ids/fn-id (:namespace %) (:name %))) source)
+        compile-staged (fn [package root roots implementations]
+                         (let [certified (reduce #(snapshot/with-certified-owner %1 %2 roots) package owners)
+                               staged (assoc module :input-format 2
+                                             :fns (mapv #(-> (get-in certified [:closure-baselines % :proposed])
+                                                             (dissoc :namespace :source-file)) owners))]
+                           (execution/compile-staged-module certified root roots implementations
+                                                            (staged-options module staged visible))))
+        reads (atom [])
+        conj-impl (get-in @loaded [:conj :impl])
+        native (assoc-in @loaded [:conj :impl] (fn [args ctx]
+                                                 (swap! reads conj (contains? args :item))
+                                                 (conj-impl args ctx)))
+        pair (ids/fn-id module-ns :_ex-pair-with-first)
+        {:keys [canonical legacy analysis]} (runtimes source pair compile-staged native)]
+    (is (false? (get-in analysis [:public-input :routes [:item2] :required])))
+    (doseq [input [{} {:item2 nil} {:item2 false} {:item2 "second"}]
+            run [legacy canonical]]
+      (reset! reads [])
+      (is (= ["first" (:item2 input)] (run input)))
+      (is (= [true true] @reads)))
+    (let [outer (ids/fn-id module-ns :ex-outer)
+          {:keys [canonical legacy]} (runtimes source outer compile-staged)]
+      (is (= [["first" nil]] (legacy {}) (canonical {})))
+      (is (= [["first" 42]] (legacy {:item2 42}) (canonical {:items {:item-0 {:item2 42}}}))))))
+
+
 (deftest shipped-json-handler-executes-from-verified-scoped-source
   (let [core (vec (concat
                     (declarations "packages/core/collections/fns.edn" #{:assoc})

@@ -80,14 +80,16 @@
 
 (defn- resolve-expression
   [frame address ctx]
-  (let [{:keys [op value source fields scope target-id default]} (get-in frame [:ir :expressions address])]
+  (let [{:keys [op value source fields scope target-id default nil-when-absent?]}
+        (get-in frame [:ir :expressions address])]
     (case op
       :literal value
       :closure (lexical-callable frame address target-id ctx)
       :supplied (if-let [cell (get (:input-sources frame) address)]
                   @cell
                   (get (:supplied frame) address default))
-      :read @(get-in frame [:cells source])
+      :read (when (or (not nil-when-absent?) (get-in frame [:present source]))
+              @(get-in frame [:cells source]))
       :record (input/record-view
                 (into {} (keep (fn [[name child]]
                                  (when (get-in frame [:present child])

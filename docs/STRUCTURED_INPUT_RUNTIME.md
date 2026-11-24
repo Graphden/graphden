@@ -132,7 +132,11 @@ field can execute. A base implementation receives a plain map of outer
 runtime thunks. This extra boundary is intentional: `defbase` resolves an outer
 thunk exactly once, so an Atom, Delay or marked callable returned by a reference
 is passed through unchanged. Nested structured records remain lookup views.
-Optional absence, explicit nil and false are distinct. No default is invented.
+Optional absence, explicit nil and false are distinct.
+Verified legacy renames with an optional `:any` source and an `:any`
+destination preserve the original native argument key and supply nil when the
+caller omits the alias. Ordinary projections to a required field require their
+source.
 
 ### Synchronous graph callbacks
 

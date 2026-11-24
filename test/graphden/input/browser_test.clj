@@ -191,6 +191,36 @@
            (run-browser plan inputs)))))
 
 
+(deftest browser-retains-the-nil-read-of-a-verified-optional-rename
+  (let [source {:root {:input {:value :any :alias :any} :optional #{[:alias]} :return :any}}
+        owner (fixture/id :root)
+        [alias-id] (fixture/field-path :root [:alias])
+        [target] (fixture/field-path :root [:value])
+        binding-id (ids/binding-id owner target)
+        row {:id binding-id :fn-id owner :scope-path [] :target-path [target]
+             :expression-kind "projection" :projection-scope-path [] :projection-path [alias-id]}
+        {:keys [context]} (fixture/model source :root)
+        context (assoc-in context [:bindings binding-id] row)
+        analyze (fn [ctx] (analysis/analyze-effective-input ctx owner {:check-expression check/check-input-binding}))
+        verified (assoc-in context [:source-optional-renames binding-id]
+                           {:origin-fn-id owner :source-id alias-id :target-id target})
+        checked (analyze verified)
+        native (get @loaded :const)
+        implementation {:base-fn-id (ids/fn-id "core.logic" :const)
+                        :impl (:impl native) :argument-paths {:value [target]}
+                        :root-entry {:args {:value :any} :return :any}}
+        options {:context verified :snapshot-id (:snapshot-id verified)
+                 :allow-fn? (constantly true) :implementations {owner implementation}}
+        plan (browser/export-named checked options)
+        invoke (jvm/compile-named checked options)
+        inputs [{} {:alias nil} {:alias false} {:alias 42}]]
+    (is (= [[[owner []] [alias-id]]] (:required-addresses (analyze context))))
+    (is (empty? (:required-addresses checked)))
+    (is (= [nil nil false 42] (mapv #(invoke % nil) inputs)))
+    (is (= (mapv #(hash-map :value (wire/encode-value %) :sequence false) [nil nil false 42])
+           (run-browser plan inputs)))))
+
+
 (deftest browser-checks-primitive-reference-obligations-only-when-read
   (let [source (-> definitions
                    (assoc-in [:name :return] :any)

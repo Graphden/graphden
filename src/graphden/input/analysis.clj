@@ -167,13 +167,13 @@
                (fn [target scope overlays]
                  (analyze-input ctx target (assoc options :scope scope :additional-rows overlays
                                                   :defer-reference-checks? infer?))))
-             (projections/prepare)
+             (projections/prepare (:source-optional-renames ctx))
              (projections/apply-demands)
              (as-> graph (if infer?
                            (inference/analyze ctx graph options)
                            (captures/prepare ctx (assoc-in (resolvers/mark-boundaries graph)
                                                            [:coverage :signatures] false))))
-             (projections/prepare)
+             (projections/prepare (:source-optional-renames ctx))
              (checking/check-graph (:check-expression options))
              (projections/apply-demands)
              (obligations/separate)

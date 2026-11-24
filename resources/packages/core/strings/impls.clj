@@ -465,7 +465,8 @@
    :pr-str             {:impl pr-str-fn             :taint-propagate? true}
    :pprint-str         {:impl pprint-str-fn         :taint-propagate? true}
    :to-str             {:impl to-str-fn             :taint-propagate? true}
-   :name               {:impl name-fn               :return-type-rule name-return-rule :taint-propagate? true}
+   :name               {:impl name-fn :return-type-rule name-return-rule
+                        :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :blank?             {:impl blank?-fn             :taint-propagate? true}
    :url-decode         {:impl url-decode-fn         :taint-propagate? true}
    :str-contains?      {:impl str-contains?-fn      :taint-propagate? true}

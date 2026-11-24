@@ -967,18 +967,21 @@
   {:first {:impl first-fn :taint-propagate? true}
    :rest {:impl rest-fn :taint-propagate? true}
    :cons {:impl cons-fn :taint-propagate? true}
-   :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
+   :conj {:impl conj-any-fn :return-type-rule conj-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :get {:impl get-fn :return-type-rule get-return-rule
          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :get-in {:impl get-in-fn :return-type-rule get-in-return-rule
             :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule
            :local-type-rules #{:return-type-rule} :taint-propagate? true}
-   :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule :taint-propagate? true}
+   :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :count {:impl count-fn :taint-propagate? true}
    :empty? {:impl empty?-fn :taint-propagate? true}
    :contains? {:impl contains?-fn :taint-propagate? true}
-   :keys {:impl keys-fn :return-type-rule keys-return-rule :taint-propagate? true}
+   :keys {:impl keys-fn :return-type-rule keys-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :vals {:impl vals-fn :return-type-rule vals-return-rule :taint-propagate? true}
    :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
    :into {:impl into-fn :return-type-rule into-return-rule
@@ -997,7 +1000,8 @@
    :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
    :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule
             :local-type-rules #{:return-type-rule} :taint-propagate? true}
-   :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule :taint-propagate? true}
+   :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule
                  :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :postwalk {:impl postwalk-fn :taint-propagate? true}

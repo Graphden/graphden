@@ -132,3 +132,28 @@
         (is (= :missing-field
                (try ((:return-type-rule entry) {:m {:type shape} :path {:value [{:value :missing}]}} :any)
                     nil (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))))
+
+
+(deftest frozen-value-rules-use-only-the-checked-binding-facts
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [native (:base-fn-defs (loader/load-packages ["core"]))
+          facts [["core.collections" :conj {:coll {:type [:list :text]} :item {:type :text}} [:list :text]]
+                 ["core.collections" :dissoc {:map {:type {:x :int :y :text}} :key {:value :x}} {:y :text}]
+                 ["core.collections" :keys {:map {:type [:map :text :int]}} [:list :text]]
+                 ["core.collections" :update-vals
+                  {:m {:type [:map :keyword :int]} :f {:type [:fn {:value :int} :text]}} [:map :keyword :text]]
+                 ["core.strings" :name {:value {:type [:union :null :keyword]}} [:union :null :text]]]
+          context (context/build-context {})]
+      (doseq [[namespace name binding-facts expected] facts]
+        (let [base (ids/fn-id namespace name)
+              original (get native name)
+              callback (:return-type-rule original)
+              _ (registry/record-rich-types! base name original)
+              frozen (get-in @registry/*rich-types-override* [:by-id base])]
+          (is (signatures/local-type-rules? frozen) (str namespace "/" name))
+          (is (identical? callback (get-in frozen [:local-type-rule-evidence :return-type-rule])))
+          (is (= expected (callback binding-facts :any)
+                 (context/call-with-types context #((:return-type-rule frozen) binding-facts :any))))
+          (is (= (callback {} :any)
+                 (context/call-with-types context #((:return-type-rule frozen) {} :any)))))))))

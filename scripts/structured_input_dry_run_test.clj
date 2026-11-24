@@ -296,7 +296,7 @@
                           (is (= [file] (fs/list-dir destination))))))))
 
 
-(deftest unsupported-inline-writer-does-not-discard-other-list-definitions
+(deftest inline-writer-replays-mixed-fields-and-isolates-a-refused-definition
   (with-repository
     (fn [root roots]
       (package! root "example" []
@@ -304,14 +304,24 @@
                   [{:name :make :args {:items {:type [:list :any]}} :return-type [:list :any]}
                    {:name :pair :args {:x :any :y :any} :return-type :any}
                    {:name :good :parent :make :args {:items [{:value :literal} {:value false}]}}
-                   {:name :unsupported :parent :make
+                   {:name :mixed :parent :make
                     :args {:items [{:parent :pair :args {:x {:as :x} :y {:value 1}}}]}}]]])
-      (let [report (dry/dry-run roots)
+      (let [report (dry/dry-run roots)]
+        (is (= {:supported 4 :blocked 0} (:counts report)))
+        (is (true? (some #(when (= ["example" :mixed] (:definition %)) (:reparsed-list-definition %))
+                         (get-in report [:packages 0 :definitions])))))
+      (let [entry-operations cst/entry-operations
+            report (with-redefs [cst/entry-operations (fn [entry]
+                                                        (if (= :mixed (get-in entry [:source :name]))
+                                                          (throw (ex-info "Fixture writer refusal"
+                                                                          {:definition :mixed :reason :fixture-cst-refusal}))
+                                                          (entry-operations entry)))]
+                     (dry/dry-run roots))
             entries (into {} (map (juxt (comp second :definition) identity)) (get-in report [:packages 0 :definitions]))]
         (is (= {:supported 3 :blocked 1} (:counts report)))
         (is (true? (get-in entries [:good :reparsed-list-definition])))
-        (is (= :blocked (get-in entries [:unsupported :status])))
-        (is (some #(= [:list-cst-verification-failed :unsupported-inline-annotation-mix ["example" :unsupported]]
+        (is (= :blocked (get-in entries [:mixed :status])))
+        (is (some #(= [:list-cst-verification-failed :fixture-cst-refusal ["example" :mixed]]
                       ((juxt :code :cause :definition) %))
                   (:blockers report)))))))
 

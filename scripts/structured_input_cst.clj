@@ -3,6 +3,7 @@
    Operations address the original module, never recursively search literal data.
    No package evaluation, filesystem writes, or semantic classification."
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [graphden.input.format :as format]
     [graphden.input.list-builder :as list-builder]
@@ -117,6 +118,7 @@
 
 
 (declare ^:private inline-edit ^:private list-builder-edit ^:private annotation-map-edit)
+(declare ^:private annotation-spec-edit ^:private field-chunks)
 
 
 (defn- inline-binding-edit
@@ -136,20 +138,61 @@
     :else (leaf-edit source starts loc :wrap-ref path)))
 
 
+(defn- inline-ledger-text
+  [body]
+  (str/join (map (fn [key]
+                   (when (contains? body key)
+                     (str key " " (migration/stable-edn (get body key)) " ")))
+                 [:legacy-forms :legacy-args-order :legacy-scope-names :legacy-order])))
+
+
+(defn- mixed-inline-field
+  [source starts {:keys [bind configure legacy-forms]} targets path [key-node value-node]]
+  (let [field (z/sexpr key-node)
+        target (get targets field field)
+        config-path (if (vector? target) target [field])
+        binding? (contains? bind target)
+        key (node-edit source starts key-node #(if (and binding? (keyword? target))
+                                                 %
+                                                 (migration/stable-edn config-path)))
+        value (if binding?
+                (or (inline-binding-edit source starts value-node (get bind target)
+                                         (get legacy-forms field) (contains? configure [field])
+                                         (into path [:args field]))
+                    (node-edit source starts value-node identity))
+                (annotation-spec-edit source starts value-node field (get configure config-path)))]
+    {:field field :start (:start key) :end (:end value) :binding? binding?
+     :text (str (:after key) (subs source (:end key) (:start value)) (:after value))
+     :configuration (when-let [spec (:configuration value)]
+                      (str (migration/stable-edn [field]) " " spec))}))
+
+
+(defn- mixed-inline-edit
+  [source starts loc {:keys [input legacy-scope-names] :as body} path]
+  (let [args (value-at loc [:args])
+        targets (set/map-invert legacy-scope-names)
+        key (rename-edit source starts loc nil [:args] :bind)
+        span (node-edit source starts args identity)
+        fields (mapv (partial mixed-inline-field source starts body targets path)
+                     (partition 2 (children args)))
+        chunks (into {} (field-chunks source span fields))
+        binding-text (str/join (map (comp chunks :field) (filter :binding? fields)))
+        configs (concat (map (comp chunks :field) (remove :binding? fields))
+                        (keep :configuration fields))]
+    {:start (:start key) :end (:end span)
+     :before (subs source (:start key) (:end span))
+     :after (str (inline-ledger-text body)
+                 (when (seq input) (str ":input " (migration/stable-edn input) " "))
+                 ":bind" (subs source (:end key) (:start span)) "{" binding-text "}"
+                 " :configure {" (str/join " " configs) "}")}))
+
+
 (defn- inline-field-edits
   [source starts loc {:keys [bind input configure legacy-forms legacy-order legacy-args-order legacy-scope-names] :as body} path]
   (if legacy-args-order
-    (do
-      (when-not (and (empty? bind) (empty? input)
-                     (= (set legacy-args-order) (set (map #(get legacy-scope-names % (first %)) (keys configure)))))
-        (refuse :unsupported-inline-annotation-mix {:path path}))
-      [(annotation-map-edit source starts loc configure
-                            (str ":bind {} :legacy-forms " (migration/stable-edn legacy-forms)
-                                 " :legacy-args-order " (migration/stable-edn legacy-args-order) " "
-                                 (when (seq legacy-scope-names)
-                                   (str ":legacy-scope-names " (migration/stable-edn legacy-scope-names) " "))
-                                 (when legacy-order (str ":legacy-order " (migration/stable-edn legacy-order) " ")))
-                            legacy-scope-names)])
+    (if (and (empty? bind) (empty? input))
+      [(annotation-map-edit source starts loc configure (str ":bind {} " (inline-ledger-text body)) legacy-scope-names)]
+      [(mixed-inline-edit source starts loc body path)])
     (let [source-fields (format/inline-source-fields body)
           args (value-at loc [:args])
           fields (mapv (fn [[target form]]
@@ -197,8 +240,12 @@
     (let [edits (when (contains? original :args) (inline-field-edits source starts loc body path))
           edits (cond-> edits type-edit (conj type-edit))
           local (into [] (map #(-> % (update :start - (:start span)) (update :end - (:start span))))
-                      (sort-by :start edits))]
-      (cond-> (assoc span :after (str "[:ref " (patched-text (:before span) local) "]"))
+                      (sort-by :start edits))
+          after (str "[:ref " (patched-text (:before span) local) "]")]
+      (when (and (:legacy-args-order body)
+                 (not (migration/same-edn? [:ref body] (inventory/read-edn path after))))
+        (refuse :planner-ledger-mismatch {:path path}))
+      (cond-> (assoc span :after after)
         type-edit (assoc :configuration (:configuration type-edit))))))
 
 

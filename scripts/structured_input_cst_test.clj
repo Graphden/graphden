@@ -87,6 +87,25 @@
     (is (nil? (format/inline-origin (dissoc body :legacy-scope-names))))))
 
 
+(deftest mixed-inline-fields-retain-comments-and-original-argument-order
+  (let [raw (str "{:namespace \"demo.main\" :fns [{:name :host :parent :base "
+                 ":args {:value {:parent :reader :args {:before {:value false} ; binding tail\r\n"
+                 " ; configure field\r\n :flag {:as :flag :type :bool}"
+                 " :after {:value 1}}}}}]}")
+        original (get-in (edn/read-string raw) [:fns 0 :args :value])
+        body (format/migrate-inline original {:bind {:before [:value false] :after [:value 1]}
+                                              :configure {[:flag] {:type :bool}}})
+        patch (cst/plan raw (request {:op :rename-bind :definition :host :path [:args]}
+                                     {:op :inline-ref :definition :host :path [:args :value] :body body}))
+        edited (:text (cst/apply-text patch raw))
+        emitted (get-in (edn/read-string edited) [:fns 0 :bind :value 1])]
+    (is (= body emitted))
+    (is (= [:before :flag :after] (vec (keys (:args (format/inline-origin emitted))))))
+    (is (str/includes? edited "[:value false] ; binding tail\r\n"))
+    (is (str/includes? edited "; configure field\r\n [:flag]"))
+    (is (= :already-applied (:status (cst/apply-text patch edited))))))
+
+
 (deftest rename-preserves-declaration-style-test
   (let [source "; module\n{:namespace \"demo.main\", :fns\n [{:name :base\n   :args ; owned declaration comment\n   {:x {:type :any :value {:args 9 :input 2}}}}]} ; end\n"
         patch (cst/plan source (request {:op :rename-input :definition :base :path [:args]}))

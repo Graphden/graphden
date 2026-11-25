@@ -86,6 +86,43 @@
         (is (= :named-union-mismatch (:reason failure)))))))
 
 
+(deftest nullable-dictionary-list-operands-retain-the-stored-element-contract
+  (let [base (first (fixtures/declarations "packages/core/collections/fns.edn" #{:merge}))
+        base-id (ids/fn-id "core.collections" :merge)
+        base-signature (get @fixtures/web-base-definitions :merge)
+        signatures (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})]
+                     (registry/record-rich-types! base-id :merge (dissoc base-signature :return-type-rule))
+                     (:by-id @registry/*rich-types-override*))
+        host {:namespace "union-test" :name :settings :parent :merge
+              :args {:maps {:append [{:value {:first 1}} {:value nil} {:value {:second 2}}] :closed true}}}
+        owner (ids/fn-id "union-test" :settings)
+        target (ids/slot-id base-id :maps)
+        {:keys [binding-id builder-id]} (list-builder/origin owner target)
+        analyze (fn [candidate]
+                  (let [defs [base candidate]
+                        package (snapshot/package-index (parse/prepare-module defs {} {}) defs)
+                        {:keys [context options]} (snapshot/freeze-closure package [owner] signatures)]
+                    (analysis/analyze-effective-input context owner options)))
+        graph (analyze host)
+        item (first (get-in graph [:scopes [binding-id] :configured-contract :fields]))
+        element (:type item)
+        [read-check] (:obligations graph)
+        guarded-element (types/list-elem (:expected-type read-check))
+        guarded-dictionary (first (remove #{:null} (types/union-members guarded-element)))
+        error (try (analyze (assoc-in host [:args :maps :append 1 :value] "not a map"))
+                   nil
+                   (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+    (is (= :checked (:status graph)))
+    (is (= (ids/slot-id builder-id :item-0) (:id item)))
+    (is (= (ids/primitive-fn-id :any) (:type-id item)))
+    (is (= #{:null [:map :keyword :any]} (set (types/union-members element))))
+    (is (= :field-read (:trigger read-check)))
+    (is (some #{:null} (types/union-members guarded-element)))
+    (is (types/type-var? (types/map-key guarded-dictionary)))
+    (is (= :any (types/map-val guarded-dictionary)))
+    (is (= :type-mismatch (:reason error)))))
+
+
 (deftest original-union-order-and-uuid-must-match-the-prepared-row
   (let [package (snapshot/package-index (parse/prepare-module originals {} {}) originals)
         owner (ids/fn-id "web.html" :render-hiccup)

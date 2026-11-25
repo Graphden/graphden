@@ -39,6 +39,12 @@
   [resolve-named element]
   (or (contains? #{:any :numeric :int :text :bool :keyword} element)
       (and (keyword? element) (= :union (:kind (resolve-named element))))
+      (and (types/union-type? element) (= 3 (count element))
+           (let [[dictionary :as dictionaries] (remove #{:null} (types/union-members element))]
+             (and (= 1 (count dictionaries))
+                  (types/map-type? dictionary)
+                  (types/type-var? (types/map-key dictionary))
+                  (= :any (types/map-val dictionary)))))
       (and (vector? element) (= 2 (count element)) (= :list (first element))
            (element-type? resolve-named (second element)))))
 

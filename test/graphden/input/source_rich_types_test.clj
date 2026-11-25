@@ -47,11 +47,16 @@
 
 (deftest erased-union-return-requires-frozen-named-members
   (let [form [:union :null :fixture/entry]
+        nested [:union :null {:groups [:list {:group-id :text :change-id :fixture/entry}]}]
         aliases {:fixture/entry (ids/fn-id "fixture" :entry)}
         any-id (ids/primitive-fn-id :any)]
     (is (rich/erased-return? any-id form aliases))
     (is (not (rich/erased-return? any-id form)))
-    (is (not (rich/erased-return? (ids/primitive-fn-id :jsonb) form aliases)))))
+    (is (not (rich/erased-return? (ids/primitive-fn-id :jsonb) form aliases)))
+    (is (rich/erased-return? any-id nested aliases))
+    (is (not (rich/erased-return? any-id nested)))
+    (is (not (rich/erased-return? (ids/primitive-fn-id :jsonb) nested aliases)))
+    (is (not (rich/erased-return? any-id [:union :null {"groups" :text}] aliases)))))
 
 
 (deftest inline-record-return-requires-the-exact-stored-fields

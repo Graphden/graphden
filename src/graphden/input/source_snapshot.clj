@@ -169,7 +169,7 @@
                          (and (= :authored-source-equivalent (:verification proof))
                               (migration/same-edn? (select-keys (:v2 proof) evidence)
                                                    (select-keys child evidence)))))
-                   ;; Rowless projection pins are checked by check-type-provenance!.
+                   ;; Pins on binding rows are checked by check-type-provenance!.
                    (every? (fn [config]
                              (or (nil? (:row config))
                                  (exact-annotation? (:owner entry) (:contract child) config)))

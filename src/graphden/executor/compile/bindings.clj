@@ -353,11 +353,13 @@
 
 (defn- own-fn-of-slot
   "Return the fn-id that OWNS `slot-id` via fn-slot junction, or nil."
-  [slot-id {:keys [fn-slots-by-fn]}]
-  (some (fn [[fid junctions]]
-          (when (some #(= slot-id (:slot-id %)) junctions)
-            fid))
-        fn-slots-by-fn))
+  [slot-id {:keys [fn-by-slot fn-slots-by-fn]}]
+  (if fn-by-slot
+    (get fn-by-slot slot-id)
+    (some (fn [[fid junctions]]
+            (when (some #(= slot-id (:slot-id %)) junctions)
+              fid))
+          fn-slots-by-fn)))
 
 
 (defn- collect-env-bindings*

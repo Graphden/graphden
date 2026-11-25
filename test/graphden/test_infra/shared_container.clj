@@ -109,7 +109,13 @@
   ;; caller bypassed `get-container`'s double-checked lock.
   (counters/count! :fixture/container-boot)
   (let [start-time (System/currentTimeMillis)
-        container (doto (PostgreSQLContainer. ^String default-postgres-image)
+        gate-run (System/getenv "GRAPHDEN_WTQ_RUN")
+        container (PostgreSQLContainer. ^String default-postgres-image)
+        _ (when (and gate-run (re-matches #"[0-9]{8}-[0-9]{6}" gate-run))
+            (doto container
+              (PostgreSQLContainer/.withLabel "graphden.wtq.run" gate-run)
+              (PostgreSQLContainer/.withLabel "graphden.wtq.disposable" "shared-postgres")))
+        container (doto container
                     (PostgreSQLContainer/.withStartupAttempts 3)
                     ;; `pg_stat_statements` is how a scenario counts its own SQL
                     ;; without a line of instrumentation in the storage layer —

@@ -113,7 +113,7 @@ Synchronizes authored function definitions into function, [[file:glossary.org::#
 :CUSTOM_ID: executor/build-lookups
 :FILE: src/graphden/executor/compile/lookups.clj
 :LINE: 103
-:MINS: 7.0
+:MINS: 7.4
 :END:
 
 Builds lookup maps for functions, [[file:glossary.org::#term/slot][slots]], [[file:glossary.org::#term/binding][bindings]], and list items, including ~:fn-map~, ~:slot-map~, and ~:bindings-by-fn~. Compiler helpers use these indexes instead of repeatedly searching the raw rows. The inheritance-chain cache records the ancestors used to resolve inherited values.
@@ -126,13 +126,13 @@ Builds lookup maps for functions, [[file:glossary.org::#term/slot][slots]], [[fi
 :PROPERTIES:
 :CUSTOM_ID: executor/root-fn
 :FILE: src/graphden/executor/compile/lookups.clj
-:LINE: 292
+:LINE: 299
 :MINS: 2.0
 :END:
 
 Follows ~parent-ids~ to find the root [[file:glossary.org::#term/base-function][base function]], whose implementation computes the result. A composed [[file:glossary.org::#term/graph-function][graph function]] supplies inherited or overridden arguments to that implementation. These function parents are distinct from the version branches discussed later.
 
-- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:292]]
+- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:299]]
 - same file :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 
 * 10. collect-bindings

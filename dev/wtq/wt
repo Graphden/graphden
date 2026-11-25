@@ -166,6 +166,7 @@ gate_log_tail() {
 bootstrap_node_modules() {
   local path="$1" dir src dst
   while IFS= read -r dir; do
+    [ "$dir" != . ] || continue   # root dependencies use the lockfile cache below
     src="$MAIN_WT/$dir/node_modules"
     dst="$path/$dir/node_modules"
     if [ ! -d "$src" ]; then
@@ -187,20 +188,37 @@ bootstrap_node_modules() {
   sync_root_node_modules "$path"
 }
 
-# Feature worktrees can inherit an incomplete main checkout dependency tree.
-# Install the exact lock before any local check; the train calls the same
-# helper before its parallel checks so installs never race linter readers.
-sync_root_node_modules() {
+# Install root dependencies once per package manifest and lockfile. The cache
+# lock protects publication and the idle reaper. Worktree copies are real
+# directories so the license checker and package discovery still work.
+sync_root_node_modules() (
   local path="$1" lock="$1/package-lock.json" modules="$1/node_modules"
   [ -f "$lock" ] || return 0
   local digest
-  digest="$(sha256sum "$lock" | cut -d' ' -f1)"
-  if [ ! -d "$modules" ] || [ "$(cat "$modules/.graphden-lock-sha256" 2>/dev/null)" != "$digest" ]; then
-    info "Installing root npm dependencies for $path/package-lock.json"
-    (cd "$path" && npm ci --ignore-scripts --no-audit --no-fund) || return 1
-    printf '%s\n' "$digest" > "$modules/.graphden-lock-sha256"
+  digest="$(cat "$path/package.json" "$lock" | sha256sum | cut -d' ' -f1)" || return 1
+  if [ -d "$modules" ] && [ ! -L "$modules" ] && [ "$(cat "$modules/.graphden-lock-sha256" 2>/dev/null)" = "$digest" ]; then
+    return 0
   fi
-}
+  local cache_root="$WTQ_DIR/npm-root" cached scratch
+  cached="$cache_root/$digest"
+  mkdir -p "$cache_root" || return 1
+  exec 5>>"$cache_root/.lock"
+  flock -x 5 || return 1
+  if [ ! -d "$cached" ]; then
+    scratch="$(mktemp -d "$cache_root/.install.XXXXXXXX")" || return 1
+    trap 'rm -rf -- "$scratch"' EXIT
+    cp "$path/package.json" "$lock" "$scratch/" || return 1
+    info "Installing shared root npm dependencies for $path/package-lock.json"
+    (cd "$scratch" && npm ci --include=dev --ignore-scripts --no-audit --no-fund) || return 1
+    printf '%s\n' "$digest" > "$scratch/node_modules/.graphden-lock-sha256" || return 1
+    mv -- "$scratch/node_modules" "$cached" || return 1
+  fi
+  touch "$cached" || return 1
+  rm -rf -- "$modules" || return 1
+  if ! cp -al "$cached" "$modules" 2>/dev/null; then
+    rm -rf -- "$modules" && cp -a "$cached" "$modules" || return 1
+  fi
+)
 
 sync_train_root_node_modules() {
   sync_root_node_modules "$TRAIN_WT"
@@ -635,7 +653,7 @@ cmd_doctor() {
   say "  to your leftovers. Check the pid, then kill it yourself."
 }
 
-# Automatic cleanup reclaims only build artifacts and old diagnostic logs.
+# The low-disk fallback reclaims build artifacts and old diagnostic logs.
 # Unreferenced Docker volumes can still contain recoverable database state;
 # Trivy databases are retained to avoid downloading them again on gate retries.
 # Neither is disposable merely because a gate needs more free disk space.
@@ -658,7 +676,7 @@ archive_gate_logs() {
   # diagnostics while releasing the shared inode before adjacent full gates
   # exhaust the disk. Receipts stay intact; wt log reads the .gz files.
   info "Archiving gate logs older than 24 hours ..."
-  find "$LOG_DIR" -maxdepth 1 -type f \( -name '*.log' -o -name '.gate-*.out' \) -mmin +1440 -print0 \
+  find "$LOG_DIR" -maxdepth 1 -type f \( -name '*.log' -o -name '.gate-*.out' -o -name '*.integration-gc-*.log.[0-9]' \) -mmin +1440 -print0 \
     | xargs -0 -r -P 2 -n 1 gzip -f
 }
 
@@ -1724,12 +1742,14 @@ gate_suites() {
   local LOCAL_INTEGRATION="" REMOTE_CREDIT_STAGE=0
   local -a WTQ_PROGRESS_MEMBERS=("${WTQ_PROGRESS_MEMBERS[@]}")
   local GRAPHDEN_RESUME_OUT="$LOG_DIR/_train-$WTQ_REPORT_TS"
+  local GRAPHDEN_WTQ_RUN="$WTQ_REPORT_TS"
   local GRAPHDEN_RESUME_FROM="${WTQ_RESUME_FROM:-}"
   local WTQ_REUSE_FROM="${WTQ_REUSE_FROM:-}"
   local GRAPHDEN_RESUME_CREDIT=0
   local GRAPHDEN_CI_FIRST_TESTS="${WTQ_FIRST_TESTS:-}"
   [ -n "${WTQ_REUSE_FROM:-}" ] && GRAPHDEN_RESUME_CREDIT=1
   export GRAPHDEN_RESUME_OUT GRAPHDEN_RESUME_FROM GRAPHDEN_RESUME_CREDIT GRAPHDEN_CI_FIRST_TESTS
+  export GRAPHDEN_WTQ_RUN
   local -a stages=(ci) ordered=()
   base_sha="$(git -C "$wt" rev-parse "$TARGET")"
   ci_sha="$(git -C "$wt" rev-parse HEAD)"
@@ -1886,7 +1906,13 @@ gate_suites() {
       WTQ_FAILURE_RECEIPT="$GRAPHDEN_RESUME_OUT" record_failed_stage "$stage" "$base_sha" "${WTQ_PROGRESS_MEMBERS[@]}"
     fi
     WTQ_STAGE_ABORT=0
-    if ! run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected" "$ci_sha"; then
+    local failed=0
+    run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected" "$ci_sha" || failed=1
+    if [[ "$GRAPHDEN_WTQ_RUN" =~ ^[0-9]{8}-[0-9]{6}$ ]]; then
+      bash "$SCRIPT_DIR/reap-test-containers.sh" --run "$GRAPHDEN_WTQ_RUN" \
+        || warn "could not reap disposable databases for $GRAPHDEN_WTQ_RUN"
+    fi
+    if [ "$failed" = 1 ]; then
       if [ "$WTQ_STAGE_ABORT" = 1 ]; then
         (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" pending) || return 1
         return 3

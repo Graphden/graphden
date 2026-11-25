@@ -112,6 +112,7 @@
      :fn-map               {fn-id → fn-row}
      :slot-map             {slot-id → slot-row}
      :fn-slots-by-fn       {fn-id → [fn-slot-row …]}, ordered by :position
+     :fn-by-slot          {slot-id → first owning fn-id}
      :slot-by-fn-name      {[fn-id slot-name-keyword] → slot-row}
      :slot-by-fn-source-slot
                             {[fn-id source-slot-id] → slot-row} —
@@ -141,6 +142,11 @@
                             (reduce (fn [acc fs]
                                       (update acc (:fn-id fs) (fnil conj []) fs))
                                     {}))
+        fn-by-slot (reduce-kv (fn [owners fid junctions]
+                                (reduce (fn [acc {:keys [slot-id]}]
+                                          (if (contains? acc slot-id) acc (assoc acc slot-id fid)))
+                                        owners junctions))
+                              {} fn-slots-by-fn)
         slot-by-fn-name (into {}
                               (mapcat (fn [[fid junctions]]
                                         (keep (fn [fs]
@@ -178,6 +184,7 @@
        :views-by-root      views-by-root
        :slot-map           slot-map
        :fn-slots-by-fn     fn-slots-by-fn
+       :fn-by-slot         fn-by-slot
        :slot-by-fn-name    slot-by-fn-name
        :slot-by-fn-source-slot slot-by-fn-source-slot
        :bindings-by-fn     bindings-by-fn

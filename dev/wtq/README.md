@@ -185,8 +185,16 @@ Details that are deliberate:
   missing browser cache is a resumable host PRECOND rather than a late suite
   failure. Disk admission archives gate logs older than 24 hours without
   losing `wt log` access and drops reproducible Docker build cache before
-  refusing the next stage. Automatic cleanup and `wt gc` preserve Docker
-  volumes and downloaded Trivy databases, including when disk remains low.
+  refusing the next stage. Stage cleanup reaps stopped scratch PostgreSQL
+  containers explicitly labeled for that run, along with their anonymous
+  volumes. Untagged volumes and downloaded Trivy databases are preserved.
+  To recover abandoned scratch containers after a reboot, schedule
+  `bash dev/wtq/reap-test-containers.sh --idle <git-common-dir>/wtq` on the host.
+  It checks both gate locks and also expires old entries in the shared root
+  npm cache, whose worktree copies retain their hardlinks.
+  Local WTQ integration defaults to a 4 GiB Java heap and two parallel
+  namespaces. The actual heap settings and bounded per-JVM GC logs are
+  retained alongside the train receipt.
   Missing or malformed proof runs the check rather than waiving it. CI preserves canonical resource
   batches (it may split, never combine them); readers follow their measuring
   tests, and the verified build precedes image consumers. Browser admission

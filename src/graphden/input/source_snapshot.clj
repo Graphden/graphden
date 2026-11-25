@@ -169,7 +169,11 @@
                          (and (= :authored-source-equivalent (:verification proof))
                               (migration/same-edn? (select-keys (:v2 proof) evidence)
                                                    (select-keys child evidence)))))
-                   (every? (partial exact-annotation? (:owner entry) (:contract child)) (vals (:configurations child))))
+                   ;; Rowless projection pins are checked by check-type-provenance!.
+                   (every? (fn [config]
+                             (or (nil? (:row config))
+                                 (exact-annotation? (:owner entry) (:contract child) config)))
+                           (vals (:configurations child))))
       (reject! :unsupported-scope-declaration fn-id))
     (when (contains? (:originals package) id) (reject! :conflicting-inline-declaration id))
     child))

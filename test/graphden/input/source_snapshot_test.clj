@@ -497,6 +497,29 @@
            (:code (failure #(snapshot/freeze-closure (update package :originals dissoc base) [host-id] @roots)))))))
 
 
+(deftest inline-projection-pin-preserves-the-stored-binding-and-type
+  (let [host {:name :keyword-wrapper :namespace "fixture" :parent :const
+              :args {:value {:parent :str-to-keyword :args {:string {:as :param-name :type :text}}}}}
+        definitions (into [host] (concat (filter #(= :const (:name %)) (sources "logic"))
+                                         (filter #(= :str-to-keyword (:name %)) (sources "strings"))
+                                         (filter #(#{:nullable-text :nullable-keyword} (:name %)) (sources "refinements"))))
+        prepared (parse/prepare-module definitions {} {})
+        owner (ids/fn-id "fixture" :keyword-wrapper)
+        entry (-> (source/plan-module [host] prepared) (source/verify-module prepared) :definitions first)
+        package (snapshot/package-index prepared definitions)
+        [child-path child] (first (get-in entry [:v2 :inline-definitions]))
+        target (ids/slot-id (ids/fn-id "core.strings" :str-to-keyword) :string)
+        bound (ids/binding-id (:fn-id child) target)
+        text-id (ids/primitive-fn-id :text)
+        context (:context (snapshot/freeze-declarations package [owner]))
+        config-key (first (keys (:configurations child)))
+        tampered (assoc-in entry [:v2 :inline-definitions child-path :configurations config-key :type] :int)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= :text (get-in context [:source-binding-types [bound text-id]])))
+    (is (= :configuration-evidence-required
+           (:code (failure #(snapshot/freeze-declarations (assoc-in package [:closure-baselines owner] tampered) [owner])))))))
+
+
 (deftest multiple-inline-branches-freeze-every-authored-use
   (let [leaf {:parent :str-upper :args {:string "checked"}}
         host {:namespace "fixture" :name :inline-comparison :parent :equal?

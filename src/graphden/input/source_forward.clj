@@ -2,6 +2,7 @@
   "Locate authored local fields behind unique legacy value-reference uses."
   (:require
     [graphden.input.format :as format]
+    [graphden.input.list-builder :as list-builder]
     [graphden.input.migration :as migration]
     [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-rich-types :as rich]
@@ -97,7 +98,7 @@
          (= '[:union a b] (:return-type base)))))
 
 
-(defn- checked-reference-binding
+(defn- checked-direct-reference
   [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]}
    {:keys [target-id return-type multiple-readers?] :as target}]
   (let [row (single (filter #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %)))
@@ -126,20 +127,59 @@
     (cond-> {:binding-id (:id row)} origin (assoc :generic-reference origin))))
 
 
+(defn- checked-list-reference
+  [{owner-id :identity :keys [legacy]} target-id]
+  (let [{:keys [fragment item argument]}
+        (single (for [{:keys [list-builder origin] :as argument} (:arguments legacy)
+                      :let [fragment (peek (:fragments list-builder))]
+                      :when (and (:records list-builder) (= owner-id (:owner-id fragment))
+                                 (= (:binding-id origin) (:binding-id fragment)))
+                      item (:items fragment)
+                      :when (= target-id (:fn-id item))]
+                  {:fragment fragment :item item :argument argument})
+                :missing-direct-reference-binding)
+        {:keys [binding-id builder-id]} fragment
+        {:keys [position id]} item
+        {:keys [expression list-ref-names list-inline-items]} argument
+        row (single (filter #(and (= :binding-list-item (:kind %)) (= id (:id %))) (:records legacy))
+                    :missing-direct-reference-binding)]
+    (when-not (and (= :ref (:kind item)) (= target-id (:ref-fn-id row)) (nil? (:value row))
+                   (= binding-id (:binding-id row)) (= position (:position row))
+                   (= id (ids/binding-list-item-id binding-id position))
+                   (= {:kind :ref :fn-id builder-id}
+                      (list-builder/reference-expression {:fragments [fragment]} expression list-ref-names list-inline-items)))
+      (reject! :unproved-reference-binding))
+    {:binding-id binding-id :root-target-id builder-id
+     :list-operand {:binding-id binding-id :position position :item-id id :ref-fn-id target-id}}))
+
+
+(defn- checked-reference-binding
+  [prepared entry {:keys [target-id multiple-readers?] :as target}]
+  (if (or multiple-readers?
+          (some #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %))) (get-in entry [:legacy :records])))
+    (checked-direct-reference prepared entry target)
+    (checked-list-reference entry target-id)))
+
+
 (defn- proof
   [prepared {owner-id :identity :as entry} field {:keys [slot membership type]}
    {:keys [field-id field-type target-id direct? multiple-readers?] :as target}]
-  (let [{:keys [binding-id generic-reference]} (checked-reference-binding prepared entry target)]
+  (let [{:keys [binding-id generic-reference root-target-id list-operand]}
+        (checked-reference-binding prepared entry target)]
     (when-not (and (= field-id (:source-slot-id slot))
                    (or (= type field-type)
+                       (and list-operand (nil? field-type))
                        (and (primitive-field? type) (primitive-field? field-type) (types/subtype? type field-type))))
       (reject! :unproved-forwarded-target))
     (cond-> {:owner-id owner-id :field-id (:id slot) :membership-id (:id membership)
-             :source-path [:args field] :target-fn-id target-id :target-field-id field-id :root-use-id binding-id
+             :source-path [:args field] :target-fn-id (or root-target-id target-id)
+             :target-field-id field-id :root-use-id binding-id
              :source-type type :target-type field-type
              :projection-id (migration/derived-id :forwarded-field owner-id binding-id field-id)
              :source-address [[owner-id []] [(:id slot)]]
-             :target-address (when direct? [[owner-id [binding-id]] [field-id]])}
+             :target-address (when direct?
+                               [[owner-id (cond-> [binding-id] list-operand (conj (:item-id list-operand)))] [field-id]])}
+      list-operand (assoc :list-operand list-operand)
       generic-reference (assoc :generic-reference generic-reference)
       multiple-readers? (assoc :multiple-readers? true))))
 

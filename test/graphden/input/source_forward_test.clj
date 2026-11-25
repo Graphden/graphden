@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
+    [graphden.input.list-builder :as list-builder]
     [graphden.input.scoped-source :as scoped-source]
     [graphden.input.source :as source]
     [graphden.input.source-forward :as forward]
@@ -56,6 +57,27 @@
 (deftest forwarding-does-not-conflate-two-uses-of-one-function
   (let [[prepared entry] (fixture {:left :encode-body :right :encode-body :data {:type :text}})]
     (is (= :nonunique-reference-use (rejection prepared entry)))))
+
+
+(deftest forwarding-through-a-list-uses-the-stored-operand-position
+  (let [forms [{:name :collect :args {:items {:type '[:list a]}} :return-type '[:list a]}
+               {:name :encode :args {:data :text} :return-type :text}
+               {:name :response :parent :collect :args {:items ["prefix" :encode] :data {:type :text}}}]
+        declarations (mapv #(assoc % :namespace "fixture") forms)
+        prepared (parse/prepare-module declarations {} {})
+        entry (last (:definitions (source/plan-module declarations prepared)))
+        owner (ids/fn-id "fixture" :response)
+        target (ids/fn-id "fixture" :encode)
+        field (ids/slot-id target :data)
+        {:keys [binding-id builder-id]} (list-builder/origin owner (ids/slot-id (ids/fn-id "fixture" :collect) :items))
+        operand (ids/binding-list-item-id binding-id 1)
+        proof (forward/verify-forwarded-field prepared entry :data)
+        tampered (update-in entry [:legacy :records]
+                            (fn [records] (mapv #(cond-> % (= operand (:id %)) (assoc :position 0)) records)))]
+    (is (= builder-id (:target-fn-id proof)))
+    (is (= [[owner [binding-id operand]] [field]] (:target-address proof)))
+    (is (= {:binding-id binding-id :position 1 :item-id operand :ref-fn-id target} (:list-operand proof)))
+    (is (= :unproved-reference-binding (rejection prepared tampered)))))
 
 
 (deftest multiple-forwarded-fields-must-be-lowered-as-a-complete-group

@@ -312,7 +312,11 @@
             list-links (into {} (keep (fn [certificate]
                                         (let [edge (first (:edges certificate))]
                                           (when (:source-list-fragment edge)
-                                            (let [link (source-list-link (cons own lineage) edge (:public-path certificate))]
+                                            (let [owner (get-in own [:owner :id])
+                                                  origins (if (= owner (:origin-fn-id edge))
+                                                            (certified-lineage env owner)
+                                                            lineage)
+                                                  link (source-list-link origins edge (:public-path certificate))]
                                               [(:id link) link]))))) certificates)]
         (run! (partial check-descendants! env) certificates)
         {:scoped-inputs (into {} (map (juxt :public-path identity)) certificates)

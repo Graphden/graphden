@@ -561,6 +561,30 @@
         (is (= :text (get-in checked [:scopes [binding-id operand] :signature :return])))))))
 
 
+(deftest forwarded-list-reference-retains-both-edges-in-source-replay
+  (let [host {:name :sample :namespace "fixture" :parent :str
+              :args {:parts [{:value "prefix"} :str-upper] :string {:type :text}}}
+        originals (conj (filterv #(#{:str-upper :str} (:name %)) (sources "strings")) host)
+        prepared (parse/prepare-module originals {} {})
+        package (snapshot/package-index prepared originals)
+        owner (ids/fn-id "fixture" :sample)
+        local (ids/slot-id owner :string)
+        target (ids/slot-id (ids/fn-id "core.strings" :str-upper) :string)
+        list-field (ids/slot-id (ids/fn-id "core.strings" :str) :parts)
+        {:keys [binding-id]} (list-builder/origin owner list-field)
+        operand (ids/binding-list-item-id binding-id 1)
+        result (snapshot/migrate-forwarded-field package owner :string @roots)
+        path [:parts :item-1 :string]
+        witness (some :scope-certificate (get-in result [:legacy :arguments]))
+        certificate (get-in result [:v2 :scoped-inputs path])]
+    (is (= :authored-source-equivalent (:verification result)) (:blockers result))
+    (is (= [:project [:string]] (get-in result [:proposed :bind path])))
+    (is (= [binding-id operand] (mapv :binding-id (:edges witness))))
+    (is (= [binding-id operand] (get-in certificate [:row :scope-path])))
+    (is (= [local] (get-in certificate [:row :projection-path])))
+    (is (= [target] (get-in certificate [:row :target-path])))))
+
+
 (deftest absent-or-incompatible-package-evidence-is-rejected-test
   (let [package (fixture "checked")
         reader (ids/fn-id "core.strings" :str-upper)]

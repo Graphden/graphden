@@ -320,12 +320,19 @@
   (first (verify-bindings plan-entry [source-path] snapshot analyze)))
 
 
+(defn- checked-free-route
+  [graph address]
+  (let [[_ route :as entry] (only (filter #(= address (:address (val %))) (get-in graph [:public-input :routes]))
+                                  :unavailable-forwarded-input)]
+    (when-not (and (= :input-field (:kind route)) (:whole-bindable? route))
+      (reject! :unproved-forwarded-input))
+    entry))
+
+
 (defn- free-route!
   [graph address type]
-  (let [[names route] (only (filter #(= address (:address (val %))) (get-in graph [:public-input :routes]))
-                            :unavailable-forwarded-input)]
-    (when-not (and (= :input-field (:kind route)) (:whole-bindable? route)
-                   (migration/same-edn? type (:completion-type route)))
+  (let [[names route] (checked-free-route graph address)]
+    (when-not (migration/same-edn? type (:completion-type route))
       (reject! :unproved-forwarded-input))
     names))
 
@@ -333,7 +340,7 @@
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
                            field-id source-type target-type target-fn-id target-field-id root-use-id
-                           multiple-readers? generic-reference]}]
+                           multiple-readers? generic-reference list-operand]}]
   (let [address (occurrence before target-field-id (when multiple-readers? root-use-id))
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
@@ -346,12 +353,20 @@
                    (not (contains? (:bindings snapshot) projection-id)))
       (reject! :unproved-forwarded-identity))
     (let [source-names (free-route! before source-address source-type)
-          target-names (free-route! before address target-type)
+          target-names (if (and list-operand (nil? target-type))
+                         (let [[names route] (checked-free-route before address)
+                               type (:completion-type route)]
+                           (when-not (and (some? type)
+                                          (context/call-with-types snapshot #(types/subtype? source-type type)))
+                             (reject! :unproved-forwarded-input))
+                           names)
+                         (free-route! before address target-type))
           edges (mapv #(checked-edge before snapshot owner-id (subvec uses 0 %)) (range 1 (inc (count uses))))
           field-owner (only (filter #(= target-field-id (ids/slot-id % (peek target-names)))
                                     (get-in before [:scopes uses :declaration-order]))
                             :reference-field-origin-mismatch)]
       (when-not (and (= target-fn-id (:target-fn-id (first edges)))
+                     (or (nil? list-operand) (= list-operand (:source-list-operand (second edges))))
                      (= 1 (count source-names)) (= (conj (mapv :name edges) (first source-names)) target-names))
         (reject! :unproved-forwarded-use))
       (cond-> {:snapshot-id (:snapshot-id snapshot)

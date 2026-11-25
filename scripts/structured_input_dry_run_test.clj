@@ -278,8 +278,8 @@
 
 (deftest artifact-cli-publishes-a-new-file-without-overwriting-an-existing-one
   (with-repository
-    (fn [root _]
-      (package! root "example" [] [["main" "example" [identity-fn]]])
+    (fn [root roots]
+      (package! root "example" [] [["main" "example" [(assoc identity-fn :description "Проверка UTF-8")]]])
       (fs/with-temp-dir [destination {:prefix "structured-source-artifact-"}]
                         (let [file (fs/path destination "migration.edn")
                               run #(process/shell {:out :string :err :string :continue true}
@@ -289,7 +289,7 @@
                               {:keys [exit out]} (run)
                               payload (slurp (str file))]
                           (is (zero? exit))
-                          (is (= 1 (:artifact-format (edn/read-string payload))))
+                          (is (= (dry/migration-artifact roots nil) (edn/read-string payload)))
                           (is (= {:supported 1 :blocked 0} (:counts (edn/read-string out))))
                           (is (= 2 (:exit (run))))
                           (is (= payload (slurp (str file))))

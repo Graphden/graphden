@@ -5,6 +5,7 @@
    Exit zero means analysis completed, not that the corpus is migratable."
   (:require
     [babashka.fs :as fs]
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [graphden.input.source :as source]
     [graphden.packages.rebase :as rebase]
@@ -348,12 +349,14 @@
 
 
 (defn write-artifact!
-  "Publish the private migration artifact at the requested path."
+  "Publish the private migration artifact as EDN at the requested path."
   [file artifact]
   (let [destination (fs/absolutize file)
         temp (fs/create-temp-file {:dir (fs/parent destination) :prefix ".input-migration-"})]
     (try
-      (spit (str temp) (inventory/report-text artifact) :encoding "UTF-8")
+      (with-open [writer (io/writer (str temp) :encoding "UTF-8")]
+        (binding [*out* writer *print-readably* true *print-length* nil *print-level* nil]
+          (prn artifact)))
       (Files/move temp destination (make-array java.nio.file.CopyOption 0))
       (finally
         (fs/delete-if-exists temp)))))

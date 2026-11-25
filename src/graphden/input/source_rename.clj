@@ -4,7 +4,9 @@
     [graphden.input.context :as context]
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
+    [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slots]
     [graphden.packages.records.types :as records]
     [graphden.packages.type-declaration :as type-declaration]
@@ -81,11 +83,32 @@
       ((::source-pin? context) target alias-type)))
 
 
+(defn- inherited-callable-pin?
+  [{:keys [name->id defs-by-name] :as context} author target field alias-type]
+  (let [target-id (get name->id target)
+        definition (get defs-by-name author)
+        parents (concat (when-let [parent (:parent definition)] [parent]) (:parents definition))
+        target-implementation? (fn [parent]
+                                 (some #(= target-id (get name->id %))
+                                       (slots/chain-of parent defs-by-name)))
+        branch-refs (remove #(= target-id (get name->id %)) (rest (slots/chain-of author defs-by-name)))
+        [pin & more] (filter #(contains? (:args %) field) (map defs-by-name branch-refs))]
+    (when (and (uuid? target-id) (seq parents) (every? target-implementation? parents)
+               (= :any (slots/slot-type-of target field defs-by-name))
+               (vector? alias-type) (= :fn (first alias-type))
+               (:fn-id pin) (empty? more) (= alias-type (get-in pin [:args field :type])))
+      (let [rows (parse/parse-prepared-module (assoc context :fn-defs [pin]))
+            binding-id (ids/binding-id (:fn-id pin) (ids/slot-id target-id field))
+            [binding & extra] (filter #(and (= :binding (:kind %)) (= binding-id (:id %))) rows)]
+        (and binding (empty? extra)
+             (= alias-type (:type (rich/self-pin pin field rows binding :any))))))))
+
+
 (defn origin
   "Match the true inherited field, alias, membership and authored rich type.
    A shared storage primitive alone cannot justify a rich field projection."
   [{:keys [name->id defs-by-name] :as context} definition owner records field spec]
-  (when (and (= 1 (count (:parent-ids owner))) (map? spec) (contains? spec :as)
+  (when (and (seq (:parent-ids owner)) (map? spec) (contains? spec :as)
              (every? #{:as :type :description} (keys spec))
              (or (not (contains? spec :description)) (string? (:description spec)))
              (simple-keyword? (:as spec)) (not= field (:as spec)))
@@ -99,11 +122,14 @@
           field-id (when (uuid? target-id) (ids/slot-id target-id key))
           slot (some #(when (= alias-id (:id %)) %) (:slot records))
           alias-type (or (:type prepared) (slots/ancestor-type-pin author field defs-by-name) :any)
-          pin? (contains? spec :type)]
+          pin? (contains? spec :type)
+          inherited? (and (not pin?) (not= target-type alias-type)
+                          (inherited-callable-pin? context author target key alias-type))]
       (when (and field-id (= field key) (some #{target} (rest (slots/chain-of author defs-by-name)))
                  (format/projection-input-type? alias-type)
+                 (or (= 1 (count (:parent-ids owner))) inherited?)
                  (if pin? (and (format/configuration-type? (:type spec)) (compatible-pin? context target-type alias-type))
-                     (= target-type alias-type))
+                     (or (= target-type alias-type) inherited?))
                  (= field-id (:source-slot-id slot))
                  (= (:type-fn-id slot) (records/resolve-type-ref alias-type name->id))
                  (= (name exposed) (:name slot)) (false? (:required slot)) (nil? (:description slot))

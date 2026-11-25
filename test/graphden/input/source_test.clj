@@ -729,6 +729,29 @@
     (is (= :blocked (:status (replay changed))))))
 
 
+(deftest callable-rename-through-a-shared-implementation-keeps-its-narrowed-field
+  (let [read-defs (fn [path names]
+                    (let [{module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource path)))]
+                      (into [] (comp (filter (comp names :name)) (map #(assoc % :namespace module-ns))) fns)))
+        core (read-defs "packages/core/collections/fns.edn" #{:assoc :assoc-fn :assoc-empty})
+        [handler] (read-defs "packages/app-base/common/fns.edn" #{:assoc-handler})
+        verify (fn [parents]
+                 (let [ctx (prepared (conj parents handler))]
+                   (result (source/verify-module (source/plan-module [handler] ctx) ctx) :assoc-handler)))
+        entry (verify core)
+        owner (ids/fn-id "app.common" :assoc-handler)
+        field (ids/slot-id owner :handler)
+        target (ids/slot-id (ids/fn-id "core.collections" :assoc) :value)
+        projection (some #(when (= "projection" (:expression-kind %)) %) (get-in entry [:v2 :bindings]))
+        conflicting (mapv #(cond-> % (= :assoc-empty (:name %))
+                                   (assoc-in [:args :value] {:as :value :type :text})) core)]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {:type '[:fn {:arg b} c] :required false} (get-in entry [:proposed :input :handler])))
+    (is (= (ids/binding-id owner target) (:id projection)))
+    (is (= [[target] [field]] ((juxt :target-path :projection-path) projection)))
+    (is (contains? (codes (verify conflicting)) :rename-projection-required))))
+
+
 (deftest pinned-rename-uses-namespace-resolved-type-bodies
   (let [target '[:union :null [:map a :any] [:list :any]]
         lookup {:namespace "core" :name :lookup :args {:coll {:type target}} :return-type :any}

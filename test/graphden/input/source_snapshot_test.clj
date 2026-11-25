@@ -520,6 +520,32 @@
            (:code (failure #(snapshot/freeze-declarations (assoc-in package [:closure-baselines owner] tampered) [owner])))))))
 
 
+(deftest inline-reference-pin-retains-the-original-field-type
+  (let [host {:name :take-wrapper :namespace "fixture" :parent :const
+              :args {:value {:parent :take :args {:count {:ref :count-value :type :non-negative-int}}}}}
+        producer {:name :count-value :namespace "fixture" :parent :const :args {:value 2} :return-type :int}
+        definitions (into [host producer] (concat (filter #(= :const (:name %)) (sources "logic"))
+                                                  (filter #(= :take (:name %)) (sources "collections"))
+                                                  (filter #(= :non-negative-int (:name %)) (sources "refinements"))))
+        prepared (parse/prepare-module definitions {} {})
+        owner (ids/fn-id "fixture" :take-wrapper)
+        entry (-> (source/plan-module [host] prepared) (source/verify-module prepared) :definitions first)
+        package (snapshot/package-index prepared definitions)
+        [child-path child] (first (get-in entry [:v2 :inline-definitions]))
+        target (ids/slot-id (ids/fn-id "core.collections" :take) :count)
+        binding-id (ids/binding-id (:fn-id child) target)
+        type-id (ids/fn-id "core.refinements" :non-negative-int)
+        context (:context (snapshot/freeze-declarations package [owner]))
+        config-key (first (keys (:configurations child)))
+        tampered (assoc-in entry [:v2 :inline-definitions child-path :configurations config-key :type-override-fn-id]
+                           (ids/primitive-fn-id :int))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= (ids/fn-id "fixture" :count-value) (get-in context [:bindings binding-id :ref-fn-id])))
+    (is (= :non-negative-int (get-in context [:source-binding-types [binding-id type-id]])))
+    (is (= :configuration-evidence-required
+           (:code (failure #(snapshot/freeze-declarations (assoc-in package [:closure-baselines owner] tampered) [owner])))))))
+
+
 (deftest multiple-inline-branches-freeze-every-authored-use
   (let [leaf {:parent :str-upper :args {:string "checked"}}
         host {:namespace "fixture" :name :inline-comparison :parent :equal?

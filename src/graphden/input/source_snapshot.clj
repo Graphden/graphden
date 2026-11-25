@@ -272,9 +272,8 @@
 
 
 (defn- exact-projection-pin?
-  [type-ids contract bindings {:keys [target-path type type-override-fn-id]}]
-  (let [row (some #(when (= target-path (:target-path %)) %) bindings)
-        field-by-id (into {} (map (juxt :id identity)) (:fields contract))
+  [type-ids contract row {:keys [target-path type type-override-fn-id]}]
+  (let [field-by-id (into {} (map (juxt :id identity)) (:fields contract))
         target (get field-by-id (first target-path))
         source (get field-by-id (first (:projection-path row)))]
     (and (= "projection" (:expression-kind row)) (= [] (:scope-path row) (:projection-scope-path row))
@@ -282,6 +281,28 @@
          (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row) (:type-id source))
          (= type (:type source))
          (descriptor/stored-source-type? type type-override-fn-id type-ids))))
+
+
+(defn- exact-reference-pin?
+  [type-ids owner contract {:keys [id fn-id scope-path target-path expression-kind ref-fn-id
+                                   value-present type-override-fn-id]}
+   {:keys [type] :as config}]
+  (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
+    (and field (= target-path (:target-path config)) (= "ref" expression-kind) (= [] scope-path)
+         (uuid? fn-id) (= (:id owner) fn-id) (= id (ids/binding-id fn-id (:id field)))
+         (uuid? ref-fn-id) (false? value-present)
+         (= type (:type field))
+         (uuid? type-override-fn-id)
+         (= type-override-fn-id (:type-override-fn-id config) (:type-id field))
+         (descriptor/stored-source-type? type type-override-fn-id type-ids))))
+
+
+(defn- original-type-pin
+  [type-ids owner contract bindings {:keys [target-path] :as config}]
+  (let [binding (some #(when (= target-path (:target-path %)) %) bindings)]
+    (when (and binding (or (exact-projection-pin? type-ids contract binding config)
+                           (exact-reference-pin? type-ids owner contract binding config)))
+      binding)))
 
 
 (defn- optional-rename-bindings
@@ -334,10 +355,12 @@
              :source-binding-types
              (into {}
                    (for [{:keys [owner contract configurations bindings]} (vals entries)
-                         {:keys [row type target-path type-override-fn-id] :as config} (vals configurations)
-                         :let [projection? (exact-projection-pin? (:alias-ids named) contract bindings config)
-                               binding (or row (when projection? (some #(when (= target-path (:target-path %)) %) bindings)))]
-                         :when (and type-override-fn-id (or (exact-annotation? owner contract config) projection?))]
+                         {:keys [row type type-override-fn-id] :as config} (vals configurations)
+                         :when type-override-fn-id
+                         :let [binding (if row
+                                         (when (exact-annotation? owner contract config) row)
+                                         (original-type-pin (:alias-ids named) owner contract bindings config))]
+                         :when binding]
                      [[(:id binding) type-override-fn-id] type]))
              :markers markers))))
 
@@ -364,7 +387,7 @@
                             (and (some #{row} bindings)
                                  (or (exact-annotation? owner contract config)
                                      (rich/exact-self-pin? owner field config type-rows))))
-                          (exact-projection-pin? type-ids contract bindings config)))
+                          (original-type-pin type-ids owner contract bindings config)))
                       (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))

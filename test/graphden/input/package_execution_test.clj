@@ -78,10 +78,10 @@
   (let [operation (fn [name field input-type result]
                     {:namespace "scoped" :name name :args {field {:type input-type}} :return-type result})
         base-declarations [(operation :sink :left :text :text) (operation :reader :deep :any :text)
-               (operation :middle :inner :any :any) (operation :leaf :sample :any :any)]
+                           (operation :middle :inner :any :any) (operation :leaf :sample :any :any)]
         source (into base-declarations [{:namespace "scoped" :name :producer :parent :middle :args {:inner :leaf}}
-                            {:namespace "scoped" :name :host :parent :sink
-                             :args {:left :reader :deep :producer}}])
+                                        {:namespace "scoped" :name :host :parent :sink
+                                         :args {:left :reader :deep :producer}}])
         native (into {} (map (fn [{:keys [name args] :as base}]
                                (let [field (first (keys args))]
                                  [name (assoc base :impl
@@ -822,8 +822,8 @@
                               {:namespace "callable-proof" :name :route :parent :app.common/method-map
                                :args {:method "GET" :handler :echo}}]))
         base-defs (assoc @loaded :echo {:name :echo :namespace "callable-proof"
-                                    :args {:arg :text} :return-type :text :effects #{}
-                                    :impl (fn [args _] (runtime/resolve-arg args :arg))})
+                                        :args {:arg :text} :return-type :text :effects #{}
+                                        :impl (fn [args _] (runtime/resolve-arg args :arg))})
         root (ids/fn-id "callable-proof" :route)
         callback-id (ids/fn-id "callable-proof" :echo)
         compile-package (fn [package id roots impls]

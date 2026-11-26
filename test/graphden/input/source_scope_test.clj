@@ -3,8 +3,10 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
+    [graphden.input.descriptor :as descriptor]
     [graphden.input.source :as source]
     [graphden.input.source-scope :as scope]
+    [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.types.check :as check]))
@@ -232,3 +234,25 @@
                      (assoc-in after [:substitution 'c] :text)
                      (assoc-in after [:scopes [] :bindings address :reference :capture-resolved?] false)]]
       (is (nil? (prove changed))))))
+
+
+(deftest generic-reference-field-requires-its-own-declaration-and-use-scope
+  (let [{:keys [entry owner edge slot snapshot]} (fixture "text" false)
+        [[arg binding]] (#'scope/legacy-omissions entry [[:args :deep]] snapshot [])
+        original (analyze snapshot owner)
+        address [[owner [edge]] [slot]]
+        public-path [:left :deep]
+        source-type '[:list a]
+        arg (assoc-in arg [:target :type] source-type)
+        scoped (variables/type-in-scope (first address) source-type)
+        graph (-> original
+                  (update-in [:scopes [edge] :declared-contract] descriptor/update-node [slot] #(assoc % :type source-type))
+                  (assoc-in [:public-input :routes public-path :completion-type] scoped))
+        prove (fn [g] (#'scope/public-route g snapshot arg binding))]
+    (is (= [public-path address] (take 2 (prove graph))))
+    (doseq [wrong [(assoc-in graph [:public-input :routes public-path :completion-type]
+                             (variables/type-in-scope [owner []] source-type))
+                   (assoc-in graph [:public-input :routes public-path :completion-type] [:list :text])
+                   (assoc-in graph [:scopes [edge] :declared-contract]
+                             (get-in original [:scopes [edge] :declared-contract]))]]
+      (is (= :unsupported-reference-use (code #(prove wrong)))))))

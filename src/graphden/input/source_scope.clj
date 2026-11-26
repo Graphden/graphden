@@ -226,10 +226,14 @@
         _ (when (and origin (not (and (positional-type/exact? origin (:target arg) snapshot declaring)
                                       (false? (:required route)) (false? (:required-now? route)))))
             (reject! :reference-field-origin-mismatch))
-        expected (if origin :any (context/call-with-types snapshot #(types/resolve-alias (get-in arg [:target :type]))))]
+        expected (if origin :any (context/call-with-types snapshot #(types/resolve-alias (get-in arg [:target :type]))))
+        declared (descriptor/find-node (get-in graph [:scopes use-path :declared-contract]) (second address))
+        scoped (when (and (= expected (:type declared)) (types/type-any? types/type-var? expected))
+                 (variables/type-in-scope (first address) expected))]
     (when-not (and (seq edges) (= field (peek (:source-path arg))) (= names (conj (mapv :name edges) field))
                    (= :input-field (:kind route)) (:whole-bindable? route) (= slot (:origin-field-id route))
                    (or (migration/same-edn? expected (:completion-type route))
+                       (and scoped (migration/same-edn? scoped (:completion-type route)))
                        (and (= :any expected) (callable-alias-route? snapshot arg binding (peek edges) route))))
       (reject! :unsupported-reference-use))
     [names address edges declaring]))

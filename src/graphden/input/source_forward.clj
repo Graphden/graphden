@@ -5,6 +5,7 @@
     [graphden.input.list-builder :as list-builder]
     [graphden.input.migration :as migration]
     [graphden.input.source-forward-generic :as generic]
+    [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -113,7 +114,7 @@
         conditional? (and multiple-readers? (conditional-branch? prepared argument row))]
     (when-not (and (= op :ref)
                    (or (= target-id (get name->id ref))
-                       (and multiple-readers? (map? ref) (= target-id (:inline-fn-id argument))
+                       (and (map? ref) (= target-id (:inline-fn-id argument))
                             (format/inline-origin ref)))
                    (= owner-id (:fn-id row) (get-in argument [:origin :fn-id]))
                    (= (:slot-id row) (get-in argument [:origin :slot-id]))
@@ -122,7 +123,8 @@
                    (or conditional?
                        (and (or (format/configuration-type? expected) origin)
                             (format/configuration-type? return-type)
-                            (= :value (:mode (reference/classify expected {:return return-type}))))))
+                            (= :value (:mode (reference/classify expected {:return return-type}))))
+                       (readers/value-edge? prepared owner-id row)))
       (reject! :unproved-reference-binding))
     (cond-> {:binding-id (:id row)} origin (assoc :generic-reference origin))))
 

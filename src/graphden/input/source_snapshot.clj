@@ -14,6 +14,7 @@
     [graphden.input.source-annotations :as annotations]
     [graphden.input.source-context :as source-context]
     [graphden.input.source-joint :as joint]
+    [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-primitive :as primitive]
@@ -751,7 +752,8 @@
    write it into the source proposal. Require the stock type checker and the
    same implementation registry evidence used by other source certificates."
   [{:keys [prepared] :as package} owner fields roots]
-  (let [original (plan-entry package owner)
+  (let [prepared (readers/prepare prepared owner roots)
+        original (plan-entry package owner)
         {:keys [proofs entry]} (source/forwarded-fields-baseline prepared original fields)]
     (when-not (= :authored-source-equivalent (:verification entry))
       (reject! :unverified-forwarded-baseline owner))

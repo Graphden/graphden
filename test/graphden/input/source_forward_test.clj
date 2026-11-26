@@ -7,6 +7,7 @@
     [graphden.input.scoped-source :as scoped-source]
     [graphden.input.source :as source]
     [graphden.input.source-forward :as forward]
+    [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
@@ -52,6 +53,24 @@
     (is (= [[owner [edge]] [target-id]] (:target-address proof)))
     (is (= proof (forward/verify-forwarded-field prepared entry :data)))
     (is (= :unproved-field-origin (rejection prepared tampered)))))
+
+
+(deftest legacy-dispatch-distinguishes-generic-value-uses-from-callable-and-identity-uses
+  (let [check (fn [expected]
+                (let [forms (mapv #(assoc % :namespace "fixture")
+                                  [{:name :consumer :args {:input {:type expected}} :return-type :any}
+                                   {:name :producer :args {:data :text} :return-type :text}
+                                   {:name :owner :parent :consumer :args {:input :producer :data {:type :text}}}])
+                      prepared (parse/prepare-module forms {} {})
+                      entry (last (:definitions (source/plan-module forms prepared)))
+                      owner (:identity entry)
+                      ctx (readers/prepare prepared owner {(ids/fn-id "fixture" :producer) {:return :text}})
+                      row (first (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))]
+                  [(readers/value-edge? ctx owner row)
+                   (readers/value-edge? ctx owner (assoc row :ref-fn-id (random-uuid)))]))]
+    (is (= [true false] (check 'a)))
+    (is (= [false false] (check :fn-ref)))
+    (is (= [false false] (check [:fn {} :text])))))
 
 
 (deftest forwarding-does-not-conflate-two-uses-of-one-function

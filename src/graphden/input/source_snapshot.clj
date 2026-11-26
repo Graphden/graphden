@@ -494,6 +494,14 @@
     {:context context :options (implementation-options context entries roots)}))
 
 
+(defn- freeze-source-analysis
+  "Prepare inputs for source replay. The scoped verifier compares the
+   analyzed field-read obligations before and after each rewrite."
+  [package function-ids roots]
+  (let [{:keys [context entries]} (freeze-declarations package function-ids roots)]
+    {:context context :options (implementation-options context entries roots)}))
+
+
 (defn- freeze-source-declarations
   [declarations roots]
   (let [entries (into {} (map (fn [{:keys [fn-id declaration-records] :as declaration}]
@@ -608,7 +616,7 @@
           ;; The removed values may be references. Their declarations must
           ;; belong to the frozen closure before the aggregate overlay runs.
           targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))
-          {:keys [context options]} (freeze-closure baseline (into [owner] targets) roots)]
+          {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)]
       {:entry entry :baseline baseline
        :certificates (scope/verify-bindings entry paths context #(analysis/analyze-effective-input %1 %2 options))})))
 
@@ -663,7 +671,7 @@
     (when-not (= :authored-source-equivalent (:verification entry))
       (reject! :unverified-forwarded-baseline owner))
     (let [baseline (assoc-in package [:closure-baselines owner] entry)
-          {:keys [context options]} (freeze-closure baseline [owner] roots)
+          {:keys [context options]} (freeze-source-analysis baseline [owner] roots)
           certificates (scope/verify-forwarded-projections context proofs
                                                            #(analysis/analyze-effective-input %1 %2 options))]
       (source/rewrite-forwarded-fields prepared original fields certificates))))
@@ -685,7 +693,7 @@
         projected (migrate-forwarded-fields reduced-package owner fields roots)
         baseline (assoc-in reduced-package [:closure-baselines owner] projected)
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
-        {:keys [context options]} (freeze-closure baseline (into [owner] targets) roots)
+        {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)
         certificates (scope/verify-bindings-after-forwarding original projected context
                                                              #(analysis/analyze-effective-input %1 %2 options))
         candidate (joint/replay-entry original projected certificates)

@@ -235,10 +235,22 @@
                                (mapv #(hash-map :address % :kind :value-type :trigger :field-read :expected-type rich)
                                      (filter free [source target])))))
         certificate (scope/verify-forwarded-projection snapshot proof with-checks)
+        with-extra-check (fn [address type]
+                           (fn [ctx owner]
+                             (cond-> (with-checks ctx owner)
+                               (get-in ctx [:bindings projection-id])
+                               (update :obligations conj
+                                       {:address address :kind :value-type :trigger :field-read :expected-type type}))))
         unchecked (fn [ctx owner]
                     (cond-> (with-checks ctx owner) (get-in ctx [:bindings projection-id]) (assoc :obligations [])))]
     (is (= [{:address [[owner-id []] [field-id]] :kind :value-type :trigger :field-read :expected-type rich}]
            (mapv #(select-keys % [:address :kind :trigger :expected-type]) (:obligations certificate))))
+    (is (= #{rich :any}
+           (into #{} (map :expected-type)
+                 (:obligations (scope/verify-forwarded-projection snapshot proof (with-extra-check target :any))))))
+    (doseq [[address type] [[target :text] [source :any]]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"reference input occurrence"
+            (scope/verify-forwarded-projection snapshot proof (with-extra-check address type)))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"reference input occurrence"
           (scope/verify-forwarded-projection snapshot proof unchecked)))))
 

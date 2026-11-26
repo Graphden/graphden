@@ -28,8 +28,8 @@
                 (registry/record-rich-types! base :assoc (get @fixtures/web-base-definitions :assoc))
                 (:by-id @registry/*rich-types-override*))
         package (snapshot/package-index prepared originals)
-        {:keys [context entries]} (snapshot/freeze-declarations package [owner])]
-    {:owner owner :base base :entry entry :roots roots :package package :prepared prepared :context context :entries entries}))
+        {:keys [context]} (snapshot/freeze-declarations package [owner])]
+    {:owner owner :base base :entry entry :roots roots :package package :prepared prepared :context context}))
 
 
 (deftest generic-callable-self-pin-describes-a-free-inherited-field
@@ -84,12 +84,10 @@
 
 
 (deftest effective-self-pin-preserves-the-field-read-and-rejects-an-external-callable
-  (let [{:keys [owner base entry roots context entries]} (self-pin-fixture)
+  (let [{:keys [owner base entry roots package]} (self-pin-fixture)
         address [[owner []] [(ids/slot-id base :value)]]
         scheme (variables/type-in-scope [owner []] (get-in entry [:source :args :value :type]))
-        ;; Exercise the downstream compiler independently of package admission
-        ;; with the same frozen field paths and registry signatures it receives.
-        options (#'snapshot/implementation-options context entries roots)
+        {:keys [context options]} (#'snapshot/freeze-source-analysis package [owner] roots)
         graph (analysis/analyze-effective-input context owner options)
         reads (filterv #(= address (:address %)) (:obligations graph))
         implementations (update-vals (:implementations options) #(assoc % :impl (:impl (get @fixtures/web-base-definitions :assoc))))

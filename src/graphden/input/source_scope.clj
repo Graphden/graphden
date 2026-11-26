@@ -402,17 +402,19 @@
                       certificates)]
     (and (every? prior current)
          (every? (fn [{:keys [address] :as obligation}]
-                   (let [source (get sources address)]
-                     (some #(and (= source (:address %))
-                                 (= (select-keys obligation [:kind :trigger :expected-type])
-                                    (select-keys % [:kind :trigger :expected-type]))) current)))
+                   (when-let [source (get sources address)]
+                     (let [check (select-keys obligation [:kind :trigger :expected-type])]
+                       (or (= {:kind :value-type :trigger :field-read :expected-type :any} check)
+                           (some #(and (= source (:address %))
+                                       (= check (select-keys % [:kind :trigger :expected-type]))) current)))))
                  (remove current prior)))))
 
 
 (defn verify-forwarded-projections
   "Replay the complete forwarding group in one frozen graph. Every destination
    must have one value-reference path. Existing field-read checks remain, or
-   move to an equivalent checked source field; this never discharges them."
+   move to an equivalent checked source field. A new :any check at the
+   projection destination adds no constraint on its value."
   [snapshot proofs analyze]
   (let [owner (only (distinct (map :owner-id proofs)) :unproved-forwarded-identity)
         before (checked-graph analyze snapshot owner)

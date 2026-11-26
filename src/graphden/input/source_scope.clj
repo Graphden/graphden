@@ -376,11 +376,11 @@
   [snapshot analyze before after {:keys [address row public-path]}]
   (let [[[root scope-path]] address
         {id :id target :ref-fn-id} row
-        use [root (conj scope-path id)]
-        edge {:from address :to use :binding-id id :target-fn-id target :mode :value}
+        use-scope [root (conj scope-path id)]
+        edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
         original (get-in before [:public-input :routes public-path :completion-type])
         {:keys [expected-type reference]} (get-in after [:scopes scope-path :bindings address])
-        node (get-in after [:scopes (second use)])]
+        node (get-in after [:scopes (second use-scope)])]
     (when (and target (= target (:fn-id node)) (types/list-type? original)
                (types/type-any? types/type-var? original) (types/list-type? expected-type)
                (not (types/type-any? types/type-var? expected-type))

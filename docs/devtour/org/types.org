@@ -81,7 +81,7 @@ Derives declared input contexts for supported rewrites using the frozen package 
 :CUSTOM_ID: types/verify-plan
 :FILE: src/graphden/input/source_certification.clj
 :LINE: 108
-:MINS: 2.3
+:MINS: 2.6
 :END:
 
 Certifies scoped bindings and forwarded fields with trusted implementation signatures. A blocked source owner retries when its exact dependency is certified. The planner then rebuilds the requested package plan with the updated inherited field evidence.
@@ -121,13 +121,13 @@ Proves one owner and its dependencies as an immutable transaction. Verified pare
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 374
+:LINE: 500
 :MINS: 0.9
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:374]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:500]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/with-certified-owner][with-certified-owner]]
@@ -150,13 +150,13 @@ Checks the exact boundary between one owner's two proof groups. The projected ba
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings-after-forwarding
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 381
+:LINE: 507
 :MINS: 1.1
 :END:
 
 Replays the remaining scoped group with the verified projections still in the graph. Their occupied addresses and unique destinations must survive, and the runtime checks must remain exactly equal. The complete source round trip precedes publication.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:381]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:507]]
 - see also :: [[file:types.org::#types/scope-view][scope-view]], [[file:types.org::#types/verify-module][verify-module]]
 - same file :: [[file:types.org::#types/verify-bindings][verify-bindings]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]
@@ -311,13 +311,13 @@ Includes checked named residual routes and the wire type for each supported supp
 :PROPERTIES:
 :CUSTOM_ID: types/infer-use
 :FILE: src/graphden/input/signatures.clj
-:LINE: 222
+:LINE: 229
 :MINS: 3.2
 :END:
 
 Feeds canonical scoped input facts through the existing type-rule engine using explicit implementation argument paths. Frozen registry views preserve rule lookup isolation; implementation functions never run here. Returned substitutions and proofs must join graph checking before the inferred signature can be treated as checked.
 
-- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:222]]
+- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:229]]
 - referenced from :: [[file:types.org::#types/resolve-closure][resolve-closure]]
 
 * 24. resolve-closure

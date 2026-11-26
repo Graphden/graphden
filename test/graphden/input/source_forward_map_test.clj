@@ -143,7 +143,9 @@
                  ["core.collections" :keys {:map {:type [:map :text :int]}} [:list :text]]
                  ["core.collections" :update-vals
                   {:m {:type [:map :keyword :int]} :f {:type [:fn {:value :int} :text]}} [:map :keyword :text]]
-                 ["core.strings" :name {:value {:type [:union :null :keyword]}} [:union :null :text]]]
+                 ["core.strings" :name {:value {:type [:union :null :keyword]}} [:union :null :text]]
+                 ["core.system" :invoke {:func {:type [:fn {:arg :text} [:secret :int]]}} [:secret :int]]
+                 ["core.system" :invoke {:func {:type :any}} :any]]
           context (context/build-context {})]
       (doseq [[module-ns name binding-facts expected] facts]
         (let [base (ids/fn-id module-ns name)

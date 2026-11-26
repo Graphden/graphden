@@ -86,18 +86,20 @@
 
 
 (deftest literal-root-has-the-legacy-binding-and-inherited-field-identities
-  (let [original [{:namespace "fixture" :name :subtract
-                   :args (array-map :left :int :right :int) :return-type :int}
-                  {:namespace "fixture" :name :from-12 :parent :subtract :args {:left 12}}]
-        prepared (parse/prepare-module original {} {})
-        proof (second (:definitions (source/verify-module (source/plan-module original prepared) prepared)))
-        actual (second (primitive/prepare-literal-root composed-module composed-root visible))
-        identity-keys [:fn-id :input-type-id :contract :declaration-records :origin-ledger :bindings]
-        slot (ids/slot-id composed-parent :left)]
-    (is (= :authored-source-equivalent (:verification proof)))
-    (is (= (select-keys (:v2 proof) identity-keys) (select-keys actual identity-keys)))
-    (is (= (ids/binding-id composed-root slot) (get-in actual [:bindings 0 :id])))
-    (is (= [slot] (get-in actual [:bindings 0 :target-path])))))
+  (doseq [bound [{:left 12} (array-map :right 1 :left 12)]]
+    (let [original [{:namespace "fixture" :name :subtract
+                     :args (array-map :left :int :right :int) :return-type :int}
+                    {:namespace "fixture" :name :from-12 :parent :subtract :args bound}]
+          prepared (parse/prepare-module original {} {})
+          proof (second (:definitions (source/verify-module (source/plan-module original prepared) prepared)))
+          staged (assoc-in composed-module [:fns 1 :bind] (update-vals bound #(vector :value %)))
+          actual (second (primitive/prepare-literal-root staged composed-root visible))
+          identity-keys [:fn-id :input-type-id :contract :declaration-records :origin-ledger :bindings]
+          slots (map #(ids/slot-id composed-parent %) (keys bound))]
+      (is (= :authored-source-equivalent (:verification proof)))
+      (is (= (select-keys (:v2 proof) identity-keys) (select-keys actual identity-keys)))
+      (is (= (set (map #(ids/binding-id composed-root %) slots)) (set (map :id (:bindings actual)))))
+      (is (= (set (map vector slots)) (set (map :target-path (:bindings actual))))))))
 
 
 (deftest literal-root-rejects-other-parent-and-binding-shapes
@@ -108,7 +110,9 @@
                               [{:bind {:unowned [:value 12]}} :staged-literal-field-unknown]
                               [{:bind {:left [:ref :subtract]}} :staged-literal-binding-unsupported]
                               [{:bind {:left [:value [12]]}} :staged-literal-binding-unsupported]
-                              [{:bind {:left [:value 12] :right [:value 1]}} :staged-literal-binding-unsupported]
+                              [{:bind {:left [:value 12] :right [:ref :subtract]}} :staged-literal-binding-unsupported]
+                              [{:bind {:left [:value 12] :unknown [:value 1]}} :staged-literal-field-unknown]
+                              [{:bind {}} :staged-literal-binding-unsupported]
                               [{:configure {[:left] {:type :int}}} :staged-literal-declaration-unsupported]]]
     (is (= diagnostic
            (code #(primitive/prepare-literal-root (update-in composed-module [:fns 1] merge patch)

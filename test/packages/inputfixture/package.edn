@@ -1,4 +1,4 @@
 {:name "inputfixture"
  :version "1.0.0"
  :dependencies ["core"]
- :modules ["numeric"]}
+ :modules ["numeric" "power"]}

@@ -34,8 +34,8 @@
                   :args {:value {:parent :sink :args {:value :read-text :deep "bound"}}}}]
         prepared (parse/prepare-module sources {} {})
         [sink reader owner] (map #(ids/fn-id "fixture" %) [:sink :read-text :owner])
-        roots {sink {:name :sink :args {:value :text} :return :text :effects #{} :execution #{:jvm-server}}
-               reader {:name :read-text :args {:deep :text} :return :text :effects #{} :execution #{:jvm-server}}}
+        roots {sink {:name :sink :namespace "fixture" :fn-id sink :args {:value :text} :return :text :effects #{} :execution #{:jvm-server}}
+               reader {:name :read-text :namespace "fixture" :fn-id reader :args {:deep :text} :return :text :effects #{} :execution #{:jvm-server}}}
         result (certification/verify-plan prepared sources {} roots)
         proof (:source-proof result)
         child (first (vals (get-in proof [:baselines owner :v2 :inline-definitions])))

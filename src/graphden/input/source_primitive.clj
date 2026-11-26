@@ -178,13 +178,13 @@
 
 
 (defn- bound-fields
-  [{:keys [parent bind] :as definition}]
+  [{:keys [parent bind] :or {bind {}} :as definition}]
   (when-not (and (simple-keyword? parent) (not (contains? definition :parents)))
     (reject! :staged-literal-parent-unsupported))
   (when-not (and (every? #{:name :namespace :description :parent :bind} (keys definition))
                  (or (nil? (:description definition)) (string? (:description definition))))
     (reject! :staged-literal-declaration-unsupported))
-  (when-not (and (map? bind) (seq bind) (every? literal-binding? bind))
+  (when-not (and (map? bind) (every? literal-binding? bind))
     (reject! :staged-literal-binding-unsupported))
   (keys bind))
 

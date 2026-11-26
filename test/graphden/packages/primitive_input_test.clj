@@ -70,6 +70,17 @@
     post))
 
 
+(defn- partial-power-edition
+  []
+  (let [resource io/resource
+        pin (assoc power-admission :sha256 "15d2b7f0cd504c85d41ae310b3e50e7842ce94f3f3df01e1dbd3deec61210389")]
+    (with-redefs [io/resource (fn [path]
+                                (resource (if (= path "packages/inputfixture/power/fns.edn")
+                                            "packages/inputfixture/power/partial.edn" path)))]
+      (ig/init-key :app/packages {:package-names ["core" "web" "app" "inputfixture"]
+                                  :primitive-inputs [admission pin]}))))
+
+
 (deftest pinned-classpath-declaration-syncs-and-executes
   (let [storage (:storage golden/*bootstrap*)
         packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "inputfixture"]
@@ -118,7 +129,16 @@
     (sync!)
     (is (= before (version)))
     (is (= before-binding (binding-version)))
-    (is (= member-ids (mapv :id (memberships))))))
+    (is (= member-ids (mapv :id (memberships))))
+    (let [partial-packages (partial-power-edition)
+          [base exponent] power-bindings]
+      (ig/init-key :exec/base-fns {:storage storage :packages partial-packages})
+      (is (== 16 (:result (post two-cubed {:exponent 4}))))
+      (is (= (get before-binding base) (get (binding-version) base)))
+      (is (nil? (sp/read-entity storage :input-binding exponent)))
+      (sync!)
+      (is (== 8 (:result (post two-cubed {}))))
+      (is (some? (sp/read-entity storage :input-binding exponent))))))
 
 
 (deftest two-list-fragments-boot-run-and-resync

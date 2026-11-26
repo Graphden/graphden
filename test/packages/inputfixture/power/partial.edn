@@ -1,0 +1,5 @@
+{:input-format 2
+ :namespace "inputfixture.power"
+ :fns [{:name :fixture-power :input {:base :numeric :exponent :numeric} :return-type :numeric}
+       {:name :two-cubed :parent :fixture-power
+        :bind {:base [:value 2]}}]}

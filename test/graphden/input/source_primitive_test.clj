@@ -86,7 +86,7 @@
 
 
 (deftest literal-root-has-the-legacy-binding-and-inherited-field-identities
-  (doseq [bound [{:left 12} (array-map :right 1 :left 12)]]
+  (doseq [bound [{} {:left 12} (array-map :right 1 :left 12)]]
     (let [original [{:namespace "fixture" :name :subtract
                      :args (array-map :left :int :right :int) :return-type :int}
                     {:namespace "fixture" :name :from-12 :parent :subtract :args bound}]
@@ -102,6 +102,13 @@
       (is (= (set (map vector slots)) (set (map :target-path (:bindings actual))))))))
 
 
+(deftest omitted-bindings-inherit-the-complete-input
+  (let [source (update-in composed-module [:fns 1] dissoc :bind)
+        [_ child] (primitive/prepare-literal-root source composed-root visible)]
+    (is (empty? (:bindings child)))
+    (is (= [:left :right] (mapv :name (get-in child [:contract :fields]))))))
+
+
 (deftest literal-root-rejects-other-parent-and-binding-shapes
   (is (= :staged-function-not-visible
          (code #(primitive/prepare-literal-root composed-module composed-root #{composed-root}))))
@@ -112,7 +119,7 @@
                               [{:bind {:left [:value [12]]}} :staged-literal-binding-unsupported]
                               [{:bind {:left [:value 12] :right [:ref :subtract]}} :staged-literal-binding-unsupported]
                               [{:bind {:left [:value 12] :unknown [:value 1]}} :staged-literal-field-unknown]
-                              [{:bind {}} :staged-literal-binding-unsupported]
+                              [{:bind nil} :staged-literal-binding-unsupported]
                               [{:configure {[:left] {:type :int}}} :staged-literal-declaration-unsupported]]]
     (is (= diagnostic
            (code #(primitive/prepare-literal-root (update-in composed-module [:fns 1] merge patch)

@@ -42,6 +42,23 @@
     (is (not (contains? (get-in facts [:bindings-info :renamed]) :ref)))))
 
 
+(deftest a-checked-literal-retains-its-field-refinement-in-rule-facts
+  (let [{:keys [scope text graph]} (fixture)
+        address [scope [text]]
+        status [:refine :int [:and [:>= 100] [:<= 599]]]
+        fact-type (fn [expected actual proof]
+                    (let [entry {:address address :expression {:kind :value :value 401}
+                                 :expected-type expected :reference {:mode :literal :actual-type actual}}
+                          model (-> graph (assoc-in [:scopes [] :bindings address] entry)
+                                    (assoc-in [:scopes [] :proofs address] proof))]
+                      (get-in (signatures/binding-facts model scope {:status [text]}) [:bindings-info :status :type])))]
+    (is (= status (fact-type status :int {:status :checked})))
+    (is (= :int (fact-type status :int {:status :deferred})))
+    (is (= :int (fact-type status :int nil)))
+    (is (= :int (fact-type [:refine :numeric [:> 0]] :int {:status :checked})))
+    (is (= [:secret :int] (fact-type status [:secret :int] {:status :checked})))))
+
+
 (deftest optional-abi-argument-distinguishes-a-free-field-from-a-bound-nil
   (let [{:keys [scope text graph]} (fixture)
         address [scope [text]]

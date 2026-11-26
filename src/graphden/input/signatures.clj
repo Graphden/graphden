@@ -87,7 +87,14 @@
                     (update :actual-type #(reference/call-site-contract expected-callable % signature)))
         actual (or (:callable-type reference) (:actual-type reference))]
     (case mode
-      :literal {:type actual :value (:value expression) :value-present true :effects #{}}
+      ;; A checked literal inhabits the refinement the binding checker
+      ;; proved. Keep its concrete base (including any markers) when the
+      ;; expected contract would erase precision or is still deferred.
+      :literal (let [proof (get-in graph [:scopes (second (first address)) :proofs address])
+                     type (if (and (= :checked (:status proof)) (types/refine-type? expected-type)
+                                   (= actual (types/refine-base expected-type)))
+                            expected-type actual)]
+                 {:type type :value (:value expression) :value-present true :effects #{}})
       :identity {:type :fn-ref :value (:fn-id expression) :value-present true :effects #{}}
       (:value :callable-producer :graph-callable :resolved-value)
       (do

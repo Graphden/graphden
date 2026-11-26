@@ -43,12 +43,19 @@
     (String/.getBytes (stable-edn (into [:graphden/structured-input-v2 kind] origins)) StandardCharsets/UTF_8)))
 
 
+(defn- edn-order
+  [sort-key values]
+  (->> values
+       (map (fn [value] [(stable-edn (sort-key value)) value]))
+       (sort-by first)
+       (mapv second)))
+
+
 (defn- canonical
   [value]
   (cond
-    (map? value) [:map (vec (sort-by (comp stable-edn first)
-                                     (map (fn [[k v]] [(canonical k) (canonical v)]) value)))]
-    (set? value) [:set (vec (sort-by stable-edn (map canonical value)))]
+    (map? value) [:map (edn-order first (map (fn [[k v]] [(canonical k) (canonical v)]) value))]
+    (set? value) [:set (edn-order identity (map canonical value))]
     (vector? value) [:vector (mapv canonical value)]
     (sequential? value) [:sequence (mapv canonical value)]
     (instance? Timestamp value) [:timestamp (str (Timestamp/.toInstant value))]

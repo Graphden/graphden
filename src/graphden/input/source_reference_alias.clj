@@ -13,9 +13,9 @@
 (defn- resolve-readers
   [context owner target records]
   (let [defs (:defs-by-name context)
-        ancestors (distinct (mapcat #(slots/chain-of (slots/own-ref % defs) defs) [owner target]))
+        lineage (distinct (mapcat #(slots/chain-of (slots/own-ref % defs) defs) [owner target]))
         rows (into #{} (mapcat #(parse/parse-prepared-module (assoc context :fn-defs [%])))
-                   (remove #(= (:fn-id owner) (:fn-id %)) (map defs ancestors)))
+                   (remove #(= (:fn-id owner) (:fn-id %)) (map defs lineage)))
         kinds (group-by :kind (into rows records))
         index (lookups/build-lookups {:fns (:fn kinds) :slots (:slot kinds) :fn-slots (:fn-slot kinds)
                                       :bindings (:binding kinds) :list-items (:binding-list-item kinds)})
@@ -48,15 +48,15 @@
   [context definition field]
   (let [spec (get-in definition [:args field])
         owner (:fn-id definition)
-        alias (:as spec)
+        exposed-name (:as spec)
         target (get (:defs-by-name context) (:ref spec))
         rows-for #(parse/parse-prepared-module (assoc context :fn-defs [%]))]
-    (when (and (= #{:as :ref} (set (keys spec))) (simple-keyword? alias) (not= alias field)
+    (when (and (= #{:as :ref} (set (keys spec))) (simple-keyword? exposed-name) (not= exposed-name field)
                (uuid? owner) (uuid? (:fn-id target)) (not= owner (:fn-id target)))
       (let [original (rows-for definition)
             compact (update-in definition [:args field] dissoc :as)
             after (rows-for compact)
-            alias-id (ids/slot-id owner alias)
+            alias-id (ids/slot-id owner exposed-name)
             field-row (some #(when (= alias-id (:id %)) %) original)
             member (some #(when (= (ids/fn-slot-id owner alias-id) (:id %)) %) original)
             before-readers (resolve-readers context definition target original)
@@ -71,14 +71,14 @@
                                (= (:slot-id edge) (:slot-id %)) (= (:fn-id target) (:ref-fn-id %))) original)
                    (= (set after) (set (without-view original alias-id member)))
                    (= :ref (:kind edge)) (not (:is-fn edge)) (= (:fn-id target) (:ref-id edge))
-                   (= field (:base-name edge)) (= alias (:ext-name edge))
+                   (= field (:base-name edge)) (= exposed-name (:ext-name edge))
                    (= (:slot-id edge) (:source-slot-id field-row)) (empty? environment) (empty? others)
-                   (= :free (:kind reader)) (= alias (:ext-name reader) (:ext-name entry)) (empty? siblings)
+                   (= :free (:kind reader)) (= exposed-name (:ext-name reader) (:ext-name entry)) (empty? siblings)
                    (empty? more) (uuid? (:slot-id entry)) (not= alias-id (:slot-id entry))
-                   (= [entry] (filterv #(= alias (:ext-name %)) surface))
+                   (= [entry] (filterv #(= exposed-name (:ext-name %)) surface))
                    (= after-readers (update before-readers :arguments
                                             (partial mapv #(if (= edge %) (assoc % :ext-name field) %)))))
-          {:field field :alias alias :alias-slot field-row :membership member
+          {:field field :alias exposed-name :alias-slot field-row :membership member
            :callable-reader? (true? (:is-fn reader))
            :reference-binding-id binding-id :target-id (:fn-id target) :occupied-address [[owner []] [(:slot-id edge)]]
            :reader-address [[owner [binding-id]] [(:slot-id entry)]]})))))

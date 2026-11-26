@@ -301,11 +301,11 @@
   (when-let [target (:ref-fn-id row)]
     (let [[[root scope-path] field-path] address
           id (:id row)
-          use [root (conj scope-path id)]
-          edge {:from address :to use :binding-id id :target-fn-id target :mode :value}
+          target-scope [root (conj scope-path id)]
+          edge {:from address :to target-scope :binding-id id :target-fn-id target :mode :value}
           proof (get-in after [:proofs address])]
       (when (some #{edge} (:dependencies after))
-        (cond-> (mapv (partial nested-field-check target use)
+        (cond-> (mapv (partial nested-field-check target target-scope)
                       (:obligations (checked-graph analyze snapshot target)))
           (and (= :any (get-in before [:public-input :routes public-path :completion-type])
                   (get-in after [:scopes scope-path :bindings address :expected-type]))

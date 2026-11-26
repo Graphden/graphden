@@ -45,6 +45,8 @@
            :stored-owner (:fn-id origin)
            :declarations (mapv #(vector (:fn-id %) env-name) sources)
            :binding (rows/normalize
-                      (assoc (select-keys origin [:id :fn-id :org-id :value-present :value :ref-fn-id])
-                             :kind :input-binding :scope-path [] :target-path [reader-slot]
-                             :expression-kind (if (= :ref kind) "ref" "value")))})))))
+                      (merge (select-keys origin [:id :fn-id :org-id])
+                             {:kind :input-binding :scope-path [] :target-path [reader-slot]}
+                             (case kind
+                               :ref {:expression-kind "ref" :value-present false :ref-fn-id (:ref-fn-id origin)}
+                               :value {:expression-kind "value" :value-present true :value (:value origin)})))})))))

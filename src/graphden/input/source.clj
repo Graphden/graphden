@@ -670,14 +670,20 @@
 
 
 (defn- v2-authored-meaning
-  [definition parsed]
+  [definition parsed {:keys [row slot-id]}]
   (let [traces (or (:list-builders parsed) {})
         certified (into (set (map :row (vals (:scoped-inputs parsed))))
                         (comp (filter :address) (map :row)) (vals (:configurations parsed)))
         forwarded (into #{} (comp (filter :source-names) (map :row)) (vals (:scoped-inputs parsed)))
-        bindings (mapv #(if (contains? certified %)
-                          (migration/legacy-binding (assoc % :scope-path []))
-                          (rename/legacy-binding (:declaration-records parsed) %))
+        bindings (mapv (fn [binding]
+                         (cond
+                           (and row (= (:id row) (:id binding)))
+                           (do (when-not (migration/same-edn? row binding)
+                                 (throw (ex-info "Legacy initializer differs from replay" {:code :legacy-leaf-binding-mismatch})))
+                               (assoc (migration/legacy-binding binding) :slot-id slot-id))
+                           (contains? certified binding)
+                           (migration/legacy-binding (assoc binding :scope-path []))
+                           :else (rename/legacy-binding (:declaration-records parsed) binding)))
                        (remove forwarded (ordinary-bindings (:bindings parsed) traces)))]
     (assoc (authored-meaning definition parsed bindings)
            :list-builders traces
@@ -728,7 +734,7 @@
 (defn- v2-inline-meaning
   [[path child]]
   [path {:origin (format/inline-origin (:inline-body child))
-         :meaning (v2-authored-meaning (dissoc (:source child) :bind :input :configure) child)
+         :meaning (v2-authored-meaning (dissoc (:source child) :bind :input :configure) child nil)
          :children (into {} (map v2-inline-meaning) (:inline-definitions child))}])
 
 
@@ -756,8 +762,25 @@
           arguments))
 
 
+(defn- legacy-leaf-context
+  [{:keys [binding-id scope fn-id] :as context} {:keys [row slot-id]} original-bindings]
+  (if (and row (= fn-id (:fn-id row)))
+    (let [[original & more] (filter #(= (:id row) (:id %)) original-bindings)
+          target (:target-path row)]
+      (when-not (and original (empty? more) (= slot-id (:slot-id original))
+                     (= (:id row) (ids/binding-id fn-id slot-id))
+                     (migration/same-edn? (binding-meaning original)
+                                          (binding-meaning (assoc (migration/legacy-binding row) :slot-id slot-id))))
+        (throw (ex-info "Legacy initializer origin changed" {:code :legacy-leaf-origin-mismatch})))
+      (assoc context :binding-id (fn [requested-scope path]
+                                   (if (= [scope target] [requested-scope path])
+                                     (:id row)
+                                     (binding-id requested-scope path)))))
+    context))
+
+
 (defn- verification-context
-  [environment owner-id arguments bindings]
+  [environment owner-id arguments bindings legacy-leaf]
   (let [index (into {} (tree-seq (comp seq second) child-arguments [owner-id arguments]))
         type-names (get-in environment [:context :name->id])]
     (fn [v2]
@@ -765,19 +788,20 @@
             id (ids/fn-id (:namespace lowered) (:name lowered))
             args (get index id)
             origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
-        (merge (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
-                                           (source-list/verified-traces args) args type-names)
-               (source-context/scoped-reference-context environment lowered rows args))))))
+        (-> (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
+                                        (source-list/verified-traces args) args type-names)
+            (merge (source-context/scoped-reference-context environment lowered rows args))
+            (legacy-leaf-context legacy-leaf bindings))))))
 
 
 (defn- verify-compact-definition
   [environment definition]
-  (let [{definition-id :identity :keys [source proposed legacy]} definition
+  (let [{definition-id :identity :keys [source proposed legacy legacy-leaf]} definition
         prepared (get-in environment [:definition-by-id definition-id])
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
         legacy-context (source-context/declaration-context environment prepared records bindings)
-        options {:context-for (verification-context environment definition-id (:arguments legacy) bindings)
+        options {:context-for (verification-context environment definition-id (:arguments legacy) bindings legacy-leaf)
                  :normalize-inline-parent
                  (fn [ns-id parent]
                    (let [names (get-in environment [:context :name->id])
@@ -790,7 +814,7 @@
         v2 (first (:definitions reread))
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
         legacy-meaning (legacy-authored-meaning prepared legacy-context bindings (:arguments legacy))
-        v2-meaning (v2-authored-meaning lowered v2)]
+        v2-meaning (v2-authored-meaning lowered v2 legacy-leaf)]
     (verify-inline-children! environment definition prepared v2)
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"
@@ -802,8 +826,8 @@
 
 
 (defn- verify-definition
-  [environment {:keys [identity source legacy] :as definition}]
-  (let [prepared (get-in environment [:definition-by-id identity])
+  [environment {definition-id :identity :keys [source legacy] :as definition}]
+  (let [prepared (get-in environment [:definition-by-id definition-id])
         witness (source-context/occupied-reference-alias (:context environment) prepared)]
     (when-not (= witness (:occupied-reference-alias legacy))
       (throw (ex-info "Reference alias source changed" {:code :reference-alias-origin-mismatch})))
@@ -817,8 +841,8 @@
                        (empty? (alignment-blockers source prepared (normalize-source source (:context environment)))))
           (throw (ex-info "Reference alias declaration changed" {:code :reference-alias-origin-mismatch})))
         (let [result (verify-compact-definition
-                       (-> environment (assoc-in [:definition-by-id identity] compact)
-                           (assoc-in [::source-context/occupied-reference-aliases identity] witness))
+                       (-> environment (assoc-in [:definition-by-id definition-id] compact)
+                           (assoc-in [::source-context/occupied-reference-aliases definition-id] witness))
                        (-> definition (update :source source-context/compact-reference witness)
                            (assoc-in [:legacy :records] records)))]
           (assoc result :source source :legacy legacy))))))

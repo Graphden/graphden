@@ -40,7 +40,8 @@
   [{:keys [packages repositories manifest artifact]}]
   (let [pinned (when manifest (inventory/read-edn manifest (slurp manifest)))
         roots (trusted-signatures packages)
-        options {:verify-scopes #(certification/verify-plan %1 %2 %3 roots)}]
+        options {:legacy-leaves? true
+                 :verify-scopes #(certification/verify-plan %1 %2 %3 roots)}]
     (if artifact
       (let [result (dry/migration-artifact repositories pinned options)]
         (dry/write-artifact! artifact result)

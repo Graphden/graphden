@@ -509,14 +509,9 @@
     {:context context :options (implementation-options context entries roots)}))
 
 
-(defn replay-legacy-use
-  "Analyze a legacy initializer at its final owner and retain its stored
-   identity. This is a local typed comparison. It does not certify source
-   emission or how other functions inherit the original declaration."
-  [package legacy-graph owner roots]
-  (let [{:keys [binding declarations]} (legacy-use/select-binding legacy-graph owner)
-        _ (when-not binding (reject! :unsupported-legacy-use owner))
-        baseline (reduce (fn [package [declaration field]]
+(defn- freeze-legacy-use
+  [package owner roots {:keys [binding declarations]}]
+  (let [baseline (reduce (fn [package [declaration field]]
                            (when-not (contains? (get-in package [:declarations declaration :args]) field)
                              (reject! :missing-legacy-use-declaration declaration))
                            (-> (omit-arguments package declaration [field])
@@ -530,7 +525,51 @@
         actual (get-in graph [:scopes [] :bindings address])]
     (when-not (= ((juxt :id :fn-id) binding) ((juxt :binding-id :origin-fn-id) actual))
       (reject! :legacy-use-binding-mismatch owner))
-    graph))
+    {:baseline baseline :graph graph}))
+
+
+(defn replay-legacy-use
+  "Analyze a legacy initializer at its final owner and retain its stored
+   identity. This is a local typed comparison. It does not certify source
+   emission or how other functions inherit the original declaration."
+  [package legacy-graph owner roots]
+  (if-let [selected (legacy-use/select-binding legacy-graph owner)]
+    (:graph (freeze-legacy-use package owner roots selected))
+    (reject! :unsupported-legacy-use owner)))
+
+
+(defn migrate-legacy-leaf
+  "Re-emit a checked lexical initializer as a binding on its local reader.
+   The legacy graph must cover the whole corpus so inherited shadowing
+   cannot disappear outside the declaring package."
+  [package legacy-graph owner roots]
+  (let [{:keys [binding stored-slot declarations] :as selected} (legacy-use/select-binding legacy-graph owner)
+        [[_ old-name]] declarations
+        source-path [:args old-name]
+        entry (plan-entry package owner)
+        [argument & more] (filter #(= source-path (:source-path %)) (get-in entry [:legacy :arguments]))
+        [blocker & other-blockers] (:blockers entry)]
+    (when-not (and (= owner (:fn-id binding)) (= [[owner old-name]] declarations)
+                   (empty? (get-in legacy-graph [:children-by-fn owner]))
+                   argument (empty? more) (:expression argument)
+                   (nil? (:inline-fn-id argument))
+                   (= source-path (:source-path blocker))
+                   (= :ref-scope-required (:code blocker)) (empty? other-blockers))
+      (reject! :unsupported-legacy-leaf owner))
+    (let [{:keys [baseline graph]} (freeze-legacy-use package owner roots selected)
+          path (:target-path binding)
+          fields (get-in graph [:scopes [] :configured-contract :fields])
+          field (some #(when (= path [(:id %)]) (:name %)) fields)
+          proposed (:proposed (plan-entry baseline owner))]
+      (when-not (and (= :checked (:status graph)) (empty? (:diagnostics graph))
+                     (every? #(= [:value-type :field-read] ((juxt :kind :trigger) %)) (:obligations graph))
+                     (simple-keyword? field) proposed (not (contains? (:bind proposed) field)))
+        (reject! :unverified-legacy-leaf owner))
+      (let [candidate (assoc entry
+                             :status :supported :blockers []
+                             :proposed (assoc-in proposed [:bind field] (:expression argument))
+                             :legacy-leaf {:row binding :slot-id stored-slot})]
+        (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package))))))))
 
 
 (defn- freeze-source-declarations
@@ -670,7 +709,7 @@
     (assoc-in proposed [keyspace path] (get scope-certificate :configuration expression))))
 
 
-(defn migrate-binding
+(defn- migrate-scoped-binding
   "Write the checked reference inputs as explicit public paths in :bind and
    compare the complete v2 declaration with the original legacy source."
   [package owner roots]
@@ -690,6 +729,18 @@
                                :proposed (reduce (partial add-scoped-form owner) proposed scoped))
                         (assoc-in [:legacy :arguments] arguments))]
       (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))
+
+
+(defn migrate-binding
+  "Prefer an existing reference-use proof. A legacy initializer that creates
+   its own use needs whole-corpus evidence that the owner has no inheritors."
+  [{:keys [legacy-graph] :as package} owner roots]
+  (try
+    (migrate-scoped-binding package owner roots)
+    (catch clojure.lang.ExceptionInfo failure
+      (if (and legacy-graph (= :missing-reference-use (:code (ex-data failure))))
+        (migrate-legacy-leaf package legacy-graph owner roots)
+        (throw failure)))))
 
 
 (defn migrate-forwarded-fields

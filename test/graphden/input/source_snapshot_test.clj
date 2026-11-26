@@ -735,6 +735,35 @@
       (is (= owner (:fn-id refused))))))
 
 
+(deftest lexical-leaf-keeps-the-old-binding-identity-on-source-round-trip
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [primitives (filter #(#{:vec :empty?} (:name %)) (sources "collections"))
+          items {:namespace "fixture" :name :items :parent :vec :args {:coll {:value []}}}
+          leaf {:namespace "fixture" :name :items-empty? :parent :empty? :args {:coll :items}}
+          definitions (into [items leaf] primitives)
+          prepared (parse/prepare-module definitions {} {})
+          package (snapshot/package-index prepared definitions)
+          rows (group-by :kind (parse/parse-prepared-module prepared))
+          lookup (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
+                                         :bindings (:binding rows) :list-items (:binding-list-item rows)})
+          _ (doseq [{module-ns :namespace :keys [name]} primitives]
+              (registry/record-rich-types! (ids/fn-id module-ns name) name (get @loaded-bases name)))
+          signatures (:by-id @registry/*rich-types-override*)
+          id (ids/fn-id "fixture" :items-empty?)
+          old-slot (ids/slot-id (ids/fn-id "core.collections" :vec) :coll)
+          reader (ids/slot-id (ids/fn-id "core.collections" :empty?) :coll)
+          migrated (snapshot/migrate-legacy-leaf package lookup id signatures)
+          [row] (get-in migrated [:v2 :bindings])]
+      (is (= :authored-source-equivalent (:verification migrated)))
+      (is (= [:ref :fixture/items] (get-in migrated [:proposed :bind :coll])))
+      (is (= [(ids/binding-id id old-slot) [reader]] ((juxt :id :target-path) row)))
+      (is (= :unsupported-legacy-leaf
+             (:code (failure #(snapshot/migrate-legacy-leaf package
+                                                            (assoc-in lookup [:children-by-fn id] #{(random-uuid)})
+                                                            id signatures))))))))
+
+
 (deftest existing-web-reference-keeps-its-core-field-identity-test
   (let [core (filterv #(contains? #{:cell :deref} (:name %)) (sources "concurrency"))
         module (edn/read-string (slurp (io/resource "packages/web/http/fns.edn")))

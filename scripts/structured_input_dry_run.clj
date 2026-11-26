@@ -7,6 +7,7 @@
     [babashka.fs :as fs]
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [graphden.executor.compile.lookups :as lookups]
     [graphden.input.source :as source]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.parse :as parse]
@@ -189,8 +190,51 @@
           source-modules)))
 
 
+(defn- capture-legacy
+  [{:keys [fn-defs name->id defs-by-name]} exports]
+  (let [parse-definition (fn [definition]
+                           (try
+                             (parse/parse-fn-def definition name->id defs-by-name)
+                             (catch clojure.lang.ExceptionInfo error
+                               (when-not (= :records/unknown-parent (:type (ex-data error)))
+                                 (throw error)))))
+        edges (for [{module-ns :namespace :keys [parent parents fn-id]} fn-defs
+                    ref (or parents (when parent [parent]))
+                    :let [id (get name->id (parse/normalize-ref ref name->id module-ns))]
+                    :when id]
+                [id fn-id])]
+    {:status :prepared :exports exports
+     :legacy-rows (into #{} (mapcat parse-definition) fn-defs)
+     :legacy-edges (vec edges)}))
+
+
+(defn- prepared-state
+  [package dependencies prepared {:keys [emit? verify-scopes legacy-graph]} proofs]
+  (let [original (:source-definitions package)
+        proofs (cond-> proofs legacy-graph (assoc :legacy-graph legacy-graph))
+        {:keys [context plan certified blocked source-proof]} (if verify-scopes
+                                                                (verify-scopes prepared original proofs)
+                                                                {:context prepared
+                                                                 :plan (source/verify-module (source/plan-module original prepared) prepared)})
+        verification (list-probe/verify-package (:read-source package) (:definitions plan) context)
+        summaries (mapv (fn [{id :identity :as entry}]
+                          (let [diagnostic (get blocked id)]
+                            (cond-> (summarize-definition package verification entry)
+                              (contains? certified id) (assoc :scope-certification :verified)
+                              diagnostic (assoc :scope-certification diagnostic))))
+                        (:definitions plan))]
+    (cond-> {:status :prepared
+             :exports (vec (distinct (concat dependencies (qualify-definitions context))))
+             :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
+             :blockers (into (vec (mapcat :blockers summaries))
+                             (map #(assoc % :repository (:repository package) :package (:name package)))
+                             (:blockers verification))}
+      emit? (assoc :module-patches (module-patches package (:definitions plan) context))
+      source-proof (assoc :source-proof source-proof))))
+
+
 (defn- prepare-package
-  [package states {:keys [emit? verify-scopes]}]
+  [package states {:keys [capture-legacy?] :as options}]
   (let [dependencies (visible-definitions package states)
         original (:source-definitions package)
         names (parse/name->id-index {} dependencies)
@@ -207,26 +251,10 @@
           (shapes/register-marker! (:name definition) (:marker definition)))
         (if (duplicate-definition? (concat dependencies original))
           (blocked-state package [(problem package :duplicate-visible-definition)])
-          (let [prepared (parse/prepare-module original names definitions)
-                {:keys [context plan certified blocked source-proof]} (if verify-scopes
-                                                                        (verify-scopes prepared original (visible-source-proofs package states))
-                                                                        {:context prepared
-                                                                         :plan (source/verify-module (source/plan-module original prepared) prepared)})
-                verification (list-probe/verify-package (:read-source package) (:definitions plan) context)
-                summaries (mapv (fn [{id :identity :as entry}]
-                                  (let [diagnostic (get blocked id)]
-                                    (cond-> (summarize-definition package verification entry)
-                                      (contains? certified id) (assoc :scope-certification :verified)
-                                      diagnostic (assoc :scope-certification diagnostic))))
-                                (:definitions plan))]
-            (cond-> {:status :prepared
-                     :exports (vec (distinct (concat dependencies (qualify-definitions context))))
-                     :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
-                     :blockers (into (vec (mapcat :blockers summaries))
-                                     (map #(assoc % :repository (:repository package) :package (:name package)))
-                                     (:blockers verification))}
-              emit? (assoc :module-patches (module-patches package (:definitions plan) context))
-              source-proof (assoc :source-proof source-proof))))
+          (let [prepared (parse/prepare-module original names definitions)]
+            (if capture-legacy?
+              (capture-legacy prepared (vec (distinct (concat dependencies (qualify-definitions prepared)))))
+              (prepared-state package dependencies prepared options (visible-source-proofs package states)))))
         (catch Exception error
           (blocked-state package (preparation-errors package all-names error)))))))
 
@@ -312,12 +340,27 @@
     (assoc report :report-sha256 (sha256 (String/.getBytes (inventory/report-text report) "UTF-8")))))
 
 
+(defn- corpus-legacy-graph
+  [packages]
+  (let [states (vals (plan-packages packages {:capture-legacy? true}))]
+    (when (every? #(= :prepared (:status %)) states)
+      (let [rows (group-by :kind (into #{} (mapcat :legacy-rows) states))
+            graph (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
+                                          :bindings (:binding rows) :list-items (:binding-list-item rows)})]
+        ;; Known parents of an unresolved legacy declaration still count
+        ;; as inheritance edges and prevent a parent from being called a leaf.
+        (reduce (fn [result [parent child]]
+                  (update-in result [:children-by-fn parent] (fnil conj #{}) child))
+                graph (mapcat :legacy-edges states))))))
+
+
 (defn- replay-corpus
   [repositories expected-manifest options]
   (let [manifest (inventory/inventory repositories)]
     (when (and expected-manifest (not= expected-manifest manifest))
       (throw (ex-info "Inventory differs from pinned manifest" {:code :manifest-mismatch})))
     (let [packages (read-packages repositories manifest)
+          options (cond-> options (:legacy-leaves? options) (assoc :legacy-graph (corpus-legacy-graph packages)))
           states (plan-packages packages options)
           after (inventory/inventory repositories)]
       (when-not (= manifest after)

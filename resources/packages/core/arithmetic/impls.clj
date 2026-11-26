@@ -231,15 +231,21 @@
 ;; content-passing; bool predicates included since `(neq secret 42)`
 ;; tells you what the secret IS.
 (def impls
-  {:add {:impl add :return-type-rule add-return-rule :taint-propagate? true}
+  {:add {:impl add :return-type-rule add-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :sub {:impl sub :return-type-rule sub-return-rule
          :local-type-rules #{:return-type-rule} :taint-propagate? true}
-   :mul {:impl mul :return-type-rule mul-return-rule :taint-propagate? true}
+   :mul {:impl mul :return-type-rule mul-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :div {:impl div :taint-propagate? true}
-   :mod {:impl mod-fn :return-type-rule mod-return-rule :taint-propagate? true}
-   :quot {:impl quot-fn :return-type-rule mod-return-rule :taint-propagate? true}
-   :neg {:impl neg :return-type-rule neg-return-rule :taint-propagate? true}
-   :abs {:impl abs-fn :return-type-rule abs-return-rule :taint-propagate? true}
+   :mod {:impl mod-fn :return-type-rule mod-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :quot {:impl quot-fn :return-type-rule mod-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :neg {:impl neg :return-type-rule neg-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :abs {:impl abs-fn :return-type-rule abs-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :round {:impl round-fn :taint-propagate? true}
    :neq {:impl neq :taint-propagate? true}
    :lt {:impl lt :taint-propagate? true}

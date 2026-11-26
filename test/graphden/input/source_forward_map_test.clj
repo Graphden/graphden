@@ -138,7 +138,13 @@
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             types/*type-aliases-override* (atom {})]
     (let [native (:base-fn-defs (loader/load-packages ["core"]))
-          facts [["core.collections" :conj {:coll {:type [:list :text]} :item {:type :text}} [:list :text]]
+          facts [["core.arithmetic" :add {:nums {:type [:list :int]}} :int]
+                 ["core.arithmetic" :mul {:nums {:type [:list :numeric]}} :any]
+                 ["core.arithmetic" :mod {:dividend {:type :int} :divisor {:type :int}} :int]
+                 ["core.arithmetic" :quot {:dividend {:type :int} :divisor {:type :numeric}} :any]
+                 ["core.arithmetic" :neg {:number {:type :int}} :int]
+                 ["core.arithmetic" :abs {:number {:type :numeric}} :any]
+                 ["core.collections" :conj {:coll {:type [:list :text]} :item {:type :text}} [:list :text]]
                  ["core.collections" :dissoc {:map {:type {:x :int :y :text}} :key {:value :x}} {:y :text}]
                  ["core.collections" :keys {:map {:type [:map :text :int]}} [:list :text]]
                  ["core.collections" :update-vals

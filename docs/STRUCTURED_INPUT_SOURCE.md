@@ -224,6 +224,16 @@ the prepared type expression, including type variables. Supported pins retain
 the original binding UUID and a separate `:configure` assertion. Ambiguous
 names, conflicting pins and occupied ancestor fields remain diagnostics.
 
+For a legacy `{:as :handler :ref :assoc-handler}`, the occupied outer slot
+and the public callee reader can have distinct UUIDs. The checked source
+planner follows a direct value reference to a callee with one free reader.
+It compares the effective argument, environment, name translation and public
+surface before emitting the reference. Its migration ledger retains the
+original alias slot and membership, their occupied address and the callee
+reader's scoped address. A persisted override of the occupied alias can
+replace the outer value, while a source binding to the callee reader supplies
+the inner value. Database migration must resolve each original binding UUID.
+
 An authored `:description` on a scalar rename belongs to its original binding,
 not the new alias slot. The planner keeps it under `:configure` at the original
 destination alongside any type assertion. The reader requires the exact

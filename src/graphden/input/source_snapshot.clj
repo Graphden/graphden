@@ -16,6 +16,7 @@
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-primitive :as primitive]
+    [graphden.input.source-reference-alias :as reference-alias]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.input.source-scope :as scope]
@@ -44,7 +45,8 @@
   [prepared originals]
   (let [by-id (group-by definition-id originals)
         ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
-    {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous))
+    {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous
+                                                   ::source/reference-alias-witness reference-alias/witness))
      :markers (shapes/markers-snapshot)
      :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
      :originals by-id

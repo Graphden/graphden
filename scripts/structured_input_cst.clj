@@ -249,10 +249,10 @@
         type-edit (assoc :configuration (:configuration type-edit))))))
 
 
-(defn- marked-literal-edit
-  [source starts loc]
+(defn- remove-marker-to-vector
+  [source starts loc marker]
   (let [{:keys [start before] :as span} (node-edit source starts loc identity)
-        key (key-loc loc :literal?)
+        key (key-loc loc marker)
         remove-marker (mapv #(-> (node-edit source starts % (constantly ""))
                                  (update :start - start)
                                  (update :end - start))
@@ -264,6 +264,12 @@
 (defn- leaf-edit
   [source starts leaf op path]
   (case op
+    :occupied-reference
+    (let [form (z/sexpr leaf)]
+      (when-not (and (map? form) (= #{:as :ref} (set (keys form)))
+                     (simple-keyword? (:as form)) (keyword? (:ref form)))
+        (refuse :unsupported-expression-map {:path path}))
+      (remove-marker-to-vector source starts leaf :as))
     :wrap-value (node-edit source starts leaf #(str "[:value " % "]"))
     :local-projection (projection-leaf source starts leaf)
     :wrap-ref
@@ -274,7 +280,7 @@
     :map-expression-to-vector
     (let [nodes (when (= :map (z/tag leaf)) (children leaf))]
       (if (and nodes (key-loc leaf :literal?) (format/legacy-literal-marker? (z/sexpr leaf)))
-        (marked-literal-edit source starts leaf)
+        (remove-marker-to-vector source starts leaf :literal?)
         (do
           (when-not (and (= 2 (count nodes)) (#{:value :ref} (z/sexpr (first nodes)))
                          (or (= :value (z/sexpr (first nodes)))
@@ -631,7 +637,7 @@
           (refuse :not-composed-definition {:definition definition}))
         (rename-edit source starts loc definition path :bind))
 
-      (:wrap-value :wrap-ref :map-expression-to-vector :local-projection)
+      (:wrap-value :wrap-ref :map-expression-to-vector :local-projection :occupied-reference)
       (leaf-edit source starts (argument-loc loc path) op path)
 
       :inline-ref
@@ -750,11 +756,21 @@
                                         (= [(:slot-id origin)] (:target-path row)))
                            (refuse :planner-ledger-mismatch {:path source-path}))
                          {:op :scope-key :definition (:name source) :path source-path :public-path public-path})) binds)
-        operations (mapv (fn [{:keys [source-path annotation] :as argument}]
-                           (if annotation
+        occupied (:occupied-reference-alias legacy)
+        operations (mapv (fn [{:keys [source-path origin annotation] :as argument}]
+                           (cond
+                             (= source-path [:args (:field occupied)])
+                             (let [raw (get-in source source-path)
+                                   cleaned (update-in source source-path dissoc :as)]
+                               (when-not (and (= #{:as :ref} (set (keys raw))) (= (:as raw) (:alias occupied))
+                                              (= (:binding-id origin) (:reference-binding-id occupied))
+                                              (= (:slot-id origin) (get-in occupied [:alias-slot :source-slot-id])))
+                                 (refuse :planner-ledger-mismatch {:path source-path}))
+                               (assoc (binding-operation cleaned argument) :op :occupied-reference))
+                             annotation
                              {:op :field-annotation :definition (:name source) :path source-path
                               :configuration (annotations/configuration annotation)}
-                             (binding-operation source argument)))
+                             :else (binding-operation source argument)))
                          binding-entries)
         configuration (into {} (keep (fn [{:keys [op path configuration]}]
                                        (cond

@@ -159,7 +159,9 @@
         id (:id owner)
         descriptor (migration/input-type-record owner)
         input-id (:id descriptor)
-        mapping (migration/identity-mapping {id members} binding-origins)]
+        mapping (migration/identity-mapping {id members} binding-origins)
+        occupied (get-in source-environment [::occupied-reference-aliases id])
+        mapping (cond-> mapping occupied (assoc :occupied-reference-aliases {(:id (:alias-slot occupied)) occupied}))]
     (when (or (not= (count input-fields) (count (set (map :id input-fields))))
               (not= (count input-fields) (count (set (map :name input-fields)))))
       (reject! :ambiguous-inherited-input [:input]))

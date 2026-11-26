@@ -35,6 +35,19 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))
 
 
+(deftest occupied-reference-removes-the-two-alias-tokens-and-retains-comments
+  (doseq [wrapper ["{:as ; alias comment\n :handler :ref :child}"
+                   "{:ref :child ; alias comment\n :as :handler}"]]
+    (let [raw (str "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:value " wrapper "}}]}")
+          operations [(assoc (wrap-value :host [:args]) :op :rename-bind)
+                      {:op :occupied-reference :definition :host :path [:args :value]}]
+          plan (cst/plan raw (apply request operations))
+          edited (:text (cst/apply-text plan raw))]
+      (is (str/includes? edited "; alias comment\n"))
+      (is (= [:ref :child] (get-in (edn/read-string edited) [:fns 0 :bind :value])))
+      (is (= :already-applied (:status (cst/apply-text plan edited)))))))
+
+
 (deftest scoped-input-keys-retain-argument-comments-and-literal-bytes
   (let [raw "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:left :reader, :deep ;; free reader input\r\n  \"x\\n y\"}}]}"
         operations [{:op :rename-bind :definition :host :path [:args]}

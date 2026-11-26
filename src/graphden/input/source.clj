@@ -564,13 +564,31 @@
   (mapv #(select-keys % [:kind :id :fn-id :slot-id :source-slot-id :binding-id :position]) rows))
 
 
+(defn- occupied-reference-alias
+  [context definition]
+  (when-let [resolve-alias (::reference-alias-witness context)]
+    (let [[field & more] (keep (fn [[k v]] (when (and (map? v) (= #{:as :ref} (set (keys v)))) k))
+                               (:args definition))]
+      (when (and field (empty? more))
+        (resolve-alias context definition field)))))
+
+
+(defn- compact-reference
+  [definition witness]
+  (if witness (update-in definition [:args (:field witness)] dissoc :as) definition))
+
+
 (defn- plan-definition
   [source prepared context]
   (try
     (let [normalized (normalize-source source context)
           alignment (alignment-blockers source prepared normalized)
           rows ((::records-of context) prepared)
-          classified (when (empty? alignment) (classify source prepared context rows))
+          witness (when (empty? alignment) (occupied-reference-alias context prepared))
+          compact (compact-reference prepared witness)
+          classified (when (empty? alignment)
+                       (classify (compact-reference source witness) compact context
+                                 (if witness ((::records-of context) compact) rows)))
           blockers (into alignment (:blockers classified))]
       (cond-> {:source source :identity (:fn-id prepared)
                :kind (definition-kind source)
@@ -579,6 +597,7 @@
                :legacy {:records rows :rich-input (:args source)
                         :arguments (:arguments classified)}
                :origins (record-origins rows)}
+        witness (assoc-in [:legacy :occupied-reference-alias] witness)
         (empty? blockers) (assoc :proposed (:proposed classified))))
     (catch Exception e
       {:source source :status :blocked
@@ -762,7 +781,7 @@
                (source-context/scoped-reference-context environment lowered rows args))))))
 
 
-(defn- verify-definition
+(defn- verify-compact-definition
   [environment definition]
   (let [{definition-id :identity :keys [source proposed legacy]} definition
         prepared (get-in environment [:definition-by-id definition-id])
@@ -791,6 +810,29 @@
       (throw (ex-info "Structured source changed authored meaning"
                       {:type :input/source-verification :code :legacy-v2-meaning-mismatch})))
     (assoc definition :verification :authored-source-equivalent :v2 v2)))
+
+
+(defn- verify-definition
+  [environment {:keys [identity source legacy] :as definition}]
+  (let [prepared (get-in environment [:definition-by-id identity])
+        witness (occupied-reference-alias (:context environment) prepared)]
+    (when-not (= witness (:occupied-reference-alias legacy))
+      (throw (ex-info "Reference alias source changed" {:code :reference-alias-origin-mismatch})))
+    (if-not witness
+      (verify-compact-definition environment definition)
+      (let [compact (compact-reference prepared witness)
+            rows-of (:records-of environment)
+            records (rows-of compact)]
+        (when-not (and (= (:records legacy) (rows-of prepared))
+                       (= (get-in prepared [:args (:field witness) :as]) (get-in source [:args (:field witness) :as]))
+                       (empty? (alignment-blockers source prepared (normalize-source source (:context environment)))))
+          (throw (ex-info "Reference alias declaration changed" {:code :reference-alias-origin-mismatch})))
+        (let [result (verify-compact-definition
+                       (-> environment (assoc-in [:definition-by-id identity] compact)
+                           (assoc-in [::source-context/occupied-reference-aliases identity] witness))
+                       (-> definition (update :source compact-reference witness)
+                           (assoc-in [:legacy :records] records)))]
+          (assoc result :source source :legacy legacy))))))
 
 
 (defn verify-module

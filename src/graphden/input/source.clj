@@ -802,8 +802,8 @@
 
 
 (defn- verify-definition
-  [environment {:keys [identity source legacy] :as definition}]
-  (let [prepared (get-in environment [:definition-by-id identity])
+  [environment {definition-id :identity :keys [source legacy] :as definition}]
+  (let [prepared (get-in environment [:definition-by-id definition-id])
         witness (source-context/occupied-reference-alias (:context environment) prepared)]
     (when-not (= witness (:occupied-reference-alias legacy))
       (throw (ex-info "Reference alias source changed" {:code :reference-alias-origin-mismatch})))
@@ -817,8 +817,8 @@
                        (empty? (alignment-blockers source prepared (normalize-source source (:context environment)))))
           (throw (ex-info "Reference alias declaration changed" {:code :reference-alias-origin-mismatch})))
         (let [result (verify-compact-definition
-                       (-> environment (assoc-in [:definition-by-id identity] compact)
-                           (assoc-in [::source-context/occupied-reference-aliases identity] witness))
+                       (-> environment (assoc-in [:definition-by-id definition-id] compact)
+                           (assoc-in [::source-context/occupied-reference-aliases definition-id] witness))
                        (-> definition (update :source source-context/compact-reference witness)
                            (assoc-in [:legacy :records] records)))]
           (assoc result :source source :legacy legacy))))))

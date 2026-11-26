@@ -77,9 +77,9 @@
 (deftest scoped-value-reference-retains-the-checks-of-its-new-use
   (let [operation (fn [name field input-type result]
                     {:namespace "scoped" :name name :args {field {:type input-type}} :return-type result})
-        bases [(operation :sink :left :text :text) (operation :reader :deep :any :text)
+        base-declarations [(operation :sink :left :text :text) (operation :reader :deep :any :text)
                (operation :middle :inner :any :any) (operation :leaf :sample :any :any)]
-        source (into bases [{:namespace "scoped" :name :producer :parent :middle :args {:inner :leaf}}
+        source (into base-declarations [{:namespace "scoped" :name :producer :parent :middle :args {:inner :leaf}}
                             {:namespace "scoped" :name :host :parent :sink
                              :args {:left :reader :deep :producer}}])
         native (into {} (map (fn [{:keys [name args] :as base}]
@@ -87,7 +87,7 @@
                                  [name (assoc base :impl
                                               (fn [arguments _]
                                                 (let [value (runtime/resolve-arg arguments field)]
-                                                  (if (= :reader name) (pr-str value) value))))]))) bases)
+                                                  (if (= :reader name) (pr-str value) value))))]))) base-declarations)
         owner (ids/fn-id "scoped" :host)
         receipt (atom nil)
         {:keys [canonical legacy analysis]}
@@ -821,7 +821,7 @@
                                :args {:arg {:type :text}} :return-type :text}
                               {:namespace "callable-proof" :name :route :parent :app.common/method-map
                                :args {:method "GET" :handler :echo}}]))
-        bases (assoc @loaded :echo {:name :echo :namespace "callable-proof"
+        base-defs (assoc @loaded :echo {:name :echo :namespace "callable-proof"
                                     :args {:arg :text} :return-type :text :effects #{}
                                     :impl (fn [args _] (runtime/resolve-arg args :arg))})
         root (ids/fn-id "callable-proof" :route)
@@ -830,7 +830,7 @@
                           (let [certified (snapshot/with-certified-owner package id roots)]
                             (is (= :authored-source-equivalent (get-in certified [:closure-baselines id :verification])))
                             (execution/compile-package certified id roots impls)))
-        {:keys [canonical legacy analysis]} (runtimes source root compile-package bases)]
+        {:keys [canonical legacy analysis]} (runtimes source root compile-package base-defs)]
     (is (= :checked (:status analysis)))
     (doseq [run [legacy canonical]]
       (let [handler (get-in (run {}) ["GET" "handler"])]

@@ -271,12 +271,52 @@
          (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))))
 
 
+(defn- nested-field-check
+  [target [root prefix] {:keys [id address scope path kind trigger] :as check}]
+  (when-not (and (= target (first scope)) (= address [scope path]) (= id [address kind trigger]))
+    (reject! :scope-replay-mismatch))
+  (let [nested [root (into prefix (second scope))]
+        address [nested path]]
+    (assoc check :id [address kind trigger] :scope nested :address address)))
+
+
+(defn- reference-field-checks
+  "Re-analyze the original target independently. Its exact field-read checks
+   follow its new value-use edge. The checker may also schedule the universal
+   :any validator at the newly supplied field, where it accepts every value."
+  [snapshot analyze before after {:keys [address row public-path]}]
+  (when-let [target (:ref-fn-id row)]
+    (let [[[root scope-path] field-path] address
+          id (:id row)
+          use [root (conj scope-path id)]
+          edge {:from address :to use :binding-id id :target-fn-id target :mode :value}
+          proof (get-in after [:proofs address])]
+      (when (some #{edge} (:dependencies after))
+        (cond-> (mapv (partial nested-field-check target use)
+                      (:obligations (checked-graph analyze snapshot target)))
+          (and (= :any (get-in before [:public-input :routes public-path :completion-type])
+                  (get-in after [:scopes scope-path :bindings address :expected-type]))
+               (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
+          (conj {:id [address :value-type :field-read] :address address
+                 :scope (first address) :path field-path
+                 :kind :value-type :trigger :field-read :expected-type :any}))))))
+
+
+(defn- preserves-scoped-checks?
+  [snapshot analyze before after certificates]
+  (let [prior (set (:obligations before))
+        current (set (:obligations after))]
+    (or (= prior current)
+        (and (every? current prior)
+             (= current (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates))))))
+
+
 (defn- verify-bindings*
   "Check a group of legacy bindings whose complete omitted set is known.
    Resolve all addresses in one frozen baseline. Replay all rows together so
    interdependent type constraints and occupancy use the completed graph.
-   Existing field-read obligations must survive exactly; replay never
-   discharges, renames, strengthens or introduces a runtime check."
+   Existing field-read obligations must survive exactly. New value ref uses
+   may bring the exact field checks of their independently checked targets."
   [{owner :identity :as plan-entry} paths snapshot analyze projections]
   (let [omitted (legacy-omissions plan-entry paths snapshot projections)
         before (checked-graph analyze snapshot owner)
@@ -292,7 +332,7 @@
                      (every? (fn [{:keys [address row]}]
                                (= address (occurrence after (first (:target-path row))))) projections)
                      (preserves-occupancy? prior current certificates)
-                     (= (set (:obligations before)) (set (:obligations after))))
+                     (preserves-scoped-checks? snapshot analyze before after certificates))
         (reject! :scope-replay-mismatch))
       (mapv #(assoc % :obligations (:obligations after)) certificates))))
 

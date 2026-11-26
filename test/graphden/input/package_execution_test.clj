@@ -74,6 +74,41 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest scoped-value-reference-retains-the-checks-of-its-new-use
+  (let [operation (fn [name field input-type result]
+                    {:namespace "scoped" :name name :args {field {:type input-type}} :return-type result})
+        bases [(operation :sink :left :text :text) (operation :reader :deep :any :text)
+               (operation :middle :inner :any :any) (operation :leaf :sample :any :any)]
+        source (into bases [{:namespace "scoped" :name :producer :parent :middle :args {:inner :leaf}}
+                            {:namespace "scoped" :name :host :parent :sink
+                             :args {:left :reader :deep :producer}}])
+        native (into {} (map (fn [{:keys [name args] :as base}]
+                               (let [field (first (keys args))]
+                                 [name (assoc base :impl
+                                              (fn [arguments _]
+                                                (let [value (runtime/resolve-arg arguments field)]
+                                                  (if (= :reader name) (pr-str value) value))))]))) bases)
+        owner (ids/fn-id "scoped" :host)
+        receipt (atom nil)
+        {:keys [canonical legacy analysis]}
+        (runtimes source owner
+                  (fn [package id roots implementations]
+                    (let [migrated (snapshot/with-certified-owner package id roots)]
+                      (reset! receipt (get-in migrated [:closure-baselines id]))
+                      (execution/compile-package migrated id roots implementations))) native)
+        certificate (some :scope-certificate (get-in @receipt [:legacy :arguments]))
+        child-path (conj (get-in certificate [:row :scope-path]) (get-in certificate [:row :id]))
+        inner (ids/slot-id (ids/fn-id "scoped" :middle) :inner)
+        checks (into {} (map (juxt :address :expected-type)) (:obligations analysis))]
+    (is (= :authored-source-equivalent (:verification @receipt)))
+    (is (= (:obligations analysis) (:obligations certificate)))
+    (is (= :any (get checks (:address certificate))))
+    (is (= :any (get checks [[owner child-path] [inner]])))
+    (doseq [value [nil false "field"]]
+      (is (= (pr-str value) (legacy {:sample value})
+             (canonical {:left {:deep {:inner {:sample value}}}}))))))
+
+
 (deftest forwarded-input-reaches-two-distinct-uses-of-one-legacy-slot
   (let [base {:namespace "fixture" :name :combine
               :args {:left {:type :text} :right {:type :text}} :return-type :text}

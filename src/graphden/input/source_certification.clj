@@ -22,9 +22,7 @@
            (every? #(= :field-projection-required (:code %)) blockers))
       [id (mapv argument-field blockers)]
       :else
-      (let [paths (into #{} (comp (keep origins/inline-binding-path)
-                                  (filter #(< 2 (count %)))
-                                  (map #(subvec % 0 2))) blockers)]
+      (let [paths (into #{} (mapcat origins/inline-list-paths) blockers)]
         (when (every? (fn [{:keys [code source-path] :as blocker}]
                         (or (origins/inline-binding-path blocker)
                             (case code

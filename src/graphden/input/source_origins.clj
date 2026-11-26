@@ -101,29 +101,47 @@
     origin))
 
 
-(defn- argument-path?
+(defn- argument-sites
   [path]
-  (and (vector? path) (even? (count path))
-       (every? (fn [[section field]] (and (= :args section) (simple-keyword? field)))
-               (partition 2 path))))
+  (loop [start 0 sites []]
+    (if (= start (count path))
+      sites
+      (when (and (= :args (get path start)) (simple-keyword? (get path (inc start))))
+        (let [field-end (+ start 2)
+              append? (= :append (get path field-end))
+              position (if append? (inc field-end) field-end)
+              item? (nat-int? (get path position))
+              end (if item? (inc position) field-end)]
+          (when (or (not append?) item?)
+            (recur end (conj sites [field-end end]))))))))
+
+
+(defn- blocked-sites
+  [{:keys [code source-path]}]
+  (when (and (vector? source-path) (< 2 (count source-path)))
+    (case code
+      :ref-scope-required (let [sites (argument-sites source-path)
+                                [field-end end] (peek sites)]
+                            (when (and (next sites) (= field-end end)) sites))
+      :inherited-projection-required (when (= :args (peek source-path))
+                                       (seq (argument-sites (pop source-path))))
+      nil)))
 
 
 (defn inline-binding-path
-  "Locate the first child of a scoped binding blocker. A list operand may
-   occupy an exact vector or append position. The result must still resolve
-   through child-at and pass the ordinary frozen owner proof."
-  [{:keys [code source-path]}]
-  (when (and (vector? source-path) (< 2 (count source-path))
-             (argument-path? (subvec source-path 0 2)))
-    (let [position (if (= :append (get source-path 2)) 3 2)
-          end (if (nat-int? (get source-path position)) (inc position) 2)
-          remaining (subvec source-path end)
-          fields (case code
-                   :ref-scope-required (when (seq remaining) remaining)
-                   :inherited-projection-required (when (= :args (peek remaining)) (pop remaining))
-                   nil)]
-      (when (argument-path? fields)
-        (subvec source-path 0 end)))))
+  "Locate the first exact child of a scoped binding blocker, including a
+   vector or append item. The child still needs its frozen owner proof."
+  [{:keys [source-path] :as blocker}]
+  (when-let [[_ end] (first (blocked-sites blocker))]
+    (subvec source-path 0 end)))
+
+
+(defn inline-list-paths
+  "Return each enclosing list field of a verified blocker path shape."
+  [{:keys [source-path] :as blocker}]
+  (into [] (keep (fn [[field-end end]]
+                   (when (< field-end end) (subvec source-path 0 field-end))))
+        (blocked-sites blocker)))
 
 
 (defn child-at

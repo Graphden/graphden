@@ -74,10 +74,16 @@
 
 
 (deftest scoped-inline-paths-distinguish-list-positions-and-argument-maps
-  (let [locate #(origins/inline-binding-path {:code %1 :source-path %2})]
+  (let [locate #(origins/inline-binding-path {:code %1 :source-path %2})
+        nested {:code :ref-scope-required
+                :source-path [:args :direct :args :outer :append 1 :args :inner 0 :args :field]}]
     (is (= [:args :direct] (locate :ref-scope-required [:args :direct :args :x])))
     (is (= [:args :items 1] (locate :ref-scope-required [:args :items 1 :args :x])))
     (is (= [:args :items :append 2] (locate :inherited-projection-required [:args :items :append 2 :args])))
+    (is (= [:args :direct] (origins/inline-binding-path nested)))
+    (is (= [[:args :direct :args :outer] [:args :direct :args :outer :append 1 :args :inner]]
+           (origins/inline-list-paths nested)))
+    (is (empty? (origins/inline-list-paths (assoc-in nested [:source-path 8] -1))))
     (is (nil? (locate :ref-scope-required [:args :items 1])))
     (is (nil? (locate :ref-scope-required [:args :items -1 :args :x])))
     (is (nil? (locate :ref-scope-required [:args :items :append :args :x])))

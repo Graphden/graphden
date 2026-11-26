@@ -43,9 +43,13 @@
   (cond
     (and (map? value) (or (contains? value :parent) (contains? value :parents)))
     (let [child (parse/inline-declaration (dissoc value :type) host (:namespace owner))
+          ;; Parser identity belongs to the normalized expansion. The body
+          ;; emitted during migration retains the spelling at this occurrence.
+          authored (merge (dissoc (get-in root path) :type)
+                          (select-keys child [:name :namespace :description]))
           origin {:root-owner-id (definition-id root)
                   :enclosing-owner-id (definition-id owner)
-                  :source-path path :declaration child}]
+                  :source-path path :declaration authored}]
       (into [(assoc origin :fn-id (definition-id child))]
             (declaration-origins root child path)))
 
@@ -81,7 +85,7 @@
                                    original #(parse/normalize-ref % (:name->id prepared) (:namespace original)))
                       _ (checked-expansion! prepared normalized)
                       ambiguous? (> (get owner-counts (definition-id original)) 1)
-                      entries (cond->> (declaration-origins normalized normalized [])
+                      entries (cond->> (declaration-origins original normalized [])
                                 ambiguous? (map #(assoc % :ambiguous-owner? true)))]
                   (reduce #(update %1 (:fn-id %2) (fnil conj []) %2) origins entries))
                 (catch clojure.lang.ExceptionInfo failure

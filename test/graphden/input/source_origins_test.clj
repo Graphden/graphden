@@ -88,3 +88,23 @@
     (is (nil? (locate :ref-scope-required [:args :items -1 :args :x])))
     (is (nil? (locate :ref-scope-required [:args :items :append :args :x])))
     (is (nil? (locate :field-projection-required [:args :items 0 :args :x])))))
+
+
+(deftest qualified-inline-spelling-retains-the-normalized-parser-identity
+  (let [sink {:namespace "fixture" :name :sink :args {:value :any} :return-type :any}
+        host {:namespace "fixture" :name :host :parent :sink
+              :args {:value {:parent :sink :args {:value {:parent :sink}}}}}
+        qualified (assoc-in host [:args :value :args :value :parent] :fixture/sink)
+        origins (fn [owner]
+                  (let [definitions [sink owner]
+                        index (origins/index (parse/prepare-module definitions {} {}) definitions)
+                        outer (origins/child-at index (ids/fn-id "fixture" :host) [:args :value])]
+                    [outer (origins/child-at index (:fn-id outer) [:args :value])]))
+        [plain-outer plain-inner] (origins host)
+        [outer inner] (origins qualified)]
+    (is (uuid? (:fn-id inner)))
+    (is (= (:fn-id plain-outer) (:fn-id outer)))
+    (is (= (:fn-id plain-inner) (:fn-id inner)))
+    (is (= :fixture/sink (get-in outer [:declaration :args :value :parent])
+           (get-in inner [:declaration :parent])))
+    (is (= :sink (get-in plain-inner [:declaration :parent])))))

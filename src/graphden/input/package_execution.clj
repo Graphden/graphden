@@ -23,7 +23,8 @@
                               (assoc entry :impl impl))))
         checked (analysis/analyze-effective-input context root options)]
     {:context context :analysis checked
-     :invoke (compile/compile-named checked {:context context :implementations implementations})}))
+     :invoke (compile/compile-named checked {:context context :implementations implementations
+                                             :detached-closures? true})}))
 
 
 (defn compile-package
@@ -33,7 +34,7 @@
    Both must originate in the same prepared package runtime. Returns evidence
    and an ordinary executor closure, without publishing either globally."
   [package root roots implementations]
-  (compile-frozen (snapshot/freeze-closure package [root] roots) root implementations))
+  (compile-frozen (snapshot/freeze-source-analysis package [root] roots) root implementations))
 
 
 (defn- require-visible-root!
@@ -55,7 +56,7 @@
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)
       (ir/reject! :staged-root-required {}))
-    (let [frozen (snapshot/freeze-closure package [root] roots)
+    (let [frozen (snapshot/freeze-source-analysis package [root] roots)
           executable (get-in frozen [:options :implementations])]
       (when-not (every? (fn [[target-id {:keys [base-fn-id generated-list]}]]
                           ;; The verified authored owner grants access to its

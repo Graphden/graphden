@@ -325,6 +325,12 @@
       :else (assoc ctx ::call-cache (java.util.HashMap.)))))
 
 
+(defn independent-invocation-context
+  "Prime a fresh memo when a closed callable runs outside its creating invocation."
+  [ctx]
+  (invocation-context (dissoc ctx ::call-cache)))
+
+
 (def ^:private single-fire-effect-cats
   "Side-effecting effect categories whose within-execute single-fire
    RELIES on the call-cache. A fn-def that pulls a side-effecting ref

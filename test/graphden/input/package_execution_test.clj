@@ -812,3 +812,25 @@
       (reset! calls 0)
       (is (= "{\"value\":\"checked\"}" (run {})))
       (is (= 1 @calls)))))
+
+
+(deftest closed-handler-from-nested-reference-remains-callable-after-return
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:assoc :assoc-fn})
+                     [{:namespace "callable-proof" :name :echo
+                       :args {:arg {:type :text}} :return-type :text}
+                      {:namespace "callable-proof" :name :handler-map :parent :core.collections/assoc-fn
+                       :args {:key "handler" :map {:value {}} :value :echo}}
+                      {:namespace "callable-proof" :name :method-map :parent :core.collections/assoc
+                       :args {:key "GET" :map {:value {}} :value :handler-map}}])
+        bases (assoc @loaded :echo {:name :echo :namespace "callable-proof"
+                                    :args {:arg :text} :return-type :text :effects #{}
+                                    :impl (fn [args _] (runtime/resolve-arg args :arg))})
+        root (ids/fn-id "callable-proof" :method-map)
+        callback-id (ids/fn-id "callable-proof" :echo)
+        {:keys [canonical legacy analysis]} (runtimes source root execution/compile-package bases)]
+    (is (= :checked (:status analysis)))
+    (doseq [run [legacy canonical]]
+      (let [handler (get-in (run {}) ["GET" "handler"])]
+        (is (= callback-id (:graphden.executor/fn-id (meta handler))))
+        (is (= "request" (handler "request")))
+        (is (= "other thread" @(future (handler "other thread"))))))))

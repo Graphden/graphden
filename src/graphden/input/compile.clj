@@ -20,13 +20,15 @@
    This fixture API accepts leaf addresses and empty maps at checked record
    addresses. The named adapter routes public input. Execute still applies
    its authorization and cancellation guards.
-   Primitive field-read obligations use the existing validator. Supported
-   closures retain a synchronous invocation lifetime. Container obligations
-   and list builders require separate lowering."
-  [analysis {:keys [context implementations]}]
+   Primitive field-read obligations use the existing validator. With
+   :detached-closures? only closures with no external inputs can outlive
+   their creating invocation. Container obligations and list builders
+   require separate lowering."
+  [analysis {:keys [context implementations detached-closures?]}]
   (let [plan (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
                                          :target-names (update-vals (:fns context) :name)
-                                         :implementations implementations})
+                                         :implementations implementations
+                                         :detached-closures? detached-closures?})
         validators (context/call-with-types
                      context
                      #(into {} (map (fn [[address type]] [address (validator/build type)]))

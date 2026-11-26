@@ -283,7 +283,7 @@
 
 
 (defn- closure-plans
-  [analysis expressions routes]
+  [analysis expressions routes detached-closures?]
   (let [plans (:closures analysis)
         addresses (into #{} (keep (fn [[address expr]] (when (= :closure (:op expr)) address))) expressions)
         route-keys [:from :source :role :via :required?]
@@ -295,8 +295,10 @@
                  (let [{:keys [scope binding-id type]} (get expressions address)
                        owner (first address)
                        contract (get-in analysis [:scopes (second scope) :configured-contract])
-                       reference (get-in analysis [:scopes (second owner) :bindings address :reference])]
-                   (when-not (and (= (:root-scope analysis) owner) (:capture-resolved? reference)
+                       reference (get-in analysis [:scopes (second owner) :bindings address :reference])
+                       detachable? (and detached-closures? (empty? captures) (empty? external-captures))]
+                   (when-not (and (or (= (:root-scope analysis) owner) detachable?)
+                                  (:capture-resolved? reference)
                                   (or (nil? external-captures) (vector? external-captures)) (vector? parameters)
                                   (every? keyword? parameters) (= (count parameters) (count (set parameters))))
                      (reject! :unsupported-closure-scope {:address address}))
@@ -314,7 +316,8 @@
                          external (external-addresses! public-routes contract scope expressions
                                                        (set parameters) external-captures)]
                      [address (cond-> (assoc plan :scope scope :type type :parameters parameters)
-                                (seq external) (assoc :external-addresses external))]))))
+                                (seq external) (assoc :external-addresses external)
+                                detachable? (assoc :detachable? true))]))))
           plans)))
 
 
@@ -323,8 +326,11 @@
   (let [callbacks (into {} (map (juxt :scope identity)) (vals closures))
         external (into #{} (mapcat :external-addresses) (vals closures))
         owner (fn [[fn-id path]]
-                (let [branch [fn-id (subvec path 0 (min (count path) 1))]]
-                  (if (contains? callbacks branch) branch root)))
+                (or (some (fn [length]
+                            (let [branch [fn-id (subvec path 0 length)]]
+                              (when (contains? callbacks branch) branch)))
+                          (range (count path) 0 -1))
+                    root))
         ;; A callback's exposed capture is supplied by the surrounding
         ;; invocation. Keep its verified address but allocate its cell in the
         ;; root frame, so callback arguments cannot replace it.
@@ -334,7 +340,9 @@
     (doseq [[address {:keys [op source scope]}] expressions]
       (let [local (owner (first address))]
         (when (case op
-                :read (and (not= local (owner (first source))) (not= root (first source)))
+                :read (and (not= local (owner (first source)))
+                           (or (:detachable? (get callbacks local))
+                               (not= root (first source))))
                 :invoke (not= local (owner scope))
                 false)
           (reject! :cross-frame-expression {:address address}))))
@@ -373,7 +381,7 @@
    Context checking does not discover a composed function's base output.
    Public and callback-local leaves have separate frames. Unsupported
    closures and obligations fail closed."
-  [analysis {:keys [snapshot-id implementations target-names]}]
+  [analysis {:keys [snapshot-id implementations target-names detached-closures?]}]
   (checked-plan! analysis snapshot-id)
   (let [analysis (assoc analysis ::dependencies (group-by :from (:dependencies analysis)))
         root (:root-scope analysis)
@@ -397,7 +405,7 @@
                    (select-keys (get expressions address) [:op :source]))
         (reject! :input-route-not-lowered {:address address})))
     (references! expressions)
-    (let [closures (closure-plans analysis expressions routes)
+    (let [closures (closure-plans analysis expressions routes detached-closures?)
           record-inputs (into (public-record-inputs analysis expressions)
                               (mapcat :record-addresses) (vals closures))
           program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})

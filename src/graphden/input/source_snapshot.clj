@@ -494,9 +494,10 @@
     {:context context :options (implementation-options context entries roots)}))
 
 
-(defn- freeze-source-analysis
-  "Prepare inputs for source replay. The scoped verifier compares the
-   analyzed field-read obligations before and after each rewrite."
+(defn freeze-source-analysis
+  "Prepare verified declarations and checker options without an executable
+   verdict. Source replay compares read obligations, and checked lowering
+   must enforce each obligation before executing a compiled package."
   [package function-ids roots]
   (let [{:keys [context entries]} (freeze-declarations package function-ids roots)]
     {:context context :options (implementation-options context entries roots)}))

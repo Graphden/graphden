@@ -31,7 +31,7 @@
     (impl (legacy-arguments frame scope argument-paths) ctx)))
 
 
-(declare ^:private instantiate-frame)
+(declare ^:private instantiate-frame ^:private invoke-frame)
 
 
 (defn- callback-supplies
@@ -57,25 +57,31 @@
                       (when (contains? args name) [address (get args name)]))) call-sites) nil]))
 
 
+(defn- active-callback?
+  [{:keys [thread open?]}]
+  (and (identical? thread (Thread/currentThread)) @open?))
+
+
 (defn- check-callback-lifetime!
-  [{:keys [thread open?]} scope]
-  (when-not (and @open? (identical? thread (Thread/currentThread)))
+  [lifetime scope]
+  (when-not (active-callback? lifetime)
     (ir/reject! :callback-outside-invocation {:scope scope})))
 
 
 (defn- lexical-callable
   [frame address target-id ctx]
-  (let [{:keys [scope parameters] :as plan} (get-in frame [:ir :closures address])]
+  (let [{:keys [scope parameters detachable?] :as plan} (get-in frame [:ir :closures address])]
     (eager/tagged-callable
       target-id parameters
       (fn [args]
-        ;; Synchronous HOFs reuse their executor boundary and the captured
-        ;; outer cells. A deferred invocation needs a separate lifetime proof.
-        (check-callback-lifetime! (:lifetime frame) scope)
-        (executor/check-cancel!)
-        (let [[supplied input-sources] (callback-supplies plan args)
-              local (instantiate-frame (:ir frame) (:validators frame) scope supplied input-sources frame ctx)]
-          (invoke-scope local scope ctx))))))
+        (let [active? (active-callback? (:lifetime frame))
+              _ (when-not (or active? detachable?) (check-callback-lifetime! (:lifetime frame) scope))
+              _ (executor/check-cancel!)
+              [supplied input-sources] (callback-supplies plan args)
+              parent (when active? frame)
+              ctx (if parent ctx (eager/independent-invocation-context ctx))
+              local (instantiate-frame (:ir frame) (:validators frame) scope supplied input-sources parent ctx)]
+          (if parent (invoke-scope local scope ctx) (invoke-frame local scope ctx)))))))
 
 
 (defn- resolve-expression
@@ -148,11 +154,15 @@
   (instantiate-frame ir validators (:root-scope ir) supplied nil nil ctx))
 
 
+(defn- invoke-frame
+  [frame scope ctx]
+  (if-let [open? (get-in frame [:lifetime :open?])]
+    (try (invoke-scope frame scope ctx)
+         (finally (vreset! open? false)))
+    (invoke-scope frame scope ctx)))
+
+
 (defn invoke-root
   "Close the synchronous callback lifetime as the enclosing invocation exits."
   [frame ctx]
-  (let [scope (get-in frame [:ir :root-scope])]
-    (if-let [open? (get-in frame [:lifetime :open?])]
-      (try (invoke-scope frame scope ctx)
-           (finally (vreset! open? false)))
-      (invoke-scope frame scope ctx))))
+  (invoke-frame frame (get-in frame [:ir :root-scope]) ctx))

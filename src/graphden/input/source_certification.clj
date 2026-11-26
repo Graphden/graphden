@@ -128,6 +128,11 @@
         verified (source/verify-module (assoc plan :definitions entries) context)
         local-proofs (into {} (comp (filter #(= :authored-source-equivalent (:verification %)))
                                     (map (juxt :identity identity)))
-                           (:definitions verified))]
+                           (:definitions verified))
+        inline-ids (for [entry (vals local-proofs)
+                         child (rest (tree-seq (comp seq :inline-definitions) (comp vals :inline-definitions) (:v2 entry)))]
+                     (:fn-id child))]
     {:context context :plan verified :certified certified :blocked blocked :package package
-     :source-proof {:definitions visible :baselines (merge baselines local-proofs)}}))
+     ;; Replaying a certified parent in a dependent package rechecks its
+     ;; inline occurrences against their independently certified child rows.
+     :source-proof {:definitions visible :baselines (merge baselines (select-keys (:closure-baselines package) inline-ids) local-proofs)}}))

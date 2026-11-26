@@ -4,6 +4,7 @@
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.variables :as variables]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]
     [graphden.types.core.execution :as execution]))
 
@@ -94,6 +95,41 @@
                :status (if (empty? diagnostics) :checked :incomplete)))))
 
 
+(def ^:private equality-fields
+  (let [owner (ids/fn-id "core.logic" :equal?)]
+    #{[(ids/slot-id owner :a)] [(ids/slot-id owner :b)]}))
+
+
+(defn- equality-union
+  [solution pair]
+  (when (and (= 2 (count pair)) (= equality-fields (set (map (comp second :address) pair))))
+    (let [by-mode (into {} (map (juxt (comp :mode :reference) identity)) pair)
+          actual #(some->> (get-in by-mode [% :reference :actual-type]) (types/resolve solution))
+          variable (:expected-type (first pair))
+          narrow (actual :literal)
+          broad (actual :value)]
+      (when (and (keyword? narrow) (not= :any narrow)
+                 (or (nil? (get solution variable)) (= narrow (get solution variable)))
+                 (some #{narrow} (types/union-members broad))
+                 (not (types/type-any? #{variable} broad)))
+        [variable broad]))))
+
+
+(defn- equality-solution
+  "A literal can bind the shared operand variable locally before the other
+   referenced operand has a signature. Retain an existing union if the
+   literal's exact primitive type is already an arm of that operand."
+  [initial entries]
+  (let [operands (filter #(and (types/type-var? (:expected-type %))
+                               (contains? equality-fields (second (:address %)))) entries)
+        pairs (vals (group-by (juxt (comp first :address) :expected-type) operands))]
+    (reduce (fn [solution pair]
+              (if-let [entry (equality-union solution pair)]
+                (conj solution entry)
+                solution))
+            initial pairs)))
+
+
 (defn check-graph
   "Reconcile scoped solutions, then replay directional checks against that
    common solution. This connects constructor inputs/returns and projections
@@ -123,7 +159,7 @@
                               :expression {:kind :value :value value}
                               :reference {:mode :literal :actual-type actual-type}}))
                       (:resolver-arguments graph))
-        first-pass (check-entries entries check-expression initial)
+        first-pass (check-entries entries check-expression (equality-solution initial entries))
         final-pass (check-entries entries check-expression (:substitution first-pass))
         solution (:substitution final-pass)
         proofs (:proofs final-pass)

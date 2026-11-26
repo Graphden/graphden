@@ -11,6 +11,7 @@
     [graphden.input.source-joint :as joint]
     [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
+    [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
 
@@ -293,6 +294,35 @@
     (assoc check :id [address kind trigger] :scope nested :address address)))
 
 
+(defn- nested-binders
+  [target-graph after [root prefix]]
+  ;; Independent checking seeds variables from their declaring scopes. Match
+  ;; each original declaration before translating its binder identities.
+  (reduce-kv
+    (fn [result path node]
+      (let [nested-path (into prefix path)
+            nested (get-in after [:scopes nested-path])
+            contract (:declared-contract node)]
+        (if (and nested (= (:fn-id node) (:fn-id nested))
+                 (= (:declaration-order node) (:declaration-order nested))
+                 (= contract (:declared-contract nested)))
+          (merge result (variables/value-renaming [(:fn-id target-graph) path] [root nested-path] (:type contract)))
+          result)))
+    {} (:scopes target-graph)))
+
+
+(defn- nested-field-checks
+  [target-graph after use-scope]
+  (let [checks (:obligations target-graph)
+        renaming (when (some #(types/type-any? types/type-var? (:expected-type %)) checks)
+                   (nested-binders target-graph after use-scope))
+        rebase (fn [sort variable] (if (= :value sort) (get renaming variable variable) variable))]
+    (mapv (fn [check]
+            (cond-> (nested-field-check (:fn-id target-graph) use-scope check)
+              (seq renaming) (update :expected-type types/freshen-with rebase)))
+          checks)))
+
+
 (defn- reference-field-checks
   "Re-analyze the original target independently. Its exact field-read checks
    follow its new value-use edge. The checker may also schedule the universal
@@ -301,12 +331,11 @@
   (when-let [target (:ref-fn-id row)]
     (let [[[root scope-path] field-path] address
           id (:id row)
-          target-scope [root (conj scope-path id)]
-          edge {:from address :to target-scope :binding-id id :target-fn-id target :mode :value}
+          use-scope [root (conj scope-path id)]
+          edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
           proof (get-in after [:proofs address])]
       (when (some #{edge} (:dependencies after))
-        (cond-> (mapv (partial nested-field-check target target-scope)
-                      (:obligations (checked-graph analyze snapshot target)))
+        (cond-> (nested-field-checks (checked-graph analyze snapshot target) after use-scope)
           (and (= :any (get-in before [:public-input :routes public-path :completion-type])
                   (get-in after [:scopes scope-path :bindings address :expected-type]))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
@@ -327,6 +356,21 @@
           certificates)))
 
 
+(defn- annotation-field-check
+  [snapshot before after {:keys [configuration address public-path]}]
+  (when-let [authored-type (:type configuration)]
+    (let [expected (context/call-with-types snapshot #(types/resolve-alias authored-type))
+          [scope path] address]
+      ;; Metadata on an already typed, still open field schedules the same
+      ;; check at the original read. Ignore neither the type nor the use.
+      (when (and (= expected (get-in before [:public-input :routes public-path :completion-type])
+                    (get-in after [:public-input :routes public-path :completion-type]))
+                 (= address (get-in before [:public-input :routes public-path :address])
+                    (get-in after [:public-input :routes public-path :address])))
+        {:id [address :value-type :field-read] :address address :scope scope :path path
+         :kind :value-type :trigger :field-read :expected-type expected}))))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
@@ -342,7 +386,10 @@
                       (:obligations before)))]
     (or (= prior current)
         (and (every? current prior)
-             (= current (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates))))))
+             (let [ref-checks (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates)
+                   annotations (into #{} (keep #(annotation-field-check snapshot before after %)) certificates)]
+               (and (every? current ref-checks)
+                    (every? #(or (ref-checks %) (annotations %)) current)))))))
 
 
 (defn- verify-bindings*
@@ -471,13 +518,20 @@
   [before after certificates]
   (let [prior (set (:obligations before))
         current (set (:obligations after))
+        certified (into {} (map (juxt :address identity)) certificates)
         sources (into {} (map (fn [{:keys [address row]}]
                                 [address [[(:fn-id before) []] (:projection-path row)]]))
                       certificates)]
     (and (every? (fn [{:keys [address kind trigger expected-type] :as obligation}]
                    (or (prior obligation)
-                       (and (contains? sources address)
-                            (= [:value-type :field-read :any] [kind trigger expected-type]))))
+                       (when-let [{:keys [public-path source-names]} (certified address)]
+                         (and (= [:value-type :field-read] [kind trigger])
+                              (or (= :any expected-type)
+                                  (and (types/list-type? expected-type)
+                                       (= expected-type
+                                          (get-in before [:public-input :routes public-path :completion-type])
+                                          (get-in before [:public-input :routes source-names :completion-type])
+                                          (get-in after [:public-input :routes source-names :completion-type]))))))))
                  current)
          (every? (fn [{:keys [address] :as obligation}]
                    (when-let [source (get sources address)]
@@ -490,8 +544,8 @@
 (defn verify-forwarded-projections
   "Replay the complete forwarding group in one frozen graph. Every destination
    must have one value-reference path. Existing field-read checks remain, or
-   move to an equivalent checked source field. A new :any check at the
-   projection destination adds no constraint on its value."
+   move to an equivalent checked source field. A projected list retains the
+   exact supplied list contract at its reader."
   [snapshot proofs analyze]
   (let [owner (only (distinct (map :owner-id proofs)) :unproved-forwarded-identity)
         before (checked-graph analyze snapshot owner)

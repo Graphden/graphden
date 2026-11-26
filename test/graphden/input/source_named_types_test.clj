@@ -168,3 +168,21 @@
   (is (false? (descriptor/stored-source-type? :input-stream (ids/primitive-fn-id :any))))
   (is (descriptor/stored-source-type? [:union :null :input-stream :text :jsonb] (ids/primitive-fn-id :any)))
   (is (false? (descriptor/stored-source-type? [:union :null :unknown-native] (ids/primitive-fn-id :any)))))
+
+
+(deftest named-open-list-refinement-keeps-the-source-constraint-and-slot
+  (let [source (first (declarations "packages/web/html/fns.edn" #{:style-tag}))
+        [package entries] (package-entries [source])
+        owner (ids/fn-id "web.html" :style-tag)
+        lookup #(get ((named-types/lookup package %) :style-tag) :body)
+        err (fn [entries]
+              (try (lookup entries) nil
+                   (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))]
+    (is (= [:refine [:list :any] [:elem 0 [:= "style"]]] (lookup entries)))
+    (doseq [mutate [(fn [row] (cond-> row (= :slot (:kind row)) (assoc :type-fn-id (ids/primitive-fn-id :text))))
+                    (fn [row] (cond-> row (= owner (:id row)) (assoc :constraint [:elem 0 [:= "script"]])))]]
+      (is (= :named-refinement-evidence-required
+             (err (update-in entries [owner :v2 :declaration-records] (partial mapv mutate))))))
+    (let [[typed-package typed-entries] (package-entries [(assoc-in source [:refine :base] [:list :int])])]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
+            ((named-types/lookup typed-package typed-entries) :style-tag))))))

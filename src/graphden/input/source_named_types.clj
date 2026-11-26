@@ -73,7 +73,9 @@
 
 (defn- refinement-body
   [id {:keys [base constraint] :as form} row children]
-  (let [base-id (get (ids/primitive-fn-ids) base)
+  (let [base-id (if (= [:list :any] base)
+                  (ids/primitive-fn-id :sequence)
+                  (get (ids/primitive-fn-ids) base))
         by-id (into {} (map (juxt :id identity)) children)]
     (when-not (and (= #{:base :constraint} (set (keys form))) (vector? constraint)
                    (= 2 (count children) (count by-id)) (uuid? base-id)

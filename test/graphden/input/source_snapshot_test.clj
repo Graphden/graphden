@@ -118,7 +118,7 @@
       (is (not (contains? (get-in graph [:public-input :bindings]) [[owner []] [field]]))))))
 
 
-(deftest shipped-html-page-forwarding-preserves-baseline-and-refuses-unproved-tag-typing
+(deftest shipped-html-page-forwarding-preserves-operand-and-hiccup-read-types
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             types/*type-aliases-override* (atom {})
             shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})]
@@ -140,21 +140,7 @@
           {:keys [proofs entry]} (source/forwarded-fields-baseline prepared legacy-entry fields)
           {:keys [context options]} (snapshot/freeze-closure (assoc-in package [:closure-baselines owner] entry)
                                                              [owner] (:by-id @registry/*rich-types-override*))
-          original-check (:check-expression options)
-          conflict (atom nil)
-          checked (fn [{:keys [expected actual substitution address] :as request}]
-                    (try (original-check request)
-                         (catch clojure.lang.ExceptionInfo error
-                           (reset! conflict {:address address :expected (types/resolve substitution expected)
-                                             :actual (types/resolve substitution actual)
-                                             :raw-expected expected :raw-actual actual
-                                             :substitution (select-keys substitution
-                                                                        (filter types/type-var?
-                                                                                (tree-seq coll? seq [expected actual])))})
-                           (throw error))))
-          diagnostic (failure #(scope/verify-forwarded-projections
-                                 context proofs (fn [ctx id]
-                                                  (analysis/analyze-effective-input ctx id (assoc options :check-expression checked)))))
+          certificates (scope/verify-forwarded-projections context proofs #(analysis/analyze-effective-input %1 %2 options))
           callback (some #(when (= :_hiccup-normalize-attr-key (:name %)) %) html)
           verified-callback (first (:definitions (source/verify-module (source/plan-module [callback] prepared) prepared)))
           source-links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
@@ -166,13 +152,11 @@
       (is (every? (comp nil? :target-address) proofs))
       (is (= source-links (into {} (map (juxt :field-id :target-field-id)) proofs)))
       (is (= :authored-source-equivalent (:verification verified-callback)) (:blockers verified-callback))
-      (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) diagnostic)))
-      (is (= owner (ffirst (:address diagnostic))))
-      (is (= (:address diagnostic) (:address @conflict)))
-      (is (= :keyword (:expected @conflict)))
-      (is (= [:union :keyword :null] (pop (:actual @conflict))))
-      (is (types/type-var? (peek (:actual @conflict))))
-      (is (= [(ids/slot-id (ids/fn-id "core.logic" :equal?) :a)] (second (:address diagnostic)))))))
+      (is (= (set fields) (set (map (comp first :source-names) certificates))))
+      (doseq [{:keys [source-names address obligations]} certificates
+              :when (#{[:head] [:scripts]} source-names)]
+        (is (= [[:list (types/resolve-alias :hiccup-node)]]
+               (mapv :expected-type (filter #(= address (:address %)) obligations))))))))
 
 
 (deftest frozen-conditional-rule-does-not-read-an-ambient-predicate

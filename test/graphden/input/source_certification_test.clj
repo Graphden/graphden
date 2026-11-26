@@ -25,3 +25,22 @@
     (is (thrown-with-msg? IllegalStateException #"unexpected internal failure"
           (with-redefs [snapshot/with-migrated-bindings (fn [_ _ _] (throw (IllegalStateException. "unexpected internal failure")))]
             (run))))))
+
+
+(deftest only-certified-inline-descendants-of-a-verified-source-cross-the-package-boundary
+  (let [sources [{:namespace "fixture" :name :sink :args {:value :text} :return-type :text}
+                 {:namespace "fixture" :name :read-text :args {:deep :text} :return-type :text}
+                 {:namespace "fixture" :name :owner :parent :sink
+                  :args {:value {:parent :sink :args {:value :read-text :deep "bound"}}}}]
+        prepared (parse/prepare-module sources {} {})
+        [sink reader owner] (map #(ids/fn-id "fixture" %) [:sink :read-text :owner])
+        roots {sink {:name :sink :args {:value :text} :return :text :effects #{} :execution #{:jvm-server}}
+               reader {:name :read-text :args {:deep :text} :return :text :effects #{} :execution #{:jvm-server}}}
+        result (certification/verify-plan prepared sources {} roots)
+        proof (:source-proof result)
+        child (first (vals (get-in proof [:baselines owner :v2 :inline-definitions])))
+        id (:fn-id child)]
+    (is (= :authored-source-equivalent (get-in proof [:baselines owner :verification])))
+    (is (uuid? id))
+    (is (= :authored-source-equivalent (get-in proof [:baselines id :verification])))
+    (is (= #{sink reader owner id} (set (keys (:baselines proof)))))))

@@ -5,7 +5,6 @@
     [graphden.input.list-builder :as list-builder]
     [graphden.input.migration :as migration]
     [graphden.input.source-forward-generic :as generic]
-    [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
@@ -124,7 +123,8 @@
                        (and (or (format/configuration-type? expected) origin)
                             (format/configuration-type? return-type)
                             (= :value (:mode (reference/classify expected {:return return-type}))))
-                       (readers/value-edge? prepared owner-id row)))
+                       (when-let [verify (::value-edge? prepared)]
+                         (verify owner-id row))))
       (reject! :unproved-reference-binding))
     (cond-> {:binding-id (:id row)} origin (assoc :generic-reference origin))))
 

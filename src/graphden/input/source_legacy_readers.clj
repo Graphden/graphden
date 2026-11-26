@@ -4,6 +4,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.source-forward :as forward]
     [graphden.packages.records.parse :as parse]))
 
 
@@ -31,26 +32,25 @@
                             :bindings (:binding kinds) :list-items (:binding-list-item kinds)})))
 
 
+(defn- value-edge?
+  "Require the original compiler to evaluate the same effective slot and target
+   that the source parser recorded. Callable and identity dispatch stay distinct."
+  [compiler signatures owner row]
+  (binding [registry/*rich-types-override* (atom {:by-id signatures :by-name {}})
+            registry/*per-org-rich-override* (atom {})]
+    (let [idx @compiler
+          matches (filter #(= (:slot-id row) (:slot-id %))
+                          (concat (bindings/collect-bindings owner idx)
+                                  (bindings/collect-env-bindings owner idx)))
+          [reader & more] matches]
+      (and reader (empty? more) (= row (get-in idx [:binding-by-fn-slot [owner (:slot-id row)]]))
+           (= :ref (:kind reader)) (false? (:is-fn reader)) (= (:ref-fn-id row) (:ref-id reader))))))
+
+
 (defn prepare
   "Keep the legacy compiler's registry reads inside this trusted source replay.
    The compiler index is lazy and private to this exact forwarding baseline."
   [prepared owner roots]
   (if (seq roots)
-    (assoc prepared ::compiler (delay (index prepared owner)) ::signatures roots)
+    (assoc prepared ::forward/value-edge? (partial value-edge? (delay (index prepared owner)) roots))
     prepared))
-
-
-(defn value-edge?
-  "Require the original compiler to evaluate the same effective slot and target
-   that the source parser recorded. Callable and identity dispatch stay distinct."
-  [{::keys [compiler signatures]} owner row]
-  (when compiler
-    (binding [registry/*rich-types-override* (atom {:by-id signatures :by-name {}})
-              registry/*per-org-rich-override* (atom {})]
-      (let [idx @compiler
-            matches (filter #(= (:slot-id row) (:slot-id %))
-                            (concat (bindings/collect-bindings owner idx)
-                                    (bindings/collect-env-bindings owner idx)))
-            [reader & more] matches]
-        (and reader (empty? more) (= row (get-in idx [:binding-by-fn-slot [owner (:slot-id row)]]))
-             (= :ref (:kind reader)) (false? (:is-fn reader)) (= (:ref-fn-id row) (:ref-id reader)))))))

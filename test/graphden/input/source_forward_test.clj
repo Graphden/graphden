@@ -64,10 +64,10 @@
                       prepared (parse/prepare-module forms {} {})
                       entry (last (:definitions (source/plan-module forms prepared)))
                       owner (:identity entry)
-                      ctx (readers/prepare prepared owner {(ids/fn-id "fixture" :producer) {:return :text}})
+                      checked (::forward/value-edge? (readers/prepare prepared owner {(ids/fn-id "fixture" :producer) {:return :text}}))
                       row (first (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))]
-                  [(readers/value-edge? ctx owner row)
-                   (readers/value-edge? ctx owner (assoc row :ref-fn-id (random-uuid)))]))]
+                  [(checked owner row)
+                   (checked owner (assoc row :ref-fn-id (random-uuid)))]))]
     (is (= [true false] (check 'a)))
     (is (= [false false] (check :fn-ref)))
     (is (= [false false] (check [:fn {} :text])))))

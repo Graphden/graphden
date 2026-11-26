@@ -329,7 +329,7 @@
   (let [checks (:obligations target-graph)
         renaming (when (some #(types/type-any? types/type-var? (:expected-type %)) checks)
                    (nested-binders target-graph after use-scope))
-        rebase (fn [sort variable] (if (= :value sort) (get renaming variable variable) variable))]
+        rebase (fn [variable-sort variable] (if (= :value variable-sort) (get renaming variable variable) variable))]
     (mapv (fn [check]
             (cond-> (nested-field-check (:fn-id target-graph) use-scope check)
               (seq renaming) (update :expected-type types/freshen-with rebase)))

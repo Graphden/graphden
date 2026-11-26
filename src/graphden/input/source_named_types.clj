@@ -99,12 +99,19 @@
     [:list element]))
 
 
+(defn named-id-index
+  "Index named types once per prepared source snapshot. Binding proposals
+   may change arguments, while the names and declaration kinds stay fixed."
+  [name->id declarations]
+  (into {} (filter (fn [[_ id]] (declaration-kind (get declarations id)))) name->id))
+
+
 (defn lookup
   "Build a memoized reader of verified named type declarations. Resolve only
    through the package's prepared names, checking the original and row by UUID."
-  [{:keys [prepared declarations]} plan-entry]
+  [{:keys [prepared declarations named-type-ids]} plan-entry]
   (let [name->id (:name->id prepared)
-        named-ids (into {} (filter (fn [[_ id]] (declaration-kind (get declarations id)))) name->id)
+        named-ids (if named-type-ids @named-type-ids (named-id-index name->id declarations))
         type-id (fn [type]
                   (when (format/collection-type? #(or (types/primitive? %) (uuid? (get named-ids %))) type)
                     (let [id (if (keyword? type)

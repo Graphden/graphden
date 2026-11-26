@@ -46,11 +46,13 @@
    ambiguous. Unreachable source need not be lowered."
   [prepared originals]
   (let [by-id (group-by definition-id originals)
-        ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
+        ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)
+        declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))]
     {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous
                                                    ::source-context/reference-alias-witness reference-alias/witness))
      :markers (shapes/markers-snapshot)
-     :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
+     :declarations declarations
+     :named-type-ids (delay (named-types/named-id-index (:name->id prepared) declarations))
      :originals by-id
      :inline-origins (delay (origins/index prepared originals))}))
 

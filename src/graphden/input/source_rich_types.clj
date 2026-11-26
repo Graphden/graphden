@@ -47,6 +47,27 @@
                 (conj (vec (vals (types/fn-args type))) (types/fn-ret type))))))
 
 
+(defn closed-callable-shape?
+  [type]
+  (and (callable-shape? type) (not (types/type-any? types/type-var? type))))
+
+
+(defn projected-callable-id
+  "Recover a callable pin only from the owner's typed alias slot, its link
+   to the inherited field and the exact anonymous callable declaration."
+  [owner target-path alias-path contract rows-by-id type]
+  (let [[alias-id] alias-path
+        [slot & more] (get rows-by-id alias-id)
+        alias (some #(when (= alias-id (:id %)) %) (:fields contract))
+        type-id (:type-fn-id slot)]
+    (when (and (closed-callable-shape? type) alias (= type (:type alias))
+               (= [alias-id] alias-path) (= (ids/slot-id owner (:name alias)) alias-id)
+               (= 1 (count target-path)) (= (first target-path) (:source-slot-id slot))
+               (= :slot (:kind slot)) (empty? more) (= type-id (:type-id alias))
+               (callable-field? rows-by-id type-id type))
+      type-id)))
+
+
 (defn erased-return?
   "Recover a generic, bottom, collection or union return erased by storage.
    Its frozen rich implementation entry must still match the authored type.

@@ -150,7 +150,11 @@
 
 (defn- resolve-configuration
   [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations binding-descriptions]} state [names {:keys [type] :as spec}]]
-  (let [path (:path (input/resolve-address contract scope names))]
+  (let [path (:path (input/resolve-address contract scope names))
+        expression (get-in state [[scope path] :expression])
+        callable-id (when (and (rich/callable-shape? type) (= :projection (:kind expression)) (= scope (:scope expression)))
+                      (rich/projected-callable-id (first scope) path (:path expression) contract
+                                                  (group-by :id declaration-records) type))]
     (cond
       (and (not (contains? state [scope path])) (get field-annotations names))
       (let [annotation (get field-annotations names)]
@@ -161,7 +165,7 @@
           (reject! :unverified-field-annotation))
         [names annotation])
 
-      (rich/callable-shape? type)
+      (and (rich/callable-shape? type) (nil? callable-id))
       (let [owner (some #(when (= (first scope) (:id %)) %) declaration-records)
             field (some #(when (= path [(:id %)]) %) (:fields contract))]
         (when (contains? state [scope path]) (reject! :self-pin-requires-free-field))
@@ -177,9 +181,11 @@
           (when-not (= {:description (:description spec) :target-path path :binding-id (binding-id scope path)}
                        (get binding-descriptions names))
             (reject! :unverified-field-annotation)))
-        (when (and (contains? spec :type) (not (ifn? resolve-config-type))) (reject! :configuration-type-resolver-required))
-        (let [resolved (when (contains? spec :type) (resolve-config-type type))]
-          (when-not (or (not (contains? spec :type))
+        (when (and (contains? spec :type) (nil? callable-id) (not (ifn? resolve-config-type))) (reject! :configuration-type-resolver-required))
+        (let [resolved (cond
+                         callable-id {:type type :type-override-fn-id callable-id}
+                         (contains? spec :type) (resolve-config-type type))]
+          (when-not (or callable-id (not (contains? spec :type))
                         (and (format/configuration-type? (:type resolved)) (uuid? (:type-override-fn-id resolved))))
             (reject! :unresolved-configuration-type))
           [names (merge (select-keys resolved [:type :type-override-fn-id])

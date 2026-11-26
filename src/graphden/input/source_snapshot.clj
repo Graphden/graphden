@@ -284,7 +284,7 @@
 
 
 (defn- exact-projection-pin?
-  [type-ids contract row {:keys [target-path type type-override-fn-id]}]
+  [type-ids contract row {:keys [target-path type type-override-fn-id]} type-rows]
   (let [field-by-id (into {} (map (juxt :id identity)) (:fields contract))
         target (get field-by-id (first target-path))
         source (get field-by-id (first (:projection-path row)))]
@@ -292,7 +292,9 @@
          (= [(:id target)] target-path) (= [(:id source)] (:projection-path row))
          (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row) (:type-id source))
          (= type (:type source))
-         (descriptor/stored-source-type? type type-override-fn-id type-ids))))
+         (or (descriptor/stored-source-type? type type-override-fn-id type-ids)
+             (and type-rows (= type-override-fn-id (rich/projected-callable-id (:fn-id row) target-path (:projection-path row)
+                                                                               contract type-rows type)))))))
 
 
 (defn- exact-reference-pin?
@@ -310,9 +312,9 @@
 
 
 (defn- original-type-pin
-  [type-ids owner contract bindings {:keys [target-path] :as config}]
+  [type-ids owner contract bindings {:keys [target-path] :as config} & [type-rows]]
   (let [binding (some #(when (= target-path (:target-path %)) %) bindings)]
-    (when (and binding (or (exact-projection-pin? type-ids contract binding config)
+    (when (and binding (or (exact-projection-pin? type-ids contract binding config type-rows)
                            (exact-reference-pin? type-ids owner contract binding config)))
       binding)))
 
@@ -402,7 +404,7 @@
                             (and (some #{row} bindings)
                                  (or (exact-annotation? owner contract config)
                                      (rich/exact-self-pin? owner field config type-rows))))
-                          (original-type-pin type-ids owner contract bindings config)))
+                          (original-type-pin type-ids owner contract bindings config type-rows)))
                       (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))

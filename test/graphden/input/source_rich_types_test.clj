@@ -104,3 +104,28 @@
     (is (not (rich/callable-field? rows id [:fn {:arg :fixture/request} :fixture/response] named-ids)))
     (is (not (rich/callable-field? rows (ids/primitive-fn-id :fn) type named-ids)))
     (is (not (rich/callable-field? {id [(assoc row :constraint [:fn {:arg :text} :text])]} id type named-ids)))))
+
+
+(deftest callable-rename-pin-requires-the-alias-foreign-key-and-source-constraint
+  (let [base {:namespace "fixture" :name :apply-one :args {:func {:type '[:fn {:arg a} b]}}
+              :return-type :any}
+        type [:fn {:request :jsonb} [:list :jsonb]]
+        owner {:namespace "fixture" :name :query :parent :apply-one
+               :args {:func {:as :storage-query :type type :description "Storage query"}}}
+        prepared (parse/prepare-module [base owner] {} {})
+        plan (source/plan-module [owner] prepared)
+        result (first (:definitions (source/verify-module plan prepared)))
+        id (ids/fn-id "fixture" :query)
+        alias (ids/slot-id id :storage-query)
+        field (ids/slot-id (ids/fn-id "fixture" :apply-one) :func)
+        {rows :declaration-records contract :contract bindings :bindings} (:v2 result)
+        index (group-by :id rows)
+        [constraint] (records/inline-fn-type-rows-from-form type)
+        check (fn [i] (rich/projected-callable-id id [field] [alias] contract i type))]
+    (is (= :authored-source-equivalent (:verification result)))
+    (is (= {:type type :description "Storage query"} (get-in result [:proposed :configure [:func]])))
+    (is (= [:project [:storage-query]] (get-in result [:proposed :bind :func])))
+    (is (= (:id constraint) (check index) (:type-override-fn-id (first bindings))))
+    (is (nil? (check (dissoc index (:id constraint)))))
+    (is (nil? (check (assoc-in index [alias 0 :source-slot-id] (random-uuid)))))
+    (is (nil? (check (update-in index [(:id constraint) 0] assoc :constraint [:fn {} :text]))))))

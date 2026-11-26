@@ -1,6 +1,7 @@
 (ns graphden.input.obligations-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.input.context :as context]
     [graphden.input.obligations :as obligations]
     [graphden.input.variables :as variables]))
 
@@ -69,3 +70,18 @@
            (try (obligations/separate graph)
                 nil
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
+
+
+(deftest checks-use-the-frozen-body-of-their-named-type
+  (let [field (random-uuid)
+        address [[(random-uuid) []] [field]]
+        rich [:union :keyword :null]
+        configured {:scopes {[] {:configured-contract {:fields [{:id field :type :tag}]}}}}
+        diag {:code :runtime-type-obligation :address address}
+        check (fn [diagnostics] (:obligations (obligations/separate (assoc configured :diagnostics diagnostics))))]
+    (context/call-with-types {:aliases {:tag rich}}
+                             (fn []
+                               (doseq [diagnostics [[diag (assoc diag :expected-type rich)]
+                                                    [(assoc diag :expected-type rich) diag]]]
+                                 (is (= [rich] (mapv :expected-type (check diagnostics)))))
+                               (is (thrown? clojure.lang.ExceptionInfo (check [diag (assoc diag :expected-type :text)])))))))

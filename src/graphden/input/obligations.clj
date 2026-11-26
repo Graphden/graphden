@@ -13,11 +13,12 @@
   [graph {:keys [address expected-type]}]
   (let [[scope path] address
         node (descriptor/node-at (get-in graph [:scopes (second scope) :configured-contract]) path)
+        expected (or expected-type (:type node))
         container? (contains? node :fields)
         kind (if container? :container-type :value-type)
         trigger (if container? :container-materialization :field-read)]
     {:id [address kind trigger] :address address :scope scope :path path
-     :kind kind :trigger trigger :expected-type (or expected-type (:type node))}))
+     :kind kind :trigger trigger :expected-type (if (keyword? expected) (types/resolve-alias expected) expected)}))
 
 
 (defn- map-check-implies?

@@ -221,12 +221,23 @@
         after {:substitution '{b a c a}
                :dependencies [{:from address :to [owner [row-id]] :binding-id row-id :target-fn-id target :mode :graph-callable}]
                :scopes {[] {:bindings {address {:dispatch-type original :expected-type expected
-                                                :reference {:mode :graph-callable :capture-resolved? true :callable-type actual}}}}
+                                                :reference {:mode :graph-callable :capture-resolved? true :actual-type actual :callable-type actual}}}}
                         [row-id] {:fn-id target :signature {:lambda-params ["request"] :args '{:request a}
                                                             :return 'a :effects #{} :execution #{:jvm-server :browser-main}}}}
                :closures {address {:parameters [:request] :captures [] :external-captures [] :callable-type actual}}}
         prove (fn [g] (#'scope/scoped-unary-callable (context/build-context {}) before g certificate))]
     (is (= expected (prove after)))
+    (let [raw '[:fn {} a #{} #{:jvm-server :browser-main}]
+          positional '[:fn {:arg a} a #{} #{:jvm-server :browser-main}]
+          ignored (-> after
+                      (assoc-in [:scopes [row-id] :signature :lambda-params] nil)
+                      (assoc-in [:scopes [row-id] :signature :args] {})
+                      (assoc-in [:closures address :parameters] [])
+                      (assoc-in [:closures address :callable-type] positional)
+                      (assoc-in [:scopes [] :bindings address :reference :actual-type] raw)
+                      (assoc-in [:scopes [] :bindings address :reference :callable-type] positional))]
+      (is (= expected (prove ignored)))
+      (is (nil? (prove (assoc-in ignored [:closures address :parameters] [:request])))))
     (doseq [changed [(assoc-in after [:dependencies 0 :mode] :value)
                      (assoc-in after [:scopes [row-id] :signature :lambda-params] [])
                      (assoc-in after [:scopes [row-id] :signature :effects] #{:io})

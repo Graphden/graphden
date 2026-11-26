@@ -341,9 +341,9 @@
 
 
 (defn- scoped-unary-callable
-  "Check an authored unary graph callable against its inferred positional
-   argument and return. The target has an explicit parameter and no captures.
-   The checker may retain validation of that exact callable at the field."
+  "Validate a unary call site receiving a graph with one explicit positional
+   parameter or a graph that ignores the argument. A capture-free target has
+   an independently reconstructible call-site type."
   [snapshot before after {:keys [address row public-path]}]
   (let [[[root scope-path]] address
         id (:id row)
@@ -357,12 +357,15 @@
         signature (:signature target-node)]
     (when (and target (= target (:fn-id target-node)) (some #{edge} (:dependencies after))
                (= :graph-callable (:mode reference)) (true? (:capture-resolved? reference))
-               (= 1 (count parameters) (count (:args signature)))
+               (vector? parameters) (<= (count parameters) 1) (map? (:args signature))
                (= parameters (mapv keyword (:lambda-params signature)) (vec (keys (:args signature))))
                (= [] captures external-captures)
                (types/fn-type? original) (= original dispatch-type)
                (= expected-type (types/resolve (:substitution after) original)) (types/fn-type? expected-type)
-               (= callable-type (:callable-type reference) (reference/callable-contract signature))
+               (= 1 (count (types/fn-args expected-type)))
+               (= (:actual-type reference) (reference/callable-contract signature))
+               (= callable-type (:callable-type reference)
+                  (reference/call-site-contract expected-type (:actual-type reference) (assoc signature :lambda-params parameters)))
                (types/fn-type? callable-type)
                (= (vals (types/fn-args expected-type)) (vals (types/fn-args callable-type)))
                (= (types/fn-ret expected-type) (types/fn-ret callable-type))

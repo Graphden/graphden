@@ -41,11 +41,20 @@
             arm))))))
 
 
+(defn- compiled-closure-origin
+  [expressions closures address]
+  (loop [address address]
+    (or (get closures address)
+        (let [{:keys [op source]} (get expressions address)]
+          (when (= :read op)
+            (recur source))))))
+
+
 (defn- read-validator
   [analysis expressions closures {:keys [address kind trigger expected-type]}]
   (let [op (get-in expressions [address :op])
         details {:address address :kind kind :trigger trigger}
-        closure (get closures address)
+        closure (compiled-closure-origin expressions closures address)
         check (when (and op (= :value-type kind) (= :field-read trigger))
                 (if closure
                   (when (= expected-type (:type closure)) expected-type)

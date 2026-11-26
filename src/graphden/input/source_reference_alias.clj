@@ -79,5 +79,6 @@
                    (= after-readers (update before-readers :arguments
                                             (partial mapv #(if (= edge %) (assoc % :ext-name field) %)))))
           {:field field :alias alias :alias-slot field-row :membership member
+           :callable-reader? (true? (:is-fn reader))
            :reference-binding-id binding-id :target-id (:fn-id target) :occupied-address [[owner []] [(:slot-id edge)]]
            :reader-address [[owner [binding-id]] [(:slot-id entry)]]})))))

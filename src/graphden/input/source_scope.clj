@@ -185,6 +185,18 @@
     certificate))
 
 
+(defn- callable-alias-route?
+  [snapshot arg binding edge route]
+  (let [{:keys [reader-address target-id callable-reader?]}
+        (get-in snapshot [:source-reference-aliases (:binding-id edge)])]
+    (and callable-reader?
+         (= :ref (first (:expression arg)))
+         (uuid? (:ref-fn-id binding))
+         (= [(:slot-id binding)] (second reader-address))
+         (= target-id (:target-fn-id edge))
+         (types/fn-type? (:completion-type route)))))
+
+
 (defn- public-route
   [graph snapshot arg binding]
   (let [owner (:fn-id binding)
@@ -203,7 +215,8 @@
         expected (if origin :any (context/call-with-types snapshot #(types/resolve-alias (get-in arg [:target :type]))))]
     (when-not (and (seq edges) (= field (peek (:source-path arg))) (= names (conj (mapv :name edges) field))
                    (= :input-field (:kind route)) (:whole-bindable? route) (= slot (:origin-field-id route))
-                   (migration/same-edn? expected (:completion-type route)))
+                   (or (migration/same-edn? expected (:completion-type route))
+                       (and (= :any expected) (callable-alias-route? snapshot arg binding (peek edges) route))))
       (reject! :unsupported-reference-use))
     [names address edges declaring]))
 
@@ -302,10 +315,31 @@
                  :kind :value-type :trigger :field-read :expected-type :any}))))))
 
 
+(defn- callable-alias-reference-addresses
+  [snapshot after certificates]
+  (let [modes (into {} (map (juxt :from :mode)) (:dependencies after))]
+    (into #{}
+          (keep (fn [{:keys [address edges]}]
+                  (let [{:keys [binding-id from]} (peek edges)]
+                    (when (and (= :graph-callable (get modes address))
+                               (get-in snapshot [:source-reference-aliases binding-id :callable-reader?]))
+                      from))))
+          certificates)))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
-  (let [prior (set (:obligations before))
-        current (set (:obligations after))]
+  (let [current (set (:obligations after))
+        alias-references (callable-alias-reference-addresses snapshot after certificates)
+        prior (if (empty? alias-references)
+                (set (:obligations before))
+                (into #{}
+                      (comp (remove (fn [{:keys [address kind trigger expected-type] :as check}]
+                                      (and (contains? alias-references address)
+                                           (= [:value-type :field-read :any] [kind trigger expected-type])
+                                           (not (contains? current check)))))
+                            (map #(update % :expected-type (partial types/resolve (:substitution after)))))
+                      (:obligations before)))]
     (or (= prior current)
         (and (every? current prior)
              (= current (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates))))))

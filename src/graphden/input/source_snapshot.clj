@@ -46,7 +46,7 @@
   (let [by-id (group-by definition-id originals)
         ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)]
     {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous
-                                                   ::source/reference-alias-witness reference-alias/witness))
+                                                   ::source-context/reference-alias-witness reference-alias/witness))
      :markers (shapes/markers-snapshot)
      :declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))
      :originals by-id
@@ -341,6 +341,9 @@
       (assoc (dissoc named :type-rows)
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
              :source-optional-renames (optional-rename-bindings entries fields)
+             :source-reference-aliases
+             (into {} (map (juxt :reference-binding-id identity))
+                   (mapcat #(vals (get-in % [:origin-ledger :mapping :occupied-reference-aliases])) (vals entries)))
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
              :type-bodies (merge (:type-bodies named) inputs)
              :source-return-types

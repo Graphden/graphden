@@ -21,6 +21,21 @@
                   {:type :input/source-context :code code :path path})))
 
 
+(defn occupied-reference-alias
+  "Resolve an occupied source view only through the verified legacy reader."
+  [context definition]
+  (when-let [resolve-alias (::reference-alias-witness context)]
+    (let [[field & more] (keep (fn [[k v]] (when (and (map? v) (= #{:as :ref} (set (keys v)))) k))
+                               (:args definition))]
+      (when (and field (empty? more))
+        (resolve-alias context definition field)))))
+
+
+(defn compact-reference
+  [definition witness]
+  (if witness (update-in definition [:args (:field witness)] dissoc :as) definition))
+
+
 (defn environment
   "Capture the package's resolved dependency index and reuse legacy parses."
   [{:keys [defs-by-name name->id] :as context}]
@@ -143,7 +158,12 @@
 (defn- declared-input
   [source-environment own binding-origins]
   (let [{:keys [owner]} own
-        ordered (parent-order source-environment own)
+        ordered (mapv (fn [{:keys [definition] :as entry}]
+                        (if-let [witness (occupied-reference-alias (:context source-environment) definition)]
+                          (let [compact (compact-reference definition witness)]
+                            (scope-entry compact ((:records-of source-environment) compact)))
+                          entry))
+                      (parent-order source-environment own))
         _ (ensure-acyclic! ordered)
         input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
                                         (let [aliases (keep (fn [[k v]] (rename/origin (:context source-environment) definition owner records k v)) (:args definition))

@@ -349,7 +349,10 @@
    alias slot. Prove each stored link against the declaring definition's
    local source lowering before a descendant can use the alias."
   [context ancestor]
-  (let [rows ((::records-of context) ancestor)
+  (let [witness (source-context/occupied-reference-alias context ancestor)
+        original (or ((::original-of context) ancestor) ancestor)
+        ancestor (source-context/compact-reference ancestor witness)
+        rows ((::records-of context) ancestor)
         owner-id (ids/fn-id (:namespace ancestor) (:name ancestor))
         owner (some #(when (and (= :fn (:kind %)) (= owner-id (:id %))) %) rows)
         bindings (filter #(= :binding (:kind %)) rows)
@@ -359,7 +362,7 @@
                        (comp (filter #(or (:value-present %) (:ref-fn-id %) (:terminal %))) (map :slot-id)) bindings)]
     (cond-> {:owner (:id owner) :parents (:parent-ids owner) :occupied occupied :addresses (mapv :slot-id bindings)}
       (seq links)
-      (assoc :proven? (let [original (or ((::original-of context) ancestor) ancestor)
+      (assoc :proven? (let [original (source-context/compact-reference original witness)
                             {:keys [aliases blockers]} (local-arguments original ancestor context rows)
                             certified (get-in context [::source-context/forwarded-parent-links (:id owner)])]
                         (or (= links certified)
@@ -564,30 +567,16 @@
   (mapv #(select-keys % [:kind :id :fn-id :slot-id :source-slot-id :binding-id :position]) rows))
 
 
-(defn- occupied-reference-alias
-  [context definition]
-  (when-let [resolve-alias (::reference-alias-witness context)]
-    (let [[field & more] (keep (fn [[k v]] (when (and (map? v) (= #{:as :ref} (set (keys v)))) k))
-                               (:args definition))]
-      (when (and field (empty? more))
-        (resolve-alias context definition field)))))
-
-
-(defn- compact-reference
-  [definition witness]
-  (if witness (update-in definition [:args (:field witness)] dissoc :as) definition))
-
-
 (defn- plan-definition
   [source prepared context]
   (try
     (let [normalized (normalize-source source context)
           alignment (alignment-blockers source prepared normalized)
           rows ((::records-of context) prepared)
-          witness (when (empty? alignment) (occupied-reference-alias context prepared))
-          compact (compact-reference prepared witness)
+          witness (when (empty? alignment) (source-context/occupied-reference-alias context prepared))
+          compact (source-context/compact-reference prepared witness)
           classified (when (empty? alignment)
-                       (classify (compact-reference source witness) compact context
+                       (classify (source-context/compact-reference source witness) compact context
                                  (if witness ((::records-of context) compact) rows)))
           blockers (into alignment (:blockers classified))]
       (cond-> {:source source :identity (:fn-id prepared)
@@ -815,12 +804,12 @@
 (defn- verify-definition
   [environment {:keys [identity source legacy] :as definition}]
   (let [prepared (get-in environment [:definition-by-id identity])
-        witness (occupied-reference-alias (:context environment) prepared)]
+        witness (source-context/occupied-reference-alias (:context environment) prepared)]
     (when-not (= witness (:occupied-reference-alias legacy))
       (throw (ex-info "Reference alias source changed" {:code :reference-alias-origin-mismatch})))
     (if-not witness
       (verify-compact-definition environment definition)
-      (let [compact (compact-reference prepared witness)
+      (let [compact (source-context/compact-reference prepared witness)
             rows-of (:records-of environment)
             records (rows-of compact)]
         (when-not (and (= (:records legacy) (rows-of prepared))
@@ -830,7 +819,7 @@
         (let [result (verify-compact-definition
                        (-> environment (assoc-in [:definition-by-id identity] compact)
                            (assoc-in [::source-context/occupied-reference-aliases identity] witness))
-                       (-> definition (update :source compact-reference witness)
+                       (-> definition (update :source source-context/compact-reference witness)
                            (assoc-in [:legacy :records] records)))]
           (assoc result :source source :legacy legacy))))))
 

@@ -814,20 +814,23 @@
       (is (= 1 @calls)))))
 
 
-(deftest closed-handler-from-nested-reference-remains-callable-after-return
-  (let [source (into (declarations "packages/core/collections/fns.edn" #{:assoc :assoc-fn})
-                     [{:namespace "callable-proof" :name :echo
-                       :args {:arg {:type :text}} :return-type :text}
-                      {:namespace "callable-proof" :name :handler-map :parent :core.collections/assoc-fn
-                       :args {:key "handler" :map {:value {}} :value :echo}}
-                      {:namespace "callable-proof" :name :method-map :parent :core.collections/assoc
-                       :args {:key "GET" :map {:value {}} :value :handler-map}}])
+(deftest shipped-method-map-keeps-a-bound-handler-callable-after-return
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:assoc :assoc-fn :assoc-empty})
+                     (concat (declarations "packages/app-base/common/fns.edn" #{:method-map :assoc-handler})
+                             [{:namespace "callable-proof" :name :echo
+                               :args {:arg {:type :text}} :return-type :text}
+                              {:namespace "callable-proof" :name :route :parent :app.common/method-map
+                               :args {:method "GET" :handler :echo}}]))
         bases (assoc @loaded :echo {:name :echo :namespace "callable-proof"
                                     :args {:arg :text} :return-type :text :effects #{}
                                     :impl (fn [args _] (runtime/resolve-arg args :arg))})
-        root (ids/fn-id "callable-proof" :method-map)
+        root (ids/fn-id "callable-proof" :route)
         callback-id (ids/fn-id "callable-proof" :echo)
-        {:keys [canonical legacy analysis]} (runtimes source root execution/compile-package bases)]
+        compile-package (fn [package id roots impls]
+                          (let [certified (snapshot/with-certified-owner package id roots)]
+                            (is (= :authored-source-equivalent (get-in certified [:closure-baselines id :verification])))
+                            (execution/compile-package certified id roots impls)))
+        {:keys [canonical legacy analysis]} (runtimes source root compile-package bases)]
     (is (= :checked (:status analysis)))
     (doseq [run [legacy canonical]]
       (let [handler (get-in (run {}) ["GET" "handler"])]

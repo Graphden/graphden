@@ -370,6 +370,28 @@
       expected-type)))
 
 
+(defn- scoped-list-reference
+  "A value ref may instantiate a generic list. Check the solved element
+   against the independently inferred target in both of its scopes."
+  [snapshot analyze before after {:keys [address row public-path]}]
+  (let [[[root scope-path]] address
+        {id :id target :ref-fn-id} row
+        use [root (conj scope-path id)]
+        edge {:from address :to use :binding-id id :target-fn-id target :mode :value}
+        original (get-in before [:public-input :routes public-path :completion-type])
+        {:keys [expected-type reference]} (get-in after [:scopes scope-path :bindings address])
+        node (get-in after [:scopes (second use)])]
+    (when (and target (= target (:fn-id node)) (types/list-type? original)
+               (types/type-any? types/type-var? original) (types/list-type? expected-type)
+               (not (types/type-any? types/type-var? expected-type))
+               (= :value (:mode reference)) (some #{edge} (:dependencies after))
+               (= (types/resolve (:substitution after) original) expected-type
+                  (:actual-type reference) (get-in node [:signature :return])))
+      (let [graph (checked-graph analyze snapshot target true)]
+        (when (= expected-type (get-in graph [:scopes [] :signature :return]))
+          {:type expected-type :graph graph})))))
+
+
 (defn- reference-field-checks
   "Replay the independently checked target on the new edge. Its own field
    may carry the universal :any check or the proved unary callable contract."
@@ -382,14 +404,16 @@
           proof (get-in after [:proofs address])
           callable-type (scoped-unary-callable snapshot before after certificate)]
       (when (or callable-type (some #{edge} (:dependencies after)))
-        (cond-> (nested-field-checks (checked-graph analyze snapshot target true) after use-scope)
-          (and (or callable-type
+        (cond-> (nested-field-checks (or (get-in certificate [:checked-list :graph])
+                                         (checked-graph analyze snapshot target true))
+                                     after use-scope)
+          (and (or callable-type (:checked-list certificate)
                    (= :any (get-in before [:public-input :routes public-path :completion-type])
                       (get-in after [:scopes scope-path :bindings address :expected-type])))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
           (conj {:id [address :value-type :field-read] :address address
                  :scope (first address) :path field-path
-                 :kind :value-type :trigger :field-read :expected-type (or callable-type :any)}))))))
+                 :kind :value-type :trigger :field-read :expected-type (or callable-type (get-in certificate [:checked-list :type]) :any)}))))))
 
 
 (defn- callable-alias-reference-addresses
@@ -422,9 +446,16 @@
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
+        original (set (:obligations before))
+        certificates (if (= current original)
+                       certificates
+                       (mapv (fn [certificate]
+                               (if-let [result (scoped-list-reference snapshot analyze before after certificate)]
+                                 (assoc certificate :checked-list result) certificate)) certificates))
         alias-references (callable-alias-reference-addresses snapshot after certificates)
-        prior (if (and (empty? alias-references) (not-any? #(scoped-unary-callable snapshot before after %) certificates))
-                (set (:obligations before))
+        prior (if (and (empty? alias-references) (not-any? :checked-list certificates)
+                       (not-any? #(scoped-unary-callable snapshot before after %) certificates))
+                original
                 (into #{}
                       (comp (remove (fn [{:keys [address kind trigger expected-type] :as check}]
                                       (and (contains? alias-references address)

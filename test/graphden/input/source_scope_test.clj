@@ -256,3 +256,28 @@
                    (assoc-in graph [:scopes [edge] :declared-contract]
                              (get-in original [:scopes [edge] :declared-contract]))]]
       (is (= :unsupported-reference-use (code #(prove wrong)))))))
+
+
+(deftest generic-list-reference-needs-the-same-independent-return
+  (let [owner (demo-id :host)
+        target (demo-id :items)
+        id (demo-id :row)
+        address [[owner []] [(demo-id :slot)]]
+        certificate {:address address :public-path [:items] :row {:id id :ref-fn-id target}}
+        snapshot {:snapshot-id (random-uuid)}
+        expected [:list :any]
+        before {:public-input {:routes {[:items] {:completion-type '[:list a]}}}}
+        target-graph {:fn-id target :status :checked :public-input (assoc snapshot :fn-id target)
+                      :coverage {:recursive-availability true :type-checker true}
+                      :scopes {[] {:signature {:return expected}}}}
+        after {:substitution '{a :any}
+               :dependencies [{:from address :to [owner [id]] :mode :value :binding-id id :target-fn-id target}]
+               :scopes {[] {:bindings {address {:expected-type expected :reference {:mode :value :actual-type expected}}}}
+                        [id] {:fn-id target :signature {:return expected}}}}
+        prove (fn [g result] (#'scope/scoped-list-reference snapshot (constantly result) before g certificate))]
+    (is (= {:type expected :graph target-graph} (prove after target-graph)))
+    (is (nil? (prove after (assoc-in target-graph [:scopes [] :signature :return] [:list :text]))))
+    (is (nil? (prove (assoc-in after [:scopes [id] :signature :return] :any) target-graph)))
+    (is (nil? (prove (assoc-in after [:dependencies 0 :mode] :graph-callable) target-graph)))
+    (is (nil? (prove (assoc after :substitution {}) target-graph)))
+    (is (= :incomplete-reference-analysis (code #(prove after (assoc target-graph :status :incomplete)))))))

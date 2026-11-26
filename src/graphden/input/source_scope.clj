@@ -14,7 +14,8 @@
     [graphden.input.source-rename :as rename]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.reference :as reference]))
 
 
 (defn- reject!
@@ -335,25 +336,56 @@
           checks)))
 
 
+(defn- scoped-unary-callable
+  "Check an authored unary graph callable against its inferred positional
+   argument and return. The target has an explicit parameter and no captures.
+   The checker may retain validation of that exact callable at the field."
+  [snapshot before after {:keys [address row public-path]}]
+  (let [[[root scope-path]] address
+        id (:id row)
+        target (:ref-fn-id row)
+        use-scope [root (conj scope-path id)]
+        edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :graph-callable}
+        {:keys [expected-type dispatch-type reference]} (get-in after [:scopes scope-path :bindings address])
+        original (get-in before [:public-input :routes public-path :completion-type])
+        {:keys [parameters captures external-captures callable-type]} (get-in after [:closures address])
+        target-node (get-in after [:scopes (second use-scope)])
+        signature (:signature target-node)]
+    (when (and target (= target (:fn-id target-node)) (some #{edge} (:dependencies after))
+               (= :graph-callable (:mode reference)) (true? (:capture-resolved? reference))
+               (= 1 (count parameters) (count (:args signature)))
+               (= parameters (mapv keyword (:lambda-params signature)) (vec (keys (:args signature))))
+               (= [] captures external-captures)
+               (types/fn-type? original) (= original dispatch-type)
+               (= expected-type (types/resolve (:substitution after) original)) (types/fn-type? expected-type)
+               (= callable-type (:callable-type reference) (reference/callable-contract signature))
+               (types/fn-type? callable-type)
+               (= (vals (types/fn-args expected-type)) (vals (types/fn-args callable-type)))
+               (= (types/fn-ret expected-type) (types/fn-ret callable-type))
+               (context/call-with-types snapshot #(types/subtype? callable-type expected-type)))
+      expected-type)))
+
+
 (defn- reference-field-checks
-  "Re-analyze the original target independently. Its exact field-read checks
-   follow its new value-use edge. The checker may also schedule the universal
-   :any validator at the newly supplied field, where it accepts every value."
-  [snapshot analyze before after {:keys [address row public-path]}]
+  "Replay the independently checked target on the new edge. Its own field
+   may carry the universal :any check or the proved unary callable contract."
+  [snapshot analyze before after {:keys [address row public-path] :as certificate}]
   (when-let [target (:ref-fn-id row)]
     (let [[[root scope-path] field-path] address
           id (:id row)
           use-scope [root (conj scope-path id)]
           edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
-          proof (get-in after [:proofs address])]
-      (when (some #{edge} (:dependencies after))
+          proof (get-in after [:proofs address])
+          callable-type (scoped-unary-callable snapshot before after certificate)]
+      (when (or callable-type (some #{edge} (:dependencies after)))
         (cond-> (nested-field-checks (checked-graph analyze snapshot target true) after use-scope)
-          (and (= :any (get-in before [:public-input :routes public-path :completion-type])
-                  (get-in after [:scopes scope-path :bindings address :expected-type]))
+          (and (or callable-type
+                   (= :any (get-in before [:public-input :routes public-path :completion-type])
+                      (get-in after [:scopes scope-path :bindings address :expected-type])))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
           (conj {:id [address :value-type :field-read] :address address
                  :scope (first address) :path field-path
-                 :kind :value-type :trigger :field-read :expected-type :any}))))))
+                 :kind :value-type :trigger :field-read :expected-type (or callable-type :any)}))))))
 
 
 (defn- callable-alias-reference-addresses
@@ -387,7 +419,7 @@
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
         alias-references (callable-alias-reference-addresses snapshot after certificates)
-        prior (if (empty? alias-references)
+        prior (if (and (empty? alias-references) (not-any? #(scoped-unary-callable snapshot before after %) certificates))
                 (set (:obligations before))
                 (into #{}
                       (comp (remove (fn [{:keys [address kind trigger expected-type] :as check}]

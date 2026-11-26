@@ -203,3 +203,32 @@
                  (assoc obligation :id [address :value-type :field-read])
                  (assoc obligation :scope [(random-uuid) []])]]
       (is (= :incomplete-reference-analysis (code #(replay [bad] [bad])))))))
+
+
+(deftest unary-graph-callable-replay-keeps-its-exact-parameter-contract
+  (let [owner (demo-id :host)
+        target (demo-id :handler)
+        row-id (demo-id :row)
+        address [[owner []] [(demo-id :field)]]
+        public-path [:outer :handler]
+        original '[:fn {:arg b} c :any :unknown]
+        actual '[:fn {:request a} a #{} #{:jvm-server :browser-main}]
+        expected '[:fn {:arg a} a :any :unknown]
+        certificate {:row {:ref-fn-id target :id row-id} :address address :public-path public-path}
+        before {:public-input {:routes {public-path {:completion-type original}}}}
+        after {:substitution '{b a c a}
+               :dependencies [{:from address :to [owner [row-id]] :binding-id row-id :target-fn-id target :mode :graph-callable}]
+               :scopes {[] {:bindings {address {:dispatch-type original :expected-type expected
+                                                :reference {:mode :graph-callable :capture-resolved? true :callable-type actual}}}}
+                        [row-id] {:fn-id target :signature {:lambda-params ["request"] :args '{:request a}
+                                                            :return 'a :effects #{} :execution #{:jvm-server :browser-main}}}}
+               :closures {address {:parameters [:request] :captures [] :external-captures [] :callable-type actual}}}
+        prove (fn [g] (#'scope/scoped-unary-callable (context/build-context {}) before g certificate))]
+    (is (= expected (prove after)))
+    (doseq [changed [(assoc-in after [:dependencies 0 :mode] :value)
+                     (assoc-in after [:scopes [row-id] :signature :lambda-params] [])
+                     (assoc-in after [:scopes [row-id] :signature :effects] #{:io})
+                     (assoc-in after [:closures address :external-captures] [{:target address}])
+                     (assoc-in after [:substitution 'c] :text)
+                     (assoc-in after [:scopes [] :bindings address :reference :capture-resolved?] false)]]
+      (is (nil? (prove changed))))))

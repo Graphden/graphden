@@ -741,7 +741,8 @@
     (let [primitives (filter #(#{:vec :empty?} (:name %)) (sources "collections"))
           items {:namespace "fixture" :name :items :parent :vec :args {:coll {:value []}}}
           leaf {:namespace "fixture" :name :items-empty? :parent :empty? :args {:coll :items}}
-          definitions (into [items leaf] primitives)
+          inline (assoc leaf :name :inline-items-empty? :args {:coll (select-keys items [:parent :args])})
+          definitions (into [items leaf inline] primitives)
           prepared (parse/prepare-module definitions {} {})
           package (snapshot/package-index prepared definitions)
           rows (group-by :kind (parse/parse-prepared-module prepared))
@@ -754,10 +755,17 @@
           old-slot (ids/slot-id (ids/fn-id "core.collections" :vec) :coll)
           reader (ids/slot-id (ids/fn-id "core.collections" :empty?) :coll)
           migrated (snapshot/migrate-legacy-leaf package lookup id signatures)
-          [row] (get-in migrated [:v2 :bindings])]
+          [row] (get-in migrated [:v2 :bindings])
+          inline-id (ids/fn-id "fixture" (:name inline))
+          inline-result (snapshot/migrate-legacy-leaf package lookup inline-id signatures)
+          [inline-row] (get-in inline-result [:v2 :bindings])
+          inline-child (get-in inline-result [:v2 :inline-definitions [reader]])]
       (is (= :authored-source-equivalent (:verification migrated)))
       (is (= [:ref :fixture/items] (get-in migrated [:proposed :bind :coll])))
       (is (= [(ids/binding-id id old-slot) [reader]] ((juxt :id :target-path) row)))
+      (is (= :authored-source-equivalent (:verification inline-result)))
+      (is (= (ids/binding-id inline-id old-slot) (:id inline-row)))
+      (is (= (:ref-fn-id inline-row) (:fn-id inline-child)))
       (is (= :unsupported-legacy-leaf
              (:code (failure #(snapshot/migrate-legacy-leaf package
                                                             (assoc-in lookup [:children-by-fn id] #{(random-uuid)})

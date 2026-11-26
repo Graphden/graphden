@@ -738,11 +738,20 @@
          :children (into {} (map v2-inline-meaning) (:inline-definitions child))}])
 
 
+(defn- lexical-inline-origin
+  [{:keys [row slot-id]} [path child :as entry]]
+  (if (and row (= path (:target-path row)) (= (:fn-id child) (:ref-fn-id row)))
+    [[slot-id] child]
+    entry))
+
+
 (defn- verify-inline-children!
-  [environment {:keys [source legacy]} prepared v2]
+  [environment {:keys [source legacy legacy-leaf]} prepared v2]
   (let [expected (legacy-inline-meanings environment source prepared (:arguments legacy))
-        actual (into {} (map v2-inline-meaning) (:inline-definitions v2))]
-    (when-not (migration/same-edn? expected actual)
+        inlines (:inline-definitions v2)
+        actual (into {} (comp (map (partial lexical-inline-origin legacy-leaf)) (map v2-inline-meaning)) inlines)]
+    (when-not (and (= (count inlines) (count actual))
+                   (migration/same-edn? expected actual))
       (throw (ex-info "Inline source identities or declarations changed"
                       {:type :input/source-verification :code :inline-declaration-mismatch})))))
 

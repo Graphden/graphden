@@ -522,8 +522,10 @@
         context (analysis/with-use-bindings context {owner [binding]})
         graph (analysis/analyze-effective-input context owner options)
         address [[owner []] (:target-path binding)]
-        actual (get-in graph [:scopes [] :bindings address])]
-    (when-not (= ((juxt :id :fn-id) binding) ((juxt :binding-id :origin-fn-id) actual))
+        actual (get-in graph [:scopes [] :bindings address])
+        mode (if (:ref-fn-id binding) :value :literal)]
+    (when-not (and (= ((juxt :id :fn-id) binding) ((juxt :binding-id :origin-fn-id) actual))
+                   (= mode (get-in actual [:reference :mode])))
       (reject! :legacy-use-binding-mismatch owner))
     {:baseline baseline :graph graph}))
 
@@ -552,7 +554,6 @@
     (when-not (and (= owner (:fn-id binding)) (= [[owner old-name]] declarations)
                    (empty? (get-in legacy-graph [:children-by-fn owner]))
                    argument (empty? more) (:expression argument)
-                   (nil? (:inline-fn-id argument))
                    (= source-path (:source-path blocker))
                    (= :ref-scope-required (:code blocker)) (empty? other-blockers))
       (reject! :unsupported-legacy-leaf owner))
@@ -563,7 +564,9 @@
           proposed (:proposed (plan-entry baseline owner))]
       (when-not (and (= :checked (:status graph)) (empty? (:diagnostics graph))
                      (every? #(= [:value-type :field-read] ((juxt :kind :trigger) %)) (:obligations graph))
-                     (simple-keyword? field) proposed (not (contains? (:bind proposed) field)))
+                     (simple-keyword? field) proposed (not (contains? (:bind proposed) field))
+                     (or (nil? (:inline-fn-id argument))
+                         (and (= old-name field) (= (:inline-fn-id argument) (:ref-fn-id binding)))))
         (reject! :unverified-legacy-leaf owner))
       (let [candidate (assoc entry
                              :status :supported :blockers []

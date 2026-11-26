@@ -28,12 +28,17 @@
    :input-binding :input-binding-version])
 
 
+(defn- with-stable-printing
+  [render]
+  (binding [*print-length* nil *print-level* nil *print-meta* false
+            *print-readably* true *print-dup* false *print-namespace-maps* false]
+    (render)))
+
+
 (defn stable-edn
   "Complete readable data, independent of a caller's REPL print settings."
   [value]
-  (binding [*print-length* nil *print-level* nil *print-meta* false
-            *print-readably* true *print-dup* false *print-namespace-maps* false]
-    (pr-str value)))
+  (with-stable-printing #(pr-str value)))
 
 
 (defn derived-id
@@ -46,7 +51,7 @@
 (defn- edn-order
   [sort-key values]
   (->> values
-       (map (fn [value] [(stable-edn (sort-key value)) value]))
+       (map (fn [value] [(pr-str (sort-key value)) value]))
        (sort-by first)
        (mapv second)))
 
@@ -65,7 +70,7 @@
 
 (defn- canonical-edn
   [value]
-  (stable-edn (canonical value)))
+  (with-stable-printing #(pr-str (canonical value))))
 
 
 (defn same-edn?

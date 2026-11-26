@@ -60,3 +60,27 @@
         b (assoc a :id (random-uuid))]
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid structured input binding"
           (analysis/analyze-input (assoc context :bindings {(:id a) a (:id b) b}) owner)))))
+
+
+(deftest replayed-rows-belong-to-one-final-function-use
+  (let [{:keys [owner field context]} (fixture)
+        child (random-uuid)
+        ctx (assoc-in context [:fns child] {:input-type-fn-id (get-in context [:fns owner :input-type-fn-id])
+                                            :parent-ids [owner]})
+        row (assoc (bind-row owner field {:expression-kind "value" :value-present true :value "parent"}) :kind :input-binding)
+        replay (analysis/with-use-bindings ctx {owner [row]})
+        bound (get-in (analysis/analyze-input replay owner) [:bindings [[owner []] [field]]])]
+    (is (not= (:snapshot-id ctx) (:snapshot-id replay)))
+    (is (= [owner (:id row)] ((juxt :origin-fn-id :binding-id) bound)))
+    (is (= [[[child []] [field]]] (:required-addresses (analysis/analyze-input replay child))))
+    (is (empty? (:bindings ctx)))
+    (doseq [invalid [(assoc row :fn-id child) (assoc row :org-id (random-uuid))
+                     (assoc row :required true) (assoc row :scope-path [(random-uuid)])]]
+      (is (thrown? clojure.lang.ExceptionInfo (analysis/with-use-bindings ctx {owner [invalid]}))))
+    (is (thrown? clojure.lang.ExceptionInfo (analysis/with-use-bindings ctx {owner [row row]})))
+    (is (thrown? clojure.lang.ExceptionInfo (analysis/with-use-bindings replay {child [row]})))
+    (let [existing (assoc row :id (random-uuid))
+          stored (assoc-in ctx [:bindings (:id existing)] existing)]
+      (is (thrown? clojure.lang.ExceptionInfo (analysis/with-use-bindings stored {owner [existing]})))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (analysis/analyze-input (analysis/with-use-bindings stored {owner [row]}) owner))))))

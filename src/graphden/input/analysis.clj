@@ -97,7 +97,8 @@
              declared contract
              owned (mapv #(rows/normalize (assoc % :fn-id fn-id
                                                  :origin-fn-id (or (:origin-fn-id %) (:fn-id %))))
-                         (concat (map #(assoc % :origin-use-path (second scope)) bindings) additional-rows))
+                         (concat (map #(assoc % :origin-use-path (second scope)) bindings) additional-rows
+                                 (get-in ctx [::use-bindings fn-id])))
              local (filterv #(empty? (:scope-path %)) owned)
              policy (metadata/apply-overlays ctx (variables/descriptor-in-scope scope declared) local
                                              {:scope scope :declaration-order declaration-order
@@ -146,6 +147,44 @@
           :coverage {:declared-structure true :local-occupancy true
                      :recursive-availability (empty? closure-gaps)
                      :type-checker (boolean check-expression)}})))))
+
+
+(def ^:private use-binding-columns
+  #{:kind :id :fn-id :org-id :scope-path :target-path :expression-kind :value-present :value :ref-fn-id})
+
+
+(defn- replay-use-bindings
+  [ctx target bindings]
+  (let [lineage (set (inheritance/declaration-order ctx target))]
+    (when-not (and (vector? bindings) (seq bindings) (= (count bindings) (count (set (map :id bindings)))))
+      (context/reject! :invalid-use-bindings {:target target}))
+    (mapv (fn [binding]
+            (let [row (rows/normalize binding)]
+              (when-not (and (every? use-binding-columns (keys binding))
+                             (= :input-binding (:kind row))
+                             (contains? lineage (:fn-id row))
+                             (= (:org-id row) (get-in ctx [:fns (:fn-id row) :org-id]))
+                             (empty? (:scope-path row)) (= 1 (count (:target-path row)))
+                             (contains? #{"value" "ref"} (:expression-kind row))
+                             (not (contains? (:bindings ctx) (:id row))))
+                (context/reject! :invalid-use-binding {:target target :binding-id (:id row)}))
+              row))
+          bindings)))
+
+
+(defn with-use-bindings
+  "Freeze trusted value/reference rows for specific final functions in an
+   offline comparison snapshot. A row is visible only when visiting its final
+   function. A repeated reference keeps its own use path and the original row
+   identity. Ordinary stored bindings and occupancy checks still apply.
+   The caller separately proves that each row represents the original source."
+  [ctx by-function]
+  (when (or (not (map? by-function)) (empty? by-function) (contains? ctx ::use-bindings))
+    (context/reject! :invalid-use-bindings {}))
+  (assoc ctx :snapshot-id (random-uuid)
+         ::use-bindings (reduce-kv (fn [result target bindings]
+                                     (assoc result target (replay-use-bindings ctx target bindings)))
+                                   {} by-function)))
 
 
 (defn analyze-effective-input

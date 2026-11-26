@@ -400,13 +400,16 @@
         sources (into {} (map (fn [{:keys [address row]}]
                                 [address [[(:fn-id before) []] (:projection-path row)]]))
                       certificates)]
-    (and (every? prior current)
+    (and (every? (fn [{:keys [address kind trigger expected-type] :as obligation}]
+                   (or (prior obligation)
+                       (and (contains? sources address)
+                            (= [:value-type :field-read :any] [kind trigger expected-type]))))
+                 current)
          (every? (fn [{:keys [address] :as obligation}]
                    (when-let [source (get sources address)]
                      (let [check (select-keys obligation [:kind :trigger :expected-type])]
-                       (or (= {:kind :value-type :trigger :field-read :expected-type :any} check)
-                           (some #(and (= source (:address %))
-                                       (= check (select-keys % [:kind :trigger :expected-type]))) current)))))
+                       (some #(and (= source (:address %))
+                                   (= check (select-keys % [:kind :trigger :expected-type]))) current))))
                  (remove current prior)))))
 
 

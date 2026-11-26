@@ -34,6 +34,15 @@
    :sha256 "b9916eb06942752882460e8503147148878736c384bf5bea081236f470e5ecb2"})
 
 
+(def ^:private power-root (ids/fn-id "inputfixture.power" :fixture-power))
+(def ^:private two-cubed (ids/fn-id "inputfixture.power" :two-cubed))
+
+
+(def ^:private power-admission
+  {:module ["inputfixture" "power"] :fn-id power-root :abi-fn-id (ids/fn-id "core.arithmetic" :pow)
+   :sha256 "c5c6d98fec6e550c00b86bb0fa9f6a4b1242a713dd303d8acf71735c7292fb2e"})
+
+
 (deftest unadmitted-source-fails-before-any-package-implementation
   (let [loads (atom 0)]
     (with-redefs-fn {#'loader/load-module-impls (fn [& _] (swap! loads inc))}
@@ -63,7 +72,8 @@
 
 (deftest pinned-classpath-declaration-syncs-and-executes
   (let [storage (:storage golden/*bootstrap*)
-        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "inputfixture"] :primitive-input admission})
+        packages (ig/init-key :app/packages {:package-names ["core" "web" "app" "inputfixture"]
+                                             :primitive-inputs [admission power-admission]})
         sync! #(ig/init-key :exec/base-fns {:storage storage :packages packages})
         {:keys [base-fns] :as base-info} (sync!)
         _ (ig/init-key :exec/fn-entities {:storage storage :packages packages :base-fns base-info})
@@ -71,10 +81,12 @@
         child-input (migration/derived-id :input-type child)
         number-slot (ids/slot-id root :number)
         binding (ids/binding-id child number-slot)
+        power-slots (mapv #(ids/slot-id power-root %) [:base :exponent])
+        power-bindings (mapv #(ids/binding-id two-cubed %) power-slots)
         memberships #(sp/query-entities storage :fn-slot {:fn-id input})
         version #(resolution/resolve-version-ids (vs/unwrap storage) :fn [root input child child-input]
                                                  (vs/current-branch-id storage))
-        binding-version #(resolution/resolve-version-ids (vs/unwrap storage) :input-binding [binding]
+        binding-version #(resolution/resolve-version-ids (vs/unwrap storage) :input-binding (conj power-bindings binding)
                                                          (vs/current-branch-id storage))
         before (version)
         before-binding (binding-version)
@@ -90,13 +102,18 @@
     (is (= -4 (:result (post root {:number -3.2}))))
     (is (= -4 (:result (post floor {:number -3.2}))))
     (is (= -8 (:result (post child {}))))
+    (is (== 8 (:result (post two-cubed {}))))
+    (doseq [field [:base :exponent]]
+      (is (= "unknown-input-field" (get-in (post two-cubed {field 1}) [:error-data :code]))))
+    (is (= (mapv #(vector (str %)) power-slots)
+           (mapv #(:target-path (sp/read-entity storage :input-binding %)) power-bindings)))
     (is (= "unknown-input-field" (get-in (post child {:number 1}) [:error-data :code])))
     (is (= "invalid-structured-arguments" (get-in (post root {:unknown 1}) [:error-data :reason])))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"primitive admission failed"
           (ig/init-key :exec/base-fns {:storage storage :packages packages
                                        :extra-base-fns {:fixture-floor (:ceil base-fns)}})))
     (is (= #{root input child child-input} (set (keys before))))
-    (is (= #{binding} (set (keys before-binding))))
+    (is (= (conj (set power-bindings) binding) (set (keys before-binding))))
     (is (= [(str number-slot)] (:target-path (sp/read-entity storage :input-binding binding))))
     (sync!)
     (is (= before (version)))

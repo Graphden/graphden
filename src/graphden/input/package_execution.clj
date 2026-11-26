@@ -85,7 +85,7 @@
 
 
 (defn compile-staged-literal-root
-  "Compile one visible v2 root with a scalar literal binding and a visible
+  "Compile one visible v2 root with scalar literal bindings and a visible
    primitive parent declared in the same pinned file."
   [root roots implementations {payload :bytes :keys [sha256 visible-fn-ids]}]
   (require-visible-root! root visible-fn-ids)

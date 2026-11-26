@@ -147,6 +147,8 @@
                  ["core.collections" :conj {:coll {:type [:list :text]} :item {:type :text}} [:list :text]]
                  ["core.collections" :dissoc {:map {:type {:x :int :y :text}} :key {:value :x}} {:y :text}]
                  ["core.collections" :keys {:map {:type [:map :text :int]}} [:list :text]]
+                 ["core.collections" :vals {:map {:type [:map :text [:secret :int]]}} [:list [:secret :int]]]
+                 ["core.collections" :vals {:map {:type {:x :text :y :text}}} [:list :text]]
                  ["core.collections" :update-vals
                   {:m {:type [:map :keyword :int]} :f {:type [:fn {:value :int} :text]}} [:map :keyword :text]]
                  ["core.strings" :name {:value {:type [:union :null :keyword]}} [:union :null :text]]

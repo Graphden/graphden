@@ -982,7 +982,8 @@
    :contains? {:impl contains?-fn :taint-propagate? true}
    :keys {:impl keys-fn :return-type-rule keys-return-rule
           :local-type-rules #{:return-type-rule} :taint-propagate? true}
-   :vals {:impl vals-fn :return-type-rule vals-return-rule :taint-propagate? true}
+   :vals {:impl vals-fn :return-type-rule vals-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
    :into {:impl into-fn :return-type-rule into-return-rule
           :local-type-rules #{:return-type-rule} :taint-propagate? true}

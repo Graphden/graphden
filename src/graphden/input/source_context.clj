@@ -36,7 +36,7 @@
   (if witness (update-in definition [:args (:field witness)] dissoc :as) definition))
 
 
-(defn- names-by-id
+(defn- group-names-by-id
   [name->id]
   (group-by val (filter (comp uuid? val) name->id)))
 
@@ -51,7 +51,7 @@
   "Reuse the package's canonical declaration and alias indexes during
    per-definition replay. Check the prepared map identity before reuse."
   [{:keys [defs-by-name name->id] :as context} declarations]
-  (let [aliases (or (indexed-values name->id (::alias-index context)) (names-by-id name->id))]
+  (let [aliases (or (indexed-values name->id (::alias-index context)) (group-names-by-id name->id))]
     (assoc context ::declaration-index [defs-by-name declarations] ::alias-index [name->id aliases])))
 
 
@@ -61,7 +61,7 @@
   (let [indexed (indexed-values defs-by-name (::declaration-index context))
         definitions (if indexed fn-defs (concat (vals defs-by-name) fn-defs))]
     {:context (rename/prepare-context context)
-     :names-by-id (or (indexed-values name->id (::alias-index context)) (names-by-id name->id))
+     :names-by-id (or (indexed-values name->id (::alias-index context)) (group-names-by-id name->id))
      :definition-by-id (into (or indexed {}) (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)
      :records-of (memoize (fn [definition]

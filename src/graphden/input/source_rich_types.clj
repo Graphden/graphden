@@ -58,12 +58,12 @@
   [owner target-path alias-path contract rows-by-id type]
   (let [[alias-id] alias-path
         [slot & more] (get rows-by-id alias-id)
-        alias (some #(when (= alias-id (:id %)) %) (:fields contract))
+        alias-field (some #(when (= alias-id (:id %)) %) (:fields contract))
         type-id (:type-fn-id slot)]
-    (when (and (closed-callable-shape? type) alias (= type (:type alias))
-               (= [alias-id] alias-path) (= (ids/slot-id owner (:name alias)) alias-id)
+    (when (and (closed-callable-shape? type) alias-field (= type (:type alias-field))
+               (= [alias-id] alias-path) (= (ids/slot-id owner (:name alias-field)) alias-id)
                (= 1 (count target-path)) (= (first target-path) (:source-slot-id slot))
-               (= :slot (:kind slot)) (empty? more) (= type-id (:type-id alias))
+               (= :slot (:kind slot)) (empty? more) (= type-id (:type-id alias-field))
                (callable-field? rows-by-id type-id type))
       type-id)))
 

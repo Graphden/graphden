@@ -80,13 +80,13 @@ Derives declared input contexts for supported rewrites using the frozen package 
 :PROPERTIES:
 :CUSTOM_ID: types/verify-plan
 :FILE: src/graphden/input/source_certification.clj
-:LINE: 108
+:LINE: 106
 :MINS: 2.6
 :END:
 
 Certifies scoped bindings and forwarded fields with trusted implementation signatures. A blocked source owner retries when its exact dependency is certified. The planner then rebuilds the requested package plan with the updated inherited field evidence.
 
-- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:108]]
+- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:106]]
 - see also :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 - referenced from :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
 
@@ -94,13 +94,13 @@ Certifies scoped bindings and forwarded fields with trusted implementation signa
 :PROPERTIES:
 :CUSTOM_ID: types/index
 :FILE: src/graphden/input/source_origins.clj
-:LINE: 70
+:LINE: 74
 :MINS: 2.1
 :END:
 
 Matches each original owner's complete normalized inline expansion with preparation. Generated UUIDs retain their enclosing owner and exact nested or sequence path. These private source bodies are provenance, not checked runtime declarations.
 
-- source :: [[file:../../../src/graphden/input/source_origins.clj::(defn index][src/graphden/input/source_origins.clj:70]]
+- source :: [[file:../../../src/graphden/input/source_origins.clj::(defn index][src/graphden/input/source_origins.clj:74]]
 
 * 8. with-certified-owner
 :PROPERTIES:
@@ -121,13 +121,13 @@ Proves one owner and its dependencies as an immutable transaction. Verified pare
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 500
+:LINE: 503
 :MINS: 0.9
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:500]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:503]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/with-certified-owner][with-certified-owner]]
@@ -150,13 +150,13 @@ Checks the exact boundary between one owner's two proof groups. The projected ba
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings-after-forwarding
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 507
+:LINE: 510
 :MINS: 1.1
 :END:
 
 Replays the remaining scoped group with the verified projections still in the graph. Their occupied addresses and unique destinations must survive, and the runtime checks must remain exactly equal. The complete source round trip precedes publication.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:507]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:510]]
 - see also :: [[file:types.org::#types/scope-view][scope-view]], [[file:types.org::#types/verify-module][verify-module]]
 - same file :: [[file:types.org::#types/verify-bindings][verify-bindings]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]

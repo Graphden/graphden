@@ -182,3 +182,24 @@
                                                                  :trigger :container-materialization)]))]
       (is (= :incomplete-reference-analysis
              (code #(scope/verify-binding entry [:args :deep] snapshot container)))))))
+
+
+(deftest scoped-binding-preserves-verified-container-materialization-checks
+  (let [{:keys [entry owner snapshot]} (fixture "text" false)
+        address [[owner []] []]
+        expected (get-in (analyze snapshot owner) [:scopes [] :configured-contract :type])
+        obligation {:id [address :container-type :container-materialization] :address address
+                    :scope (first address) :path [] :expected-type expected
+                    :kind :container-type :trigger :container-materialization}
+        replay (fn [before after]
+                 (scope/verify-binding entry [:args :deep] snapshot
+                                       (fn [s id]
+                                         (assoc (analyze s id) :obligations
+                                                (if (= (:snapshot-id s) (:snapshot-id snapshot)) before after)))))]
+    (is (= [obligation] (:obligations (replay [obligation] [obligation]))))
+    (is (= :scope-replay-mismatch (code #(replay [obligation] []))))
+    (is (= :scope-replay-mismatch (code #(replay [] [obligation]))))
+    (doseq [bad [(assoc obligation :expected-type :text)
+                 (assoc obligation :id [address :value-type :field-read])
+                 (assoc obligation :scope [(random-uuid) []])]]
+      (is (= :incomplete-reference-analysis (code #(replay [bad] [bad])))))))

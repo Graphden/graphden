@@ -3,6 +3,7 @@
    analysis. Derives no routes and changes neither source nor storage."
   (:require
     [graphden.input.context :as context]
+    [graphden.input.descriptor :as descriptor]
     [graphden.input.list-builder :as list-builder]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
@@ -87,15 +88,26 @@
     omitted))
 
 
+(defn- container-check?
+  [graph {:keys [id address scope path kind trigger expected-type]}]
+  (and (= [:container-type :container-materialization] [kind trigger])
+       (vector? scope) (= 2 (count scope)) (= (:fn-id graph) (first scope)) (vector? path)
+       (= address [scope path]) (= id [address kind trigger])
+       (when-let [contract (get-in graph [:scopes (second scope) :configured-contract])]
+         (when-let [node (descriptor/find-node contract path)]
+           (and (contains? node :fields) (= expected-type (:type node)))))))
+
+
 (defn- checked-graph
-  [analyze snapshot owner]
+  [analyze snapshot owner & [scoped-bindings?]]
   (let [graph (analyze snapshot owner)
         surface (:public-input graph)]
     (when-not (and (some? (:snapshot-id snapshot)) (= (:snapshot-id snapshot) (:snapshot-id surface))
                    (= owner (:fn-id graph) (:fn-id surface)))
       (reject! :stale-input-surface))
     (when-not (and (= :checked (:status graph)) (empty? (:diagnostics graph))
-                   (every? #(= [:value-type :field-read] ((juxt :kind :trigger) %)) (:obligations graph))
+                   (every? #(or (= [:value-type :field-read] ((juxt :kind :trigger) %))
+                                (and scoped-bindings? (container-check? graph %))) (:obligations graph))
                    (true? (get-in graph [:coverage :recursive-availability]))
                    (true? (get-in graph [:coverage :type-checker])))
       (reject! :incomplete-reference-analysis))
@@ -335,7 +347,7 @@
           edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
           proof (get-in after [:proofs address])]
       (when (some #{edge} (:dependencies after))
-        (cond-> (nested-field-checks (checked-graph analyze snapshot target) after use-scope)
+        (cond-> (nested-field-checks (checked-graph analyze snapshot target true) after use-scope)
           (and (= :any (get-in before [:public-input :routes public-path :completion-type])
                   (get-in after [:scopes scope-path :bindings address :expected-type]))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
@@ -400,13 +412,13 @@
    may bring the exact field checks of their independently checked targets."
   [{owner :identity :as plan-entry} paths snapshot analyze projections]
   (let [omitted (legacy-omissions plan-entry paths snapshot projections)
-        before (checked-graph analyze snapshot owner)
+        before (checked-graph analyze snapshot owner true)
         certificates (mapv (partial binding-certificate snapshot before) omitted)
         additions (into {} (map (juxt :id identity)) (map :row certificates))]
     (when-not (= (count certificates) (count additions) (count (set (map :address certificates))))
       (reject! :scope-replay-mismatch))
     (let [updated (-> snapshot (assoc :snapshot-id (random-uuid)) (update :bindings merge additions))
-          after (checked-graph analyze updated owner)
+          after (checked-graph analyze updated owner true)
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (every? true? (map #(verified-addition? before after (second %1) %2) omitted certificates))

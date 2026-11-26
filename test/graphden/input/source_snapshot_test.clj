@@ -240,6 +240,25 @@
            (:code (failure #(snapshot/freeze-closure package [owner] (assoc-in @roots [base :return] :any))))))))
 
 
+(deftest nested-record-union-return-survives-signature-inference
+  (let [base (some #(when (= :const (:name %)) %) (sources "logic"))
+        ;; A named leaf under an inline record still needs its frozen alias.
+        named-type (some #(when (= :nullable-text (:name %)) %) (sources "refinements"))
+        rich [:union :null {:groups [:list {:label :nullable-text}]}]
+        child {:namespace "fixture" :name :page :parent :const
+               :args {:value {:value nil}} :return-type rich}
+        definitions [base named-type child]
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owner (ids/fn-id "fixture" :page)
+        type-id (ids/primitive-fn-id :any)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)]
+    (is (= rich (get-in context [:source-return-types [owner type-id]])))
+    (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
+    (is (= (types/make-union [:null {:groups [:list {:label (types/make-union [:null :text])}]}])
+           (get-in graph [:scopes [] :signature :return])))))
+
+
 (deftest shipped-bottom-return-is-frozen-without-executing-the-thrower
   (let [declaration (some #(when (= :throw (:name %)) %) (sources "system"))
         id (ids/fn-id "core.system" :throw)
@@ -886,8 +905,11 @@
         report (snapshot/projection-readiness package owner @roots)
         [route] (:projections report)
         field (ids/slot-id (ids/fn-id "core.collections" :get) :coll)]
-    (is (= :incomplete (:status report)))
-    (is (some #(= :conflicting-runtime-obligations (:code %)) (:diagnostics report)))
+    (is (= :checked (:status report)) (pr-str (:diagnostics report)))
+    (is (= [[[:map :keyword :any] :field-read]]
+           (into [] (comp (filter #(= [[owner []] [field]] (:address %)))
+                          (map (juxt :expected-type :trigger)))
+                 (:obligations report))))
     (is (= (ids/binding-id owner field) (:binding-id route)))
     (is (= [[owner []] [(ids/slot-id owner :outcome)]] (:source route)))
     (is (= [:map :keyword :any] (:actual-type route)))

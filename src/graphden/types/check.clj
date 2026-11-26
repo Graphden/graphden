@@ -593,20 +593,27 @@
 ;; -----------------------------------------------------------------------------
 
 (defn- map-binding-target
-  "A record can only inhabit the map arm of a nullable map. Checking that arm
-   directly lets map/record unification bind its key parameter. The empty-map
-   sentinel proves membership for every key and value type without binding either."
+  "A dictionary can only inhabit the map arm of a union of maps, lists and
+   nil. Check that arm directly to infer its key parameter. Preserve the
+   existing record and empty-map handling for nullable maps."
   [expected actual]
-  (if (or (= :empty-map actual) (and (types/record-type? actual) (seq actual)))
-    (let [members (types/union-members expected)
-          map-type (if (and (= 2 (count members)) (some #{:null} members))
-                     (types/strip-null expected)
-                     expected)]
-      (cond
-        (not (types/map-type? map-type)) expected
-        (= :empty-map actual) :empty-map
-        :else map-type))
-    expected))
+  (let [members (types/union-members expected)]
+    (cond
+      (and members (types/map-type? actual)
+           (every? #(or (= :null %) (types/list-type? %) (types/map-type? %)) members))
+      (let [[dictionary & other] (filter types/map-type? members)]
+        (if (and dictionary (empty? other)) dictionary expected))
+
+      (or (= :empty-map actual) (and (types/record-type? actual) (seq actual)))
+      (let [map-type (if (and (= 2 (count members)) (some #{:null} members))
+                       (types/strip-null expected)
+                       expected)]
+        (cond
+          (not (types/map-type? map-type)) expected
+          (= :empty-map actual) :empty-map
+          :else map-type))
+
+      :else expected)))
 
 
 (defn- checked-refinement?

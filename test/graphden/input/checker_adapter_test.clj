@@ -67,6 +67,14 @@
           (check/infer-input-signature (assoc-in facts [:declaration :return-type] :int))))))
 
 
+(deftest typed-dictionary-infers-the-key-of-the-only-dictionary-arm
+  (let [result (check/check-input-binding
+                 {:expected '[:union :null [:map k :any] [:list :any]]
+                  :actual [:map :keyword :any] :expression {:kind :type-fact}})]
+    (is (= {'k :keyword} (:substitution result)))
+    (is (= :runtime-type-obligation (:reason result)))))
+
+
 (deftest wrapped-identity-checks-the-target-id-without-an-execution-dependency-test
   (let [[owner root field edge target identity-type] (repeatedly 6 random-uuid)
         ctx (context/build-context

@@ -109,6 +109,29 @@
         (= field-type-id (records/resolve-type-ref type named-ids)))))
 
 
+(defn- source-union-shape?
+  [type named-ids]
+  (binding [types/*type-aliases-override* (atom {})]
+    (expansion/assert-finite! type))
+  (letfn [(leaf?
+            [value]
+            (or (types/primitive? value) (types/type-var? value) (= :never value)
+                (uuid? (get named-ids value))
+                (and (types/record-type? value) (seq value)
+                     (every? simple-keyword? (keys value))
+                     (every? (partial format/collection-type? leaf?) (vals value)))))]
+    (format/collection-type? leaf? type)))
+
+
+(defn stored-source-return-type?
+  "Check a frozen return against its physical FK and independently verified
+   named type IDs. An inline union uses :any even with nested record arms."
+  [type type-id named-ids]
+  (or (stored-source-type? type type-id named-ids)
+      (and (types/union-type? type) (= type-id (:any primitive-ids))
+           (source-union-shape? type named-ids))))
+
+
 (defn- declared-field-node
   [ctx type-id field source seen]
   (let [field-type-id (:type-fn-id field)

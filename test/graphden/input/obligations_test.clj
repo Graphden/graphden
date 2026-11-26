@@ -29,6 +29,20 @@
                   (catch clojure.lang.ExceptionInfo error (ex-data error))))))))
 
 
+(deftest a-concrete-union-member-implies-the-broader-read-check-in-either-order
+  (let [owner (random-uuid)
+        field (random-uuid)
+        address [[owner []] [field]]
+        dictionary [:map :keyword :any]
+        broad [:union :null [:list :any] dictionary]
+        graph {:scopes {[] {:configured-contract {:fields [{:id field :type dictionary}]}}}}]
+    (doseq [checks [[dictionary broad] [broad dictionary]]]
+      (let [diagnostics (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) checks)
+            result (obligations/separate (assoc graph :diagnostics diagnostics))]
+        (is (= [[address dictionary :field-read]]
+               (mapv (juxt :address :expected-type :trigger) (:obligations result))))))))
+
+
 (deftest equal-shapes-from-independent-binders-remain-distinct-checks
   (let [owner (random-uuid)
         field (random-uuid)

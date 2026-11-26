@@ -464,6 +464,27 @@
       (is (= [] (invoke (:closure (compiled literal functions))))))))
 
 
+(deftest computed-keyword-dictionary-keys-are-validated-when-consumed
+  (let [dictionary [:map :keyword :any]
+        collection '[:union :null [:map :keyword :any] [:list :any]]
+        result (atom {:child nil})
+        calls (atom 0)
+        functions {:root echo :child (fn [_ _] (swap! calls inc) @result)}]
+    (doseq [expected [dictionary collection]]
+      (reset! result {:child nil})
+      (let [definitions {:root {:input {:x expected} :return :any :bindings {[:x] {:ref :child}}}
+                         :child {:input {} :return dictionary}}
+            {:keys [closure analysis]} (compiled definitions functions)
+            before @calls]
+        (is (some #(= :field-read (:trigger %)) (:obligations analysis)))
+        (is (= before @calls))
+        (is (= {:child nil} (invoke closure)))
+        (reset! result {"child" nil})
+        (is (= :execution-error/type-mismatch
+               (try (invoke closure) nil
+                    (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))))
+
+
 (deftest computed-null-retains-a-field-read-validator-for-its-union-arm
   (let [definitions {:root {:input {:x '[:union :null [:map a :any]]}
                             :return :any :bindings {[:x] {:ref :child}}}

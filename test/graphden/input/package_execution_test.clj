@@ -706,9 +706,11 @@
       (is (= {:payload (pr-str value)} (legacy {:payload value}) (canonical {:payload value}))))))
 
 
-(deftest generic-const-forwarding-keeps-an-unsupported-named-map-read-boundary
-  (let [retained (atom nil)]
-    (is (= :runtime-obligations-required (rejection-code #(generic-forward-runtimes :any identity retained))))
+(deftest generic-const-forwarding-executes-with-a-checked-dictionary-read
+  (let [retained (atom nil)
+        {:keys [canonical legacy]} (generic-forward-runtimes :any identity retained)]
+    (doseq [value [nil false {:key "value"}]]
+      (is (= {:payload value} (legacy {:payload value}) (canonical {:payload value}))))
     (is (= :authored-source-equivalent (:verification @retained)))
     (is (= [[:map :keyword :any]]
            (mapv :expected-type

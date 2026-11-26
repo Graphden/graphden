@@ -195,7 +195,7 @@
 (defn- declared-return
   [ctx {:keys [id return-type-fn-id]}]
   (if-let [witness (get-in ctx [:source-return-types [id return-type-fn-id]])]
-    (if (descriptor/stored-source-type? witness return-type-fn-id (:alias-ids ctx))
+    (if (descriptor/stored-source-return-type? witness return-type-fn-id (:alias-ids ctx))
       (types/resolve-alias witness)
       (context/reject! :return-type-witness-mismatch {:fn-id id :type-id return-type-fn-id}))
     (:type (descriptor/resolve-descriptor ctx return-type-fn-id))))

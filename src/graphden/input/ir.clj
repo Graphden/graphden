@@ -25,8 +25,9 @@
 (defn- field-read-type
   [analysis [[_ scope] :as address] expected op]
   (cond
-    (contains? #{:any :null :bool :text :int :float :decimal :numeric
-                 :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected) expected
+    (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
+                     :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
+        (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))) expected
     ;; A checked literal or producer can select a concrete arm without
     ;; interpreting variables in the other arms. Keep the check at the read.
     (types/union-type? expected)
@@ -34,6 +35,7 @@
       (when (#{[:invoke :value] [:literal :literal]} [op mode])
         (let [arm (cond
                     (= :null actual-type) :null
+                    (= [:map :keyword :any] actual-type) actual-type
                     (types/list-type? actual-type) [:list :any])]
           (when (some #{arm} (types/union-members expected))
             arm))))))

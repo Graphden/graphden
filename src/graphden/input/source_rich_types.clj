@@ -7,8 +7,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as records]
-    [graphden.types.core :as types]
-    [graphden.types.expansion :as expansion]))
+    [graphden.types.core :as types]))
 
 
 (defn- supported-value-type?
@@ -48,20 +47,6 @@
                 (conj (vec (vals (types/fn-args type))) (types/fn-ret type))))))
 
 
-(defn- source-union-shape?
-  [type named-ids]
-  (binding [types/*type-aliases-override* (atom {})]
-    (expansion/assert-finite! type))
-  (letfn [(leaf?
-            [value]
-            (or (types/primitive? value) (types/type-var? value) (= :never value)
-                (uuid? (get named-ids value))
-                (and (types/record-type? value) (seq value)
-                     (every? simple-keyword? (keys value))
-                     (every? (partial format/collection-type? leaf?) (vals value)))))]
-    (format/collection-type? leaf? type)))
-
-
 (defn erased-return?
   "Recover a generic, bottom, collection or union return erased by storage.
    Its frozen rich implementation entry must still match the authored type.
@@ -70,11 +55,7 @@
   ([type-id type named-ids]
    (and (or (types/type-var? type) (= :never type)
             (and (vector? type) (contains? #{:list :map :union} (first type))))
-        (or (descriptor/stored-source-type? type type-id named-ids)
-            ;; Storage keeps only the :any FK for an inline union. Record
-            ;; members remain in the verified source, including nested lists.
-            (and (types/union-type? type) (= type-id (ids/primitive-fn-id :any))
-                 (source-union-shape? type named-ids))))))
+        (descriptor/stored-source-return-type? type type-id named-ids))))
 
 
 (defn inline-record-return?

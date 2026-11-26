@@ -8,6 +8,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
+    [graphden.input.source-external :as external]
     [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-joint :as joint]
     [graphden.input.source-positional-type :as positional-type]
@@ -328,23 +329,28 @@
     {} (:scopes target-graph)))
 
 
+(defn- type-at-use
+  [renaming rich]
+  (if (seq renaming)
+    (types/freshen-with rich (fn [variable-sort variable] (if (= :value variable-sort) (get renaming variable variable) variable)))
+    rich))
+
+
 (defn- nested-field-checks
   [target-graph after use-scope]
   (let [checks (:obligations target-graph)
         renaming (when (some #(types/type-any? types/type-var? (:expected-type %)) checks)
-                   (nested-binders target-graph after use-scope))
-        rebase (fn [variable-sort variable] (if (= :value variable-sort) (get renaming variable variable) variable))]
+                   (nested-binders target-graph after use-scope))]
     (mapv (fn [check]
-            (cond-> (nested-field-check (:fn-id target-graph) use-scope check)
-              (seq renaming) (update :expected-type types/freshen-with rebase)))
+            (update (nested-field-check (:fn-id target-graph) use-scope check) :expected-type (partial type-at-use renaming)))
           checks)))
 
 
 (defn- scoped-unary-callable
   "Validate a unary call site receiving a graph with one explicit positional
-   parameter or a graph that ignores the argument. A capture-free target has
-   an independently reconstructible call-site type."
-  [snapshot before after {:keys [address row public-path]}]
+   parameter or a graph that ignores the argument. Preserve independently checked
+   public inputs of handlers that declare an empty parameter vector."
+  [snapshot before after {:keys [address row public-path external-graph]}]
   (let [[[root scope-path]] address
         id (:id row)
         target (:ref-fn-id row)
@@ -352,14 +358,19 @@
         edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :graph-callable}
         {:keys [expected-type dispatch-type reference]} (get-in after [:scopes scope-path :bindings address])
         original (get-in before [:public-input :routes public-path :completion-type])
-        {:keys [parameters captures external-captures callable-type]} (get-in after [:closures address])
+        {:keys [parameters captures external-captures call-sites callable-type]} (get-in after [:closures address])
         target-node (get-in after [:scopes (second use-scope)])
         signature (:signature target-node)]
     (when (and target (= target (:fn-id target-node)) (some #{edge} (:dependencies after))
                (= :graph-callable (:mode reference)) (true? (:capture-resolved? reference))
                (vector? parameters) (<= (count parameters) 1) (map? (:args signature))
-               (= parameters (mapv keyword (:lambda-params signature)) (vec (keys (:args signature))))
-               (= [] captures external-captures)
+               (= parameters (mapv keyword (:lambda-params signature))) (= [] captures)
+               (if (seq external-captures)
+                 (and (= [] parameters (:lambda-params signature) call-sites)
+                      (= target (:fn-id external-graph))
+                      (external/same-inputs? external-graph after use-scope public-path external-captures
+                                             (partial type-at-use (nested-binders external-graph after use-scope))))
+                 (and (= [] external-captures) (= parameters (vec (keys (:args signature))))))
                (types/fn-type? original) (= original dispatch-type)
                (= expected-type (types/resolve (:substitution after) original)) (types/fn-type? expected-type)
                (= 1 (count (types/fn-args expected-type)))
@@ -405,9 +416,9 @@
           use-scope [root (conj scope-path id)]
           edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
           proof (get-in after [:proofs address])
-          callable-type (scoped-unary-callable snapshot before after certificate)]
+          callable-type (:checked-callable certificate)]
       (when (or callable-type (some #{edge} (:dependencies after)))
-        (cond-> (nested-field-checks (or (get-in certificate [:checked-list :graph])
+        (cond-> (nested-field-checks (or (:external-graph certificate) (get-in certificate [:checked-list :graph])
                                          (checked-graph analyze snapshot target true))
                                      after use-scope)
           (and (or callable-type (:checked-list certificate)
@@ -446,18 +457,29 @@
          :kind :value-type :trigger :field-read :expected-type expected}))))
 
 
+(defn- reference-certificate
+  [snapshot analyze before after {:keys [address row] :as certificate}]
+  (if-let [result (scoped-list-reference snapshot analyze before after certificate)]
+    (assoc certificate :checked-list result)
+    (let [{:keys [parameters call-sites captures external-captures]} (get-in after [:closures address])
+          target (:ref-fn-id row)
+          checked (cond-> certificate
+                    (and target (= [] parameters call-sites captures) (seq external-captures)) (assoc :external-graph (checked-graph analyze snapshot target true)))]
+      (if-let [callable (scoped-unary-callable snapshot before after checked)]
+        (assoc checked :checked-callable callable)
+        certificate))))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
         original (set (:obligations before))
         certificates (if (= current original)
                        certificates
-                       (mapv (fn [certificate]
-                               (if-let [result (scoped-list-reference snapshot analyze before after certificate)]
-                                 (assoc certificate :checked-list result) certificate)) certificates))
+                       (mapv (partial reference-certificate snapshot analyze before after) certificates))
         alias-references (callable-alias-reference-addresses snapshot after certificates)
         prior (if (and (empty? alias-references) (not-any? :checked-list certificates)
-                       (not-any? #(scoped-unary-callable snapshot before after %) certificates))
+                       (not-any? :checked-callable certificates))
                 original
                 (into #{}
                       (comp (remove (fn [{:keys [address kind trigger expected-type] :as check}]

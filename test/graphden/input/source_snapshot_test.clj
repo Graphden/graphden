@@ -738,11 +738,14 @@
 (deftest lexical-leaf-keeps-the-old-binding-identity-on-source-round-trip
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             types/*type-aliases-override* (atom {})]
-    (let [primitives (filter #(#{:vec :empty?} (:name %)) (sources "collections"))
+    (let [primitives (concat (filter #(#{:vec :empty?} (:name %)) (sources "collections"))
+                             (filter #(= :not (:name %)) (sources "logic")))
           items {:namespace "fixture" :name :items :parent :vec :args {:coll {:value []}}}
           leaf {:namespace "fixture" :name :items-empty? :parent :empty? :args {:coll :items}}
           inline (assoc leaf :name :inline-items-empty? :args {:coll (select-keys items [:parent :args])})
-          definitions (into [items leaf inline] primitives)
+          outer {:namespace "fixture" :name :items-present? :parent :not
+                 :args {:value (select-keys inline [:parent :args])}}
+          definitions (into [items leaf inline outer] primitives)
           prepared (parse/prepare-module definitions {} {})
           package (snapshot/package-index prepared definitions)
           rows (group-by :kind (parse/parse-prepared-module prepared))
@@ -759,13 +762,21 @@
           inline-id (ids/fn-id "fixture" (:name inline))
           inline-result (snapshot/migrate-legacy-leaf package lookup inline-id signatures)
           [inline-row] (get-in inline-result [:v2 :bindings])
-          inline-child (get-in inline-result [:v2 :inline-definitions [reader]])]
+          inline-child (get-in inline-result [:v2 :inline-definitions [reader]])
+          outer-id (ids/fn-id "fixture" (:name outer))
+          outer-proof (get-in (snapshot/with-certified-owner (assoc package :legacy-graph lookup) outer-id signatures)
+                              [:closure-baselines outer-id])
+          [outer-child] (vals (get-in outer-proof [:v2 :inline-definitions]))
+          [outer-child-row] (:bindings outer-child)]
       (is (= :authored-source-equivalent (:verification migrated)))
       (is (= [:ref :fixture/items] (get-in migrated [:proposed :bind :coll])))
       (is (= [(ids/binding-id id old-slot) [reader]] ((juxt :id :target-path) row)))
       (is (= :authored-source-equivalent (:verification inline-result)))
       (is (= (ids/binding-id inline-id old-slot) (:id inline-row)))
       (is (= (:ref-fn-id inline-row) (:fn-id inline-child)))
+      (is (= :authored-source-equivalent (:verification outer-proof)))
+      (is (= [(ids/binding-id (:fn-id outer-child) old-slot) [reader]]
+             ((juxt :id :target-path) outer-child-row)))
       (is (= :unsupported-legacy-leaf
              (:code (failure #(snapshot/migrate-legacy-leaf package
                                                             (assoc-in lookup [:children-by-fn id] #{(random-uuid)})

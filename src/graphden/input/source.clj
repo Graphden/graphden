@@ -457,16 +457,18 @@
 
 (defn- certified-inline-plan
   [source child context]
-  (when-let [{:keys [proposed legacy] :as certificate} (get-in context [::certified-inlines (:fn-id child)])]
+  (when-let [{:keys [proposed legacy legacy-leaf] :as certificate} (get-in context [::certified-inlines (:fn-id child)])]
     (let [original (assoc source :description (or (:description source) (:description child)))
           arguments (:arguments legacy)
           names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
                                  (when scope-certificate
                                    [(:public-path scope-certificate) (second source-path)]))) arguments)]
-      (when (and (seq names)
+      (when (and (or (seq names) legacy-leaf)
                  (migration/same-edn? (normalize-source original context)
                                       (normalize-source (:source certificate) context)))
-        {:proposed (assoc proposed :legacy-scope-names names) :arguments arguments :blockers []}))))
+        (cond-> {:proposed (cond-> proposed (seq names) (assoc :legacy-scope-names names))
+                 :arguments arguments :blockers []}
+          legacy-leaf (assoc :legacy-leaf legacy-leaf))))))
 
 
 (defn- inline-child-plan
@@ -508,13 +510,14 @@
           expected (parse/inline-declaration normalized [(:name source) field position] ns-id)
           child (prepared-inline-child context ns-id ref)]
       (when-not (and (= (:name expected) ref) child) (err :inline-list-item-origin-mismatch nil))
-      (let [{:keys [proposed arguments blockers]} (when (contains? raw :args) (inline-child-plan raw child context))
+      (let [{:keys [proposed arguments blockers legacy-leaf]} (when (contains? raw :args) (inline-child-plan raw child context))
             v2 (if (contains? raw :args) (when proposed (format/migrate-inline raw proposed)) raw)]
         (when (seq blockers)
           (err :inline-list-item-declaration-required
                (mapv #(merge % (blocker source (:code %) (into path (:source-path %)))) blockers)))
         (when-not (and v2 (migration/same-edn? raw (format/inline-origin v2))) (err :inline-binding-origin-required nil))
-        {:ref ref :fn-id (:fn-id child) :inline-body v2 :body raw :arguments arguments}))))
+        (cond-> {:ref ref :fn-id (:fn-id child) :inline-body v2 :body raw :arguments arguments}
+          legacy-leaf (assoc :legacy-leaf legacy-leaf))))))
 
 
 (defn- lower-inline-argument
@@ -528,7 +531,7 @@
             problem #(assoc argument :blockers [(blocker source % source-path)])]
         (if (nil? child)
           (problem :missing-inline-declaration)
-          (let [{:keys [proposed arguments blockers]} (inline-child-plan body child context)
+          (let [{:keys [proposed arguments blockers legacy-leaf]} (inline-child-plan body child context)
                 v2 (when proposed (format/migrate-inline body proposed))]
             (cond
               (seq blockers)
@@ -536,7 +539,8 @@
                      (mapv #(merge % (blocker source (:code %) (into source-path (:source-path %)))) blockers))
               (not (and v2 (migration/same-edn? body (format/inline-origin v2))))
               (problem :inline-binding-origin-required)
-              :else (assoc argument :expression [:ref v2] :inline-arguments arguments :inline-fn-id (:fn-id child)))))))))
+              :else (cond-> (assoc argument :expression [:ref v2] :inline-arguments arguments :inline-fn-id (:fn-id child))
+                      legacy-leaf (assoc :inline-legacy-leaf legacy-leaf)))))))))
 
 
 (defn- lower-inlines
@@ -731,13 +735,6 @@
   (into {} (mapcat (partial legacy-inline-argument environment source prepared)) arguments))
 
 
-(defn- v2-inline-meaning
-  [[path child]]
-  [path {:origin (format/inline-origin (:inline-body child))
-         :meaning (v2-authored-meaning (dissoc (:source child) :bind :input :configure) child nil)
-         :children (into {} (map v2-inline-meaning) (:inline-definitions child))}])
-
-
 (defn- lexical-inline-origin
   [{:keys [row slot-id]} [path child :as entry]]
   (if (and row (= path (:target-path row)) (= (:fn-id child) (:ref-fn-id row)))
@@ -745,13 +742,31 @@
     entry))
 
 
+(declare ^:private v2-inline-meanings)
+
+
+(defn- v2-inline-meaning
+  [proofs [path child]]
+  (let [proof (get-in proofs [(:fn-id child) :legacy-leaf])]
+    [path {:origin (format/inline-origin (:inline-body child))
+           :meaning (v2-authored-meaning (dissoc (:source child) :bind :input :configure) child proof)
+           :children (v2-inline-meanings proofs (:fn-id child) (:inline-definitions child))}]))
+
+
+(defn- v2-inline-meanings
+  [proofs owner inlines]
+  (let [proof (get-in proofs [owner :legacy-leaf])
+        actual (into {} (comp (map (partial lexical-inline-origin proof)) (map (partial v2-inline-meaning proofs))) inlines)]
+    (when-not (= (count inlines) (count actual))
+      (throw (ex-info "Inline source sites overlap" {:code :inline-declaration-mismatch})))
+    actual))
+
+
 (defn- verify-inline-children!
-  [environment {:keys [source legacy legacy-leaf]} prepared v2]
+  [environment {:keys [source legacy]} prepared v2 proofs]
   (let [expected (legacy-inline-meanings environment source prepared (:arguments legacy))
-        inlines (:inline-definitions v2)
-        actual (into {} (comp (map (partial lexical-inline-origin legacy-leaf)) (map v2-inline-meaning)) inlines)]
-    (when-not (and (= (count inlines) (count actual))
-                   (migration/same-edn? expected actual))
+        actual (v2-inline-meanings proofs (:fn-id v2) (:inline-definitions v2))]
+    (when-not (migration/same-edn? expected actual)
       (throw (ex-info "Inline source identities or declarations changed"
                       {:type :input/source-verification :code :inline-declaration-mismatch})))))
 
@@ -765,10 +780,16 @@
 
 (defn- child-arguments
   [[_ arguments]]
-  (mapcat (fn [{:keys [inline-fn-id inline-arguments list-inline-items]}]
-            (cond-> (mapv (juxt :fn-id :arguments) (vals list-inline-items))
-              inline-fn-id (conj [inline-fn-id inline-arguments])))
+  (mapcat (fn [{:keys [inline-fn-id inline-arguments inline-legacy-leaf list-inline-items]}]
+            (cond-> (mapv (juxt :fn-id :arguments :legacy-leaf) (vals list-inline-items))
+              inline-fn-id (conj [inline-fn-id inline-arguments inline-legacy-leaf])))
           arguments))
+
+
+(defn- inline-proof-index
+  [owner arguments legacy-leaf]
+  (into {} (map (fn [[id args proof]] [id {:arguments args :legacy-leaf proof}]))
+        (tree-seq (comp seq second) child-arguments [owner arguments legacy-leaf])))
 
 
 (defn- legacy-leaf-context
@@ -789,18 +810,17 @@
 
 
 (defn- verification-context
-  [environment owner-id arguments bindings legacy-leaf]
-  (let [index (into {} (tree-seq (comp seq second) child-arguments [owner-id arguments]))
-        type-names (get-in environment [:context :name->id])]
+  [environment owner-id proofs bindings]
+  (let [type-names (get-in environment [:context :name->id])]
     (fn [v2]
       (let [[lowered rows] (source-context/lower-declarations environment v2)
             id (ids/fn-id (:namespace lowered) (:name lowered))
-            args (get index id)
+            {args :arguments legacy-leaf :legacy-leaf} (get proofs id)
             origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
         (-> (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
                                         (source-list/verified-traces args) args type-names)
             (merge (source-context/scoped-reference-context environment lowered rows args))
-            (legacy-leaf-context legacy-leaf bindings))))))
+            (legacy-leaf-context legacy-leaf origins))))))
 
 
 (defn- verify-compact-definition
@@ -810,7 +830,8 @@
         records (:records legacy)
         bindings (filterv #(= :binding (:kind %)) records)
         legacy-context (source-context/declaration-context environment prepared records bindings)
-        options {:context-for (verification-context environment definition-id (:arguments legacy) bindings legacy-leaf)
+        proofs (inline-proof-index definition-id (:arguments legacy) legacy-leaf)
+        options {:context-for (verification-context environment definition-id proofs bindings)
                  :normalize-inline-parent
                  (fn [ns-id parent]
                    (let [names (get-in environment [:context :name->id])
@@ -824,7 +845,7 @@
         [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
         legacy-meaning (legacy-authored-meaning prepared legacy-context bindings (:arguments legacy))
         v2-meaning (v2-authored-meaning lowered v2 legacy-leaf)]
-    (verify-inline-children! environment definition prepared v2)
+    (verify-inline-children! environment definition prepared v2 proofs)
     (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
       (throw (ex-info "Structured source records changed on round trip"
                       {:type :input/source-verification :code :v2-round-trip-mismatch})))

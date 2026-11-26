@@ -48,8 +48,10 @@
   (let [by-id (group-by definition-id originals)
         ambiguous (into #{} (keep (fn [[id ds]] (when (next ds) id))) by-id)
         declarations (into {} (map (juxt definition-id identity)) (vals (:defs-by-name prepared)))]
-    {:prepared (source/with-reference-index (assoc prepared ::rename/ambiguous-type-ids ambiguous
-                                                   ::source-context/reference-alias-witness reference-alias/witness))
+    {:prepared (-> (assoc prepared ::rename/ambiguous-type-ids ambiguous
+                          ::source-context/reference-alias-witness reference-alias/witness)
+                   (source-context/with-declaration-index declarations)
+                   (source/with-reference-index))
      :markers (shapes/markers-snapshot)
      :declarations declarations
      :named-type-ids (delay (named-types/named-id-index (:name->id prepared) declarations))
@@ -118,12 +120,16 @@
    Update both lookup paths used by the legacy parser and v2 replay."
   [{:keys [declarations] :as package} owner fields]
   (let [omit #(update % :args (fn [args] (apply dissoc args fields)))
-        baseline (omit (get declarations owner))]
+        baseline (omit (get declarations owner))
+        declarations (assoc declarations owner baseline)]
     (-> package
         (update-in [:originals owner] #(mapv omit %))
-        (assoc-in [:declarations owner] baseline)
-        (update-in [:prepared :defs-by-name]
-                   #(update-vals % (fn [d] (if (= owner (:fn-id d)) baseline d)))))))
+        (assoc :declarations declarations)
+        (update :prepared
+                (fn [prepared]
+                  (-> (update prepared :defs-by-name
+                              #(update-vals % (fn [d] (if (= owner (:fn-id d)) baseline d))))
+                      (source-context/with-declaration-index declarations)))))))
 
 
 (defn- owned-declaration

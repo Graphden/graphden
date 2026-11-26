@@ -36,13 +36,33 @@
   (if witness (update-in definition [:args (:field witness)] dissoc :as) definition))
 
 
+(defn- names-by-id
+  [name->id]
+  (group-by val (filter (comp uuid? val) name->id)))
+
+
+(defn- indexed-values
+  [source [stored-source indexed]]
+  (when (identical? source stored-source)
+    indexed))
+
+
+(defn with-declaration-index
+  "Reuse the package's canonical declaration and alias indexes during
+   per-definition replay. Check the prepared map identity before reuse."
+  [{:keys [defs-by-name name->id] :as context} declarations]
+  (let [aliases (or (indexed-values name->id (::alias-index context)) (names-by-id name->id))]
+    (assoc context ::declaration-index [defs-by-name declarations] ::alias-index [name->id aliases])))
+
+
 (defn environment
   "Capture the package's resolved dependency index and reuse legacy parses."
-  [{:keys [defs-by-name name->id] :as context}]
-  (let [definitions (concat (vals defs-by-name) (:fn-defs context))]
+  [{:keys [defs-by-name name->id fn-defs] :as context}]
+  (let [indexed (indexed-values defs-by-name (::declaration-index context))
+        definitions (if indexed fn-defs (concat (vals defs-by-name) fn-defs))]
     {:context (rename/prepare-context context)
-     :names-by-id (group-by val (filter (comp uuid? val) name->id))
-     :definition-by-id (into {} (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
+     :names-by-id (or (indexed-values name->id (::alias-index context)) (names-by-id name->id))
+     :definition-by-id (into (or indexed {}) (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)
      :records-of (memoize (fn [definition]
                             (parse/parse-prepared-module (assoc context :fn-defs [definition]))))}))

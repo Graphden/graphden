@@ -6,6 +6,7 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.format :as format]
     [graphden.input.inheritance :as inheritance]
+    [graphden.input.legacy-use :as legacy-use]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.signatures :as signatures]
@@ -506,6 +507,30 @@
   [package function-ids roots]
   (let [{:keys [context entries]} (freeze-declarations package function-ids roots)]
     {:context context :options (implementation-options context entries roots)}))
+
+
+(defn replay-legacy-use
+  "Analyze a legacy initializer at its final owner and retain its stored
+   identity. This is a local typed comparison. It does not certify source
+   emission or how other functions inherit the original declaration."
+  [package legacy-graph owner roots]
+  (let [{:keys [binding declarations]} (legacy-use/select-binding legacy-graph owner)
+        _ (when-not binding (reject! :unsupported-legacy-use owner))
+        baseline (reduce (fn [package [declaration field]]
+                           (when-not (contains? (get-in package [:declarations declaration :args]) field)
+                             (reject! :missing-legacy-use-declaration declaration))
+                           (-> (omit-arguments package declaration [field])
+                               (update :closure-baselines dissoc declaration)))
+                         package declarations)
+        targets (cond-> [owner] (:ref-fn-id binding) (conj (:ref-fn-id binding)))
+        {:keys [context options]} (freeze-source-analysis baseline targets roots)
+        context (analysis/with-use-bindings context {owner [binding]})
+        graph (analysis/analyze-effective-input context owner options)
+        address [[owner []] (:target-path binding)]
+        actual (get-in graph [:scopes [] :bindings address])]
+    (when-not (= ((juxt :id :fn-id) binding) ((juxt :binding-id :origin-fn-id) actual))
+      (reject! :legacy-use-binding-mismatch owner))
+    graph))
 
 
 (defn- freeze-source-declarations

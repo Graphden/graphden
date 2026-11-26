@@ -8,6 +8,7 @@
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
     [graphden.input.analysis :as analysis]
+    [graphden.input.legacy-use :as legacy-use]
     [graphden.input.list-builder :as list-builder]
     [graphden.input.list-execution :as list-execution]
     [graphden.input.list-signature :as list-signature]
@@ -701,15 +702,35 @@
           remapped (update graph :bindings
                            #(mapv (fn [row] (if (= (:id row) (:id binding)) (assoc row :slot-id destination) row)) %))
           compile-graph #(eager/compile-all (assoc (lookups/build-lookups %) :base-fns (registry/compute-base-fns-map @loaded-bases)))
+          lookup (lookups/build-lookups graph)
+          selected (legacy-use/select-binding lookup owner)
+          override (legacy-use/select-binding lookup derived)
+          package (snapshot/package-index prepared definitions)
+          _ (sync/register-type-aliases! definitions)
+          _ (doseq [{module-ns :namespace :keys [name]} definitions
+                    :let [base (get @loaded-bases name)]
+                    :when base]
+              (registry/record-rich-types! (ids/fn-id module-ns name) name base))
+          signatures (:by-id @registry/*rich-types-override*)
+          original-replay (snapshot/replay-legacy-use package lookup owner signatures)
+          override-replay (snapshot/replay-legacy-use package lookup derived signatures)
           before (compile-graph graph)
           after (compile-graph remapped)
-          refused (failure #(snapshot/verify-binding (snapshot/package-index prepared definitions) owner {}))]
+          refused (failure #(snapshot/verify-binding package owner {}))]
       (is (= (ids/slot-id (ids/fn-id "core.strings" :str-trim) :string) (:slot-id binding)))
       (is (= (dissoc binding :slot-id)
              (dissoc (some #(when (= (:id binding) (:id %)) %) (:bindings remapped)) :slot-id)))
       (is (= "app.fn" ((before owner) {:q "  APP/Fn  "} {}) ((after owner) {:q "  APP/Fn  "} {})))
       (is (= "  ORIGINAL.CASE  " ((before derived) {} {})))
       (is (= "" ((after derived) {} {})))
+      (is (= [owner (:id binding) [destination]]
+             ((juxt :fn-id :id :target-path) (:binding selected))))
+      (is (= [derived (ids/binding-id derived (:slot-id binding)) [destination]]
+             ((juxt :fn-id :id :target-path) (:binding override))))
+      (is (= [[derived :string] [owner :string]] (:declarations override)))
+      (is (= :checked (:status original-replay) (:status override-replay)))
+      (is (contains? (get-in original-replay [:public-input :routes]) [:string :string :string :q]))
+      (is (= {[] {:kind :input-record :type {}}} (get-in override-replay [:public-input :routes])))
       (is (= :missing-reference-use (:code refused)))
       (is (= owner (:fn-id refused))))))
 

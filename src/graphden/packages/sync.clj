@@ -288,6 +288,30 @@
   (into {} (map (comp (juxt :fn-id :input-type-id) :parsed val)) primitives))
 
 
+(defn- reconcile-literal-children!
+  "A new pin can free a previously bound field. Retire only the deterministic
+   literal rows of a current package child, retaining their branch history."
+  [storage primitives]
+  (let [children (mapcat :children (remove :list-module (vals primitives)))
+        fields (into {} (map (fn [{:keys [fn-id contract]}]
+                               [fn-id (into {} (map (fn [{slot :id}] [(records/binding-id fn-id slot) [(str slot)]]))
+                                            (:fields contract))])) children)
+        retained (into #{} (mapcat #(map :id (:bindings %))) children)]
+    (when (seq fields)
+      (doseq [{:keys [id fn-id target-path scope-path expression-kind value-present] :as row}
+              (sp/query-entities storage :input-binding {:fn-id (vec (keys fields))})
+              :when (not (contains? retained id))]
+        (when-not (and (contains? (get fields fn-id) id) (= target-path (get-in fields [fn-id id]))
+                       (= [] scope-path) (= "value" expression-kind) (true? value-present) (not (coll? (:value row)))
+                       (not-any? #(some? (get row %)) [:ref-fn-id :resolver-fn-id :projection-path :projection-scope-path
+                                                       :type-override-fn-id :required :terminal :description]))
+          (throw (ex-info "Cannot retire an unrecognized package binding" {:type :package-error/primitive-admission})))
+        (input-access/with-binding-write fn-id id
+                                         #(binding [vs/*tombstone-delete?* true]
+                                            (when-not (sp/delete-entity storage :input-binding id)
+                                              (throw (ex-info "Package binding removal failed" {:type :package-error/primitive-admission})))))))))
+
+
 (defn- sync-package-bases!
   [storage definitions ns-id-map all-name->id impls primitives]
   (if (empty? primitives)
@@ -303,6 +327,7 @@
                                            storage definitions ns-id-map all-name->id
                                            (fn [signatures]
                                              (update-vals primitives #(primitive/checked-records % impls signatures))))]
+                             (reconcile-literal-children! storage primitives)
                              (doseq [{:keys [fn-id id] :as row} (sort-by (comp count :scope-path) bindings)]
                                ;; JSONB stores path UUIDs as strings. Send that
                                ;; same representation to the version diff.

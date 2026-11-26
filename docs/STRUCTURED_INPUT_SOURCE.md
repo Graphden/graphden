@@ -585,7 +585,8 @@ preparation and report explicit blockers.
 primitive parent declared in the same pinned module. Each flat
 `[:value scalar]` binding derives its UUID from the owner and its inherited
 field. Checked execution exposes the remaining fields, including an empty
-input record when every field is bound. The seam blocks inherited or external
+input record when every field is bound. An omitted or empty binding map
+exposes every parent field. The seam blocks inherited or external
 parents, configuration, extra declarations and references.
 
 ### Defaults in pinned record inputs

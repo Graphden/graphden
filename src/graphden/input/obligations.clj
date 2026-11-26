@@ -20,20 +20,30 @@
      :kind kind :trigger trigger :expected-type (or expected-type (:type node))}))
 
 
-(defn- concrete-union-member?
-  [member union]
-  (and (types/union-type? union)
-       (not (types/type-any? types/type-var? union))
-       (some #{member} (types/union-members union))))
+(defn- map-check-implies?
+  [narrow broad]
+  (and (types/map-type? narrow) (types/map-type? broad)
+       (= (types/map-key narrow) (types/map-key broad))
+       (= :any (types/map-val broad))))
+
+
+(defn- check-implies?
+  [narrow broad]
+  (or (= narrow broad) (= :any broad)
+      (and (not (types/type-any? types/type-var? narrow))
+           (not (types/type-any? types/type-var? broad))
+           ;; Validate the same keys and every value in the stronger map.
+           ;; Record checks do not constrain the keys of extra entries.
+           (some #(or (= narrow %) (map-check-implies? narrow %))
+                 (or (types/union-members broad) [broad])))))
 
 
 (defn- retain-obligation
   [by-id {:keys [id expected-type] :as incoming}]
   (if-let [{prior :expected-type} (get by-id id)]
     (cond
-      (or (= expected-type prior) (= :any expected-type)
-          (concrete-union-member? prior expected-type)) by-id
-      (or (= :any prior) (concrete-union-member? expected-type prior)) (assoc by-id id incoming)
+      (check-implies? prior expected-type) by-id
+      (check-implies? expected-type prior) (assoc by-id id incoming)
       ;; A single read can require multiple checks. Their intersection needs
       ;; an explicit representation before it can be passed to the compiler.
       :else (context/reject! :conflicting-runtime-obligations (select-keys incoming [:address :kind :trigger])))

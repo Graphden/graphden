@@ -29,18 +29,30 @@
                   (catch clojure.lang.ExceptionInfo error (ex-data error))))))))
 
 
-(deftest a-concrete-union-member-implies-the-broader-read-check-in-either-order
+(deftest a-concrete-dictionary-implies-a-broader-read-check-in-either-order
   (let [owner (random-uuid)
         field (random-uuid)
         address [[owner []] [field]]
-        dictionary [:map :keyword :any]
-        broad [:union :null [:list :any] dictionary]
-        graph {:scopes {[] {:configured-contract {:fields [{:id field :type dictionary}]}}}}]
-    (doseq [checks [[dictionary broad] [broad dictionary]]]
-      (let [diagnostics (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) checks)
-            result (obligations/separate (assoc graph :diagnostics diagnostics))]
-        (is (= [[address dictionary :field-read]]
-               (mapv (juxt :address :expected-type :trigger) (:obligations result))))))))
+        dictionary [:map :uuid [:list [:map :keyword :any]]]
+        open-values [:map :uuid :any]
+        union [:union :null [:list :any] open-values]
+        graph {:scopes {[] {:configured-contract {:fields [{:id field :type dictionary}]}}}}
+        separate (fn [checks]
+                   (obligations/separate
+                     (assoc graph :diagnostics
+                            (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) checks))))]
+    (doseq [narrow [dictionary open-values]
+            broad (if (= narrow dictionary) [open-values union] [union])
+            checks [[narrow broad] [broad narrow]]]
+      (let [result (separate checks)]
+        (is (= [[address narrow :field-read]]
+               (mapv (juxt :address :expected-type :trigger) (:obligations result))))))
+    (doseq [checks [[[:map :keyword :any] union]
+                    [dictionary [:map :uuid :text]]
+                    [{:id :uuid} union]]]
+      (is (= :conflicting-runtime-obligations
+             (try (separate checks) nil
+                  (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
 
 
 (deftest equal-shapes-from-independent-binders-remain-distinct-checks

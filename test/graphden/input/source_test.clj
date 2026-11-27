@@ -707,6 +707,20 @@
     (is (contains? (codes (result (plan [parent duplicate]) :profile)) :rename-field-collision))))
 
 
+(deftest rename-and-a-different-typed-literal-keep-their-own-bindings
+  (let [parent {:namespace "demo" :name :sink :args {:x {:type :text} :count {:type :any}} :return-type :text}
+        child {:namespace "demo" :name :child :parent :sink
+               :args {:x {:as :text-value} :count {:value 2 :type :int}}}
+        ctx (prepared [parent child])
+        planned (source/plan-module [child] ctx)
+        entry (result (source/verify-module planned ctx) :child)
+        changed (assoc-in planned [:definitions 0 :proposed :configure [:count] :type] :text)]
+    (is (= :authored-source-equivalent (:verification entry)) (pr-str (:blockers entry)))
+    (is (= {:x [:project [:text-value]] :count [:value 2]} (get-in entry [:proposed :bind])))
+    (is (= {[:count] {:type :int}} (get-in entry [:proposed :configure])))
+    (is (= :blocked (:status (result (source/verify-module changed ctx) :child))))))
+
+
 (deftest generic-rename-keeps-the-source-type-variable-and-its-original-slot-identities
   (let [rich '[:union :null [:map a :any] [:list :any]]
         lookup {:name :lookup :namespace "fixture" :args {:coll {:type rich}} :return-type :any}

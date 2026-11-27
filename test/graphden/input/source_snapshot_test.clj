@@ -1079,6 +1079,29 @@
                :diagnostics first :code)))))
 
 
+(deftest dictionary-components-keep-their-original-type-identities
+  (let [module "dictionary.fixture"
+        inputs (mapv #(assoc % :namespace module)
+                     [{:name :key-type :union [:keyword :text]}
+                      {:name :entry-value :type {:label :text}}
+                      {:name :entries :map {:key :key-type :value :entry-value}}])
+        typed-package (fn [forms] (snapshot/package-index (parse/prepare-module forms {} {}) forms))
+        package (typed-package inputs)
+        freeze (fn [p]
+                 (let [lookup (named-types/lookup p #(#'snapshot/plan-entry p %))]
+                   (named-types/evidence {} lookup {} [:entries])))
+        frozen (freeze package)
+        ids (fn [name] (ids/fn-id module name))]
+    (is (= [:map :key-type :entry-value] (get-in frozen [:aliases :entries])))
+    (is (= {:label :text} (get-in frozen [:aliases :entry-value])))
+    (is (= (ids :key-type) (get-in frozen [:alias-ids :key-type])))
+    (is (= (ids :entry-value) (get-in frozen [:alias-ids :entry-value])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"source declaration"
+          (freeze (update package :originals dissoc (ids :entry-value)))))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (freeze (typed-package (assoc-in inputs [2 :map :value] :entries)))))))
+
+
 (deftest nested-uses-retain-two-scopes-and-one-original-rename
   (let [core (into (filterv #(#{:str-trim :re-find?} (:name %)) (sources "strings"))
                    (filter #(= :equal? (:name %))) (sources "logic"))

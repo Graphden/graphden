@@ -36,6 +36,7 @@
     (case kind
       :list (if (and (keyword? form) (not (types/primitive? form))) (resolve-ref form) form)
       :union (if (vector? form) (mapv #(rebase/rewrite-type-references % resolve-ref) form) form)
+      :map (if (map? form) (update-vals form #(rebase/rewrite-type-references % resolve-ref)) form)
       form)))
 
 
@@ -137,8 +138,10 @@
                          :refine (refinement-body id form row children)
                          :list (list-body id normalized-form row children type-id)
                          :union (union-body normalized-form id type-id)
-                         :map (let [{:keys [key value]} form]
-                                (when-not (every? types/primitive? [key value]) (reject! :named-dictionary-evidence-required id))
+                         :map (let [{:keys [key value]} normalized-form]
+                                (when-not (and (map? normalized-form) (= #{:key :value} (set (keys normalized-form)))
+                                               (every? #(and (keyword? %) (uuid? (type-id %))) [key value]))
+                                  (reject! :named-dictionary-evidence-required id))
                                 [:map key value]))
                   declared-name (:name definition)
                   ns-name (:namespace definition)
@@ -213,7 +216,9 @@
            (recur (pop pending) (conj seen name) frozen))
          (let [frozen (rule-aliases frozen aliases)]
            (context/call-with-types frozen
-                                    #(run! expansion/assert-finite! (union-constraints frozen)))
+                                    #(doseq [[id origin] (:type-origins frozen)
+                                             :when (or (:union origin) (:map origin))]
+                                       (expansion/assert-finite! (get-in frozen [:fns id :constraint]))))
            frozen))))))
 
 

@@ -35,7 +35,8 @@
            (not (types/type-any? types/type-var? broad))
            ;; Validate the same keys and every value in the stronger map.
            ;; Record checks do not constrain the keys of extra entries.
-           (some #(or (= narrow %) (map-check-implies? narrow %))
+           (some #(or (= narrow %) (map-check-implies? narrow %)
+                      (and (types/list-type? narrow) (types/list-type? %) (= :any (types/list-elem %))))
                  (or (types/union-members broad) [broad])))))
 
 

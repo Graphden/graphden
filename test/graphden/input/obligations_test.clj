@@ -56,6 +56,25 @@
                   (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
 
 
+(deftest a-checked-list-retains-its-element-validation
+  (let [owner (random-uuid)
+        field (random-uuid)
+        address [[owner []] [field]]
+        narrow [:list [:list :any]]
+        graph {:scopes {[] {:configured-contract {:fields [{:id field :type narrow}]}}}}
+        separate (fn [types]
+                   (obligations/separate
+                     (assoc graph :diagnostics
+                            (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) types))))]
+    (doseq [broad [[:list :any] [:union :null [:list :any]]]
+            types [[narrow broad] [broad narrow]]]
+      (is (= [narrow] (mapv :expected-type (:obligations (separate types))))))
+    (doseq [other [[:list :text] [:list :keyword] '[:list a]]]
+      (is (= :conflicting-runtime-obligations
+             (try (separate [narrow other]) nil
+                  (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
+
+
 (deftest equal-shapes-from-independent-binders-remain-distinct-checks
   (let [owner (random-uuid)
         field (random-uuid)

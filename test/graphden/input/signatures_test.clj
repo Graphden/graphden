@@ -237,3 +237,29 @@
     (let [narrowed (infer scope #(-> % (assoc-in [:configured-contract :type :coll] :any)
                                      (assoc-in [:configured-contract :fields 0 :type] :any)) implementation)]
       (is (not= source-variable (get-in narrowed [:root-entry :return]))))))
+
+
+(deftest projected-lookups-instantiate-only-their-private-map-key
+  (let [base (ids/fn-id "core.collections" :get)
+        owner (random-uuid)
+        scope [owner []]
+        abi [base [owner]]
+        field (ids/slot-id base :coll)
+        address [scope [field]]
+        variable (variables/type-in-scope abi 'a)
+        domain [:union :null [:list :any] [:map variable :any]]
+        root {:fn-id base :name :get :namespace "core.collections" :return :any :args {:key :any :default :any :coll domain}}
+        record {:id :uuid}
+        facts (fn [rich] {:bindings-info {:coll {:type rich :address address}}})
+        node (fn [rich] {:bindings {address {:expected-type rich :reference {:mode :projection :actual-type rich}}}})
+        specialize (fn [entry n renaming f] (#'signatures/projected-lookup-signature entry n scope abi renaming f))]
+    (doseq [[rich key-type] [[record :any] [[:map :text :int] :text]]]
+      (is (= #{:null [:list :any] [:map key-type :any]}
+             (set (rest (get-in (specialize root (node rich) {} (facts rich)) [:args :coll]))))))
+    (doseq [[entry n renaming f] [[(assoc root :fn-id (random-uuid)) (node record) {} (facts record)]
+                                  [(assoc-in root [:args :key] variable) (node record) {} (facts record)]
+                                  [root (node record) {variable 'caller-key} (facts record)]
+                                  [root (assoc-in (node record) [:bindings address :reference :mode] :value) {} (facts record)]
+                                  [root (node record) {} (facts {:different :text})]
+                                  [root (node '{:id k}) {} (facts '{:id k})]]]
+      (is (= entry (specialize entry n renaming f))))))

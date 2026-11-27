@@ -32,11 +32,14 @@
   [narrow broad]
   (or (= narrow broad) (= :any broad)
       (and (not (types/type-any? types/type-var? narrow))
-           (not (types/type-any? types/type-var? broad))
-           ;; Validate the same keys and every value in the stronger map.
-           ;; Record checks do not constrain the keys of extra entries.
-           (some #(or (= narrow %) (map-check-implies? narrow %)
-                      (and (types/list-type? narrow) (types/list-type? %) (= :any (types/list-elem %))))
+           ;; A single closed arm suffices. Other union arms can have private
+           ;; variables. Records allow arbitrary extra keys, so they imply
+           ;; only a map that accepts every key and value.
+           (some (fn [arm]
+                   (and (not (types/type-any? types/type-var? arm))
+                        (or (= narrow arm) (map-check-implies? narrow arm)
+                            (and (types/record-type? narrow) (= [:map :any :any] arm))
+                            (and (types/list-type? narrow) (types/list-type? arm) (= :any (types/list-elem arm))))))
                  (or (types/union-members broad) [broad])))))
 
 

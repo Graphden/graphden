@@ -75,6 +75,21 @@
                   (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
 
 
+(deftest a-concrete-arm-covers-the-read-independently-of-other-union-arms
+  (let [owner (random-uuid)
+        field (random-uuid)
+        address [[owner []] [field]]
+        envelope '[:union :null [:list :any] [:map k :any]]
+        separate (fn [narrow broad]
+                   (-> {:scopes {[] {:configured-contract {:fields [{:id field :type narrow}]}}}
+                        :diagnostics (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) [broad narrow])}
+                       obligations/separate :obligations first :expected-type))]
+    (is (= [:list :text] (separate [:list :text] envelope)))
+    (is (= {:id :uuid} (separate {:id :uuid} [:union :null [:map :any :any]])))
+    (is (= :conflicting-runtime-obligations (try (separate {:id :uuid} envelope) nil
+                                                (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))))
+
+
 (deftest equal-shapes-from-independent-binders-remain-distinct-checks
   (let [owner (random-uuid)
         field (random-uuid)

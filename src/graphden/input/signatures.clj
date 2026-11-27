@@ -7,6 +7,7 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]
     [graphden.types.reference :as reference]
     [graphden.types.validator :as validator])
@@ -263,6 +264,32 @@
     {} declarations))
 
 
+(def ^:private get-id (ids/fn-id "core.collections" :get))
+(def ^:private get-collection-field (ids/slot-id get-id :coll))
+
+
+(defn- projected-lookup-signature
+  "The native lookup has one private key variable, used only in its map arm.
+   A record admits extra keys of any type. A homogeneous map supplies its
+   declared key type. Neither witness changes an authored or shared binder."
+  [root-entry node scope implementation-scope renaming facts]
+  (let [{:keys [type address]} (get-in facts [:bindings-info :coll])
+        bound (get-in node [:bindings address])
+        key-type (cond (types/record-type? type) :any (types/map-type? type) (types/map-key type))]
+    (if (and key-type (= get-id (:fn-id root-entry)) (= [scope [get-collection-field]] address)
+             (= "core.collections" (:namespace root-entry)) (= :get (:name root-entry))
+             (= :projection (get-in bound [:reference :mode])) (= type (:expected-type bound) (get-in bound [:reference :actual-type]))
+             (not (types/type-any? types/type-var? type)))
+      (let [variable (variables/type-in-scope implementation-scope 'a)
+            domain (get-in root-entry [:args :coll])]
+        (if (and (not (contains? renaming variable)) (= :any (:return root-entry))
+                 (= {:key :any :default :any} (dissoc (:args root-entry) :coll))
+                 (= #{:null [:list :any] [:map variable :any]} (set (types/union-members domain))))
+          (assoc-in root-entry [:args :coll] (types/resolve {variable key-type} domain))
+          root-entry))
+      root-entry)))
+
+
 (defn infer-use
   "Infer one use from resolved dependency signatures through the supplied
    existing-engine callback. The implementation descriptor is shared with the
@@ -286,7 +313,8 @@
         facts (binding-facts graph scope argument-paths)
         _ (check-rule-type! root-entry (:bindings-info facts))
         result (infer-signature
-                 (assoc facts :fn-id (:fn-id node) :root-entry root-entry
+                 (assoc facts :fn-id (:fn-id node)
+                        :root-entry (projected-lookup-signature root-entry node scope implementation-scope renaming facts)
                         :signature-view (frozen-view ctx graph base-fn-id root-entry)
                         :declaration declaration))
         signature (-> result

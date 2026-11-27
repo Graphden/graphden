@@ -158,7 +158,7 @@
             (if (contains? node :fields)
               (cond-> (assoc field :fields (input-fields fields address-ids record-inputs whole-record-inputs encode))
                 (contains? record-inputs address) (assoc :slot (get address-ids address))
-                (contains? whole-record-inputs address) (assoc :whole true))
+                (contains? whole-record-inputs address) (assoc :whole (if (= :any (get whole-record-inputs address)) "any" true)))
               (assoc field :slot (get address-ids address)))))
         nodes))
 
@@ -186,8 +186,8 @@
   (let [checks (get value-obligations address)
         checks (if (= :supplied (:op expression)) (remove #{(:type expression)} checks) checks)
         emitted (reduce validate-expression (browser-expression expression address wire) checks)
-        emitted (if-let [required (get container-obligations address)]
-                  {:kind "validate" :type {:recordKeys (mapv (juxt namespace name) required)} :expr emitted}
+        emitted (if-let [{:keys [required key-type]} (get container-obligations address)]
+                  {:kind "validate" :type {:recordKeys (mapv (juxt namespace name) required) :keyType (name key-type)} :expr emitted}
                   emitted)]
     (function-plan (get address-ids address) const-id (get owners address)
                    [{:name "value" :expr emitted}])))

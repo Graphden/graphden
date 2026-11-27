@@ -96,10 +96,14 @@
                   (get (:supplied frame) address default))
       :read (when (or (not nil-when-absent?) (get-in frame [:present source]))
               @(get-in frame [:cells source]))
-      :record (input/record-view
-                (into (update-vals (get (:supplied frame) address {}) input/value-cell) (keep (fn [[name child]]
-                                                                                                (when (get-in frame [:present child])
-                                                                                                  [name (get-in frame [:cells child])])) fields)))
+      :record (let [view (if (= :any (get-in frame [:ir :whole-record-inputs address]))
+                           input/dictionary-view input/record-view)
+                    extras (get (:supplied frame) address {})
+                    extra-cells (if (input/record-view? extras) (input/cache-token extras) (update-vals extras input/value-cell))]
+                (view (into extra-cells (keep (fn [[name child]]
+                                                (when (get-in frame [:present child])
+                                                  [name (get-in frame [:cells child])])))
+                            fields)))
       :invoke (let [{:keys [base-fn-id argument-paths name]} (get-in frame [:ir :scopes scope])]
                 (executor/check-cancel!)
                 (eager/invoke-compiled
@@ -124,7 +128,8 @@
                                   (and (contains? record-inputs address)
                                        (or (= {} value)
                                            (and (contains? (:whole-record-inputs ir) address)
-                                                (map? value) (every? keyword? (keys value))
+                                                (map? value) (or (= :any (get-in ir [:whole-record-inputs address]))
+                                                                 (every? keyword? (keys value)))
                                                 (not-any? #(contains? value (first %))
                                                           (get-in ir [:expressions address :fields])))))))
                             supplied)

@@ -4,6 +4,7 @@
   (:require
     [graphden.input.descriptor :as descriptor]
     [graphden.input.literal-lookup :as literal-lookup]
+    [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.obligations :as obligations]
     [graphden.types.core :as types]
     [graphden.types.reference :as reference]))
@@ -78,27 +79,39 @@
 
 
 (defn- container-validator
-  [expressions {:keys [address trigger expected-type additional-types]}]
+  [analysis expressions scopes {:keys [address trigger expected-type additional-types]}]
   (let [source (loop [at address]
                  (let [expression (get expressions at)]
                    (if (= :read (:op expression)) (recur (:source expression)) at)))
         origin (get expressions source)
-        fields (:fields origin)]
+        fields (:fields origin)
+        [scope path] address
+        native (get scopes scope)
+        binding (get-in analysis [:scopes (second scope) :bindings address])
+        {collection :argument original-path :path} (lookup-abi/collection-argument (:root-entry native) 'a)
+        dictionary (cond
+                     (and (= 1 (count additional-types))
+                          (obligations/materialized-dictionary? expected-type (first additional-types))) :keyword
+                     (and (empty? additional-types) collection (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
+                          (= path original-path (get-in native [:argument-paths collection]))
+                          (= :read (get-in expressions [address :op]))
+                          (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
+                          (= expected-type (:expected-type binding) (get-in binding [:reference :actual-type]))
+                          (obligations/portable-record? expected-type)) :any)]
     ;; Only the precise constructed record is known to keep field validators
     ;; on its own lazy cells. Check its keys at the materializing read.
     (when-not (and (= :container-materialization trigger) (= :record (:op origin))
-                   (= expected-type (:type origin)) (= 1 (count additional-types))
-                   (obligations/materialized-dictionary? expected-type (first additional-types))
+                   (= expected-type (:type origin)) dictionary
                    (= (set (keys expected-type)) (set (map first fields)))
                    (every? (fn [[name address]]
                              (= {:op :supplied :type (get expected-type name)}
                                 (select-keys (get expressions address) [:op :type]))) fields))
       (reject! :runtime-obligations-required {:address address :kind :container-type :trigger trigger}))
-    {:source source :required (vec (sort (keys expected-type)))}))
+    {:source source :required (vec (sort (keys expected-type))) :key-type dictionary}))
 
 
 (defn- read-obligations
-  [analysis expressions closures]
+  [analysis expressions scopes closures]
   (let [obligations (distinct (concat (:obligations analysis) (mapcat :obligations (vals (:scopes analysis)))))
         whole (into #{} (comp (filter #(and (= :input-field (:kind %)) (:whole-bindable? %))) (map :address))
                     (vals (get-in analysis [:public-input :routes])))]
@@ -107,13 +120,14 @@
                         (contains? (:container-obligations plan) address))
                 (reject! :conflicting-runtime-obligations {:address address}))
               (if (= :container-type kind)
-                (let [{:keys [source required]} (container-validator expressions entry)]
-                  (cond-> (assoc-in plan [:container-obligations address] required)
-                    (contains? whole source) (update :whole-record-inputs conj source)))
+                (let [{:keys [source key-type] :as proof} (container-validator analysis expressions scopes entry)]
+                  (cond-> (assoc-in plan [:container-obligations address] (dissoc proof :source))
+                    (contains? whole source) (update-in [:whole-record-inputs source]
+                                                        #(if (= :keyword %) :keyword key-type))))
                 (let [checks (into [] (keep #(read-validator analysis expressions closures (assoc entry :expected-type %)))
                                    (cons expected-type additional-types))]
                   (cond-> plan (seq checks) (assoc-in [:value-obligations address] checks)))))
-            {:value-obligations {} :container-obligations {} :whole-record-inputs #{}} obligations)))
+            {:value-obligations {} :container-obligations {} :whole-record-inputs {}} obligations)))
 
 
 (defn- lower-binding
@@ -509,7 +523,7 @@
                               (mapcat :record-addresses) (vals closures))
           program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})
           layouts (frame-layouts root scopes expressions closures program (:required-addresses analysis))]
-      (merge (read-obligations analysis expressions closures)
+      (merge (read-obligations analysis expressions scopes closures)
              {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
               :closures closures :frame-layouts layouts :presence-program program
               :required-addresses (get-in layouts [root :required-addresses])

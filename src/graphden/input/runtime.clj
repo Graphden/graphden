@@ -73,7 +73,7 @@
 
 (defn- read-field
   [cells key not-found]
-  (if-let [entry (when (keyword? key) (find cells key))]
+  (if-let [entry (find cells key)]
     @(val entry)
     not-found))
 
@@ -88,7 +88,7 @@
 
 
 (defn- make-record
-  [cells metadata]
+  [cells metadata keyword-keys?]
   ;; APersistentMap supplies symmetric value equality, Clojure/Java hashes,
   ;; map invocation, Java Map views and persistent conj. Those are ordinary
   ;; value consumers, never the compiler's non-forcing memo identity.
@@ -97,15 +97,15 @@
 
     (meta [] metadata)
 
-    (withMeta [m] (make-record cells m))
+    (withMeta [m] (make-record cells m keyword-keys?))
 
     (count [] (count cells))
 
-    (containsKey [key] (and (keyword? key) (contains? cells key)))
+    (containsKey [key] (contains? cells key))
 
     (entryAt
       [key]
-      (when-let [entry (when (keyword? key) (find cells key))] (lazy-entry key (val entry))))
+      (when-let [entry (find cells key)] (lazy-entry key (val entry))))
 
     (valAt
       ([key] (read-field cells key nil))
@@ -113,19 +113,19 @@
 
     (assoc
       [key value]
-      (field-key! key)
-      (make-record (assoc cells key (value-cell value)) metadata))
+      (when keyword-keys? (field-key! key))
+      (make-record (assoc cells key (value-cell value)) metadata keyword-keys?))
 
     (assocEx
       [key value]
-      (field-key! key)
+      (when keyword-keys? (field-key! key))
       (when (contains? cells key)
         (throw (RuntimeException. "Key already present")))
-      (make-record (assoc cells key (value-cell value)) metadata))
+      (make-record (assoc cells key (value-cell value)) metadata keyword-keys?))
 
-    (without [key] (make-record (if (keyword? key) (dissoc cells key) cells) metadata))
+    (without [key] (make-record (dissoc cells key) metadata keyword-keys?))
 
-    (empty [] (make-record {} metadata))
+    (empty [] (make-record {} metadata keyword-keys?))
 
     (seq [] (entry-seq cells))
 
@@ -136,19 +136,30 @@
       (reduce-kv (fn [acc key cell] (f acc key @cell)) init cells))))
 
 
+(defn- checked-cells
+  [cells]
+  (when-not (and (map? cells) (not (record-view? cells))
+                 (every? #(instance? FieldCell %) (vals cells)))
+    (throw (ex-info "Record fields must be explicit cells" {:type :input/invalid-record-cells})))
+  (into {} cells))
+
+
 (defn record-view
   "Construct a persistent map view from keyword field-name → FieldCell. Nested
    records must be supplied explicitly as cell results; dictionaries are
    never inspected or recursively wrapped. Share existing cells to preserve
    projections of one producer; independent invocations allocate fresh cells."
   [cells]
-  (when-not (and (map? cells) (not (record-view? cells))
-                 (every? #(instance? FieldCell %) (vals cells)))
-    (throw (ex-info "Record fields must be explicit cells" {:type :input/invalid-record-cells})))
-  (doseq [key (keys cells)] (field-key! key))
-  ;; Canonical storage keeps the token independent of a caller's custom map
-  ;; hash implementation; cells themselves retain their original identities.
-  (make-record (into {} cells) nil))
+  (let [cells (checked-cells cells)]
+    (doseq [key (keys cells)] (field-key! key))
+    (make-record cells nil true)))
+
+
+(defn dictionary-view
+  "Project a fully supplied record as an open native dictionary. Every entry
+   retains its original cell, including extra keys outside the declared fields."
+  [cells]
+  (make-record (checked-cells cells) nil false))
 
 
 (defn cache-token

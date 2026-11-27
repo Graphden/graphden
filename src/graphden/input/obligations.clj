@@ -63,10 +63,15 @@
     :else false))
 
 
+(defn portable-record?
+  [record]
+  (and (types/record-type? record) (every? keyword? (keys record))
+       (every? portable-record-field? (vals record))))
+
+
 (defn materialized-dictionary?
   [record dictionary]
-  (and (types/record-type? record) (every? keyword? (keys record))
-       (every? portable-record-field? (vals record)) (keyword-map-check? dictionary)))
+  (and (portable-record? record) (keyword-map-check? dictionary)))
 
 
 (defn- retain-obligation

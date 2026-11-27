@@ -15,9 +15,9 @@
 
 
 (defn- check-record-keys
-  [required]
+  [{:keys [required key-type]}]
   (fn [value]
-    (when-not (and (map? value) (every? keyword? (keys value)) (every? #(contains? value %) required))
+    (when-not (and (map? value) (or (= :any key-type) (every? keyword? (keys value))) (every? #(contains? value %) required))
       (throw (ex-info "Value does not match the required type"
                       {:type :execution-error/type-mismatch :errors [{:path [] :code :type-mismatch}]})))
     value))

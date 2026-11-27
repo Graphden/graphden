@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
@@ -275,10 +276,6 @@
     {} declarations))
 
 
-(def ^:private get-id (ids/fn-id "core.collections" :get))
-(def ^:private get-collection-field (ids/slot-id get-id :coll))
-
-
 (defn- projected-key-type
   [bound {:keys [type value value-present]}]
   (let [expected (:expected-type bound)
@@ -331,21 +328,15 @@
 
 
 (defn- projected-lookup-signature
-  "The native lookup has one private key variable, used only in its map arm.
-   A record admits extra keys of any type. A homogeneous map supplies its
-   declared key type. Neither witness changes an authored or shared binder."
+  "The private map-key binder of get and get-in occurs only in their collection.
+   A projected open record admits arbitrary keys, including middleware extras."
   [root-entry node scope implementation-scope renaming facts]
-  (let [{:keys [address] :as fact} (get-in facts [:bindings-info :coll])]
-    (if (and (= get-id (:fn-id root-entry)) (= [scope [get-collection-field]] address)
-             (= "core.collections" (:namespace root-entry)) (= :get (:name root-entry)))
-      (let [key-type (projected-key-type (get-in node [:bindings address]) fact)
-            variable (variables/type-in-scope implementation-scope 'a)
-            domain (get-in root-entry [:args :coll])]
-        (if (and key-type (not (contains? renaming variable)) (= :any (:return root-entry))
-                 (= {:key :any :default :any} (dissoc (:args root-entry) :coll))
-                 (= #{:null [:list :any] [:map variable :any]} (set (types/union-members domain))))
-          (assoc-in root-entry [:args :coll] (types/resolve {variable key-type} domain))
-          root-entry))
+  (let [variable (variables/type-in-scope implementation-scope 'a)
+        {:keys [argument path]} (lookup-abi/collection-argument root-entry variable)
+        {:keys [address] :as fact} (get-in facts [:bindings-info argument])]
+    (if-let [key-type (when (and argument (= [scope path] address) (not (contains? renaming variable)))
+                        (projected-key-type (get-in node [:bindings address]) fact))]
+      (update-in root-entry [:args argument] (partial types/resolve {variable key-type}))
       root-entry)))
 
 

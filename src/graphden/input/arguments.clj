@@ -2,7 +2,8 @@
   "Invocation routing through a checked residual input surface. Values remain
    opaque at leaves; only declared record and reference-input groups are walked."
   (:require
-    [graphden.input.ir :as ir]))
+    [graphden.input.ir :as ir]
+    [graphden.input.runtime :as input]))
 
 
 (defn route-values
@@ -20,10 +21,12 @@
                (when-not (map? value)
                  (ir/reject! :record-input-required {:path path}))
                (let [extras (remove accepted (keys value))
-                     open? (contains? whole-record-inputs (:address node))]
-                 (when (and (seq extras) (or (not open?) (not-every? keyword? extras)))
+                     key-type (get whole-record-inputs (:address node))]
+                 (when (and (seq extras) (or (nil? key-type) (and (= :keyword key-type) (not-every? keyword? extras))))
                    (ir/reject! :unknown-input-field {:path path}))
-                 (into (if (= :input-field (:kind node)) {(:address node) (select-keys value extras)} {})
+                 (into (if (= :input-field (:kind node)) {(:address node) (if (input/record-view? value)
+                                                                            (input/dictionary-view (select-keys (input/cache-token value) extras))
+                                                                            (select-keys value extras))} {})
                        (mapcat (fn [{:keys [name address] :as field}]
                                  (when (contains? value name)
                                    (if (contains? field :fields)

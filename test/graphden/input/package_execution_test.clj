@@ -1264,7 +1264,8 @@
       (let [{:keys [legacy canonical]} (runtimes source root compile-query)
             request {:request-method :get :uri "/" :headers {} :query-string "" :body nil :async-channel nil}]
         (doseq [value [nil false "found" 0]
-                :let [args {:request (assoc request :query-params {"q" value}) :param-name "q"}]]
+                extra [:middleware "middleware" 7]
+                :let [args {:request (assoc request :query-params {"q" value} extra 17) :param-name "q"}]]
           (is (= value (legacy args) (canonical args))))))))
 
 

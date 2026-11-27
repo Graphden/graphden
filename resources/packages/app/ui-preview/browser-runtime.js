@@ -423,7 +423,7 @@
     operationBudgets.set(token, state);
     return token;
   }
-  function routeStructured(fields, supplied, slots, tick, remaining, root, extras = null) {
+  function routeStructured(fields, supplied, slots, tick, remaining, root, extras = null, keyType = null) {
     const record = root
       ? supplied && typeof supplied === 'object' && !Array.isArray(supplied) && !(supplied instanceof Map)
       : supplied instanceof Map;
@@ -434,10 +434,15 @@
       tick();
       const field = byKey.get(key);
       if (!field) {
-        if (!extras || !(key instanceof Keyword)) throw new Error('Unknown graph input field');
-        const value = supplied.get(key);
-        if (remaining) encodeValue(value, remaining, 0);
-        extras.set(key, value);
+        if (!extras || (keyType !== 'any' && !(key instanceof Keyword))) throw new Error('Unknown graph input field');
+        if (!Number.isSafeInteger(key)) mapKey(key);
+        if (!remaining && supplied instanceof DeferredRecord) {
+          extras.set(key, new Thunk(() => supplied.get(key)));
+        } else {
+          const value = supplied.get(key);
+          if (remaining) encodeValue(value, remaining, 0);
+          extras.set(key, value);
+        }
         continue;
       }
       // Internal callback inputs already belong to graph evaluation.
@@ -448,8 +453,8 @@
       }
       const value = root ? supplied[key] : supplied.get(key);
       if (field.fields) {
-        const extras = field.whole === true && field.slot ? new Map() : null;
-        routeStructured(field.fields, value, slots, tick, remaining, false, extras);
+        const extras = (field.whole === true || field.whole === 'any') && field.slot ? new Map() : null;
+        routeStructured(field.fields, value, slots, tick, remaining, false, extras, field.whole);
         if (field.slot) slots.set(field.slot, extras);
       } else {
         if (remaining) encodeValue(value, remaining, 0);
@@ -496,7 +501,7 @@
     if (Array.isArray(type?.recordKeys) && value instanceof Map) {
       for (const key of value.keys()) {
         tick();
-        if (!(key instanceof Keyword)) return false;
+        if (type.keyType !== 'any' && !(key instanceof Keyword)) return false;
       }
       return type.recordKeys.every(([ns, name]) => {
         tick();

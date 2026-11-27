@@ -609,3 +609,44 @@
       (is (:error bad-key))
       (is (= :unknown-input-field (invocation-error (jvm/compile-named (:analysis plain) (:options plain)) extra)))
       (is (:error (first (run-browser (browser/export-named (:analysis plain) (:options plain)) [extra])))))))
+
+
+(deftest native-whole-record-lookup-retains-open-keys-and-validates-fields-on-demand
+  (let [base (some #(when (= :get (:name %)) (assoc % :namespace "core.collections"))
+                   (:fns (edn/read-string (slurp (io/resource "packages/core/collections/fns.edn")))))
+        record {:namespace "test.input" :name :lookup-record :type {:present :text :unused :int}}
+        child {:namespace "test.input" :name :open-lookup :parent :get
+               :args {:coll {:as :record :type :lookup-record} :key {:as :by :type :any} :default nil}}
+        source [base record child]
+        native (get @loaded :get)
+        base-id (ids/fn-id "core.collections" :get)
+        owner (ids/fn-id "test.input" :open-lookup)]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              types/*type-aliases-override* (atom {:lookup-record (:type record)})]
+      (let [roots (:by-id (registry/record-rich-types! base-id :get native))
+            package (snapshot/package-index (parse/prepare-module source {} {}) source)
+            certified (snapshot/with-certified-owner package owner roots)
+            {:keys [context options]} (snapshot/freeze-source-analysis certified [owner] roots)
+            checked (analysis/analyze-effective-input context owner options)
+            options (assoc options :context context :snapshot-id (:snapshot-id context) :allow-fn? (constantly true)
+                           :implementations (update-vals (:implementations options) #(assoc % :impl (:impl native))))
+            invoke (jvm/compile-named checked options)
+            plan (browser/export-named checked options)
+            data {:present "yes" :unused false "present" 17}
+            cases [{:record data :by "present"} {:record data :by :present}
+                   {:record data :by :unused} {:record (dissoc data :present) :by "present"}]
+            results (run-browser plan cases)
+            ;; The browser graph-value codec has a narrower key domain than
+            ;; native ECMAScript Map. Exercise the runtime's ordinary host entry.
+            js (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');"
+                    "const p=JSON.parse(require('fs').readFileSync(0,'utf8'));"
+                    "const m=new Map([[g.keyword('present'),'yes'],[g.keyword('unused'),false],[7,17]]);"
+                    "console.log(JSON.stringify(g.createRuntime(p).run('root',{record:m,by:7})));")
+            host (sh/sh "node" "-e" js :in (json/generate-string plan))]
+        (is (= [17 "yes"] (mapv #(invoke % nil) (take 2 cases))))
+        (is (= [["int" 17] ["string" "yes"]] (mapv :value (take 2 results))))
+        (is (= 17 (invoke {:record (assoc data 7 17) :by 7} nil)))
+        (is (zero? (:exit host)) (:err host))
+        (is (= 17 (json/parse-string (:out host))))
+        (doseq [bad (drop 2 cases)] (is (thrown? clojure.lang.ExceptionInfo (invoke bad nil))))
+        (is (every? :error (drop 2 results)))))))

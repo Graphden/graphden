@@ -3,6 +3,7 @@
   (:require
     [graphden.executor.compile.bindings :as legacy]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.executor.compile.renames :as renames]
     [graphden.input.rows :as rows]
     [graphden.packages.records.ids :as ids]))
 
@@ -17,6 +18,27 @@
          :value (and (true? (:value-present origin)) (= value (:value origin))
                      (nil? (:ref-fn-id origin)))
          false)))
+
+
+(defn- coalesce-default?
+  "Match a fallback whose stored slot belongs to an already bound lookup.
+   The legacy environment also routed it to coalesce's free default slot."
+  [graph owner writer reader arguments]
+  (let [base (ids/fn-id "core.logic" :coalesce)
+        [value & other] (remove #{reader} arguments)
+        target (:ref-id value)
+        field (:env-name writer)]
+    (and (= base (:id (lookups/root-fn owner (:fn-map graph) graph)))
+         (= :default field (:base-name reader) (:ext-name reader))
+         (= (ids/slot-id base :default) (:slot-id reader))
+         (= :value (:base-name value) (:ext-name value))
+         (= (ids/slot-id base :value) (:slot-id value))
+         (= :ref (:kind writer) (:kind value)) (false? (:is-fn value))
+         (empty? other) (uuid? target) (uuid? (:ref-id writer))
+         (some #(and (= (:slot-id writer) (:slot-id %)) (= :value (:kind %)) (nil? (:value %)))
+               (legacy/collect-bindings target graph))
+         (not-any? (fn [callee] (contains? (set (renames/cache-projection-frees callee graph)) field))
+                   [target (:ref-id writer)]))))
 
 
 (defn select-binding
@@ -38,7 +60,8 @@
                                                   (lookups/fn-owned-slot-ids final-id graph) graph)]
         (when (and reader (empty? other-readers) (uuid? reader-slot) (not= reader-slot slot-id)
                    (= (hash-set slot-id reader-slot) (set routes))
-                   (every? #(or (= :value (:kind %)) (= reader %)) arguments)
+                   (or (every? #(or (= :value (:kind %)) (= reader %)) arguments)
+                       (coalesce-default? graph final-id winner reader arguments))
                    (plain-origin? winner origin)
                    (= (:id origin) (ids/binding-id (:fn-id origin) slot-id)))
           {:stored-slot slot-id

@@ -824,7 +824,10 @@
   (try
     (migrate-scoped-binding package owner roots)
     (catch clojure.lang.ExceptionInfo failure
-      (if (and legacy-graph (= :missing-reference-use (:code (ex-data failure))))
+      (if (and legacy-graph
+               (or (= :missing-reference-use (:code (ex-data failure)))
+                   (and (= :unavailable-reference-input (:code (ex-data failure)))
+                        (legacy-use/select-binding legacy-graph owner))))
         (migrate-legacy-leaf package legacy-graph owner roots)
         (throw failure)))))
 

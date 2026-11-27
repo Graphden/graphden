@@ -90,6 +90,33 @@
     (is (= "fallback" (legacy {}) (canonical {})))))
 
 
+(deftest coalesce-default-follows-the-legacy-environment-route
+  (let [source (into (declarations "packages/core/logic/fns.edn" #{:coalesce :const})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             (declarations "packages/core/collections/fns.edn" #{:get})
+                             [{:namespace "fixture" :name :fallback-value :parent :const
+                               :args {:value "fallback"} :return-type :any}
+                              {:namespace "fixture" :name :choose :parent :coalesce
+                               :args {:value {:parent :get
+                                              :args {:coll {:as :data :type [:map :keyword :any]}
+                                                     :key {:value :primary} :default nil}}
+                                      :default :fallback-value}}]))
+        root (ids/fn-id "fixture" :choose)
+        compile-owner (fn [package owner roots implementations]
+                        (let [rows (group-by :kind (parse/parse-prepared-module (:prepared package)))
+                              graph (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
+                                                           :bindings (:binding rows) :list-items (:binding-list-item rows)})
+                              migrated (snapshot/with-certified-owner (assoc package :legacy-graph graph) owner roots)
+                              proof (get-in migrated [:closure-baselines root :legacy-leaf])]
+                          (is (= (ids/slot-id (ids/fn-id "core.collections" :get) :default) (:slot-id proof)))
+                          (is (= [(ids/slot-id (ids/fn-id "core.logic" :coalesce) :default)]
+                                 (get-in proof [:row :target-path])))
+                          (execution/compile-package migrated root roots implementations)))
+        {:keys [canonical legacy]} (runtimes source root compile-owner)]
+    (doseq [[data expected] [[{} "fallback"] [{:primary nil} "fallback"] [{:primary false} "fallback"] [{:primary 0} 0]]]
+      (is (= expected (legacy {:data data}) (canonical {:value {:data data}}))))))
+
+
 (deftest legacy-reference-can-open-the-reader-of-a-forwarded-input
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:if :nil?})
                      (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})

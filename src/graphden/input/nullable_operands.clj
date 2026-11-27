@@ -39,17 +39,24 @@
           non-null (if (types/union-type? reference)
                      (types/make-union (remove #{:null} (types/union-members reference)))
                      reference)]
-      (when (and literal non-null (= literal (get solution variable))
-                 (not (#{:any :null :never} non-null))
-                 (not (types/type-any? #(or (= :any %) (types/type-var? %)) non-null))
-                 (not= literal non-null) (types/subtype? literal non-null))
+      (cond
+        (and (not (contains? solution variable))
+             (every? #(= {:mode :value :actual-type :any} (select-keys (:reference %) [:mode :actual-type])) pair)
+             (= :any (types/resolve {variable :any} (:expected-type (first pair)))))
+        [variable :any]
+
+        (and literal non-null (= literal (get solution variable))
+             (not (#{:any :null :never} non-null))
+             (not (types/type-any? #(or (= :any %) (types/type-var? %)) non-null))
+             (not= literal non-null) (types/subtype? literal non-null))
         [variable non-null]))))
 
 
 (defn reconcile
   "When a local literal first fixed a shared variable, retain the wider
-   non-null result already proved on its opposite operand. Every binding
-   in the graph is subsequently rechecked against the shared solution."
+   non-null result proved on the other operand. Two independently evaluated
+   :any returns can instantiate the same open variable. The graph rechecks
+   both bindings against the resulting shared solution."
   [initial entries]
   (let [pairs (group-by (juxt (comp first :address) :expected-type)
                         (filter #(and (fields (second (:address %))) (nullable-variable (:expected-type %))) entries))]

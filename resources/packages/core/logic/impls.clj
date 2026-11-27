@@ -378,8 +378,11 @@
 (defn cond-return-rule
   [bindings-info default-ret]
   (let [info       (get bindings-info :clauses)
-        elem-types (:elem-types info)
-        clause-val (:value info)]
+        elements   (:list-elements info)
+        elem-types (if elements (mapv :type elements) (:elem-types info))
+        ;; The verified builder records literal values independently of refs.
+        ;; Preserve exhaustiveness, with no narrowing from an unproved predicate.
+        clause-val (if elements (mapv #(if (:value-present %) (select-keys % [:value]) {}) elements) (:value info))]
     ;; `:cond :clauses` is a flat `[test1 result1 test2 result2 …]`
     ;; sequence — odd-length silently behaves as "last item is a
     ;; test with no corresponding result", which `cond-fn` then
@@ -512,7 +515,8 @@
                                   :non-negative-int :core.refinements/non-negative-int}
         :taint-propagate? true}
    :cond {:impl cond-fn
-          :return-type-rule cond-return-rule :taint-propagate? true
+          :return-type-rule cond-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true
           :lazy-seq-args #{:clauses}}
    :case {:impl case-fn :return-type-rule case-return-rule :taint-propagate? true}
    :coalesce {:impl coalesce :return-type-rule coalesce-return-rule

@@ -172,3 +172,14 @@
           e (try (f {:value (delay nil) :type (delay :node)} nil)
                  nil (catch clojure.lang.ExceptionInfo e e))]
       (is (= :types/unsupported-validator (:type (ex-data e)))))))
+
+
+(deftest cond-infers-closed-clauses-from-proved-operand-facts
+  (let [return-rule (get-in impls/*impls* [:cond :return-type-rule])
+        operands [{:type :bool} {:type :text}
+                  {:type :bool :value-present true :value true} {:type :int}]
+        infer (fn [facts] (return-rule {:clauses {:list-elements facts}} :any))]
+    (is (= #{:text :int} (set (types/union-members (infer operands)))))
+    (is (= #{:text :int :null}
+           (set (types/union-members (infer (update operands 2 dissoc :value-present))))))
+    (is (= :any (return-rule {:clauses {:type [:list :any]}} :any)))))

@@ -83,7 +83,7 @@
                           (positions/occurrence-policy row))
       "ref" (cond-> (assoc item :kind :ref :fn-id (:ref-fn-id row))
               (:type-override-fn-id row) (assoc :type (or (reference-types-by-id (:type-override-fn-id row))
-                                                        (reject! :unsupported-list-reference-type))))
+                                                          (reject! :unsupported-list-reference-type))))
       (reject! :missing-list-operand))))
 
 

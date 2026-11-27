@@ -59,6 +59,7 @@
       (when (= (:fn-id expression) (:fn-id node))
         (identity-record-source node [[root path] value-path] expected-type)))))
 
+
 (defn- projected-collection-domain
   [analysis scopes [scope path :as source] type [reader reader-path :as address]]
   (let [{:keys [root-entry base-fn-id argument-paths]} (get scopes scope)

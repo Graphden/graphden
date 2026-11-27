@@ -1222,3 +1222,24 @@
     (is (= :scope-replay-mismatch
            (try (snapshot/migrate-binding package (ids/fn-id "fixture" :positional-call) @roots)
                 (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))))
+
+
+(deftest lexical-initializer-keeps-a-separate-native-argument-rename
+  (let [definitions (into (filterv #(#{:position-in :vec} (:name %)) (sources "collections"))
+                          (concat (filter #(= :nullable-int (:name %)) (sources "refinements"))
+                                  [{:namespace "fixture" :name :producer :parent :vec
+                                    :args {:coll {:value ["a" "b"]}}}
+                                   {:namespace "fixture" :name :owner :parent :position-in
+                                    :args {:coll :producer :value {:as :marker}}}]))
+        grouped (group-by :kind (parse/parse-prepared-module (parse/prepare-module definitions {} {})))
+        graph (lookups/build-lookups {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+                                      :bindings (:binding grouped)})
+        owner (ids/fn-id "fixture" :owner)
+        marker (ids/slot-id owner :marker)
+        source (ids/slot-id (ids/fn-id "core.collections" :vec) :coll)
+        target (ids/slot-id (ids/fn-id "core.collections" :position-in) :coll)
+        selected (legacy-use/select-binding graph owner)]
+    (is (= [source owner] ((juxt :stored-slot :stored-owner) selected)))
+    (is (= [(ids/binding-id owner source) [target] (ids/fn-id "fixture" :producer)]
+           ((juxt :id :target-path :ref-fn-id) (:binding selected))))
+    (is (nil? (legacy-use/select-binding (assoc-in graph [:slot-map marker :source-slot-id] target) owner)))))

@@ -41,6 +41,26 @@
                    [target (:ref-id writer)]))))
 
 
+(defn- independent-rename?
+  "A second native argument can stay free when its only reader is the
+   owner's public rename, disjoint from the initializer and its producer."
+  [graph owner writer reader arguments]
+  (let [[sibling & more] (remove #{reader} arguments)
+        {:keys [ext-name base-name slot-id]} sibling
+        base (:id (lookups/root-fn owner (:fn-map graph) graph))
+        alias (when (simple-keyword? ext-name) (ids/slot-id owner ext-name))
+        row (get-in graph [:slot-map alias])
+        source (:ref-id writer)]
+    (and (= :ref (:kind writer)) (uuid? source) (= :free (:kind sibling)) (empty? more)
+         (= [base] (get-in graph [:fn-map owner :parent-ids]))
+         (simple-keyword? base-name) (not= ext-name base-name) (not= ext-name (:env-name writer))
+         (= slot-id (ids/slot-id base base-name) (:source-slot-id row))
+         (= ext-name (keyword (:name row)) (lookups/chain-rename-for-slot owner slot-id graph))
+         (= alias (lookups/effective-reader-slot-id owner slot-id graph))
+         (not-any? #{alias slot-id} [(:slot-id writer) (:slot-id reader)])
+         (not-any? #{ext-name (:env-name writer)} (renames/cache-projection-frees source graph)))))
+
+
 (defn select-binding
   "Select a legacy lexical initializer separately for each final function.
    Return the exact stored row identity and a use-local binding for the
@@ -61,7 +81,8 @@
         (when (and reader (empty? other-readers) (uuid? reader-slot) (not= reader-slot slot-id)
                    (= (hash-set slot-id reader-slot) (set routes))
                    (or (every? #(or (= :value (:kind %)) (= reader %)) arguments)
-                       (coalesce-default? graph final-id winner reader arguments))
+                       (coalesce-default? graph final-id winner reader arguments)
+                       (independent-rename? graph final-id winner reader arguments))
                    (plain-origin? winner origin)
                    (= (:id origin) (ids/binding-id (:fn-id origin) slot-id)))
           {:stored-slot slot-id

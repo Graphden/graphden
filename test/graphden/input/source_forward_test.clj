@@ -219,7 +219,7 @@
         field (ids/slot-id (ids/fn-id "fixture" :encode) :data)
         root (ids/binding-id owner (ids/slot-id combine :left))
         uses (mapv (fn [name] [root (ids/binding-id child (ids/slot-id combine name))]) [:left :right])]
-    (is (= (set (map #(vector [owner %] [field]) uses)) (set (map :target-address proofs))))
+    (is (= (set (for [path uses] [[owner path] [field]])) (set (map :target-address proofs))))
     (is (= 2 (count (set (map :projection-id proofs)))))
     (is (every? :nested-reader? proofs))
     (is (= :nonunique-reference-use (rejection prepared entry)))))

@@ -64,8 +64,8 @@
         validate #(lookup/lookup-item-list-type %1 expressions %2 closures address expected)
         proof [:scopes (second item) :signature :resolved-bindings :keys :list-elements]]
     (is (= expected (validate graph scopes)))
-    (doseq [keys [nil [] [{:value-present false :type :keyword}] [{:value-present true :value "label" :type :text}]]]
-      (is (nil? (validate (assoc-in graph proof keys) scopes))))
+    (doseq [elements [nil [] [{:value-present false :type :keyword}] [{:value-present true :value "label" :type :text}]]]
+      (is (nil? (validate (assoc-in graph proof elements) scopes))))
     (is (nil? (validate graph (assoc-in scopes [item :root-entry :return] :any))))))
 
 
@@ -151,7 +151,7 @@
         node {:signature-source {:base-fn-id native :argument-paths {:map path}
                                  :root-entry {:fn-id native :name :assoc :namespace "core.collections" :args args :return :any}}
               :bindings {address {:reference {:mode :value :actual-type actual}}}}
-        domain #(lookup-abi/collection-read-domain {:scopes {[] %}} address declared %2)]
+        domain #(lookup/collection-read-domain {:scopes {[] %}} address declared %2)]
     (is (= actual (domain node :invoke)))
     (is (nil? (domain node :read)))
     (is (nil? (domain (assoc-in node [:signature-source :root-entry :args :key] 'a) :invoke)))

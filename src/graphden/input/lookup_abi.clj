@@ -89,11 +89,11 @@
 (defn- dictionary-argument
   [{:keys [fn-id name args return] module-ns :namespace :as entry}]
   (or (collection-argument entry 'a)
-       (when (and (= fn-id (ids/fn-id "core.collections" :count)) (= ["core.collections" :count] [module-ns name])
-                  (= #{} (:effects entry)) (contains? #{:non-negative-int [:refine :int [:>= 0]]} return)
-                  (= #{:coll} (set (keys args)))
-                  (= '#{:null :text [:map a :any] [:list :any]} (set (types/union-members (:coll args)))))
-         {:argument :coll :path [(ids/slot-id fn-id :coll)]})
+      (when (and (= fn-id (ids/fn-id "core.collections" :count)) (= ["core.collections" :count] [module-ns name])
+                 (= #{} (:effects entry)) (contains? #{:non-negative-int [:refine :int [:>= 0]]} return)
+                 (= #{:coll} (set (keys args)))
+                 (= '#{:null :text [:map a :any] [:list :any]} (set (types/union-members (:coll args)))))
+        {:argument :coll :path [(ids/slot-id fn-id :coll)]})
       (when (and (= fn-id (ids/fn-id "core.collections" :assoc))
                  (= [module-ns name] ["core.collections" :assoc]) (= return :any)
                  (= args '{:map [:union :null [:map a :any]] :key :any :value :any}))
@@ -155,8 +155,8 @@
 
 (defn- verified-native?
   [node implementation]
-  (let [keys [:base-fn-id :root-entry :argument-paths]]
-    (= (select-keys implementation keys) (select-keys (:signature-source node) keys))))
+  (let [abi-fields [:base-fn-id :root-entry :argument-paths]]
+    (= (select-keys implementation abi-fields) (select-keys (:signature-source node) abi-fields))))
 
 
 (defn- collection-abi

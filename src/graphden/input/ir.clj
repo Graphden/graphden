@@ -355,8 +355,8 @@
                   (cond-> (assoc-in plan [:container-obligations address] (dissoc proof :source))
                     (contains? whole source) (update-in [:whole-record-inputs source]
                                                         #(if (= :keyword %) :keyword key-type))))
-                 :else
-                 (let [checks (into [] (keep #(read-validator analysis expressions scopes closures (assoc entry :expected-type %)))
+                :else
+                (let [checks (into [] (keep #(read-validator analysis expressions scopes closures (assoc entry :expected-type %)))
                                    (cons expected-type additional-types))]
                   (cond-> plan (seq checks) (assoc-in [:value-obligations address] checks)))))
             {:value-obligations {} :container-obligations {} :whole-record-inputs {}} obligations)))

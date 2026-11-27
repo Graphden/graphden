@@ -5,13 +5,16 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
     [graphden.input.ir :as ir]
+    [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as list-execution]
     [graphden.input.source-snapshot :as snapshot]
-    [graphden.input.staged-module :as staged]))
+    [graphden.input.staged-module :as staged]
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
 (defn- compile-frozen
-  [{:keys [context options]} root implementations]
+  [{:keys [context options]} checked implementations]
   (let [implementations (update-vals
                           (:implementations options)
                           (fn [{:keys [base-fn-id generated-list] :as entry}]
@@ -20,11 +23,43 @@
                                          (get implementations base-fn-id))]
                               (when-not (fn? impl)
                                 (ir/reject! :resolved-implementation-required {:base-fn-id base-fn-id}))
-                              (assoc entry :impl impl))))
-        checked (analysis/analyze-effective-input context root options)]
+                              (assoc entry :impl impl))))]
     {:context context :analysis checked
      :invoke (compile/compile-named checked {:context context :implementations implementations
                                              :detached-closures? true})}))
+
+
+(def ^:private zipmap-list-slots
+  (set (map #(ids/slot-id (ids/fn-id "core.collections" :zipmap) %) [:keys :vals])))
+
+
+(defn- check-legacy-invocation
+  "Append remains open for composition. At V1 invocation the final unused
+   zipmap continuation contributes no items. Specialize only an unresolved
+   public tail of that exact generated use, then rerun the ordinary checker."
+  [{:keys [context options]} root]
+  (let [checked (analysis/analyze-effective-input context root options)
+        ends (into {}
+                   (for [{:keys [name kind type required whole-bindable? origin-field-id address]}
+                         (when (= :checked (:status checked)) (vals (get-in checked [:public-input :routes])))
+                         :when (and (= :input-field kind) (= :tail name) (false? required) whole-bindable?
+                                    (types/list-type? type) (types/type-var? (types/list-elem type)))
+                         :let [[scope path] address
+                               node (get-in checked [:scopes (second scope)])
+                               id (:fn-id node)
+                               {:keys [owner-id target-id tail] :as fragment} (get-in context [:source-list-fragments id])
+                               abi (:signature-source node)]
+                         :when (and (= :open tail) (zipmap-list-slots target-id) (uuid? owner-id)
+                                    (= id (:builder-id fragment) (:base-fn-id abi))
+                                    (= owner-id (get-in abi [:generated-list :owner-id]))
+                                    (true? (get-in abi [:generated-list :infer-return?]))
+                                    (= path [origin-field-id] [(:tail-id fragment)] (get-in abi [:argument-paths :tail]))
+                                    (= (builder/origin owner-id target-id)
+                                       (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id])))]
+                     [scope (builder/empty-tail-binding fragment)]))]
+    (if (seq ends)
+      (analysis/analyze-effective-input context root (assoc options :legacy-list-ends ends))
+      checked)))
 
 
 (defn compile-package
@@ -34,7 +69,8 @@
    Both must originate in the same prepared package runtime. Returns evidence
    and an ordinary executor closure, without publishing either globally."
   [package root roots implementations]
-  (compile-frozen (snapshot/freeze-source-analysis package [root] roots) root implementations))
+  (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
+    (compile-frozen frozen (check-legacy-invocation frozen root) implementations)))
 
 
 (defn- require-visible-root!
@@ -67,7 +103,7 @@
                                  (contains? visible-fn-ids base-fn-id))))
                         executable)
         (ir/reject! :staged-function-not-visible {}))
-      (assoc (compile-frozen frozen root implementations)
+      (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
              :staged-source {:sha256 sha256 :namespace (:namespace module)}))))
 
 
@@ -80,7 +116,7 @@
   (require-visible-root! root visible-fn-ids)
   (let [module (staged/read-pinned payload sha256)
         frozen (snapshot/freeze-primitive module root roots)]
-    (assoc (compile-frozen frozen root implementations)
+    (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
            :staged-source {:sha256 sha256 :namespace (:namespace module)})))
 
 
@@ -91,5 +127,5 @@
   (require-visible-root! root visible-fn-ids)
   (let [module (staged/read-pinned payload sha256)
         frozen (snapshot/freeze-literal-root module root roots visible-fn-ids)]
-    (assoc (compile-frozen frozen root implementations)
+    (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
            :staged-source {:sha256 sha256 :namespace (:namespace module)})))

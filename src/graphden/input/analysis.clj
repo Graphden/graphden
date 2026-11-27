@@ -101,7 +101,7 @@
    recursive availability. Missing required fields and incomplete checking
    are separate outputs. All effective/residual values remain recomputable."
   ([ctx fn-id] (analyze-input ctx fn-id {}))
-  ([ctx fn-id {:keys [check-expression scope additional-rows defer-reference-checks?]}]
+  ([ctx fn-id {:keys [check-expression scope additional-rows defer-reference-checks? legacy-list-ends]}]
    (context/call-with-types
      ctx
      (fn []
@@ -112,7 +112,11 @@
                                                  :origin-fn-id (or (:origin-fn-id %) (:fn-id %))))
                          (concat (map #(assoc % :origin-use-path (second scope)) bindings) additional-rows
                                  (get-in ctx [::use-bindings fn-id])))
+             terminal (get legacy-list-ends scope)
              local (filterv #(empty? (:scope-path %)) owned)
+             local (if (and (= fn-id (:fn-id terminal)) (not-any? #(= (:target-path terminal) (:target-path %)) local))
+                     (conj local terminal)
+                     local)
              policy (metadata/apply-overlays ctx (variables/descriptor-in-scope scope declared) local
                                              {:scope scope :declaration-order declaration-order
                                               :check-expression check-expression})

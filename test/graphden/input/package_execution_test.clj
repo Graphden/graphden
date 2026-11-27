@@ -902,3 +902,64 @@
     (doseq [label ["shared" ""]]
       (let [args {:label label}]
         (is (= (str "left=" label ";right=" label) (legacy args) (canonical args)))))))
+
+
+(deftest migrated-zipmap-closes-only-the-final-unbound-legacy-continuation
+  (let [prefix {:namespace "fixture" :name :base-row :parent :zipmap
+                :args {:keys [{:value :first}] :vals [{:value "a"}]}}
+        suffix {:namespace "fixture" :name :extended-row :parent :base-row
+                :args {:keys {:append [{:value :second}]} :vals {:append [{:value "b"}]}}}
+        originals (into (declarations "packages/core/collections/fns.edn" #{:zipmap}) [prefix suffix])
+        root (ids/fn-id "fixture" :extended-row)
+        compile-root (fn [package id roots impls]
+                       (let [{:keys [context options]} (snapshot/freeze-source-analysis package [id] roots)
+                             open (analysis/analyze-effective-input context id options)]
+                         (is (= 2 (count (filter #(= [:input-field :tail true] ((juxt :kind :name :whole-bindable?) %))
+                                                 (vals (get-in open [:public-input :routes]))))))
+                         (execution/compile-package package id roots impls)))
+        {:keys [legacy canonical analysis]} (runtimes originals root compile-root)
+        public (set (map :name (get-in analysis [:public-input :root :fields])))]
+    (is (= :checked (:status analysis)))
+    (is (= {:first "a" :second "b"} (legacy {}) (canonical {})))
+    (is (empty? public))
+    (is (= :unknown-input-field (rejection-code #(canonical {:keys {:tail [:injected]}}))))))
+
+
+(deftest migrated-zipmap-retains-list-demand-and-reference-sharing
+  (let [tick (fn [name value]
+               {:namespace "fixture" :name name :parent :str-upper :args {:string {:value value}}})
+        owner {:namespace "fixture" :name :unequal-row :parent :zipmap
+               :args {:keys [:first-key :second-key :extra-key :unused-key]
+                      :vals [:first-value :first-value]}}
+        originals (into (declarations "packages/core/collections/fns.edn" #{:zipmap})
+                        (concat (declarations "packages/core/strings/fns.edn" #{:str-upper})
+                                [(tick :first-key "a") (tick :second-key "b") (tick :extra-key "c")
+                                 (tick :unused-key "d") (tick :first-value "value") owner]))
+        calls (atom [])
+        implementations (update-in @loaded [:str-upper :impl]
+                                   (fn [impl]
+                                     (fn [args ctx]
+                                       (let [v (impl args ctx)]
+                                         (swap! calls conj v)
+                                         v))))
+        {:keys [legacy canonical]} (runtimes originals (ids/fn-id "fixture" :unequal-row)
+                                             execution/compile-package implementations)
+        _ (is (empty? @calls))
+        expected (legacy {})
+        reads @calls]
+    (reset! calls [])
+    (is (= {"A" "VALUE" "B" "VALUE"} expected (canonical {})))
+    (is (= reads @calls))
+    (is (= 1 (count (filter #{"VALUE"} reads))))
+    (is (not-any? #{"D"} reads))))
+
+
+(deftest ordinary-numeric-list-remains-open-at-invocation
+  (let [prefix {:namespace "fixture" :name :difference-prefix :parent :sub :args {:nums [20 3]}}
+        suffix {:namespace "fixture" :name :difference-complete :parent :difference-prefix
+                :args {:nums {:append [2 4] :closed true}}}
+        originals (into (declarations "packages/core/arithmetic/fns.edn" #{:sub}) [prefix suffix])
+        part (runtimes originals (ids/fn-id "fixture" :difference-prefix))
+        full (runtimes originals (ids/fn-id "fixture" :difference-complete))]
+    (is (= 15 ((:canonical part) {:nums {:tail [2]}})))
+    (is (= 11 ((:canonical full) {}) ((:legacy full) {})))))

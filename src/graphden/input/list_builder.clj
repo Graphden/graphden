@@ -182,6 +182,14 @@
       fragment)))
 
 
+(defn empty-tail-binding
+  "The empty continuation row of a verified list fragment."
+  [{:keys [builder-id tail-id]}]
+  (rows/normalize {:kind :input-binding :id (ids/binding-id builder-id tail-id)
+                   :fn-id builder-id :scope-path [] :target-path [tail-id]
+                   :expression-kind "value" :value [] :value-present true}))
+
+
 (defn link-fragments
   "Lower a verified, single-parent chain in ancestor-first inheritance order.
    Descendants bind the previous builder's optional continuation at its use
@@ -189,7 +197,7 @@
    Item occurrences stay ordered inside their own builder."
   [fragments]
   (loop [remaining (seq fragments) path [] prior nil bindings []]
-    (if-let [{:keys [owner-id target-id binding-id builder-id tail tail-id] :as current} (first remaining)]
+    (if-let [{:keys [owner-id target-id binding-id builder-id tail] :as current} (first remaining)]
       (do
         (when-not (and (= (origin owner-id target-id) (select-keys current [:owner-id :target-id :binding-id :builder-id :tail-id]))
                        (contains? #{:open :closed} tail) (not-any? #{binding-id} path)
@@ -201,8 +209,6 @@
                                     :expression-kind "ref" :ref-fn-id builder-id :value-present false})
               bindings (cond-> (conj bindings edge)
                          (= :closed tail)
-                         (conj (rows/normalize {:kind :input-binding :id (ids/binding-id builder-id tail-id)
-                                                :fn-id builder-id :scope-path [] :target-path [tail-id]
-                                                :expression-kind "value" :value [] :value-present true})))]
+                         (conj (empty-tail-binding current)))]
           (recur (next remaining) (conj path binding-id) current bindings)))
       {:bindings bindings :open-continuation (when (= :open (:tail prior)) [path [(:tail-id prior)]])})))

@@ -877,7 +877,7 @@
     (assoc definition :verification :authored-source-equivalent :v2 v2)))
 
 
-(defn- verify-definition
+(defn- verify-standard-definition
   [environment {definition-id :identity :keys [source legacy] :as definition}]
   (let [prepared (get-in environment [:definition-by-id definition-id])
         witness (source-context/occupied-reference-alias (:context environment) prepared)]
@@ -898,6 +898,15 @@
                        (-> definition (update :source source-context/compact-reference witness)
                            (assoc-in [:legacy :records] records)))]
           (assoc result :source source :legacy legacy))))))
+
+
+(defn- verify-definition
+  [environment {id :identity :as definition}]
+  (if-let [verify (get-in environment [:context ::normalized-verifiers id])]
+    (or (when (fn? verify) (verify definition))
+        (throw (ex-info "Normalized source changed on staged replay"
+                        {:type :input/source-verification :code :normalized-source-mismatch})))
+    (verify-standard-definition environment definition)))
 
 
 (defn verify-module

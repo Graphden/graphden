@@ -13,6 +13,7 @@
     [graphden.input.source-list :as source-list]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
+    [rewrite-clj.node :as node]
     [rewrite-clj.zip :as z]
     [structured-input-inventory :as inventory])
   (:import
@@ -596,6 +597,26 @@
                        " :bind"))))
 
 
+(defn- query-lookup-edit
+  [source starts loc {:keys [op path from to definition]}]
+  (let [target (value-at loc path)]
+    (when-not (migration/same-edn? from (z/sexpr target))
+      (refuse :planner-ledger-mismatch {:definition definition :path path}))
+    (case op
+      :query-lookup-header
+      (let [edit (rename-edit source starts loc definition [:args] :bind)]
+        (when (or (key-loc loc :return-type) (not= :nullable-text to))
+          (refuse :planner-ledger-mismatch {:definition definition}))
+        (assoc edit :after ":return-type :nullable-text :bind"))
+      :query-lookup-parent (node-edit source starts target (constantly (migration/stable-edn to)))
+      :query-lookup-bind
+      (let [nodes (tree-seq node/inner? node/children (z/node target))
+            _ (when (some #(= :uneval (node/tag %)) nodes) (refuse :unsupported-reader-discard {}))
+            comments (keep #(when (= :comment (node/tag %)) (node/string %)) nodes)]
+        (node-edit source starts target (constantly (str (when (seq comments) (str (str/join "\n" comments) "\n"))
+                                                         (migration/stable-edn to))))))))
+
+
 (defn- operation-edit
   [source starts definitions {:keys [op definition path] :as operation}]
   (when-not (and (keyword? definition) (vector? path) (seq path))
@@ -603,6 +624,8 @@
   (let [loc (or (get definitions definition)
                 (refuse :missing-definition {:definition definition}))]
     (case op
+      (:query-lookup-header :query-lookup-parent :query-lookup-bind)
+      (query-lookup-edit source starts loc operation)
       :field-annotations (annotation-map-edit source starts loc (:configuration operation)
                                               (if (:empty-bind? operation) ":bind {} " "")
                                               (:scope-names operation))
@@ -861,6 +884,17 @@
     (case (cond (and (= :composed kind) (seq (:arguments legacy)) annotation-only?) :annotations
                 (and (= :composed kind) pin) :self-pin
                 :else kind)
+      :query-lookup
+      (do
+        (when-not (and (= (dissoc source :parent :args) (dissoc proposed :parent :bind :return-type))
+                       (= :nullable-text (:return-type proposed)) (map? (:bind proposed)))
+          (refuse :planner-ledger-mismatch {:definition (:name source)}))
+        (mapv (fn [[op path from to]]
+                {:op op :definition (:name source) :path [path] :from from :to to})
+              [[:query-lookup-parent :parent (:parent source) (:parent proposed)]
+               [:query-lookup-header :args (:args source) :nullable-text]
+               [:query-lookup-bind :args (:args source) (:bind proposed)]]))
+
       :annotations
       (annotation-only-operations source proposed (:arguments legacy))
 

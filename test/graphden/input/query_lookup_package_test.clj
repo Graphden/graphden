@@ -1,0 +1,81 @@
+(ns graphden.input.query-lookup-package-test
+  (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
+    [clojure.test :refer [deftest is]]
+    [graphden.executor.interface :as executor]
+    [graphden.executor.registry.core :as registry]
+    [graphden.input.package-execution :as execution]
+    [graphden.input.query-lookup-package :as query]
+    [graphden.input.source-snapshot :as snapshot]
+    [graphden.packages.loader :as loader]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.sync :as sync]
+    [graphden.types.core :as types]
+    [graphden.util.hex :as hex])
+  (:import
+    (java.nio.charset
+      StandardCharsets)
+    (java.security
+      MessageDigest)))
+
+
+(defn- source
+  []
+  (let [modules {"core/refinements" #{:nullable-text :nullable-keyword :text-map :path-segment}
+                 "core/collections" #{:get :get-in} "core/logic" #{:coalesce} "core/strings" #{:str-to-keyword}
+                 "web/ring-adapter" #{:ring-request-shape}
+                 "web/crud-delete" #{:_query-param-raw :_query-param-string-key :_query-param-keyword-key :_query-param-fallback :query-param}}]
+    (vec (for [[path names] modules
+               :let [{module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource (str "packages/" path "/fns.edn"))))]
+               f fns :when (contains? names (:name f))]
+           (assoc f :namespace module-ns)))))
+
+
+(defn- pinned-stage
+  [module]
+  (let [bs (String/.getBytes (pr-str module) StandardCharsets/UTF_8)]
+    {:bytes bs :sha256 (hex/encode (.digest (MessageDigest/getInstance "SHA-256") bs))}))
+
+
+(defn- rejection
+  [f]
+  (try (f) nil (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))
+
+
+(deftest original-query-owner-replays-with-its-native-result-and-original-static-type
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [original {:name :query :parent :query-param :args {:param-name {:value "a"}}}
+          owner (ids/fn-id "fixture" :query)
+          forms (conj (source) (assoc original :namespace "fixture"))
+          package (snapshot/package-index (parse/prepare-module forms {} {}) forms)
+          {:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
+          _ (sync/register-type-aliases! fn-defs)
+          implementations (into {} (for [{name :name module :namespace} forms :when (contains? base-fn-defs name)
+                                         :let [id (ids/fn-id module name) entry (get base-fn-defs name)]]
+                                     (do (registry/record-rich-types! id name entry) [id (:impl entry)])))
+          roots (:by-id @registry/*rich-types-override*)
+          {:keys [proposed]} (query/prepare package owner roots)
+          legacy {:namespace "fixture" :fns [original]}
+          stage (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)])
+          visible (set (keys (:declarations package)))
+          compile-stage (fn [module visible]
+                          (execution/compile-staged-module
+                            package owner roots implementations
+                            (assoc (pinned-stage module) :legacy-module legacy :visible-fn-ids visible)))
+          {:keys [invoke input-origin analysis]} (compile-stage stage visible)
+          [_ kw raw] (:reads input-origin)
+          ctx {:compiled-registry (atom {owner invoke}) :base-fns {}}
+          run #(executor/execute ctx owner %)]
+      (is (= [:union :null :text] (get-in analysis [:scopes [] :signature :return])))
+      (is (= 0 (run {:request (delay {:query-params {"a" 0}})})))
+      (is (= {:v 5} (run {(:request kw) {:query-params {:b {:v 5}}} (:param-name kw) (delay "b")})))
+      (is (= "c" (run {(:request raw) {:query-string "b=c"} (:param-name raw) "b"})))
+      (is (= :unverified-staged-declaration
+             (rejection #(compile-stage (assoc-in stage [:fns 0 :return-type] :any) visible))))
+      (is (= :unverified-staged-declaration
+             (rejection #(compile-stage (assoc-in stage [:fns 0 :parent] :core.logic/coalesce) visible))))
+      (is (= :staged-function-not-visible
+             (rejection #(compile-stage stage (disj visible (ids/fn-id "web.crud" :_query-param-raw)))))))))

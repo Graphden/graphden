@@ -6,6 +6,7 @@
     [graphden.input.query-lookup-arguments :as arguments]
     [graphden.input.query-lookup-source :as query]
     [graphden.input.source :as source]
+    [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
@@ -17,7 +18,7 @@
    (ids/fn-id "core.logic" :coalesce)])
 
 
-(defn- original-source
+(defn- unique-original
   [package id]
   (let [[form & others] (get-in package [:originals id])]
     (when-not (seq others) form)))
@@ -28,11 +29,11 @@
    checker. Compare its native result declaration and recover the exact
    five input paths. No result or callback is admitted from staged EDN."
   [{:keys [declarations legacy-graph] :as package} owner roots]
-  (let [source (original-source package owner)]
+  (let [source (unique-original package owner)]
     (when (contains? #{:query-param :web.crud/query-param} (:parent source))
       (when-let [{expanded :source :keys [chooser views proof]}
-                 (query/expansion legacy-graph owner source roots (set (keys declarations)))]
-        (let [support (mapv #(original-source package %) dependencies)]
+                 (query/expansion (or legacy-graph (readers/owner-index (:prepared package) owner)) owner source roots (set (keys declarations)))]
+        (let [support (mapv #(unique-original package %) dependencies)]
           (when (every? some? support)
             (let [forms (into (conj support chooser expanded) (map :form) views)
                   native (into roots (map (juxt :id :signature)) views)
@@ -56,10 +57,8 @@
   "Recheck a staged single definition against the canonical proposal.
    Source spans are held by the enclosing module ledger."
   [{:keys [original proposed entry]} source draft]
-  (when (and (migration/same-edn? (dissoc source :namespace :source-file :source-line)
-                                  (dissoc original :namespace :source-file :source-line))
-             (migration/same-edn? (dissoc draft :namespace :source-file :source-line)
-                                  (dissoc proposed :namespace :source-file :source-line)))
+  (when (and (migration/same-edn? source original)
+             (migration/same-edn? draft proposed))
     entry))
 
 
@@ -78,6 +77,5 @@
           (assoc-in [:query-lookups id] expansion)
           (assoc-in [:prepared ::source/normalized-verifiers id]
                     (fn [candidate]
-                      (when (and (migration/same-edn? (:source normalized) (:source candidate))
-                                 (migration/same-edn? (:proposed normalized) (:proposed candidate)))
+                      (when (replay expansion (:source candidate) (:proposed candidate))
                         normalized)))))))

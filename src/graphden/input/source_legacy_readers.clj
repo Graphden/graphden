@@ -39,6 +39,12 @@
                             :bindings (:binding kinds) :list-items (:binding-list-item kinds)})))
 
 
+(defn owner-index
+  "Resolve the legacy call graph for one original authored package owner."
+  [prepared owner]
+  (index-rows (owner-rows prepared owner)))
+
+
 (defn- value-edge?
   "Require the original compiler to evaluate the same effective slot and target
    that the source parser recorded. Callable and identity dispatch stay distinct."

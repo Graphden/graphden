@@ -2,11 +2,13 @@
   "Explicit offline execution boundary for prepared, verified package source.
    Does not register implementations or select a production compiler."
   (:require
+    [graphden.executor.compile-runtime :as executor]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
     [graphden.input.ir :as ir]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as list-execution]
+    [graphden.input.query-lookup-package :as query]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
     [graphden.packages.records.ids :as ids]
@@ -62,6 +64,17 @@
       checked)))
 
 
+(defn- compile-normalized
+  [{:keys [package roots views adapt proof]} owner implementations]
+  (let [implementations (reduce (fn [result {:keys [id original]}] (assoc result id (get implementations original)))
+                                implementations views)
+        frozen (snapshot/freeze-source-analysis package [owner] roots)
+        checked (analysis/analyze-effective-input (:context frozen) owner (:options frozen))
+        {:keys [invoke] :as compiled} (compile-frozen frozen checked implementations)]
+    (assoc compiled :structured-invoke invoke :input-origin proof
+           :invoke (executor/named-input-closure (fn [args ctx] (invoke (adapt args) ctx))))))
+
+
 (defn compile-package
   "Freeze and check a package closure, then lower its named residual inputs.
    package comes from source-snapshot/package-index. roots are frozen rich
@@ -69,8 +82,10 @@
    Both must originate in the same prepared package runtime. Returns evidence
    and an ordinary executor closure, without publishing either globally."
   [package root roots implementations]
-  (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
-    (compile-frozen frozen (check-legacy-invocation frozen root) implementations)))
+  (if-let [expansion (or (get-in package [:query-lookups root]) (query/prepare package root roots))]
+    (compile-normalized expansion root implementations)
+    (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
+      (compile-frozen frozen (check-legacy-invocation frozen root) implementations))))
 
 
 (defn- require-visible-root!
@@ -89,22 +104,32 @@
   [package root roots implementations {payload :bytes :keys [legacy-module sha256 visible-fn-ids]}]
   (require-visible-root! root visible-fn-ids)
   (let [module (staged/read-pinned payload sha256)
+        package (reduce (fn [p {:keys [name]}]
+                          (let [id (ids/fn-id (:namespace legacy-module) name)]
+                            (if (get-in p [:query-lookups id]) p (or (query/certify p id roots) p))))
+                        package (:fns legacy-module))
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)
       (ir/reject! :staged-root-required {}))
-    (let [frozen (snapshot/freeze-source-analysis package [root] roots)
-          executable (get-in frozen [:options :implementations])]
-      (when-not (every? (fn [[target-id {:keys [base-fn-id generated-list]}]]
-                          ;; The verified authored owner grants access to its
-                          ;; generated list, never to its separate operand refs.
-                          (if generated-list
-                            (and (= target-id base-fn-id) (contains? visible-fn-ids (:owner-id generated-list)))
-                            (and (contains? visible-fn-ids target-id)
-                                 (contains? visible-fn-ids base-fn-id))))
-                        executable)
-        (ir/reject! :staged-function-not-visible {}))
-      (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
-             :staged-source {:sha256 sha256 :namespace (:namespace module)}))))
+    (if-let [expansion (get-in package [:query-lookups root])]
+      (do
+        (when-not (every? visible-fn-ids (get-in expansion [:proof :original-targets]))
+          (ir/reject! :staged-function-not-visible {}))
+        (assoc (compile-normalized expansion root implementations)
+               :staged-source {:sha256 sha256 :namespace (:namespace module)}))
+      (let [frozen (snapshot/freeze-source-analysis package [root] roots)
+            executable (get-in frozen [:options :implementations])]
+        (when-not (every? (fn [[target-id {:keys [base-fn-id generated-list]}]]
+                            ;; The verified authored owner grants access to its
+                            ;; generated list, never to its separate operand refs.
+                            (if generated-list
+                              (and (= target-id base-fn-id) (contains? visible-fn-ids (:owner-id generated-list)))
+                              (and (contains? visible-fn-ids target-id)
+                                   (contains? visible-fn-ids base-fn-id))))
+                          executable)
+          (ir/reject! :staged-function-not-visible {}))
+        (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
+               :staged-source {:sha256 sha256 :namespace (:namespace module)})))))
 
 
 (defn compile-staged-primitive

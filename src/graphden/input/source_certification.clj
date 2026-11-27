@@ -1,6 +1,7 @@
 (ns graphden.input.source-certification
   "Certify supported legacy scope rewrites in the order their proofs require."
   (:require
+    [graphden.input.query-lookup-package :as query]
     [graphden.input.source :as source]
     [graphden.input.source-legacy-readers :as legacy-readers]
     [graphden.input.source-origins :as origins]
@@ -38,10 +39,11 @@
 (defn- attempt
   [package roots id field]
   (try
-    {:package (cond
-                (= :joint field) (snapshot/with-certified-owner package id roots)
-                field (snapshot/with-migrated-forwarding package id field roots)
-                :else (snapshot/with-migrated-bindings package [id] roots))}
+    {:package (or (query/certify package id roots)
+                  (cond
+                    (= :joint field) (snapshot/with-certified-owner package id roots)
+                    field (snapshot/with-migrated-forwarding package id field roots)
+                    :else (snapshot/with-migrated-bindings package [id] roots)))}
     (catch clojure.lang.ExceptionInfo failure
       (let [{:keys [type code fn-id] :as data} (ex-data failure)]
         (when-not (or (#{"input" "types"} (some-> type namespace))

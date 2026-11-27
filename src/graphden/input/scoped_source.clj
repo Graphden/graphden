@@ -19,7 +19,7 @@
 
 
 (defn- read-leaf
-  [{:keys [name->id contract scope inline-at]} {:keys [source-names field-id]} path form]
+  [{:keys [name->id contract scope inline-at]} {:keys [source-names field-id shared-source]} path form]
   (when-not (and (vector? form) (= 2 (count form))) (reject! :unsupported-scoped-expression path))
   (let [[op payload] form]
     (case op
@@ -30,12 +30,18 @@
              (if (uuid? target)
                {:kind :ref :fn-id target}
                (reject! :unresolved-scoped-reference path)))
-      :project (do
-                 (when-not (and (= payload source-names) (vector? payload)
-                                (= 1 (count payload)) (simple-keyword? (first payload)))
-                   (reject! :unverified-forwarded-source path))
-                 (assoc (select-keys (input/resolve-address contract scope payload) [:scope :path])
-                        :kind :projection))
+      :project (if shared-source
+                 (let [[source-scope source-path] (:address shared-source)]
+                   (when-not (and (= payload (:public-path shared-source))
+                                  (= (first scope) (first source-scope)) (= [field-id] source-path))
+                     (reject! :unverified-forwarded-source path))
+                   {:kind :projection :scope source-scope :path source-path})
+                 (do
+                   (when-not (and (= payload source-names) (vector? payload)
+                                  (= 1 (count payload)) (simple-keyword? (first payload)))
+                     (reject! :unverified-forwarded-source path))
+                   (assoc (select-keys (input/resolve-address contract scope payload) [:scope :path])
+                          :kind :projection)))
       (reject! :unsupported-scoped-expression path))))
 
 
@@ -89,7 +95,7 @@
 
 (defn- parse-route
   [ctx local-state public-path form]
-  (let [{:keys [address row owner use-path field-id copy-of configuration] :as certificate} (checked-route ctx local-state public-path)
+  (let [{:keys [address row owner use-path field-id copy-of configuration shared-source] :as certificate} (checked-route ctx local-state public-path)
         pin? (and (= "ref" (:expression-kind row)) (= #{:type} (set (keys configuration)))
                   (uuid? (:type-override-fn-id row))
                   (migration/same-edn? configuration (get-in ctx [:authored-configurations public-path])))]
@@ -97,6 +103,9 @@
     (let [expression (read-leaf ctx certificate public-path form)
           projection? (= :projection (:kind expression))
           id (cond
+               shared-source (do (when-not (and projection? (= copy-of (ids/binding-id owner field-id)))
+                                   (reject! :scoped-origin-mismatch public-path))
+                                 (migration/derived-id :scoped-ref-read owner use-path field-id))
                projection? (migration/derived-id :forwarded-field owner (if (:nested-reader? certificate) use-path (first use-path)) field-id)
                copy-of (do (when-not (and (= :value (:kind expression)) (= copy-of (ids/binding-id owner field-id)))
                              (reject! :scoped-origin-mismatch public-path))
@@ -116,9 +125,10 @@
         (reject! :scoped-origin-mismatch public-path))
       (cond-> {:address address :row parsed :expression expression}
         copy-of (assoc :copy-of copy-of)
+        shared-source (assoc :shared-source shared-source)
         (and (= :ref (:kind expression)) (map? (second form))) (assoc :inline-body (second form))
         (:named-leaf? certificate) (assoc :named-leaf? true)
-        projection? (assoc :source-names (:source-names certificate))))))
+        (and projection? (not shared-source)) (assoc :source-names (:source-names certificate))))))
 
 
 (defn parse-bindings
@@ -127,11 +137,17 @@
                                 (when (vector? path) [path (parse-route ctx state path form)])))
                      (when (map? bind) bind))
         by-id (into {} (map (juxt (comp :id :row) identity)) (vals parsed))]
-    (doseq [[path {:keys [copy-of]}] (:scoped-inputs ctx) :when copy-of]
+    (doseq [[path {:keys [copy-of shared-source]}] (:scoped-inputs ctx) :when copy-of]
       (let [copy (get parsed path)
             original (get by-id copy-of)]
-        (when-not (and (= copy-of (:copy-of copy)) (= :value (get-in original [:expression :kind]))
-                       (migration/same-edn? (:expression original) (:expression copy)))
+        (when-not (and (= copy-of (:copy-of copy))
+                       (if shared-source
+                         (and (= :ref (get-in original [:expression :kind]))
+                              (= original (get parsed (:public-path shared-source)))
+                              (= (:address original) (:address shared-source)
+                                 ((juxt :scope :path) (:expression copy))))
+                         (and (= :value (get-in original [:expression :kind]))
+                              (migration/same-edn? (:expression original) (:expression copy)))))
           (reject! :scoped-origin-mismatch path))))
     parsed))
 
@@ -166,9 +182,9 @@
 
 (defn emit-bindings
   [local routes id->name]
-  (reduce-kv (fn [form path {:keys [expression source-names inline-body]}]
+  (reduce-kv (fn [form path {:keys [expression source-names inline-body shared-source]}]
                (assoc form path (case (:kind expression)
                                   :value [:value (:value expression)]
                                   :ref [:ref (or inline-body (get id->name (:fn-id expression)) (reject! :unresolved-scoped-reference path))]
-                                  :projection [:project source-names])))
+                                  :projection [:project (or (:public-path shared-source) source-names)])))
              local routes))

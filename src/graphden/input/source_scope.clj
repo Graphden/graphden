@@ -379,47 +379,70 @@
       (:target-type-origin arg) (assoc :target-type-origin (:target-type-origin arg)))))
 
 
+(defn- repeated-binding-certificate
+  [primary value-present {:keys [address row] :as reader}]
+  (let [{id :id owner :fn-id} (:row primary)
+        [[_ use-path] [slot-id]] address
+        [[_ source-scope] source-path] (:address primary)
+        common (assoc reader :copy-of id :repeated-occurrences (:repeated-occurrences primary))]
+    (if value-present
+      (assoc-in common [:row :id] (migration/derived-id :scoped-literal-read owner use-path slot-id))
+      (assoc common
+             :shared-source (select-keys primary [:address :public-path])
+             :row (rows/normalize
+                    (assoc (dissoc row :ref-fn-id)
+                           :id (migration/derived-id :scoped-ref-read owner use-path slot-id)
+                           :expression-kind "projection"
+                           :projection-scope-path source-scope :projection-path source-path))))))
+
 (defn- binding-certificates
-  [snapshot before literal-witness [arg {:keys [id fn-id slot-id value-present] :as binding} :as origin]]
+  [snapshot before reader-witness [arg {:keys [slot-id value-present ref-fn-id] :as binding} :as origin]]
   (let [addresses (occurrences before slot-id)
         field (peek (:source-path arg))]
-    (if (and (next addresses) literal-witness value-present (empty? (:policy arg))
+    (if (and (next addresses) reader-witness (or value-present (uuid? ref-fn-id)) (empty? (:policy arg))
              (every? (fn [[_ contract]]
                        (every? #(or (not= field (:name %)) (= slot-id (:id %))) (:fields contract)))
                      (get-in before [:public-input :scope-contracts]))
-             (literal-witness field binding))
+             (reader-witness field binding))
       (let [addresses (sort-by context/address-sort-key addresses)
-            [primary & additional] (map (partial binding-certificate snapshot before origin) addresses)
-            common {:literal-occurrences (set addresses)}]
-        (into [(merge primary common)]
-              (map (fn [{[[_ use-path]] :address :as certificate}]
-                     (-> (merge certificate common)
-                         (assoc :copy-of id)
-                         (assoc-in [:row :id] (migration/derived-id :scoped-literal-read fn-id use-path slot-id)))))
-              additional))
+            [primary & others :as readers] (map (partial binding-certificate snapshot before origin) addresses)
+            primary (assoc primary :repeated-occurrences (set addresses))]
+        (when (and (not value-present) (some :captured-input (mapcat :edges readers)))
+          (reject! :nonunique-reference-input))
+        (into [primary] (map (partial repeated-binding-certificate primary value-present)) others))
       [(binding-certificate snapshot before origin (occurrence before slot-id))])))
 
+(defn- verified-shared-projection?
+  [after binding added {:keys [row shared-source]}]
+  (let [[source-scope source-path] (:address shared-source)
+        source (get-in after [:public-input :bindings (:address shared-source)])]
+    (and (= (:id row) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
+         (= {:kind :projection :scope source-scope :path source-path} (:expression added))
+         (= (:id binding) (:binding-id source))
+         (= :value (get-in source [:reference :mode]))
+         (= {:kind :ref :fn-id (:ref-fn-id binding)} (:expression source)))))
 
 (defn- verified-addition?
-  [before after binding {:keys [address row public-path literal-occurrences] :as certificate}]
+  [before after binding {:keys [address row public-path repeated-occurrences shared-source] :as certificate}]
   (let [added (get-in after [:public-input :bindings address])
         expression (if (:value-present binding)
                      {:kind :value :value (:value binding)}
                      {:kind :ref :fn-id (:ref-fn-id binding)})]
     (and (= (:id binding) (or (:copy-of certificate) (:id row)))
-         (if literal-occurrences
-           (= literal-occurrences (set (occurrences after (:slot-id binding))))
+         (if repeated-occurrences
+           (= repeated-occurrences (set (occurrences after (:slot-id binding))))
            (= address (occurrence after (:slot-id binding))))
-         (if (nil? (:expression-kind row))
-           (let [quantities [:address :completion-type :required :required-now? :whole-bindable?]]
-             (and (nil? added)
-                  (migration/same-edn? (select-keys (get-in before [:public-input :routes public-path]) quantities)
-                                       (select-keys (get-in after [:public-input :routes public-path]) quantities))))
-           (and (= (:id row) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
-                (migration/same-edn? expression (:expression added))))
-         (migration/same-edn? (meaning binding)
-                              (meaning (migration/legacy-binding (assoc row :scope-path [] :id (:id binding))))))))
-
+         (if shared-source
+           (verified-shared-projection? after binding added certificate)
+           (and (if (nil? (:expression-kind row))
+                  (let [quantities [:address :completion-type :required :required-now? :whole-bindable?]]
+                    (and (nil? added)
+                         (migration/same-edn? (select-keys (get-in before [:public-input :routes public-path]) quantities)
+                                              (select-keys (get-in after [:public-input :routes public-path]) quantities))))
+                  (and (= (:id row) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
+                       (migration/same-edn? expression (:expression added))))
+                (migration/same-edn? (meaning binding)
+                                     (meaning (migration/legacy-binding (assoc row :scope-path [] :id (:id binding))))))))))
 
 (defn- nested-field-check
   [target [root prefix] {:keys [id address scope path kind trigger] :as check}]
@@ -538,7 +561,7 @@
 (defn- reference-field-checks
   "Replay the independently checked target on the new edge. Its own field
    may carry the universal :any check or the proved unary callable contract."
-  [snapshot analyze before after {:keys [address row public-path] :as certificate}]
+  [snapshot analyze before after {:keys [address row public-path repeated-occurrences] :as certificate}]
   (when-let [target (:ref-fn-id row)]
     (let [[[root scope-path] field-path] address
           id (:id row)
@@ -552,16 +575,20 @@
           callable-type (:checked-callable certificate)
           checked-value (some certificate [:checked-list :checked-open :checked-lookup])]
       (when (or callable-type (some #{edge} (:dependencies after)))
-        (cond-> (nested-field-checks (or (:external-graph certificate) (:graph checked-value)
-                                         (checked-graph analyze snapshot target true))
-                                     after use-scope)
-          (and (or asserted callable-type checked-value
-                   (= :any (get-in before [:public-input :routes public-path :completion-type])
-                      (get-in after [:scopes scope-path :bindings address :expected-type])))
-               (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
-          (conj {:id [address :value-type :field-read] :address address
-                 :scope (first address) :path field-path
-                 :kind :value-type :trigger :field-read :expected-type (or asserted callable-type (:type checked-value) :any)}))))))
+        (let [checks (nested-field-checks (or (:external-graph certificate) (:graph checked-value)
+                                             (checked-graph analyze snapshot target true))
+                                         after use-scope)
+              checks (if repeated-occurrences
+                       (mapv #(update % :expected-type (partial types/resolve (:substitution after))) checks)
+                       checks)]
+          (cond-> checks
+            (and (or asserted callable-type checked-value
+                     (= :any (get-in before [:public-input :routes public-path :completion-type])
+                        (get-in after [:scopes scope-path :bindings address :expected-type])))
+                 (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
+            (conj {:id [address :value-type :field-read] :address address
+                   :scope (first address) :path field-path
+                   :kind :value-type :trigger :field-read :expected-type (or asserted callable-type (:type checked-value) :any)})))))))
 
 
 (defn- callable-alias-reference-addresses
@@ -621,6 +648,16 @@
     (= required (get-in (checked-graph analyze snapshot target true) [:scopes [] :signature :return]))))
 
 
+(defn- shared-value-read?
+  [after by-address {:keys [address expected-type] :as check}]
+  (let [{:keys [row shared-source]} (get by-address address)
+        added (reads/binding-at after address)]
+    (and shared-source (reads/field-read? check) (= :any expected-type)
+         (= (:id row) (:binding-id added))
+         (= :projection (get-in added [:reference :mode]))
+         (= (:address shared-source) (get-in added [:reference :source])))))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
@@ -668,7 +705,8 @@
                     (every? (fn [check]
                               (or (ref-checks check) (annotations check)
                                   (and (empty? (:additional-types check))
-                                       (some #(reads/literal-read? snapshot after % check) certificates)))) current)))))))
+                                       (or (shared-value-read? after by-address check)
+                                           (some #(reads/literal-read? snapshot after % check) certificates))))) current)))))))
 
 
 (defn- preserves-projection-readers?
@@ -720,10 +758,10 @@
    interdependent type constraints and occupancy use the completed graph.
    Existing field-read obligations must survive exactly. New value ref uses
    may bring the exact field checks of their independently checked targets."
-  [{owner :identity :as plan-entry} paths snapshot analyze projections literal-witness]
+  [{owner :identity :as plan-entry} paths snapshot analyze projections reader-witness]
   (let [omitted (legacy-omissions plan-entry paths snapshot projections)
         before (checked-graph analyze snapshot owner true)
-        grouped (mapv (partial binding-certificates snapshot before literal-witness) omitted)
+        grouped (mapv (partial binding-certificates snapshot before reader-witness) omitted)
         certificates (into [] cat grouped)
         additions (into {} (map (juxt :id identity)) (map :row certificates))]
     (when-not (= (count certificates) (count additions) (count (set (map :address certificates))))
@@ -746,8 +784,8 @@
   "Check exactly the complete omitted binding group, preserving all existing
    occupancy and runtime obligations. No forwarding declarations are admitted."
   ([entry paths snapshot analyze] (verify-bindings entry paths snapshot analyze nil))
-  ([entry paths snapshot analyze literal-witness]
-   (verify-bindings* entry paths snapshot analyze [] literal-witness)))
+  ([entry paths snapshot analyze reader-witness]
+   (verify-bindings* entry paths snapshot analyze [] reader-witness)))
 
 
 (defn verify-bindings-after-forwarding

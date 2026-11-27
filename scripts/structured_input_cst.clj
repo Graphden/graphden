@@ -144,7 +144,42 @@
   (str/join (map (fn [key]
                    (when (contains? body key)
                      (str key " " (migration/stable-edn (get body key)) " ")))
-                 [:legacy-forms :legacy-args-order :legacy-scope-names :legacy-order])))
+                 [:legacy-forms :legacy-args-order :legacy-scope-names :legacy-scope-copies :legacy-order])))
+
+
+(defn- binding-insertions
+  [bindings]
+  (apply str (map (fn [[path form]]
+                    (str " " (migration/stable-edn path) " " (migration/stable-edn form)))
+                  (sort-by (comp pr-str key) bindings))))
+
+
+(defn- scoped-path?
+  [path]
+  (and (vector? path) (< 1 (count path)) (every? simple-keyword? path)))
+
+
+(defn- copied-bindings?
+  [bindings]
+  (and (map? bindings)
+       (every? (fn [[path expression]]
+                 (when (and (scoped-path? path) (vector? expression) (= 2 (count expression)))
+                   (let [[op origin] expression]
+                     (case op
+                       :value true
+                       :project (and (scoped-path? origin) (not= origin path) (= (peek origin) (peek path)))
+                       false))))
+               bindings)))
+
+
+(defn- append-bindings-edit
+  [source starts args bindings]
+  (when-not (and (= :map (z/tag args)) (seq bindings) (copied-bindings? bindings)
+                 (not-any? #(key-loc args %) (keys bindings)))
+    (refuse :invalid-scoped-copies {}))
+  (let [{:keys [end]} (node-edit source starts args identity)
+        insertion (dec end)]
+    {:start insertion :end insertion :before "" :after (binding-insertions bindings)}))
 
 
 (defn- mixed-inline-field
@@ -169,7 +204,7 @@
 
 
 (defn- mixed-inline-edit
-  [source starts loc {:keys [input legacy-scope-names] :as body} path]
+  [source starts loc {:keys [input bind legacy-scope-names legacy-scope-copies] :as body} path]
   (let [args (value-at loc [:args])
         targets (set/map-invert legacy-scope-names)
         key (rename-edit source starts loc nil [:args] :bind)
@@ -177,7 +212,8 @@
         fields (mapv (partial mixed-inline-field source starts body targets path)
                      (partition 2 (children args)))
         chunks (into {} (field-chunks source span fields))
-        binding-text (str/join (map (comp chunks :field) (filter :binding? fields)))
+        binding-text (str (str/join (map (comp chunks :field) (filter :binding? fields)))
+                          (binding-insertions (select-keys bind (keys legacy-scope-copies))))
         configs (concat (map (comp chunks :field) (remove :binding? fields))
                         (keep :configuration fields))]
     {:start (:start key) :end (:end span)
@@ -189,7 +225,7 @@
 
 
 (defn- inline-field-edits
-  [source starts loc {:keys [bind input configure legacy-forms legacy-order legacy-args-order legacy-scope-names] :as body} path]
+  [source starts loc {:keys [bind input configure legacy-forms legacy-order legacy-args-order legacy-scope-names legacy-scope-copies] :as body} path]
   (if legacy-args-order
     (if (and (empty? bind) (empty? input))
       [(annotation-map-edit source starts loc configure (str ":bind {} " (inline-ledger-text body)) legacy-scope-names)]
@@ -206,7 +242,7 @@
                                           (node-edit source starts (key-loc args field)
                                                      (constantly (migration/stable-edn target))))]
                            [field edit key-edit]))
-                       bind)
+                       (apply dissoc bind (keys legacy-scope-copies)))
           configurations (keep (fn [[field edit]]
                                  (when-let [spec (:configuration edit)]
                                    (str (migration/stable-edn [field]) " " spec)))
@@ -216,9 +252,12 @@
                                    (when (seq configurations) (str ":configure {" (str/join " " configurations) "} "))
                                    (when (seq legacy-forms) (str ":legacy-forms " (migration/stable-edn legacy-forms) " "))
                                    (when (seq legacy-scope-names) (str ":legacy-scope-names " (migration/stable-edn legacy-scope-names) " "))
+                                   (when (seq legacy-scope-copies) (str ":legacy-scope-copies " (migration/stable-edn legacy-scope-copies) " "))
                                    (when (seq legacy-order) (str ":legacy-order " (migration/stable-edn legacy-order) " "))
                                    ":bind"))
-            (into [] (comp (mapcat rest) (remove nil?)) fields)))))
+            (cond-> (into [] (comp (mapcat rest) (remove nil?)) fields)
+              (seq legacy-scope-copies)
+              (conj (append-bindings-edit source starts args (select-keys bind (keys legacy-scope-copies)))))))))
 
 
 (defn- inline-type-edit
@@ -372,7 +411,7 @@
 
 
 (defn- partition-composed-edit
-  [source starts loc {:keys [definition path declarations position-inputs operators forwarded-bindings]}]
+  [source starts loc {:keys [definition path declarations position-inputs operators forwarded-bindings scoped-paths copied-bindings]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
                  (not-any? #(key-loc loc %) [:input :bind :configure])
                  (vector? declarations) (= (count declarations) (count (set declarations)))
@@ -381,7 +420,12 @@
                            (and (vector? target) (<= 2 (count target)) (every? simple-keyword? target)
                                 (= [:project [(peek target)]] expression)
                                 (some #{(peek target)} declarations))) forwarded-bindings)
-                 (map? operators) (not-any? (set declarations) (keys operators)))
+                 (map? operators) (not-any? (set declarations) (keys operators))
+                 (or (nil? scoped-paths)
+                     (and (map? scoped-paths)
+                          (every? (fn [[field target]] (and (contains? operators field) (scoped-path? target) (= field (peek target))))
+                                  scoped-paths)))
+                 (or (nil? copied-bindings) (copied-bindings? copied-bindings)))
     (refuse :invalid-field-partition {:definition definition}))
   (let [args (value-at loc path)
         input? (or (seq declarations) (seq position-inputs))
@@ -405,8 +449,8 @@
                                  :inline-ref (inline-edit source starts value (:body operation) [:args field])
                                  (leaf-edit source starts value op [:args field])))))
         spans (mapv (fn [{:keys [field] :as span}]
-                      (if (annotation-fields field)
-                        (update span :text #(str "[" field "]" (subs % (count (str field)))))
+                      (if-let [key (or (get scoped-paths field) (when (annotation-fields field) [field]))]
+                        (update span :text #(str (pr-str key) (subs % (count (str field)))))
                         span))
                     spans)
         chunks (field-chunks source map-span spans)
@@ -419,8 +463,7 @@
                   (map second own-chunks) (map by-field declarations))
         bindable? (complement (into owns? annotation-fields))
         binds (concat (map second (filter (comp bindable? first) chunks))
-                      (map (fn [[target expression]] (str " " (pr-str target) " " (pr-str expression)))
-                           (sort-by (comp pr-str key) forwarded-bindings)))
+                      (keep #(when (seq %) (binding-insertions %)) [forwarded-bindings copied-bindings]))
         configs (concat (map second (filter (comp annotation-fields first) chunks))
                         (keep :configuration spans))]
     (when-not (and (= :map (z/tag args)) (= (set (keys by-field)) (into owns? (keys operators))))
@@ -669,6 +712,9 @@
       :inline-ref
       (inline-edit source starts (argument-loc loc path) (:body operation) path)
 
+      :scoped-copies
+      (append-bindings-edit source starts (value-at loc path) (:bindings operation))
+
       :partition-composed-args
       (partition-composed-edit source starts loc operation)
 
@@ -751,6 +797,37 @@
                           (or forwarded-certificates (some-> scope-certificate vector))))) fields))
 
 
+(defn- copied-bindings
+  [arguments]
+  (into {}
+        (mapcat
+          (fn [{:keys [source-path scope-certificate scoped-copies expression]}]
+            (for [{:keys [public-path row copy-of shared-source edges]} scoped-copies
+                  :let [{primary :public-path original :row} scope-certificate]]
+              (do
+                (when-not (and (= copy-of (:id original)) (uuid? copy-of)
+                               (= (count public-path) (inc (count edges)))
+                               (= (peek public-path) (peek primary) (peek source-path))
+                               (= (:scope-path row) (mapv :binding-id edges))
+                               (= (:target-path original) (:target-path row)))
+                  (refuse :planner-ledger-mismatch {:path source-path}))
+                [public-path
+                 (case (:expression-kind row)
+                   "projection" (do
+                                  (when-not (and (= :ref (first expression))
+                                                 (= primary (:public-path shared-source))
+                                                 (= (:scope-path original) (:projection-scope-path row))
+                                                 (= (:target-path original) (:projection-path row)))
+                                    (refuse :planner-ledger-mismatch {:path source-path}))
+                                  [:project primary])
+                   "value" (do
+                             (when-not (and (= :value (first expression)) (= (:value row) (second expression)))
+                               (refuse :planner-ledger-mismatch {:path source-path}))
+                             expression)
+                   (refuse :planner-ledger-mismatch {:path source-path}))])))
+          arguments)))
+
+
 (defn- self-pin-operation
   [source proposed [argument & more] pin]
   (let [path (:source-path argument)
@@ -775,7 +852,8 @@
         position-inputs (positions/declarations arguments)
         declarations (merge declarations alias-input position-inputs)
         forwarded (forwarded-bindings fields)
-        bindings (into forwarded (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
+        copies (copied-bindings binds)
+        bindings (into (into forwarded copies) (map (fn [arg] [(or (get-in arg [:scope-certificate :public-path]) (second (:source-path arg))) (:expression arg)])) binds)
         scopes (keep (fn [{:keys [scope-certificate source-path origin]}]
                        (when-let [{:keys [public-path row]} scope-certificate]
                          (when-not (and (= source-path (:source-path scope-certificate)) (= (:id row) (:binding-id origin))
@@ -811,7 +889,7 @@
                    (vector? arguments) (= (count paths) (count (set paths)))
                    (= (count arguments) (+ (count fields) (count binding-entries)))
                    (= (set paths) (set (for [field (keys (:args source))] [:args field])))
-                   (= (+ (count forwarded) (count binds)) (count bindings))
+                   (= (+ (count forwarded) (count binds) (count copies)) (count bindings))
                    (every? #(= (:spec %) (get-in source (:source-path %))) fields)
                    (= proposed (cond-> (dissoc source :args)
                                  (seq declarations) (assoc :input declarations)
@@ -822,7 +900,8 @@
       (seq alias-entries)
       (do
         (when (seq annotations) (refuse :unsupported-annotation-mix {}))
-        (when-not (and (empty? fields) (not-any? #(= :typed-expression (:op %)) operations))
+        (when-not (and (empty? fields) (empty? scopes) (empty? copies)
+                       (not-any? #(= :typed-expression (:op %)) operations))
           (refuse :unsupported-projection-mix {}))
         (into [{:op :declare-projection-input :definition (:name source) :path [:args]
                 :input alias-input :position-inputs position-inputs
@@ -834,8 +913,12 @@
         :declarations (vec (remove (set (keys position-inputs)) (keys declarations)))
         :position-inputs position-inputs
         :forwarded-bindings forwarded
+        :scoped-paths (into {} (map (juxt (comp second :path) :public-path)) scopes)
+        :copied-bindings copies
         :operators (into {} (map (juxt (comp second :path) identity)) operations)}]
-      :else (into (into (rename :rename-bind) scopes) operations))))
+      :else (cond-> (into (into (rename :rename-bind) scopes) operations)
+              (seq copies) (conj {:op :scoped-copies :definition (:name source) :path [:args]
+                                  :bindings copies})))))
 
 
 (defn- annotation-only-operations

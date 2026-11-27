@@ -331,7 +331,7 @@
 
 (defn inline-source-fields
   "Map each inline binding and scoped annotation to its original name. Scoped keys
-   need an explicit spelling. Verified copies share the original literal."
+   need an explicit spelling. Extra reads must point to the original binding."
   [{:keys [bind configure legacy-scope-names legacy-scope-copies] :as body}]
   (when (and (map? bind) (or (nil? configure) (map? configure)))
     (let [local (filter simple-keyword? (keys bind))
@@ -350,8 +350,11 @@
                  (every? (fn [[copy origin]]
                            (let [form (get bind origin)]
                              (and (contains? names origin) (not (contains? configure copy))
-                                  (vector? form) (= 2 (count form)) (= :value (first form))
-                                  (= form (get bind copy))))) copies)
+                                  (vector? form) (= 2 (count form))
+                                  (case (first form)
+                                    :value (= form (get bind copy))
+                                    :ref (= [:project origin] (get bind copy))
+                                    false)))) copies)
                  (every? #(and (vector? %) (> (count %) 1) (every? simple-keyword? %)) scoped)
                  (every? (fn [path]
                            (let [form (get bind path)]

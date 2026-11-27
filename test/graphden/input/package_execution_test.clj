@@ -1375,6 +1375,38 @@
     (is (= "attached!" (legacy {}) (canonical {})))))
 
 
+(deftest repeated-value-reference-keeps-the-original-reader-results
+  (let [forms (into (declarations "packages/app/views/fns.edn"
+                                  #{:_view-filter-text-value :_view-filter-trimmed :_view-filter-text :_view-filter-text-item})
+                    (concat (declarations "packages/core/refinements/fns.edn" #{:nullable-text :positive-int :non-negative-int})
+                            (declarations "packages/core/logic/fns.edn" #{:if :const :some?})
+                            (declarations "packages/core/strings/fns.edn" #{:str-trim :to-str :blank?})))
+        module "app.views"
+        name :_view-filter-text-item
+        root (ids/fn-id module name)
+        original (first (filter #(= name (:name %)) forms))
+        legacy-module {:namespace module :fns [(dissoc original :namespace)]}
+        compile-owner (fn [package owner roots implementations]
+                        (let [certified (snapshot/with-migrated-bindings package [owner] roots)
+                              entry (get-in certified [:closure-baselines owner])
+                              readers (vals (get-in entry [:v2 :scoped-inputs]))
+                              visible (into #{} (map :fn-id) (get-in certified [:prepared :fn-defs]))
+                              staged (assoc legacy-module :input-format 2 :fns [(dissoc (:proposed entry) :namespace)])]
+                          (is (= {"ref" 1 "projection" 3} (frequencies (map (comp :expression-kind :row) readers))))
+                          (execution/compile-staged-module certified owner roots implementations
+                                                           (staged-options legacy-module staged visible))))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! forms)
+      (let [{:keys [legacy canonical analysis]} (runtimes forms root compile-owner)
+            paths (keep (fn [[path {:keys [name kind]}]]
+                          (when (and (= :item name) (= :input-field kind)) path))
+                        (get-in analysis [:public-input :routes]))
+            [item] paths]
+        (is (= 1 (count paths)))
+        (doseq [[input expected] [[nil nil] ["   " nil] ["  Alice  " "Alice"] [0 "0"]]]
+          (is (= expected (legacy {:item input}) (canonical (assoc-in {} item input)))))))))
+
+
 (deftest terminal-named-input-feeds-distinct-legacy-slot-identities
   (let [source (into (declarations "packages/core/collections/fns.edn" #{:zipmap})
                      (concat (declarations "packages/core/strings/fns.edn" #{:str :to-str})
@@ -1476,8 +1508,8 @@
                               lower ir/lower-checked
                               compile-runtime #(execution/compile-package certified root roots implementations)
                               wrong (fn [& options]
-                                      (let [read (apply readers options)]
-                                        (fn [& args] (assoc (apply read args) :positional {}))))]
+                                      (let [witness (apply readers options)]
+                                        (fn [& args] (assoc (apply witness args) :positional {}))))]
                           (is (= :authored-source-equivalent (get-in certified [:closure-baselines root :verification])))
                           (is (= :unsupported-reference-use
                                  (get-in (with-redefs [legacy-readers/callback-readers wrong] (verify)) [:blocked root :code])))

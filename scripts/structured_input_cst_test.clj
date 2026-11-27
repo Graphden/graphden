@@ -85,6 +85,25 @@
            (format/inline-origin (format/migrate-inline (assoc-in original [:args :flag] false) proposal))))))
 
 
+(deftest shared-inline-reference-keeps-one-original-writer
+  (let [raw "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:value {:parent :reader :args {:word ;; shared initializer\r\n :producer}}}}]}"
+        original (get-in (edn/read-string raw) [:fns 0 :args :value])
+        primary [:left :word]
+        read-path [:right :word]
+        proposal {:bind {primary [:ref :producer] read-path [:project primary]}
+                  :legacy-scope-names {primary :word}
+                  :legacy-scope-copies {read-path primary}}
+        body (format/migrate-inline original proposal)
+        plan (cst/plan raw (request {:op :rename-bind :definition :host :path [:args]}
+                                    {:op :inline-ref :definition :host :path [:args :value] :body body}))
+        edited (:text (cst/apply-text plan raw))]
+    (is (= original (format/inline-origin body)))
+    (is (= body (get-in (edn/read-string edited) [:fns 0 :bind :value 1])))
+    (is (str/includes? edited "[:left :word] ;; shared initializer\r\n [:ref :producer]"))
+    (is (= :already-applied (:status (cst/apply-text plan edited))))
+    (is (nil? (format/inline-origin (assoc-in body [:bind read-path] [:project [:other :word]]))))))
+
+
 (deftest scoped-inline-annotations-keep-comments-and-the-legacy-name
   (let [raw "{:namespace \"demo.main\" :fns [{:name :host :parent :base :args {:value {:parent :reader :args {:flag ;; binding comment\r\n {:as :flag :type :bool :description \"Switch\"}}}}}]}"
         original (get-in (edn/read-string raw) [:fns 0 :args :value])

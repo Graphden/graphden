@@ -103,32 +103,51 @@
   (into #{} (comp (filter #(= field (:ext-name %))) (map :slot-id)) entries))
 
 
-(defn scoped-literal-witness
-  "The original compiler must install one literal at the repeated field's
-   physical ID. Check the free reader surface without that row and reject an
-   inner environment write that can replace the name or the reader ID."
+(defn- env-reader
+  [field {:keys [value-present slot-id value ref-fn-id type-override-fn-id]}]
+  (if value-present
+    {:kind :value :env-name field :slot-id slot-id :value value}
+    {:kind :ref :env-name field :slot-id slot-id :ref-id ref-fn-id :type-override-fn-id type-override-fn-id
+     :is-fn false :produces-callable? false}))
+
+
+(defn- unshadowed-env-readers?
+  [graph field slots]
+  (not-any? (fn [target]
+              (let [owned (lookups/fn-owned-slot-ids target graph)
+                    native (bindings/collect-bindings target graph)]
+                (some (fn [writer]
+                        (or (= field (:env-name writer))
+                            (some slots (lookups/env-binding-route-ids target writer native owned graph))))
+                      (bindings/collect-env-bindings target graph))))
+            (keys (:fn-map graph))))
+
+
+(defn scoped-reader-witness
+  "Verify one legacy environment writer and the readers it shadows. A scalar
+   reference is one delayed value shared by those readers. Reject overlapping
+   writers that could change the scope of that value or only some reads."
   [prepared owner roots]
   (let [rows (delay (owner-rows prepared owner))
         graph (delay (index-rows @rows))]
-    (fn [field {:keys [id slot-id value] :as binding}]
+    (fn [field {:keys [id slot-id value-present ref-fn-id] :as binding}]
       (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
                 registry/*per-org-rich-override* (atom {})]
         (let [original @graph
-              written (filter #(= field (:env-name %)) (bindings/collect-env-bindings owner original))
-              expected {:kind :value :env-name field :slot-id slot-id :value value}]
-          (when (and (= binding (get-in original [:binding-by-fn-slot [owner slot-id]]))
-                     (= [expected] (vec written)))
+              [writer & more] (filter #(= field (:env-name %)) (bindings/collect-env-bindings owner original))
+              expected (env-reader field binding)]
+          (when (and writer (empty? more)
+                     (or value-present (uuid? ref-fn-id))
+                     (= binding (get-in original [:binding-by-fn-slot [owner slot-id]]))
+                     (= expected writer))
             (let [free (index-rows (remove #(= id (:id %)) @rows))
-                  installed (reader-ids (renames/deep-free-ext-entries owner free) field)]
+                  installed (reader-ids (renames/deep-free-ext-entries owner free) field)
+                  routes (if value-present
+                           #{slot-id}
+                           (set (lookups/env-binding-route-ids owner writer (bindings/collect-bindings owner original)
+                                                             (lookups/fn-owned-slot-ids owner original) original)))]
               (and (= #{slot-id} installed)
-                   (not-any? (fn [target]
-                               (let [owned (lookups/fn-owned-slot-ids target free)
-                                     native (bindings/collect-bindings target free)]
-                                 (some (fn [writer]
-                                         (or (= field (:env-name writer))
-                                             (some #{slot-id} (lookups/env-binding-route-ids target writer native owned free))))
-                                       (bindings/collect-env-bindings target free))))
-                             (keys (:fn-map free)))))))))))
+                   (unshadowed-env-readers? free field routes)))))))))
 
 
 (defn- shared-reader-uses

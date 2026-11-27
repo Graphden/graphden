@@ -868,7 +868,7 @@
           ;; belong to the frozen closure before the aggregate overlay runs.
           targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))
           {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)
-          witness (readers/scoped-literal-witness (:prepared package) owner roots)
+          witness (readers/scoped-reader-witness (:prepared package) owner roots)
           context (assoc context :source-callback-readers (readers/callback-readers (:prepared package) owner roots))]
       {:entry entry :baseline baseline
        :certificates (scope/verify-bindings entry paths context #(analysis/analyze-effective-input %1 %2 options) witness)})))
@@ -905,7 +905,7 @@
                           (let [[primary & copies] (get by-path source-path)]
                             (cond-> arg
                               primary (assoc :scope-certificate primary)
-                              (seq copies) (assoc :scoped-literal-copies copies))))
+                              (seq copies) (assoc :scoped-copies copies))))
                         (get-in entry [:legacy :arguments]))
         scoped (into {} (keep (fn [{:keys [source-path expression scope-certificate]}]
                                 (when scope-certificate [source-path expression]))) arguments)
@@ -915,7 +915,10 @@
     (let [candidate (-> entry
                         (assoc :status :supported :blockers []
                                :proposed (reduce (fn [definition certificate]
-                                                   (add-scoped-form owner definition certificate (get scoped (:source-path certificate))))
+                                                   (add-scoped-form owner definition certificate
+                                                                    (if-let [origin (get-in certificate [:shared-source :public-path])]
+                                                                      [:project origin]
+                                                                      (get scoped (:source-path certificate)))))
                                                  proposed certificates))
                         (assoc-in [:legacy :arguments] arguments))]
       (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))

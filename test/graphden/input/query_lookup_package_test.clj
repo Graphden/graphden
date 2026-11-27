@@ -281,6 +281,8 @@
       (is (= :closed-owner-proof-required
              (rejection #(snapshot/freeze-source-analysis package [(ids/fn-id "web.tests" :caller)] roots))))
       (is (= [304 nil nil ""] ((:invoke compiled) {} {})))
+      (doseq [[key value] [[:actual :reader] [:expected [304 nil nil ""]] [:expected "unrelated"]]]
+        (is (nil? (response/prepare (assoc-in package [:originals owner 0 :args key] value) owner roots))))
       (is (nil? (response/prepare package owner (dissoc roots (ids/fn-id "core.logic" :coalesce)))))
       (is (nil? (response/prepare (assoc-in package [:originals owner 0 :args :actual :args :resp :args :body] :external)
                                   owner roots))))))

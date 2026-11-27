@@ -56,12 +56,13 @@
   (let [{:keys [actual expected]} args
         producer (get-in actual [:args :resp])
         {:keys [headers status body] :as fields} (:args producer)]
-    (and (= "web.tests" module) (= :assert-eq parent) (= #{:actual :expected} (set (keys args)))
+    (and (= "web.tests" module) (= :assert-eq parent) (map? args) (= #{:actual :expected} (set (keys args)))
+         (map? actual) (map? expected)
          (= #{:value} (set (keys expected))) (vector? (:value expected)) (= 4 (count (:value expected)))
          (= #{:parent :args} (set (keys actual))) (= :_wt-resp-sig (:parent actual))
          (= #{:resp} (set (keys (:args actual))))
          (map? producer) (= #{:parent :args} (set (keys producer))) (keyword? (:parent producer))
-         (string? body) (set/subset? (set (keys fields)) #{:body :status :headers})
+         (map? fields) (string? body) (set/subset? (set (keys fields)) #{:body :status :headers})
          (or (not (contains? fields :status)) (int? status))
          (or (not (contains? fields :headers)) (and (map? headers) (every? string? (concat (keys headers) (vals headers))))))))
 

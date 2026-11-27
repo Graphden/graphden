@@ -2,10 +2,12 @@
   "Frozen declaration context for the offline v1-to-v2 source transition."
   (:require
     [graphden.input.format :as format]
+    [graphden.input.legacy-use :as legacy-use]
     [graphden.input.list-positions :as positions]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.source-annotations :as annotations]
+    [graphden.input.source-legacy-readers :as legacy-readers]
     [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
@@ -65,6 +67,7 @@
      :names-by-id (or (indexed-values name->id (::alias-index context)) (group-names-by-id name->id))
      :definition-by-id (into (or indexed {}) (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)
+     :legacy-reader (memoize (fn [owner] (legacy-use/select-binding (legacy-readers/owner-index context owner) owner)))
      :records-of (memoize (fn [definition]
                             (parse/parse-prepared-module (assoc context :fn-defs [definition]))))}))
 
@@ -401,6 +404,14 @@
     (certified-lineage env owner)))
 
 
+(defn- legacy-reader-link?
+  [{:keys [legacy-reader]} {:keys [origin-fn-id from binding-id target-fn-id source-legacy-slot]} link]
+  (when (and (uuid? source-legacy-slot) (= source-legacy-slot (:slot-id link)) (= origin-fn-id (:fn-id link)))
+    (let [{:keys [binding stored-slot]} (legacy-reader origin-fn-id)]
+      (and (= source-legacy-slot stored-slot) (= binding-id (:id binding) (ids/binding-id origin-fn-id stored-slot))
+           (= (second from) (:target-path binding)) (= target-fn-id (:ref-fn-id binding))))))
+
+
 (defn- check-descendants!
   [env {:keys [edges field-owner public-path row target-type-origin]}]
   (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id source-list-fragment source-list-operand] :as edge}]
@@ -414,7 +425,8 @@
           (source-list-link scope edge public-path)
           (let [origin (some #(when (= origin-fn-id (get-in % [:owner :id])) %) scope)
                 link (some #(when (= binding-id (:id %)) %) (get-in origin [:records :binding]))]
-            (when-not (and (= (:ref-fn-id link) target-fn-id) (= [(:slot-id link)] (second from)))
+            (when-not (and (= (:ref-fn-id link) target-fn-id)
+                           (if (:source-legacy-slot edge) (legacy-reader-link? env edge link) (= [(:slot-id link)] (second from))))
               (reject! :reference-use-drift public-path)))))))
   (let [scope (certified-lineage env (:target-fn-id (peek edges)))
         origin (some #(when (= field-owner (get-in % [:owner :id])) %) scope)]
@@ -449,6 +461,7 @@
                                               [(:id link) link]))))) certificates)]
         (run! (partial check-descendants! env) certificates)
         {:scoped-inputs (into {} (map (juxt :public-path identity)) certificates)
+         :verified-lexical-edges (into #{} (comp (mapcat (comp rest :edges)) (filter :source-legacy-slot)) certificates)
          :inherited-scoped-refs (merge links list-links)}))))
 
 

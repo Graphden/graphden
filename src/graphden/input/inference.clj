@@ -4,6 +4,7 @@
   (:require
     [graphden.input.captures :as captures]
     [graphden.input.checking :as checking]
+    [graphden.input.conditional-reads :as conditional-reads]
     [graphden.input.context :as context]
     [graphden.input.projections :as projections]
     [graphden.input.resolvers :as resolvers]
@@ -87,6 +88,7 @@
         incoming (some #(when (and (= path (second (:to %))) (= :resolved-value (:mode %))) %)
                        (:dependencies graph))
         graph (if incoming (resolvers/bind-argument graph incoming) graph)
+        graph (conditional-reads/install graph path implementations)
         node (get-in graph [:scopes path])
         scope [(:fn-id graph) path]
         result (signatures/infer-use ctx graph scope (get implementations (:fn-id node)) infer-signature)

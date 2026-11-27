@@ -1596,6 +1596,18 @@
     (is (thrown? clojure.lang.ExceptionInfo (canonical (supplied "outside the lookup domain"))))))
 
 
+(defn- compile-certified-staged
+  [originals {:keys [prepared]} owner roots impls]
+  (let [graph (legacy-readers/owner-index prepared owner)
+        {:keys [package blocked]} (certification/verify-plan prepared originals {:legacy-graph graph} roots)
+        {:keys [source proposed]} (get-in package [:closure-baselines owner])
+        legacy {:namespace (:namespace source) :fns [(dissoc source :namespace)]}
+        staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)])]
+    (when-not proposed (throw (ex-info "Source was not certified" (get blocked owner))))
+    (execution/compile-staged-module package owner roots impls
+                                     (staged-options legacy staged (set (keys (:declarations package)))))))
+
+
 (deftest staged-json-envelope-preserves-status-headers-and-public-input
   (let [root (ids/fn-id "web.errors" :json-envelope-response)
         originals (vec (concat (declarations "packages/core/refinements/fns.edn"
@@ -1607,15 +1619,7 @@
                                (declarations "packages/web/errors/fns.edn"
                                              #{:_jer-env :_jer-status-read :_jer-status :_jer-body-map :_jer-json :_jer-429?
                                                :_jer-headers-json :_jer-headers-retry :_jer-headers :json-envelope-response})))
-        compile-staged (fn [{:keys [prepared]} owner roots impls]
-                         (let [graph (legacy-readers/owner-index prepared owner)
-                               {package :package} (certification/verify-plan prepared originals {:legacy-graph graph} roots)
-                               {:keys [source proposed]} (get-in package [:closure-baselines owner])
-                               legacy {:namespace "web.errors" :fns [(dissoc source :namespace)]}
-                               staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)])]
-                           (is (some? proposed))
-                           (execution/compile-staged-module package owner roots impls
-                                                            (staged-options legacy staged (set (keys (:declarations package)))))))]
+        compile-staged (partial compile-certified-staged originals)]
     (binding [types/*type-aliases-override* (atom {})]
       (sync/register-type-aliases! originals)
       (let [{:keys [legacy canonical analysis]} (runtimes originals root compile-staged)
@@ -1631,3 +1635,51 @@
                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
           (is (= :execution-error/type-mismatch (:type failure)))
           (is (= :refinement-mismatch (get-in failure [:errors 0 :code]))))))))
+
+
+(deftest staged-branch-lookup-preserves-guarded-reads-and-lookup-order
+  (let [owner (ids/fn-id "app.branches" :resolve-branch-ref)
+        originals (vec (concat (declarations "packages/core/refinements/fns.edn" #{:nullable-uuid :nullable-text :positive-int :non-negative-int})
+                               (declarations "packages/core/logic/fns.edn" #{:coalesce :const :if :is-a? :some? :not})
+                               (declarations "packages/core/strings/fns.edn" #{:blank?})
+                               (declarations "packages/core/system/fns.edn" #{:parse-uuid})
+                               (declarations "packages/storage/versioned/fns.edn" #{:branch-row-shape})
+                               (declarations "packages/app/branches/fns.edn"
+                                             #{:_branch-by-name :_branch-by-id :_branch-ref-input :_branch-ref-id :_branch-ref-by-id
+                                               :_branch-ref-named? :_branch-ref-by-name :resolve-branch-ref})))
+        known #uuid "10000000-0000-0000-0000-000000000001"
+        missing #uuid "10000000-0000-0000-0000-000000000002"
+        row {:id known :name "main" :base-branch-id nil}
+        calls (atom [])
+        lookups {:_branch-by-id [:id known] :_branch-by-name [:ref "main"]}
+        native (into @loaded (for [{:keys [name] :as declaration} originals :let [[argument matching] (get lookups name)] :when argument]
+                               [name (assoc declaration :impl
+                                            (fn [args _]
+                                              (let [value (runtime/resolve-arg args argument)]
+                                                (swap! calls conj [argument value])
+                                                (when (= matching value) row))))]))
+        call (fn [invoke value]
+               (reset! calls [])
+               [(invoke {:ref value}) @calls])]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! originals)
+      (let [{:keys [legacy canonical analysis]} (runtimes originals owner (partial compile-certified-staged originals) native)]
+        (is (= #{[] [:ref]} (set (keys (get-in analysis [:public-input :routes])))))
+        (let [guards (into {} (keep (fn [[address binding]] (when-let [type (:guarded-read-type binding)] [address type])))
+                           (mapcat :bindings (vals (:scopes analysis))))
+              reads (into #{} (map (juxt :address :expected-type :kind :trigger)) (:obligations analysis))]
+          (is (= #{:text :uuid} (set (vals guards))))
+          (doseq [[address type] guards]
+            (is (contains? reads [address type :value-type :field-read]))))
+        (doseq [[value expected] [[nil [nil []]] ["" [nil []]] ["   " [nil []]]
+                                  ["missing" [nil [[:ref "missing"]]]] ["main" [row [[:ref "main"]]]]
+                                  [(str known) [row [[:id known]]]]
+                                  [(str missing) [nil [[:id missing] [:ref (str missing)]]]]]]
+          (is (= expected (call legacy value) (call canonical value)))))
+      ;; An independently truthy alternative or a predicate for another tag
+      ;; cannot justify a text lookup at the selected use.
+      (doseq [change [#(assoc-in % [:args :else] true)
+                      #(assoc-in % [:args :test :args :type :value] :keyword)]]
+        (let [source (mapv #(if (= :_branch-ref-named? (:name %)) (change %) %) originals)]
+          (is (= :types/check-failed
+                 (rejection-code #(runtimes source owner (partial compile-certified-staged source) native)))))))))

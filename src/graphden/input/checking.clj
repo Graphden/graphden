@@ -11,7 +11,7 @@
 
 
 (defn check-entry
-  [check-expression substitution {:keys [address expression expected-type reference]}]
+  [check-expression substitution {:keys [address expression expected-type reference guarded-read-type]}]
   (cond
     (= :unresolved (:mode reference))
     {:status :deferred :reason (:reason reference) :substitution substitution}
@@ -19,6 +19,11 @@
     {:status :deferred :reason :capture-analysis-required :substitution substitution}
     (nil? check-expression)
     {:status :deferred :reason :type-checker-required :substitution substitution}
+    (and (#{:text :uuid} guarded-read-type) (= expected-type guarded-read-type) (= :value (:mode reference))
+         (= #{:null guarded-read-type} (set (types/union-members (:actual-type reference)))))
+    (let [proof (check-expression {:address address :expected expected-type :actual guarded-read-type
+                                   :expression expression :substitution substitution})]
+      (assoc proof :status :deferred :reason :runtime-type-obligation))
     :else
     (check-expression {:address address :expected expected-type
                        :actual (or (:callable-type reference) (:actual-type reference))

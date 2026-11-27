@@ -269,8 +269,10 @@
         fragment (when (and fragment (list-use? graph snapshot to fragment))
                    (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id :scope-path :target-path]))
         source-path (source-scope-path snapshot graph parent row)
+        legacy-slot (get-in snapshot [:source-legacy-reference-slots id])
         capture? (external/captured-input? graph snapshot edge scoped-target)
         certificate (cond-> {:from address :binding-id id :target-fn-id target :origin-fn-id (:fn-id row) :name name}
+                      legacy-slot (assoc :source-legacy-slot legacy-slot)
                       capture? (assoc :captured-input scoped-target)
                       source-path (assoc :source-scope-path source-path)
                       operand (assoc :source-list-operand operand)
@@ -281,7 +283,8 @@
                    (or (empty? (:scope-path row)) source-path) (= path [field] (:target-path row))
                    (or operand
                        (and (not (contains? (:source-list-fragments snapshot) (:fn-id row)))
-                            (= id (ids/binding-id (:fn-id row) field))))
+                            (or (= id (ids/binding-id (:fn-id row) field))
+                                (and (uuid? legacy-slot) (= id (ids/binding-id (:fn-id row) legacy-slot))))))
                    (or (nil? fragment) (list-signature/source-link? certificate))
                    (uuid? target) (= target (:ref-fn-id row) (get-in bound [:expression :fn-id])))
       (reject! :unsupported-reference-use))
@@ -832,10 +835,17 @@
   (doseq [[source readers] (group-by (comp :source-address first)
                                      (filter (comp :multiple-readers? first) (map vector proofs certificates)))]
     (let [name (peek (:source-path (ffirst readers)))
+          occupied (set (for [[{:keys [occupied-reader-ids]} {:keys [edges]}] readers
+                              {:keys [from binding-id]} edges
+                              :when (and (contains? occupied-reader-ids binding-id)
+                                         (= :value (get-in graph [:public-input :bindings from :reference :mode]))
+                                         (= binding-id (get-in graph [:public-input :bindings from :binding-id])))]
+                          from))
           addresses (set (for [[scope contract] (get-in graph [:public-input :scope-contracts])
                                field (:fields contract)
-                               :when (= name (:name field))]
-                           [scope [(:id field)]]))]
+                               :let [address [scope [(:id field)]]]
+                               :when (and (= name (:name field)) (not (occupied address)))]
+                           address))]
       (when-not (= addresses (into #{source} (map (comp :address second)) readers))
         (reject! :unproved-forwarded-readers)))))
 

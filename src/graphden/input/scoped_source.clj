@@ -53,7 +53,7 @@
 
 
 (defn- edge-path?
-  [owner edges]
+  [owner edges lexical]
   (let [uses (mapv :binding-id edges)]
     (every? true?
             (map-indexed
@@ -64,6 +64,8 @@
                        (cond
                          source-list-operand (list-signature/source-operand? (get edges (dec index)) edge)
                          source-list-fragment (list-signature/source-link? edge)
+                         (:source-legacy-slot edge) (and (contains? lexical edge)
+                                                         (= binding-id (ids/binding-id origin-fn-id (:source-legacy-slot edge))))
                          :else (= binding-id (ids/binding-id origin-fn-id slot))))))
               edges))))
 
@@ -76,7 +78,7 @@
     (when-not (and certificate (uuid? snapshot-id) (= (:public-path certificate) public-path)
                    (seq edges) (= (count public-path) (inc (count edges))) (every? simple-keyword? public-path)
                    (= (pop public-path) (mapv :name edges)) (uuid? field-owner)
-                   (= owner-parents parents) (edge-path? owner edges) (root-link? ctx local-state (first edges)))
+                   (= owner-parents parents) (edge-path? owner edges (:verified-lexical-edges ctx)) (root-link? ctx local-state (first edges)))
       (reject! :unverified-scoped-input public-path))
     (let [use-path (mapv :binding-id edges)
           field-id (ids/slot-id field-owner (peek public-path))]

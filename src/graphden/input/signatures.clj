@@ -150,7 +150,7 @@
         (when-not (and target-scope signature (set? (:effects signature)))
           (context/reject! :reference-signature-required {:address address}))
         (let [list-elements (when (= :value mode) (checked-list-elements target-node))]
-          (cond-> {:type (or (metadata/asserted-read-type (get-in graph [:scopes (second (first address))]) binding actual) actual)
+          (cond-> {:type (or (:guarded-read-type binding) (metadata/asserted-read-type (get-in graph [:scopes (second (first address))]) binding actual) actual)
                    :effects (:effects signature) :reference-address address
                    (if (= :graph-callable mode) :bound-ref :ref) (use-id target-scope)}
             list-elements (assoc :list-elements list-elements))))

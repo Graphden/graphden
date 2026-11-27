@@ -217,7 +217,7 @@
                                            (= (:id item) (ids/binding-list-item-id (:id row) position)))]
                             [(:ref-fn-id item) [(:id row) (:id item)]]))
           child (get children target)]
-      [child step])))
+      [child step row])))
 
 
 (defn- authored-reference-steps
@@ -234,16 +234,23 @@
 
 
 (defn- authored-reader-paths
-  [{:keys [name->id defs-by-name] :as prepared} ref field field-id prefix seen]
+  [{:keys [name->id defs-by-name] :as prepared} ref field field-id prefix seen occupied]
   (when-not (contains? seen ref)
     (let [[declaring key] (slots/resolve-slot-owner-strict ref field defs-by-name #{})
-          declaring-id (get name->id declaring)]
-      (when (and (uuid? declaring-id) (= field key) (= field-id (ids/slot-id declaring-id key)))
-        (if (some #{declaring} (slots/chain-of ref defs-by-name))
-          [prefix]
-          (for [[child step] (authored-reference-steps prepared ref)
-                path (authored-reader-paths prepared child field field-id (into prefix step) (conj seen ref))]
-            path))))))
+          declaring-id (get name->id declaring)
+          here (when (and (uuid? declaring-id) (= field key)) (ids/slot-id declaring-id key))
+          local? (some #{declaring} (slots/chain-of ref defs-by-name))]
+      (if (and local? (= here field-id))
+        [{:path prefix :occupied occupied}]
+        (for [[child step row] (authored-reference-steps prepared ref)
+              :let [via-occupied? (and local? here (not= here field-id) (= here (:slot-id row))
+                                       (= 1 (count step)) (uuid? (:ref-fn-id row))
+                                       (when-let [verify (::value-edge? prepared)]
+                                         (verify (get name->id ref) row)))]
+              :when (or (= here field-id) via-occupied?)
+              result (authored-reader-paths prepared child field field-id (into prefix step) (conj seen ref)
+                                            (cond-> occupied via-occupied? (conj (:id row))))]
+          result)))))
 
 
 (defn- named-reader-paths
@@ -268,18 +275,19 @@
   (let [{:keys [owner-id root-use-id list-operand] :as base} (proof prepared entry field declaration target)
         prefix (cond-> [root-use-id] list-operand (conj (:item-id list-operand)))
         paths (cond
-                named-path [(into prefix named-path)]
-                direct? [prefix]
+                named-path [{:path (into prefix named-path)}]
+                direct? [{:path prefix}]
                 (or multiple-readers? (nil? list-operand))
-                (authored-reader-paths prepared target-ref field field-id prefix #{}))]
+                (authored-reader-paths prepared target-ref field field-id prefix #{} #{}))]
     (if (or named-path (next paths) (and multiple-readers? list-operand))
       (do
         (when-not (seq paths) (reject! :unproved-forwarded-target))
-        (mapv (fn [path]
-                (assoc base :multiple-readers? true :nested-reader? true
-                       :target-address [[owner-id path] [field-id]]
-                       :projection-id (migration/derived-id :forwarded-field owner-id path field-id))) paths))
-      [(cond-> base (and (not direct?) (seq paths)) (assoc :authored-reader-path (first paths)))])))
+        (mapv (fn [{:keys [path occupied]}]
+                (cond-> (assoc base :multiple-readers? true :nested-reader? true
+                               :target-address [[owner-id path] [field-id]]
+                               :projection-id (migration/derived-id :forwarded-field owner-id path field-id))
+                  (seq occupied) (assoc :occupied-reader-ids occupied))) paths))
+      [(cond-> base (and (not direct?) (seq paths)) (assoc :authored-reader-path (:path (first paths))))])))
 
 
 (defn verify-forwarded-uses

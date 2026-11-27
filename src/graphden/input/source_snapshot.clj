@@ -226,14 +226,27 @@
         (:parent-ids owner)))
 
 
+(defn- legacy-reference-slot
+  [{:keys [legacy-graph closure-baselines]} owner bindings]
+  (let [{:keys [legacy-leaf verification]} (get closure-baselines owner)
+        {:keys [row slot-id]} legacy-leaf]
+    (when (and (= :authored-source-equivalent verification) (= "ref" (:expression-kind row))
+               (= owner (:fn-id row)) (uuid? slot-id) (some #{row} bindings)
+               legacy-graph (empty? (get-in legacy-graph [:children-by-fn owner])))
+      (let [{:keys [stored-slot binding]} (legacy-use/select-binding legacy-graph owner)]
+        (when (and (= slot-id stored-slot) (= row binding))
+          [(:id row) slot-id])))))
+
+
 (defn- verified-entry-tree
   [package {:keys [fn-id list-builders] :as v2} resolve-named]
   (let [generated (mapv (partial list-signature/entry fn-id (get-in package [:prepared :name->id]) resolve-named)
                         (vals list-builders))
         children (inline-entries package v2 generated)
         owner (update (owned-declaration v2) :bindings into (mapcat :owner-bindings generated))
-        records (verified-record-parents package (:owner owner) resolve-named)]
-    (into (conj generated (cond-> owner (seq records) (assoc :record-parents records)))
+        records (verified-record-parents package (:owner owner) resolve-named)
+        lexical (legacy-reference-slot package fn-id (:bindings owner))]
+    (into (conj generated (cond-> owner (seq records) (assoc :record-parents records) lexical (assoc :legacy-reference-slot lexical)))
           (mapcat #(verified-entry-tree package % resolve-named))
           children)))
 
@@ -462,6 +475,7 @@
                                 [id links]))) entries)
              :source-original-projections (into {} (mapcat :original-projection-links) (vals entries))
              :source-optional-renames (optional-rename-bindings entries fields)
+             :source-legacy-reference-slots (into {} (keep :legacy-reference-slot) (vals entries))
              :source-scoped-references
              (into {} (for [[owner {:keys [scoped-inputs]}] entries
                             {:keys [address row expression]} (vals scoped-inputs)

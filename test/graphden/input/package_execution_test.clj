@@ -75,6 +75,21 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest coalesce-evaluates-references-on-both-generic-value-slots
+  (let [source (into (declarations "packages/core/logic/fns.edn" #{:coalesce :const})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             [{:namespace "fixture" :name :empty-value :parent :const
+                               :args {:value {:value nil}} :return-type :null}
+                              {:namespace "fixture" :name :text-value :parent :const
+                               :args {:value {:value "fallback"}} :return-type :text}
+                              {:namespace "fixture" :name :choose :parent :coalesce
+                               :args {:value :empty-value :default :text-value}}]))
+        root (ids/fn-id "fixture" :choose)
+        {:keys [canonical legacy analysis]} (runtimes source root)]
+    (is (= [:value :value] (mapv :mode (:dependencies analysis))))
+    (is (= "fallback" (legacy {}) (canonical {})))))
+
+
 (deftest legacy-reference-can-open-the-reader-of-a-forwarded-input
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:if :nil?})
                      (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})

@@ -10,6 +10,7 @@
     [graphden.input.inference :as inference]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.metadata :as metadata]
+    [graphden.input.nullable-operands :as nullable-operands]
     [graphden.input.obligations :as obligations]
     [graphden.input.projections :as projections]
     [graphden.input.resolvers :as resolvers]
@@ -69,13 +70,19 @@
 
 
 (defn- resolve-ambiguous-value
-  [ctx substitution {:keys [address binding-id expression expected-type reference] :as entry}]
+  [ctx substitution implementation {:keys [address binding-id expression expected-type reference] :as entry}]
   (if (= :ambiguous-reference-mode (:reason reference))
     (let [solved (types/resolve substitution expected-type)
           dispatch (reference-mode ctx (first address) binding-id (:fn-id expression) solved)]
-      (if (= :value (:mode dispatch))
+      (cond
+        (= :value (:mode dispatch))
         (assoc entry :dispatch-type solved :reference dispatch)
-        entry))
+
+        (nullable-operands/evaluates-reference? implementation (second address) expected-type)
+        (assoc entry :dispatch-type :any
+               :reference (reference-mode ctx (first address) binding-id (:fn-id expression) :any))
+
+        :else entry))
     entry))
 
 
@@ -101,7 +108,7 @@
    recursive availability. Missing required fields and incomplete checking
    are separate outputs. All effective/residual values remain recomputable."
   ([ctx fn-id] (analyze-input ctx fn-id {}))
-  ([ctx fn-id {:keys [check-expression scope additional-rows defer-reference-checks? legacy-list-ends]}]
+  ([ctx fn-id {:keys [check-expression scope additional-rows defer-reference-checks? legacy-list-ends implementations]}]
    (context/call-with-types
      ctx
      (fn []
@@ -127,7 +134,9 @@
              independent-check (when (or ambiguous? defer-reference-checks?)
                                  (checking/check-entries independent check-expression (:substitution policy)))
              entries (if ambiguous?
-                       (mapv (partial resolve-ambiguous-value ctx (:substitution independent-check)) entries)
+                       (let [implementation (when (and defer-reference-checks? check-expression)
+                                              (get implementations fn-id))]
+                         (mapv (partial resolve-ambiguous-value ctx (:substitution independent-check) implementation) entries))
                        entries)
              state (into {} (map (fn [{:keys [address binding-id expression expected-type]}]
                                    [address {:binding-id binding-id :expression expression

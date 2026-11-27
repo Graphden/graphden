@@ -24,25 +24,23 @@
 
 
 (defn- source-bindings
-  [all [scope path]]
+  [addresses-by-scope [scope path]]
   (into #{}
-        (keep (fn [[[other-scope other-path :as address] _]]
-                (when (and (= scope other-scope)
-                           (or (prefix? path other-path) (prefix? other-path path))) address))) all))
+        (filter (fn [[_ other-path]]
+                  (or (prefix? path other-path) (prefix? other-path path))))
+        (get addresses-by-scope scope)))
 
 
 (defn value-dependencies
   "Binding dependency addresses, including explicit and lexical cell routes.
    Used by cycle validation and signature ordering; never evaluates a value."
   [graph routes]
-  (let [all (into (entries graph) (map #(vector (:from %) {})) (:input-routes graph))
+  (let [addresses-by-scope (group-by first (concat (keys (entries graph)) (map :from (:input-routes graph))))
         projection-edges (into {} (map (fn [{:keys [from source]}]
-                                         [from (source-bindings all source)])) routes)
-        edges (reduce (fn [edges {:keys [from to]}]
-                        (update edges from (fnil into #{})
-                                (filter #(= to (first %)) (keys all))))
-                      projection-edges (:dependencies graph))]
-    edges))
+                                        [from (source-bindings addresses-by-scope source)])) routes)]
+    (reduce (fn [edges {:keys [from to]}]
+              (update edges from (fnil into #{}) (get addresses-by-scope to)))
+            projection-edges (:dependencies graph))))
 
 
 (defn value-order

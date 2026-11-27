@@ -994,6 +994,7 @@
         baseline (assoc-in reduced-package [:closure-baselines owner] projected)
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
         {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)
+        context (assoc context :source-callback-readers (readers/callback-readers (:prepared package) owner roots))
         certificates (scope/verify-bindings-after-forwarding original projected context
                                                              #(analysis/analyze-effective-input %1 %2 options))]
     (checked-joint-source package original projected certificates)))
@@ -1016,6 +1017,7 @@
         package-view (assoc-in omitted-package [:closure-baselines owner] baseline)
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
         {:keys [context options]} (freeze-source-analysis package-view (into [owner] targets) roots)
+        context (assoc context :source-callback-readers (readers/callback-readers (:prepared package) owner roots))
         analyze #(analysis/analyze-effective-input %1 %2 options)
         certificates (scope/verify-bindings scoped-view paths context analyze)
         installed (scope/with-certificate-rows context certificates)

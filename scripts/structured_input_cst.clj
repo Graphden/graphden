@@ -902,8 +902,9 @@
       (do
         (when-not (and (= (dissoc source :args) (dissoc proposed :bind)) (map? (:bind proposed)))
           (refuse :planner-ledger-mismatch {:definition (:name source)}))
-        [{:op :query-lookup-bind :definition (:name source) :path [:args]
-          :from (:args source) :to (:bind proposed)}])
+        (conj (rename :rename-bind)
+              {:op :query-lookup-bind :definition (:name source) :path [:args]
+               :from (:args source) :to (:bind proposed)}))
 
       :annotations
       (annotation-only-operations source proposed (:arguments legacy))

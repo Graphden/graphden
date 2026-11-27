@@ -3,7 +3,12 @@
    computation provenance relative to one memoized target, never result values."
   (:require
     [graphden.input.capture :as capture]
-    [graphden.input.ir :as ir]))
+    [graphden.input.ir :as ir])
+  (:import
+    (java.io
+      InputStream)
+    (org.httpkit.server
+      AsyncChannel)))
 
 
 (defn- inside?
@@ -47,6 +52,11 @@
                                   [:computation binding-id target-id type (arguments anchor scope)]
                                   [:cell type (get cells address)])
                                 (contains? input-sources address) [:cell type (get input-sources address)]
+                                ;; Ring handles have mutable identity. Two reads of the same
+                                ;; cell share a key within this invocation.
+                                (and (= :supplied op) (or (instance? InputStream known) (instance? AsyncChannel known))
+                                     (get cells address))
+                                [:cell type (get cells address)]
                                 (capture/safe-value? known) [:value type known]
                                 :else (ir/reject! :opaque-input-key-required {:address address}))]
                     (vswap! result assoc memo-address value)

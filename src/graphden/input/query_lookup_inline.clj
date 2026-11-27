@@ -75,11 +75,11 @@
         [native-slot :as path] (:target-path binding)
         old-id (:id binding)
         native-id (when (uuid? native-slot) (ids/binding-id owner native-slot))
-        original (some #(when (= old-id (:id %)) %) prior)
+        prior-row (some #(when (= old-id (:id %)) %) prior)
         covered (when (and (= [[owner field]] declarations) (= [native-slot] path)
                            (= :input-binding (:kind binding)) (= "ref" (:expression-kind binding))
-                           (= child (:ref-fn-id binding) (:ref-fn-id original))
-                           (= stored-slot (:slot-id original)) (uuid? old-id) (uuid? native-id))
+                           (= child (:ref-fn-id binding) (:ref-fn-id prior-row))
+                           (= stored-slot (:slot-id prior-row)) (uuid? old-id) (uuid? native-id))
                   {:ext-name field :slot-id native-slot})]
     (cond
       (migration/same-edn? prior current) (if covered {:covered covered} {})
@@ -140,7 +140,9 @@
   [package {:keys [source owner site child declaration prior support]} roots]
   (when-let [{child-package :package native :roots :keys [proof] :as expanded}
              (query/prepare (assoc-in package [:originals child] [declaration]) child roots)]
-    (let [reference (keyword (or (:namespace declaration) "") (name (:name declaration)))
+    (let [reference (if (seq (:namespace declaration))
+                      (keyword (:namespace declaration) (name (:name declaration)))
+                      (:name declaration))
           outer (assoc-in source site reference)
           forms (->> (concat [outer] support (mapcat val (:originals child-package)))
                      distinct (sort-by (juxt :namespace :name)) vec)

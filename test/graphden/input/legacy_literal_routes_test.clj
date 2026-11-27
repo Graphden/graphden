@@ -89,9 +89,9 @@
 
 (deftest expanded-inline-query-retains-the-original-bound-reference
   (let [body {:parent :query-param :args {:request {:as :request} :param-name {:value "id"}}}
-        wrapper {:name :has-id? :namespace "fixture" :parent :equal? :args {:a body :b {:value "match"}}}
+        wrapper {:name :has-id? :namespace nil :parent :equal? :args {:a body :b {:value "match"}}}
         source (query-definitions [wrapper])
-        owner (ids/fn-id "fixture" :has-id?)
+        owner (ids/fn-id nil :has-id?)
         prepared (parse/prepare-module source {} {})
         rows (legacy-rows prepared)
         graph (lookups/build-lookups rows)
@@ -111,6 +111,7 @@
                                             [(ids/fn-id module-ns name) impl])) base-fn-defs)
             runtime (execution/compile-package (:package migrated) owner roots implementations)
             request {:request-method :get :uri "/fixture" :query-string "" :headers {} :body nil :async-channel nil}]
+        (is (= (:proposed entry) (edn/read-string (pr-str (:proposed entry)))))
         (is (= [(:fn-id child)] (vec (keep :ref-fn-id (get-in entry [:v2 :bindings])))))
         (is (= :unknown-input-field
                (try ((:invoke runtime) {:request {}} {})

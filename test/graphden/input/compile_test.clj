@@ -119,6 +119,36 @@
     (is (= [["a" "b"]] @calls))))
 
 
+(deftest a-root-projection-keeps-enclosing-nullary-callbacks-in-the-invocation
+  (let [body [:fn {} :text #{}]
+        definitions {:root {:input {:body body :source :text} :return :text
+                            :bindings {[:body] {:ref :outer :id :outer-use}}}
+                     :outer {:input {:body body} :return :text
+                             :bindings {[:body] {:ref :child :id :child-use}}}
+                     :child {:input {:read :text} :return :text}}
+        {:keys [context]} (fixture/model definitions :root)
+        row {:id (fixture/id :capture-source) :fn-id (fixture/id :root)
+             :scope-path (mapv fixture/id [:outer-use :child-use])
+             :target-path (fixture/field-path :child [:read])
+             :expression-kind "projection" :projection-scope-path []
+             :projection-path (fixture/field-path :root [:source])}
+        context (assoc-in context [:bindings (:id row)] row)
+        graph (analysis/analyze-effective-input context (fixture/id :root)
+                                                {:check-expression (requiring-resolve 'graphden.types.check/check-input-binding)})
+        retained (atom [])
+        call (fn [args _]
+               (let [callback (runtime/resolve-arg args :body)]
+                 (swap! retained conj callback)
+                 (callback)))
+        functions {:root call :outer call :child (fn [args _] (runtime/resolve-arg args :read))}
+        closure (compile/compile-named graph {:context context :implementations (fixture/implementations definitions functions)
+                                              :detached-closures? true})]
+    (is (= "root value" (invoke closure {:source "root value"} {})))
+    (is (= 2 (count @retained)))
+    (doseq [callback @retained]
+      (is (= :callback-outside-invocation (rejection-code callback))))))
+
+
 (deftest authored-callable-parameter-can-be-read-inside-a-reference
   (let [definitions {:root {:input {:callback [:fn {:item :text} :text #{}]} :return :text
                             :bindings {[:callback] {:ref :child :id :callback-use}}}

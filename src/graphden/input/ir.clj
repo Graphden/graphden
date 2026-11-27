@@ -390,10 +390,25 @@
     targets))
 
 
+(defn- root-projection-scopes
+  [analysis expressions]
+  (let [root (:root-scope analysis)]
+    (into #{}
+          (mapcat (fn [[[[owner path] :as address] {:keys [op source]}]]
+                    (when (and (seq path) (= :read op) (= root (first source)) (contains? expressions source)
+                               (= {:kind :projection :scope root :path (second source)}
+                                  (get-in analysis [:scopes path :bindings address :expression])))
+                      ;; Escaping an enclosing callback would also lose the
+                      ;; root cells needed by its nested callbacks.
+                      (map (fn [depth] [owner (subvec path 0 depth)]) (range 1 (inc (count path)))))))
+          expressions)))
+
+
 (defn- closure-plans
   [analysis expressions routes detached-closures?]
   (let [plans (:closures analysis)
         addresses (into #{} (keep (fn [[address expr]] (when (= :closure (:op expr)) address))) expressions)
+        root-dependent (when (and detached-closures? (seq plans)) (root-projection-scopes analysis expressions))
         route-keys [:from :source :role :via :required?]
         by-address (group-by (fn [[_ route]] (or (:address route) (:result-address route)))
                              (get-in analysis [:public-input :routes]))]
@@ -405,7 +420,8 @@
                        owner (first address)
                        contract (get-in analysis [:scopes (second scope) :configured-contract])
                        reference (get-in analysis [:scopes (second owner) :bindings address :reference])
-                       detachable? (and detached-closures? (empty? captures) (empty? external-captures))]
+                       detachable? (and detached-closures? (empty? captures) (empty? external-captures)
+                                        (not (contains? root-dependent scope)))]
                    (when-not (and (:capture-resolved? reference)
                                   (or (nil? external-captures) (vector? external-captures)) (vector? parameters)
                                   (every? keyword? parameters) (= (count parameters) (count (set parameters))))

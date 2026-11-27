@@ -78,16 +78,19 @@
   "Register a complete original-source proof for an eligible owner. Keep
    executable preparation outside public report entries and preserve the
    complete original binding ledger for stage replay."
-  [package id roots]
-  (when-let [{:keys [original entry proof] :as expansion} (prepare package id roots)]
-    (let [before (first (:definitions (source/plan-module [original] (:prepared package))))
-          normalized (assoc entry :source original :identity id :kind :query-lookup
-                            :origins (:origins before) :legacy (:legacy before)
-                            :physical-source (select-keys proof [:binding-id :slot-id :write-mask :reads :return-type-id]))]
-      (-> package
-          (assoc-in [:closure-baselines id] normalized)
-          (assoc-in [:query-lookups id] expansion)
-          (assoc-in [:prepared ::source/normalized-verifiers id]
-                    (fn [candidate]
-                      (when (replay expansion (:source candidate) (:proposed candidate))
-                        normalized)))))))
+  ([package id roots] (certify package id roots prepare))
+  ([package id roots prepare-expansion]
+   (when-let [{:keys [original entry proof wrapper-origin] :as expansion} (prepare-expansion package id roots)]
+     (let [before (first (:definitions (source/plan-module [original] (:prepared package))))
+           physical (select-keys proof [:owner-id :binding-id :slot-id :write-mask :reads :return-type-id])
+           normalized (assoc entry :source original :identity id
+                             :kind (if wrapper-origin :query-lookup-inline :query-lookup)
+                             :origins (:origins before) :legacy (:legacy before)
+                             :physical-source (cond-> physical (seq wrapper-origin) (assoc :wrapper-origin wrapper-origin)))]
+       (-> package
+           (assoc-in [:closure-baselines id] normalized)
+           (assoc-in [:query-lookups id] expansion)
+           (assoc-in [:prepared ::source/normalized-verifiers id]
+                     (fn [candidate]
+                       (when (replay expansion (:source candidate) (:proposed candidate))
+                         normalized))))))))

@@ -99,8 +99,8 @@
         child (origins/child-at @(:inline-origins package) owner [:args :a])]
     (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
               types/*type-aliases-override* (atom {})]
-      (let [{:keys [base-fn-defs]} (loader/load-packages ["web"])
-            _ (sync/register-type-aliases! source)
+      (let [{:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
+            _ (sync/register-type-aliases! fn-defs)
             _ (doseq [[name {module-ns :namespace :as base}] base-fn-defs]
                 (registry/record-rich-types! (ids/fn-id module-ns name) name base))
             signatures (:by-id @registry/*rich-types-override*)
@@ -113,6 +113,13 @@
                                     implementations views)
             runtime (execution/compile-package (:package migrated) owner roots implementations)]
         (is (= [(:fn-id child)] (vec (keep :ref-fn-id (get-in entry [:v2 :bindings])))))
+        (is (true? ((:invoke runtime)
+                    {:a {:lookup-first {:request {:query-params {"id" "match"}}}
+                         :lookup-next {:lookup-first {:request {} :path {:item-1 {:string {:slots {}}}}}
+                                       :lookup-next {:query-string {:request {}} :param-name {:slots {}}}}}} {})))
+        (is (= :unknown-input-field
+               (try ((:invoke runtime) {:request {}} {})
+                    (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))
         (doseq [[args expected] [[{} false]
                                  [{:request {:query-params {"id" 17}}} false]
                                  [{:request {:query-params {:id "match"}}} true]

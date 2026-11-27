@@ -8,6 +8,7 @@
     [graphden.input.query-lookup-arguments :as arguments]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.runtime :as input]
+    [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.records.ids :as ids]
@@ -121,6 +122,17 @@
          :adapt (fn [args] (input/record-view {(peek prefix) (input/value-cell (adapt args))}))}))))
 
 
+(defn- same-public-readers?
+  [graph owner field origin proof]
+  (let [routes (surface/surface-entries owner graph)
+        path (get-in origin [:binding :target-path])
+        covered (when path {:ext-name field :slot-id (first path)})
+        exposed (if covered (filterv #(not= covered %) routes) routes)]
+    (and (or (nil? covered) (= 1 (- (count routes) (count exposed))))
+         (migration/same-edn? (:boundary proof) exposed)
+         (= (:accepted proof) (:accepted (surface/surface-names owner graph))))))
+
+
 (defn- enclosing-expansion
   [package {:keys [source owner site child declaration prior support]} roots]
   (when-let [{child-package :package native :roots :keys [proof] :as expanded}
@@ -133,10 +145,10 @@
           normalized (snapshot/package-index prepared forms)
           graph (:legacy-graph package)
           origin (wrapper-origin graph owner child (peek site) prior (original-rows normalized owner))]
-      (when (and origin (migration/same-edn? (:boundary proof) (surface/surface-entries owner graph))
-                 (= (:accepted proof) (:accepted (surface/surface-names owner graph))))
+      (when (and origin (same-public-readers? graph owner (peek site) origin proof))
         (when-let [wrapper (checked-wrapper normalized owner child [(peek site)] proof native origin)]
-          (merge expanded wrapper {:original source :expanded outer :wrapper-origin origin}))))))
+          (-> (merge expanded wrapper {:original source :expanded outer :wrapper-origin origin})
+              (update-in [:proof :original-targets] into (get-in graph [:fn-map owner :parent-ids]))))))))
 
 
 (defn prepare
@@ -146,7 +158,9 @@
   [{:keys [legacy-graph inline-origins] :as package} owner roots]
   (when-let [source (original package owner)]
     (when-let [site (query-site source)]
-      (let [{child :fn-id declaration :declaration} (origins/child-at @inline-origins owner site)
+      (let [legacy-graph (or legacy-graph (readers/owner-index (:prepared package) owner))
+            package (assoc package :legacy-graph legacy-graph)
+            {child :fn-id declaration :declaration} (origins/child-at @inline-origins owner site)
             [parent & others] (get-in legacy-graph [:fn-map owner :parent-ids])
             prior (original-rows package owner)]
         (when (and (uuid? child) (nil? (original package child)) (empty? others)

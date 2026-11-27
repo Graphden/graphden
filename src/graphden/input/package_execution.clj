@@ -7,6 +7,7 @@
     [graphden.input.ir :as ir]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as list-execution]
+    [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
@@ -82,7 +83,9 @@
    :invoke always uses the structured V2 surface. :input-origin, when
    present, records legacy identities for offline differential replay."
   [package root roots implementations]
-  (if-let [expansion (or (query/cached package root roots) (query/prepare package root roots))]
+  (if-let [expansion (or (query/cached package root roots)
+                         (query/prepare package root roots)
+                         (query-inline/prepare package root roots))]
     (compile-normalized expansion root implementations)
     (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
       (compile-frozen frozen (check-legacy-invocation frozen root) implementations))))
@@ -106,7 +109,9 @@
   (let [module (staged/read-pinned payload sha256)
         package (reduce (fn [p {:keys [name]}]
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
-                            (if (query/cached p id roots) p (or (query/certify p id roots) p))))
+                            (if (query/cached p id roots)
+                              p
+                              (or (query/certify p id roots) (query/certify p id roots query-inline/prepare) p))))
                         package (:fns legacy-module))
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)

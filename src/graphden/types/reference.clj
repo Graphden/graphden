@@ -11,6 +11,19 @@
   (some? (types/callable-signature return-type)))
 
 
+(defn same-unary-contract?
+  "Two closed unary contracts can differ in their local parameter name.
+   Equal argument, return, effects and execution keep the positional ABI."
+  [left right]
+  (and (types/fn-type? left) (types/fn-type? right)
+       (= 1 (count (types/fn-args left)) (count (types/fn-args right)))
+       (not-any? #(types/type-any? types/type-var? %) [left right])
+       (= (first (vals (types/fn-args left))) (first (vals (types/fn-args right))))
+       (= (types/fn-ret left) (types/fn-ret right))
+       (= (types/fn-effects left) (types/fn-effects right))
+       (= (types/fn-execution left) (types/fn-execution right))))
+
+
 (defn callable-contract
   "The existing checker/picker contract: a producer exposes the returned
    callable signature, retaining markers on its invocation result. Other

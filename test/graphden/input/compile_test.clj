@@ -106,7 +106,7 @@
         functions {:root (fn [args _] ((runtime/resolve-arg args :callback) "through the reference"))
                    :child (fn [args _] (runtime/resolve-arg args :body))
                    :reader (fn [args _] (runtime/resolve-arg args :item))}
-        {:keys [analysis closure]} (compiled definitions functions)
+        {:keys [analysis context closure]} (compiled definitions functions)
         address (fixture/address :root [] :root [:callback])
         item (fixture/address :root [:callback-use :read-item] :reader [:item])
         competing (-> definitions
@@ -118,6 +118,15 @@
       (is (= "through the reference" (invoke inferred))))
     (is (= [{:parameter :item :target item :value-path []}]
            (get-in analysis [:closures address :call-sites])))
+    (let [replay (fn [type]
+                   (let [checked (obligations/separate
+                                   (assoc analysis :diagnostics [{:code :runtime-type-obligation
+                                                                  :address address :expected-type type}]))]
+                     (compile/compile-checked checked
+                                              {:context context
+                                               :implementations (fixture/implementations definitions functions)})))]
+      (is (= "through the reference" (invoke (replay [:fn {:arg :text} :text #{} :unknown]))))
+      (is (= :runtime-obligations-required (rejection-code #(replay [:fn {:arg :int} :text #{} :unknown])))))
     (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))))
 
 

@@ -30,6 +30,25 @@
                   (catch clojure.lang.ExceptionInfo error (ex-data error))))))))
 
 
+(deftest unary-read-contracts-preserve-the-position-and-types
+  (let [field (random-uuid)
+        address [[(random-uuid) []] [field]]
+        declared [:fn {:request :jsonb} :bool #{} :unknown]
+        positional [:fn {:arg :jsonb} :bool #{} :unknown]
+        check #(hash-map :code :runtime-type-obligation :address address :expected-type %)
+        separate (fn [types]
+                   (obligations/separate {:scopes {[] {:configured-contract {:fields [{:id field :type declared}]}}}
+                                          :diagnostics (mapv check types)}))]
+    (doseq [[expected :as types] [[declared positional] [positional declared]]]
+      (is (= [expected] (mapv :expected-type (:obligations (separate types))))))
+    (doseq [other [(assoc positional 1 {:arg :text}) (assoc positional 2 :text)
+                   (assoc positional 3 #{:db}) '[:fn {:arg a} :bool #{} :unknown]]]
+      (is (= :conflicting-runtime-obligations
+             (try (separate [declared other])
+                  nil
+                  (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))
+
+
 (deftest a-concrete-dictionary-implies-a-broader-read-check-in-either-order
   (let [owner (random-uuid)
         field (random-uuid)

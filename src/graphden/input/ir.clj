@@ -5,7 +5,8 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.obligations :as obligations]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.reference :as reference]))
 
 
 (defn reject!
@@ -66,7 +67,9 @@
         closure (compiled-closure-origin expressions closures address)
         check (when (and op (= :value-type kind) (= :field-read trigger))
                 (if closure
-                  (when (= expected-type (:type closure)) expected-type)
+                  (when (or (= expected-type (:type closure))
+                            (reference/same-unary-contract? expected-type (:type closure)))
+                    expected-type)
                   (field-read-type analysis address expected-type op)))]
     (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type) (= :supplied op))
       (reject! :supplied-callable-validation-required details))

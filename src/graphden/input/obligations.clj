@@ -3,7 +3,8 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.reference :as reference]))
 
 
 (def ^:private runtime-codes #{:runtime-type-obligation :container-type-obligation})
@@ -73,6 +74,8 @@
   (if-let [{prior :expected-type :as existing} (get by-id id)]
     (cond
       (some #(check-implies? % expected-type) (cons prior (:additional-types existing))) by-id
+      (and (= :field-read (:trigger incoming))
+           (reference/same-unary-contract? prior expected-type)) by-id
       (check-implies? expected-type prior)
       (assoc by-id id (cond-> incoming
                         (:additional-types existing) (assoc :additional-types (:additional-types existing))))

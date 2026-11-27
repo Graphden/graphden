@@ -403,6 +403,10 @@
   (testing ":input-stream is a leaf — relates to :any (the top)"
     (is (t/subtype? :input-stream :any))
     (is (not (t/subtype? :jsonb :input-stream)))
+    (is (not (t/subtype? :input-stream :jsonb)))
+    (is (t/fail? (t/unify :input-stream :jsonb)))
+    (is (t/fail? (t/unify :jsonb :input-stream)))
+    (is (= #{:jsonb :input-stream} (set (t/union-members (t/make-union [:null :input-stream :text :jsonb])))))
     (is (not (t/subtype? :input-stream :bytes))
         ":input-stream is NOT bytes — it's a stream wrapper, not a buffer")))
 

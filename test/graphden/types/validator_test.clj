@@ -3,7 +3,10 @@
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.input.runtime :as input]
     [graphden.types.core :as types]
-    [graphden.types.validator :as validator]))
+    [graphden.types.validator :as validator])
+  (:import
+    (java.io
+      ByteArrayInputStream)))
 
 
 (use-fixtures :each
@@ -125,3 +128,12 @@
                        [:list [:variant :ok :node :err :text]]]]
     (let [e (try (validator/build declaration) nil (catch clojure.lang.ExceptionInfo e e))]
       (is (= :types/unsupported-validator (:type (ex-data e)))))))
+
+
+(deftest request-body-validation-preserves-the-stream-and-its-position
+  (let [stream (ByteArrayInputStream. (byte-array [1 2 3]))
+        validate-body (validator/build [:union :null :input-stream :text :jsonb])]
+    (is (identical? stream (validate-body stream)))
+    (is (= {:v 2} (validate-body {:v 2})))
+    (is (= 3 (ByteArrayInputStream/.available stream)))
+    (is (thrown? clojure.lang.ExceptionInfo (validate-body (Object.))))))

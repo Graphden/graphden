@@ -121,7 +121,7 @@
       (types/union-type? t) (compile-union t path seen)
       (and (vector? t) (= :variant (first t))) (compile-type (types/desugar-variant t) path seen)
       (and (keyword? t) (types/primitive? t)
-           (not (#{:fn :fn-ref :input-stream} t)))
+           (not (#{:fn :fn-ref} t)))
       (let [pred (get types/runtime-predicates t)]
         (fn [value p] (if (pred value) [] (error p :type-mismatch))))
       :else (unsupported! path))))

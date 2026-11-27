@@ -95,7 +95,7 @@
                          :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
             (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))
             (and (types/union-type? expected)
-                 (contains? #{#{:null [:map :keyword :any]} #{:null [:map :any :any]} #{:null [:map :any :any] [:list :any]}}
+                 (contains? #{#{:input-stream :jsonb} #{:null [:map :keyword :any]} #{:null [:map :any :any]} #{:null [:map :any :any] [:list :any]}}
                             (set (types/union-members expected))))
             (and (types/union-type? expected) (seq (types/union-members expected))
                  (every? #{:null :bool :text :int :float :numeric :keyword [:list :any]}
@@ -210,7 +210,7 @@
                                    (= :read (:op expression))
                                    (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))))
                           (= expected-type (:expected-type binding) (get-in binding [:reference :actual-type]))
-                          (obligations/portable-record? expected-type)) :any)]
+                          (obligations/materializable-record? expected-type)) :any)]
     ;; Only the precise constructed record is known to keep field validators
     ;; on its own lazy cells. Check its keys at the materializing read.
     (when-not (and (= :container-materialization trigger) (= :record (:op origin))

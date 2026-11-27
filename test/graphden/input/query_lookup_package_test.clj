@@ -214,6 +214,13 @@
         (is (= "hello world" (call "" "name=hello+world")))
         (is (= "" (call "" nil)))
         (is (= "winner" (call "name=winner" "name=%JZ")))
+        (let [stream (ByteArrayInputStream. (byte-array [1 2 3]))
+              request {:request-method :post :uri "/install" :body stream :headers {"content-type" "application/json"}
+                       :query-string "" :async-channel (AsyncChannel. nil nil)}]
+          (is (= "" (invoke {:value {:request request}} {})))
+          (is (= "winner" (call "name=winner" stream)))
+          (is (= :execution-error/type-mismatch (try (call "" stream) nil (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))
+          (is (= 3 (ByteArrayInputStream/.available stream))))
         (is (= :staged-function-not-visible
                (rejection #(execution/compile-staged-module package owner roots impls
                                                             (update receipt :visible-fn-ids disj (ids/fn-id "core.collections" :update-vals))))))))))

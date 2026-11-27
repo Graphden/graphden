@@ -55,24 +55,25 @@
   (contains? #{[:map :keyword :any] [:union :null [:map :keyword :any]]} expected))
 
 
-(defn- portable-record-field?
+(defn- record-field-validatable?
   [t]
   (cond
     (keyword? t) (contains? #{:any :jsonb :null :bool :text :keyword :int :numeric} t)
-    (types/map-type? t) (and (portable-record-field? (types/map-key t)) (portable-record-field? (types/map-val t)))
-    (types/list-type? t) (portable-record-field? (types/list-elem t))
+    (= #{:input-stream :jsonb} (set (types/union-members t))) true
+    (types/map-type? t) (and (record-field-validatable? (types/map-key t)) (record-field-validatable? (types/map-val t)))
+    (types/list-type? t) (record-field-validatable? (types/list-elem t))
     :else false))
 
 
-(defn portable-record?
+(defn materializable-record?
   [record]
   (and (types/record-type? record) (every? keyword? (keys record))
-       (every? portable-record-field? (vals record))))
+       (every? record-field-validatable? (vals record))))
 
 
 (defn materialized-dictionary?
   [record dictionary]
-  (and (portable-record? record) (keyword-map-check? dictionary)))
+  (and (materializable-record? record) (keyword-map-check? dictionary)))
 
 
 (defn- retain-obligation

@@ -1097,6 +1097,13 @@
    :fn-ref  #{:uuid}})
 
 
+(defn- jsonb-shape?
+  [t]
+  (and (not= :input-stream t)
+       (or (primitive? t) (record-type? t) (list-type? t) (map-type? t)
+           (tuple-type? t) (refine-type? t))))
+
+
 (defn- primitive-subtype?
   "Walk the primitive-supers map to see if `sub` is `sup` or any of
    its transitive supers. Used in `subtype?`'s primitive case."
@@ -1364,12 +1371,7 @@
                  ;; case (a record/list/tuple field) instead of relying on
                  ;; every propagator keeping markers top-level-typed.
                  (not (contains-marker? sub))
-                 (or (primitive? sub)
-                     (record-type? sub)
-                     (list-type? sub)
-                     (map-type? sub)
-                     (tuple-type? sub)
-                     (refine-type? sub)))) true
+                 (jsonb-shape? sub))) true
         (= sub :jsonb)                           false
 
         ;; Refinement: SUB carries a refinement, SUP is its base or any —
@@ -1839,12 +1841,10 @@
              ;; drift between the two relations.
              (and (= a :jsonb)
                   (not (contains-marker? b))
-                  (or (primitive? b) (record-type? b) (list-type? b) (map-type? b)
-                      (tuple-type? b) (refine-type? b)))
+                  (jsonb-shape? b))
              (and (= b :jsonb)
                   (not (contains-marker? a))
-                  (or (primitive? a) (record-type? a) (list-type? a) (map-type? a)
-                      (tuple-type? a) (refine-type? a)))
+                  (jsonb-shape? a))
              ;; Refinement ↔ (primitive OR refinement) — defer to
              ;; `subtype?`, which already understands
              ;; `[:refine B c] ⊆ B` and constraint-implies between

@@ -42,8 +42,8 @@
               (cond
                 (= :projection (get-in bound [:expression :kind]))
                 (recur ((juxt :scope :path) (:expression bound)) (conj seen address))
-                bound [:bound address]
-                :else [:field (:fn-id node) fields]))))))))
+                bound address
+                :else (get (force (::baseline-readers graph)) address address)))))))))
 
 
 (defn- scalar-source
@@ -87,10 +87,10 @@
 (defn install
   "Keep the assertion on the selected field. Each use is checked at runtime
    even when the producer and the guard reach the same authored field."
-  [graph path implementations]
+  [graph path implementations baseline-readers]
   (let [node (get-in graph [:scopes path])]
     (if (and (seq path) (seq (:metadata-proofs node)))
-      (let [evidence (assoc graph ::implementations implementations)
+      (let [evidence (assoc graph ::implementations implementations ::baseline-readers baseline-readers)
             parent (pop path)
             then (value-use parent (native-binding evidence parent :if :then))]
         (if (= path then)

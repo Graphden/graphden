@@ -126,7 +126,7 @@
         package (-> package
                     (assoc :closure-baselines baselines :query-lookups query-lookups)
                     (cond-> legacy-graph (assoc :legacy-graph legacy-graph :incoming-legacy-targets (delay (legacy-readers/incoming-targets legacy-graph))))
-                    (update :prepared assoc ::source/originals-by-id (:originals package)))
+                    (update :prepared assoc ::source/originals-by-id (:originals package) ::legacy-readers/frozen-roots roots))
         initial-context (:prepared package)
         preliminary (source/plan-module originals initial-context)
         {:keys [package certified blocked]} (certify package (:definitions preliminary) roots)

@@ -2,7 +2,6 @@
   "Frozen declaration context for the offline v1-to-v2 source transition."
   (:require
     [graphden.input.format :as format]
-    [graphden.input.legacy-use :as legacy-use]
     [graphden.input.list-positions :as positions]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
@@ -67,7 +66,7 @@
      :names-by-id (or (indexed-values name->id (::alias-index context)) (group-names-by-id name->id))
      :definition-by-id (into (or indexed {}) (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)
-     :legacy-reader (memoize (fn [owner] (legacy-use/select-binding (legacy-readers/owner-index context owner) owner)))
+     :legacy-reader (memoize (fn [owner] (legacy-readers/selected-binding (legacy-readers/owner-index context owner) (::legacy-readers/frozen-roots context) owner)))
      :records-of (memoize (fn [definition]
                             (parse/parse-prepared-module (assoc context :fn-defs [definition]))))}))
 

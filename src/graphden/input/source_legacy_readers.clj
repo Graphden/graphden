@@ -6,7 +6,9 @@
     [graphden.executor.compile.renames :as renames]
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.legacy-use :as legacy-use]
     [graphden.input.source-forward :as forward]
+    [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
 
 
@@ -62,6 +64,15 @@
               {:parameters (mapv keyword parameters)
                :positional (renames/hof-lambda-slot-routes target parameters graph)
                :captured (renames/build-hof-translation target parameters graph)})))))))
+
+
+(defn selected-binding
+  "Resolve the legacy writer and physical reader using only these frozen native signatures."
+  [graph roots owner]
+  (when (seq roots)
+    (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
+              registry/*per-org-rich-override* (atom {})]
+      (legacy-use/select-binding graph owner))))
 
 
 (defn- value-edge?
@@ -121,6 +132,45 @@
                              (keys (:fn-map free)))))))))))
 
 
+(defn- shared-reader-uses
+  [compiler roots owner proofs]
+  (let [{:keys [source-address target-field-id source-path]} (first proofs)
+        field (peek source-path)
+        index @compiler
+        rows (into {} (map (juxt :id identity)) (vals (:binding-by-fn-slot index)))
+        source-slot (get-in index [:slot-map (first (second source-address))])
+        traverses? (fn [proof]
+                     (let [[[root uses] fields] (:target-address proof)
+                           target (reduce (fn [from binding-id]
+                                            (let [row (get rows binding-id)]
+                                              (if (and (= from (:fn-id row)) (uuid? (:ref-fn-id row))
+                                                       (value-edge? compiler roots from row))
+                                                (:ref-fn-id row)
+                                                (reduced nil))))
+                                          owner uses)]
+                       (and target (= root owner) (= fields [target-field-id]) (seq uses)
+                            (= #{target-field-id} (reader-ids (surface/surface-entries target index) field)))))]
+    (when (and (> (count proofs) 1) (every? :multiple-readers? proofs)
+               (= source-address [[owner []] [(ids/slot-id owner field)]])
+               (= target-field-id (:source-slot-id source-slot))
+               (every? #(= target-field-id (:target-field-id %)) proofs))
+      (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (when (and (= #{target-field-id} (reader-ids (surface/surface-entries owner index) field)
+                      (reader-ids (renames/deep-free-ext-entries owner index) field))
+                   (not-any? (fn [id] (some #(= field (:env-name %)) (bindings/collect-env-bindings id index))) (keys (:fn-map index)))
+                   (every? traverses? proofs))
+          (into {} (map #(vector (:target-address %) source-address)) proofs))))))
+
+
+(defn shared-forwarded-readers
+  "Authenticate each source path against the V1 value edges, its public UUID and
+   every lexical writer before treating separate free addresses as one input in the migration baseline."
+  [prepared owner proofs]
+  (when-let [reader (::shared-reader-uses prepared)]
+    (into {} (mapcat #(reader owner %)) (vals (group-by :source-address proofs)))))
+
+
 (defn- named-leaf-readers
   [graph incoming compiler roots owner field slot]
   (when (and (not (contains? @incoming owner))
@@ -151,6 +201,7 @@
    (if (seq roots)
      (let [compiler (delay (index-rows (owner-rows prepared owner)))
            incoming (or incoming (delay (incoming-targets graph)))]
-       (cond-> (assoc prepared ::forward/value-edge? (partial value-edge? compiler roots))
+       (cond-> (assoc prepared ::frozen-roots roots ::shared-reader-uses (partial shared-reader-uses compiler roots)
+                      ::forward/value-edge? (partial value-edge? compiler roots))
          graph (assoc ::forward/named-leaf-readers (partial named-leaf-readers graph incoming compiler roots))))
      prepared)))

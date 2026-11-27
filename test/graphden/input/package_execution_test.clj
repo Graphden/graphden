@@ -1683,3 +1683,38 @@
         (let [source (mapv #(if (= :_branch-ref-named? (:name %)) (change %) %) originals)]
           (is (= :types/check-failed
                  (rejection-code #(runtimes source owner (partial compile-certified-staged source) native)))))))))
+
+
+(deftest independent-scopes-can-supply-different-values-for-one-declared-field
+  (let [owner (ids/fn-id "independent" :choose)
+        deps (into (declarations "packages/core/logic/fns.edn" #{:const :is-a? :if})
+                   (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int :nullable-text}))
+        build (fn [type]
+                (let [base {:namespace "independent" :name :read-token :args {:data {:type type}} :return-type :any}
+                      operand (if (= :text type) {:ref :token-source :type :text} :token-source)
+                      originals (into deps [base
+                                            {:namespace "independent" :name :token-source :parent :const
+                                             :args {:value {:as :token :type :nullable-text}}}
+                                            {:namespace "independent" :name :test-token :parent :is-a?
+                                             :args {:value :token-source :type {:value :text}}}
+                                            {:namespace "independent" :name :use-token :parent :read-token :args {:data operand}}
+                                            {:namespace "independent" :name :choose :parent :if
+                                             :args {:test :test-token :then :use-token :else nil}}])
+                      native (assoc @loaded :read-token (assoc base :impl (fn [args _] (runtime/resolve-arg args :data))))
+                      compile-owner (fn [{:keys [prepared]} id roots impls]
+                                      (let [graph (legacy-readers/owner-index prepared id)
+                                            verified (certification/verify-plan prepared originals {:legacy-graph graph} roots)]
+                                        (execution/compile-package (:package verified) id roots impls)))]
+                  (sync/register-type-aliases! originals)
+                  (runtimes originals owner compile-owner native)))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (let [{:keys [canonical analysis]} (build :any)
+            routes (get-in analysis [:public-input :routes])
+            [guard fields] (:address (get routes [:test :value :token]))
+            [consumer other-fields] (:address (get routes [:then :data :token]))]
+        (is (= [(ids/slot-id (ids/fn-id "independent" :token-source) :token)] fields other-fields))
+        (is (not= guard consumer))
+        (doseq [value ["independent input" nil]]
+          (is (= value (canonical {:test {:value {:token "guard input"}} :then {:data {:token value}}})))))
+      (let [failure (try (build :text) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) failure)))))))

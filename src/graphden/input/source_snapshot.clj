@@ -2,6 +2,7 @@
   "Offline package-declaration adapter for certified legacy reference uses."
   (:require
     [graphden.input.analysis :as analysis]
+    [graphden.input.conditional-reads :as conditional-reads]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.format :as format]
@@ -227,13 +228,13 @@
 
 
 (defn- legacy-reference-slot
-  [{:keys [legacy-graph closure-baselines]} owner bindings]
+  [{:keys [legacy-graph closure-baselines prepared]} owner bindings]
   (let [{:keys [legacy-leaf verification]} (get closure-baselines owner)
         {:keys [row slot-id]} legacy-leaf]
     (when (and (= :authored-source-equivalent verification) (= "ref" (:expression-kind row))
                (= owner (:fn-id row)) (uuid? slot-id) (some #{row} bindings)
                legacy-graph (empty? (get-in legacy-graph [:children-by-fn owner])))
-      (let [{:keys [stored-slot binding]} (legacy-use/select-binding legacy-graph owner)]
+      (let [{:keys [stored-slot binding]} (readers/selected-binding legacy-graph (::readers/frozen-roots prepared) owner)]
         (when (and (= slot-id stored-slot) (= row binding))
           [(:id row) slot-id])))))
 
@@ -650,7 +651,8 @@
    an executable implementation or publishing its inferred signature."
   ([package function-ids] (freeze-declarations package function-ids {}))
   ([package function-ids roots]
-   (let [resolve-named (named-types/lookup package (partial plan-entry package))
+   (let [package (assoc-in package [:prepared ::readers/frozen-roots] roots)
+         resolve-named (named-types/lookup package (partial plan-entry package))
          entries (closure package function-ids resolve-named roots)]
      {:entries entries :context (verified-context package entries resolve-named roots)})))
 
@@ -946,8 +948,16 @@
       (reject! :unverified-forwarded-baseline owner))
     (let [baseline (assoc-in package [:closure-baselines owner] entry)
           {:keys [context options]} (freeze-source-analysis baseline [owner] roots)
-          certificates (scope/verify-forwarded-projections context proofs
-                                                           #(analysis/analyze-effective-input %1 %2 options))]
+          certificates (scope/verify-forwarded-projections
+                         context proofs
+                         (fn [candidate id]
+                           ;; The baseline still has the original lexical readers. The
+                           ;; projected graph must check against its actual V2 addresses.
+                           (let [checked-context (if (identical? candidate context)
+                                                   (assoc candidate ::conditional-reads/baseline-readers
+                                                          (delay (readers/shared-forwarded-readers prepared owner proofs)))
+                                                   candidate)]
+                             (analysis/analyze-effective-input checked-context id options))))]
       (source/rewrite-forwarded-fields prepared original fields certificates))))
 
 
@@ -1027,6 +1037,7 @@
     ;; source round trip succeed. A failed leaf leaves the caller's package intact.
     (-> package
         (assoc-in [:closure-baselines owner] result)
+        (assoc-in [:prepared ::readers/frozen-roots] roots)
         (update :prepared source/with-forwarded-parent result))))
 
 
@@ -1052,6 +1063,7 @@
       (reject! :unverified-forwarded-declaration owner))
     (-> package
         (assoc-in [:closure-baselines owner] result)
+        (assoc-in [:prepared ::readers/frozen-roots] roots)
         (update :prepared source/with-forwarded-parent result))))
 
 

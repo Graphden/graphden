@@ -88,7 +88,7 @@
         incoming (some #(when (and (= path (second (:to %))) (= :resolved-value (:mode %))) %)
                        (:dependencies graph))
         graph (if incoming (resolvers/bind-argument graph incoming) graph)
-        graph (conditional-reads/install graph path implementations)
+        graph (conditional-reads/install graph path implementations (::conditional-reads/baseline-readers ctx))
         node (get-in graph [:scopes path])
         scope [(:fn-id graph) path]
         result (signatures/infer-use ctx graph scope (get implementations (:fn-id node)) infer-signature)

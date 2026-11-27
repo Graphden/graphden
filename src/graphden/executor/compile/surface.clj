@@ -50,6 +50,35 @@
       (compute))))
 
 
+(defn translate-arguments
+  "Expand an argument map onto the physical UUIDs of a frozen public
+   surface. Map traversal order controls a supplied name/UUID collision."
+  [entries args]
+  (if (or (nil? args) (empty? args))
+    args
+    (let [;; Index by BOTH the public (renamed) name and the walker's
+          ;; raw name — `{:body v}` and `{:content v}` land in the
+          ;; same slot (ADR-inherited-rename-surface).
+          by-name (reduce (fn [acc e]
+                            (cond-> (update acc (:ext-name e)
+                                            (fnil conj []) e)
+                              (:source-name e)
+                              (update (:source-name e)
+                                      (fnil conj []) e)))
+                          {}
+                          entries)]
+      (reduce-kv
+        (fn [acc arg-name v]
+          (let [matches (get by-name arg-name)]
+            (if (empty? matches)
+              (assoc acc arg-name v)
+              (reduce (fn [m e] (assoc m (:slot-id e) v))
+                      (assoc acc arg-name v)
+                      matches))))
+        {}
+        args))))
+
+
 (defn surface-names
   "`{:names [kw …] :accepted #{kw …}}` for fn-id — the public
    (closest-chain-rename) name vector and the accepted set (public ∪

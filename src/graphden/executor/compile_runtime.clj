@@ -1164,30 +1164,9 @@
 
    `nil` / `{}` args short-circuit."
   [fn-id args lookups]
-  (if (or (nil? args) (empty? args))
-    args
-    (let [entries (surface/surface-entries fn-id lookups)
-          ;; Index by BOTH the public (renamed) name and the walker's
-          ;; raw name — `{:body v}` and `{:content v}` land in the
-          ;; same slot (ADR-inherited-rename-surface).
-          by-name (reduce (fn [acc e]
-                            (cond-> (update acc (:ext-name e)
-                                            (fnil conj []) e)
-                              (:source-name e)
-                              (update (:source-name e)
-                                      (fnil conj []) e)))
-                          {}
-                          entries)]
-      (reduce-kv
-        (fn [acc arg-name v]
-          (let [matches (get by-name arg-name)]
-            (if (empty? matches)
-              (assoc acc arg-name v)
-              (reduce (fn [m e] (assoc m (:slot-id e) v))
-                      (assoc acc arg-name v)
-                      matches))))
-        {}
-        args))))
+  (if (seq args)
+    (surface/translate-arguments (surface/surface-entries fn-id lookups) args)
+    args))
 
 
 ;; =============================================================================

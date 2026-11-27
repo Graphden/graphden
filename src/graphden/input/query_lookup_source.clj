@@ -39,10 +39,12 @@
       result)))
 
 
-(defn- shape-id
+(defn- reviewed-targets
   [graph]
   (when-let [rows (closure-rows graph query-id)]
-    (migration/fingerprint (group-by :kind (map #(dissoc % :description) rows)))))
+    (when (= "01f40c0422914248794ee93d02af105ce5c7f8e0b595390190ab3f376e2c664a"
+             (migration/fingerprint (group-by :kind (map #(dissoc % :description) rows))))
+      (into #{} (comp (filter #(= :fn (:kind %))) (map :id)) rows))))
 
 
 (def ^:private branches
@@ -62,20 +64,20 @@
                (every? #{:name :namespace :parent :args :source-file :description :source-line} (keys original))
                (string? value) (or (= value source) (= {:value value} source))
                (contains? #{:query-param :web.crud/query-param} (:parent original))
-               (contains? #{{} {:request {:as :request}}} (dissoc (:args original) :param-name))
-               (= "01f40c0422914248794ee93d02af105ce5c7f8e0b595390190ab3f376e2c664a" (shape-id graph)))
-      (let [writer (literal/descriptor graph owner :param-name)
+               (contains? #{{} {:request {:as :request}}} (dissoc (:args original) :param-name)))
+      (let [targets (reviewed-targets graph)
+            writer (literal/descriptor graph owner :param-name)
             reads (mapv (fn [name]
                           (into {} (map (juxt :ext-name :slot-id))
                                 (surface/surface-entries (ids/fn-id "web.crud" name) graph))) branches)
             names (mapv :param-name reads)
             requests (mapv :request reads)]
-        (when (and (= value (:value writer)) (= #{:request} (:accepted writer))
+        (when (and targets (= value (:value writer)) (= #{:request} (:accepted writer))
                    (= [(first names)] (:written writer)) (= (subvec names 1) (:prefer-incoming writer))
                    (= 6 (count (set (concat names requests))))
                    (= (mapv (juxt :ext-name :slot-id) (:boundary writer))
                       (vec (mapcat (fn [r] [[:request (:request r)] [:param-name (:param-name r)]]) reads))))
-          (assoc writer :reads reads :return-type-id return-id))))))
+          (assoc writer :reads reads :return-type-id return-id :original-targets (conj targets owner)))))))
 
 
 (defn- expand-owner
@@ -103,8 +105,7 @@
   (when-let [proof (descriptor graph owner original)]
     (when-let [views (query-views/views roots visible)]
       (let [chooser-id (ids/fn-id (:namespace chooser) (:name chooser))]
-        (when (and (contains? visible owner)
-                   (contains? visible (ids/fn-id "core.logic" :coalesce))
+        (when (and (every? visible (:original-targets proof))
                    (not (contains? visible chooser-id)) (not (contains? roots chooser-id)))
           {:source (expand-owner original proof views) :proof proof :chooser chooser
            :views views})))))

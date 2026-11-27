@@ -197,6 +197,33 @@
                                                    :implementations (fixture/implementations definitions functions)}))))))
 
 
+(deftest a-nested-callable-retains-the-creating-frame-and-its-lifetime
+  (let [inner-type [:fn {:item :text} :text #{}]
+        definitions {:root {:input {:outer [:fn {:prefix :text} :text #{}]} :return :any
+                            :bindings {[:outer] {:ref :outer :id :outer-use}}}
+                     :outer {:input {:prefix :text :inner inner-type} :return :text :lambda-params [:prefix]
+                             :bindings {[:inner] {:ref :inner :id :inner-use}}}
+                     :inner {:input {:prefix :text :item :text} :return :text :lambda-params [:item]
+                             :field-origins {[:prefix] :outer}}}
+        retained (atom [])
+        functions {:root (fn [args _]
+                           (let [outer (runtime/resolve-arg args :outer)]
+                             (outer "a")
+                             (outer "b")
+                             (let [[a b] @retained] [(b "1") (a "2") (b "3")])))
+                   :outer (fn [args _]
+                            (swap! retained conj (runtime/resolve-arg args :inner))
+                            (runtime/resolve-arg args :prefix))
+                   :inner (fn [args _] (str (runtime/resolve-arg args :prefix) (runtime/resolve-arg args :item)))}
+        {:keys [closure analysis context]} (compiled definitions functions)]
+    (is (= ["b1" "a2" "b3"] (invoke closure)))
+    (is (= :callback-outside-invocation (rejection-code #((first @retained) "outside"))))
+    (is (= :unsupported-closure-scope
+           (rejection-code #(browser/export-named analysis {:snapshot-id (:snapshot-id context)
+                                                            :allow-fn? (constantly true)
+                                                            :implementations (fixture/implementations definitions functions)}))))))
+
+
 (deftest exposed-callback-capture-keeps-its-scope-and-surrounding-invocation
   (let [definitions {:root {:input {:style {:callback [:fn {:item :text} :text #{}] :mark :text}}
                             :return :any :bindings {[:style :callback] {:ref :child :id :callback-use}}}
@@ -216,6 +243,28 @@
     (is (= ["Ada!" "Ben!"] (invoke callback (arguments "!") {})))
     (is (= :missing-required-input
            (rejection-code #(invoke callback {:style {:mark "not a capture"}} {}))))))
+
+
+(deftest a-nested-callable-reads-only-its-addressed-external-field
+  (let [definitions {:root {:input {:result :text :label :text} :return :text :bindings {[:result] {:ref :middle :id :middle-use}}}
+                     :middle {:input {:callback [:fn {:item :text} :text #{}]} :return :text
+                              :bindings {[:callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:item :text :suffix :text} :return :text :bindings {[:suffix] {:ref :suffix :id :suffix-use}}}
+                     :suffix {:input {:label :text} :return :text}}
+        functions {:root (fn [args _] (runtime/resolve-arg args :result))
+                   :middle (fn [args _] ((runtime/resolve-arg args :callback) "child"))
+                   :child (fn [args _] (str (runtime/resolve-arg args :item) (runtime/resolve-arg args :suffix)))
+                   :suffix (fn [args _] (runtime/resolve-arg args :label))}
+        {:keys [context analysis]} (fixture/model definitions :root)
+        options {:context context :implementations (fixture/implementations definitions functions)}
+        callback (fixture/address :root [:middle-use] :middle [:callback])
+        closure (compile/compile-named analysis options)
+        arguments {:label "root" :result {:callback {:suffix {:label "!"}}}}]
+    (is (= "child!" (invoke closure arguments {})))
+    (is (= :missing-required-input (rejection-code #(invoke closure (dissoc arguments :result) {}))))
+    (doseq [changed [(assoc-in analysis [:closures callback :external-captures 0 :value-path] [:other])
+                     (assoc-in analysis [:public-input :routes [:result :callback :suffix] :target-fn-id] (random-uuid))]]
+      (is (= :unsupported-closure-scope (rejection-code #(compile/compile-named changed options)))))))
 
 
 (deftest callback-routes-a-single-record-argument-by-declared-fields
@@ -499,6 +548,39 @@
                (try (invoke closure {address 42} {})
                     nil
                     (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))))
+
+
+(deftest a-checked-row-list-validator-runs-at-the-value-read
+  (let [rows [:list [:map :keyword :any]]
+        definitions {:root {:input {:x rows} :return :any :bindings {[:x] {:ref :child}}}
+                     :child {:input {} :return rows}}
+        {:keys [analysis context]} (fixture/model definitions :root)
+        address (fixture/address :root [] :root [:x])
+        result (atom [{:a nil}])
+        functions {:root echo :child (fn [_ _] @result)}
+        options {:context context :implementations (fixture/implementations definitions functions)}
+        graph (obligations/separate (assoc analysis :diagnostics [{:address address :code :runtime-type-obligation}]))
+        closure (compile/compile-checked graph options)]
+    (is (= [{:a nil}] (invoke closure)))
+    (doseq [invalid [[{"a" 1}] [42] nil]]
+      (reset! result invalid)
+      (is (= :execution-error/type-mismatch
+             (try (invoke closure) nil (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))
+    (is (= :runtime-obligations-required
+           (rejection-code #(compile/compile-checked
+                              (assoc-in graph [:scopes [] :bindings address :reference :actual-type] [:list :any]) options))))))
+
+
+(deftest a-gradual-list-producer-checks-each-requested-numeric-value
+  (let [definitions {:root {:input {:x [:list :numeric]} :return :any :bindings {[:x] {:ref :child}}}
+                     :child {:input {} :return [:list :any]}}
+        items (atom [1 2.5])
+        {:keys [analysis closure]} (compiled definitions {:root echo :child (fn [_ _] @items)})]
+    (is (= [:list :numeric] (:expected-type (first (:obligations analysis)))))
+    (is (= @items (invoke closure)))
+    (reset! items [1 "2"])
+    (is (= :execution-error/type-mismatch
+           (try (invoke closure) nil (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))
 
 
 (deftest computed-list-retains-a-field-read-validator-for-its-union-arm

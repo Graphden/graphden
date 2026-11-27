@@ -218,7 +218,11 @@
   (when-not (fn? allow-fn?)
     (ir/reject! :browser-visibility-policy-required {}))
   (let [{:keys [root-scope expressions scopes parameters frame-layouts] :as plan}
-        (ir/lower-checked analysis options)]
+        (ir/lower-checked analysis options)
+        creators (into #{} (map first) (keys (:closures plan)))]
+    ;; The checked browser closure opcode can only run in its root frame.
+    (when (some (fn [[frame layout]] (and (not= root-scope frame) (some creators (:scopes layout)))) frame-layouts)
+      (ir/reject! :unsupported-closure-scope {}))
     (check-defaults! analysis plan options)
     (when (and closed?
                (or (seq parameters)

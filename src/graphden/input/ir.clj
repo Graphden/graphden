@@ -32,6 +32,11 @@
         (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))) expected
     (and (types/union-type? expected) (seq (types/union-members expected))
          (every? #{:null :bool :text :int :numeric :keyword} (types/union-members expected))) expected
+    (and (types/list-type? expected) (#{:invoke :read} op))
+    (let [actual (get-in analysis [:scopes scope :bindings address :reference :actual-type])]
+      (when (or (= [:list [:map :keyword :any]] expected actual)
+                (and (= [:list :any] actual) (contains? #{:bool :text :int :numeric :keyword :uuid} (types/list-elem expected))))
+        expected))
     ;; A checked literal or producer can select a concrete arm without
     ;; interpreting variables in the other arms. Keep the check at the read.
     (types/union-type? expected)
@@ -324,22 +329,48 @@
      :parameter-surface (when (seq record-addresses) {:root {:fields nodes}})}))
 
 
+(defn- external-reader-scope
+  "Follow only value references below the callback's public input group."
+  [routes expressions group-path leaf-path scope]
+  (reduce (fn [[root path :as parent] depth]
+            (let [{:keys [kind result-address input-scope reference-mode reference-binding-id target-fn-id]}
+                  (get routes (subvec leaf-path 0 depth))
+                  edge (get expressions result-address)]
+              (if (and (= :reference-inputs kind) (= :value reference-mode)
+                       (= parent (first result-address)) (= :invoke (:op edge))
+                       (= target-fn-id (:target-id edge)) (= reference-binding-id (:binding-id edge))
+                       (= [root (conj path reference-binding-id)] input-scope (:scope edge)))
+                input-scope
+                (reduced nil))))
+          scope (range (inc (count group-path)) (count leaf-path))))
+
+
 (defn- external-addresses!
-  [public-routes contract scope expressions parameters captures]
-  (let [addresses (into #{} (map :target) captures)]
-    (when-not (= (count captures) (count addresses))
+  [analysis by-address address scope expressions parameters captures]
+  (let [targets (into #{} (map :target) captures)
+        routes (get-in analysis [:public-input :routes])
+        [[group-path group] & other-groups] (get by-address address)]
+    (when-not (= (count captures) (count targets))
       (reject! :unsupported-closure-scope {:scope scope}))
     (doseq [{:keys [target value-path]} captures]
       (let [[target-scope path] target
-            field (when (= target-scope scope) (descriptor/find-node contract path))
-            [route & more] (get public-routes target)]
-        (when-not (and (= [] value-path) (= 1 (count path))
-                       field (not (:fields field)) (not (parameters (:name field)))
+            field (descriptor/find-node (get-in analysis [:scopes (second target-scope) :configured-contract]) path)
+            [[leaf-path route] & siblings] (get by-address target)
+            depth (count group-path)]
+        (when-not (and (= :reference-inputs (:kind group)) (= :graph-callable (:reference-mode group))
+                       (= scope (:input-scope group)) (empty? other-groups)
+                       (= (:reference-binding-id group) (get-in expressions [address :binding-id]))
+                       (= (:target-fn-id group) (get-in expressions [address :target-id]))
+                       (> (count leaf-path) depth) (= group-path (subvec leaf-path 0 depth))
+                       (= value-path (subvec leaf-path (inc depth))) (not (parameters (nth leaf-path depth)))
+                       (= target-scope (external-reader-scope routes expressions group-path leaf-path scope))
+                       (= 1 (count path)) field (not (:fields field)) (= (:id field) (:origin-field-id route))
+                       (= (:name field) (:name route) (peek leaf-path)) (empty? siblings)
                        (= :supplied (get-in expressions [target :op]))
-                       (= :input-field (:kind route)) (:whole-bindable? route) (empty? more)
+                       (= :input-field (:kind route)) (:whole-bindable? route)
                        (= (:type field) (:completion-type route) (get-in expressions [target :type])))
           (reject! :unsupported-closure-scope {:scope scope}))))
-    addresses))
+    targets))
 
 
 (defn- closure-plans
@@ -347,7 +378,8 @@
   (let [plans (:closures analysis)
         addresses (into #{} (keep (fn [[address expr]] (when (= :closure (:op expr)) address))) expressions)
         route-keys [:from :source :role :via :required?]
-        public-routes (group-by :address (vals (get-in analysis [:public-input :routes])))]
+        by-address (group-by (fn [[_ route]] (or (:address route) (:result-address route)))
+                             (get-in analysis [:public-input :routes]))]
     (when-not (= addresses (set (keys plans)))
       (reject! :closure-plan-mismatch {}))
     (into {}
@@ -357,8 +389,7 @@
                        contract (get-in analysis [:scopes (second scope) :configured-contract])
                        reference (get-in analysis [:scopes (second owner) :bindings address :reference])
                        detachable? (and detached-closures? (empty? captures) (empty? external-captures))]
-                   (when-not (and (or (= (:root-scope analysis) owner) detachable?)
-                                  (:capture-resolved? reference)
+                   (when-not (and (:capture-resolved? reference)
                                   (or (nil? external-captures) (vector? external-captures)) (vector? parameters)
                                   (every? keyword? parameters) (= (count parameters) (count (set parameters))))
                      (reject! :unsupported-closure-scope {:address address}))
@@ -373,9 +404,9 @@
                                        (select-keys (get routes from) route-keys)))
                        (reject! :closure-capture-route-mismatch {:address address})))
                    (let [plan (callback-parameters! analysis contract scope expressions parameters call-sites callable-type)
-                         external (external-addresses! public-routes contract scope expressions
-                                                       (set parameters) external-captures)]
+                         external (external-addresses! analysis by-address address scope expressions (set parameters) external-captures)]
                      [address (cond-> (assoc plan :scope scope :type type :parameters parameters)
+                                (seq captures) (assoc :capture-sources (into {} (map (juxt :from :source)) captures))
                                 (seq external) (assoc :external-addresses external)
                                 detachable? (assoc :detachable? true))]))))
           plans)))
@@ -397,12 +428,17 @@
         address-owner #(if (contains? external %) root (owner (first %)))
         by-frame (group-by (comp address-owner :address) program)
         required (group-by address-owner required)]
+    (doseq [[creator {:keys [scope capture-sources]}] closures
+            [destination source] capture-sources]
+      (when-not (and (= scope (owner (first destination))) (= (owner (first creator)) (address-owner source)))
+        (reject! :closure-capture-route-mismatch {:address creator})))
     (doseq [[address {:keys [op source scope]}] expressions]
       (let [local (owner (first address))]
         (when (case op
                 :read (and (not= local (owner (first source)))
                            (or (:detachable? (get callbacks local))
-                               (not= root (first source))))
+                               (and (not= root (first source))
+                                    (not= source (get-in callbacks [local :capture-sources address])))))
                 :invoke (not= local (owner scope))
                 false)
           (reject! :cross-frame-expression {:address address}))))

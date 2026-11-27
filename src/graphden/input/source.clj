@@ -479,9 +479,10 @@
   (when-let [{:keys [proposed legacy legacy-leaf] :as certificate} (get-in context [::certified-inlines (:fn-id child)])]
     (let [original (assoc source :description (or (:description source) (:description child)))
           arguments (:arguments legacy)
-          names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
-                                 (when scope-certificate
-                                   [(:public-path scope-certificate) (second source-path)]))) arguments)]
+          names (into {} (mapcat (fn [{:keys [source-path scope-certificate scoped-literal-copies]}]
+                                   (when scope-certificate
+                                     (map #(vector (:public-path %) (second source-path))
+                                          (into [scope-certificate] scoped-literal-copies))))) arguments)]
       (when (and (or (seq names) legacy-leaf)
                  (migration/same-edn? (normalize-source original context)
                                       (normalize-source (:source certificate) context)))
@@ -697,7 +698,7 @@
   (let [traces (or (:list-builders parsed) {})
         certified (into (set (map :row (vals (:scoped-inputs parsed))))
                         (comp (filter :address) (map :row)) (vals (:configurations parsed)))
-        forwarded (into #{} (comp (filter :source-names) (map :row)) (vals (:scoped-inputs parsed)))
+        derived (into #{} (comp (filter #(or (:source-names %) (:copy-of %))) (map :row)) (vals (:scoped-inputs parsed)))
         bindings (mapv (fn [binding]
                          (cond
                            (and row (= (:id row) (:id binding)))
@@ -707,7 +708,7 @@
                            (contains? certified binding)
                            (migration/legacy-binding (assoc binding :scope-path []))
                            :else (rename/legacy-binding (:declaration-records parsed) binding)))
-                       (remove forwarded (ordinary-bindings (:bindings parsed) traces)))]
+                       (remove derived (ordinary-bindings (:bindings parsed) traces)))]
     (assoc (authored-meaning definition parsed bindings)
            :list-builders traces
            :asserted-types (into {} (map (fn [[path assertion]] [(get assertion :legacy-path path) (:type assertion)]))

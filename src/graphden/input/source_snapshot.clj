@@ -746,9 +746,10 @@
           ;; The removed values may be references. Their declarations must
           ;; belong to the frozen closure before the aggregate overlay runs.
           targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))
-          {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)]
+          {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)
+          witness (readers/scoped-literal-witness (:prepared package) owner roots)]
       {:entry entry :baseline baseline
-       :certificates (scope/verify-bindings entry paths context #(analysis/analyze-effective-input %1 %2 options))})))
+       :certificates (scope/verify-bindings entry paths context #(analysis/analyze-effective-input %1 %2 options) witness)})))
 
 
 (defn verify-binding
@@ -761,7 +762,7 @@
 
 
 (defn- add-scoped-form
-  [owner proposed {:keys [scope-certificate expression]}]
+  [owner proposed scope-certificate expression]
   (let [path (:public-path scope-certificate)
         keyspace (if (contains? scope-certificate :configuration) :configure :bind)]
     (when (contains? (get proposed keyspace) path)
@@ -774,19 +775,23 @@
    compare the complete v2 declaration with the original legacy source."
   [package owner roots]
   (let [{:keys [entry baseline certificates]} (scope-evidence package owner roots)
-        by-path (into {} (map (juxt :source-path identity)) certificates)
+        by-path (group-by :source-path certificates)
         arguments (mapv (fn [{:keys [source-path] :as arg}]
-                          (if-let [certificate (get by-path source-path)]
-                            (assoc arg :scope-certificate certificate)
-                            arg))
+                          (let [[primary & copies] (get by-path source-path)]
+                            (cond-> arg
+                              primary (assoc :scope-certificate primary)
+                              (seq copies) (assoc :scoped-literal-copies copies))))
                         (get-in entry [:legacy :arguments]))
-        scoped (filter :scope-certificate arguments)
+        scoped (into {} (keep (fn [{:keys [source-path expression scope-certificate]}]
+                                (when scope-certificate [source-path expression]))) arguments)
         proposed (:proposed (plan-entry baseline owner))]
-    (when-not (and proposed (= (count scoped) (count certificates)))
+    (when-not (and proposed (= (set (keys scoped)) (set (keys by-path))))
       (reject! :unsupported-scope-source owner))
     (let [candidate (-> entry
                         (assoc :status :supported :blockers []
-                               :proposed (reduce (partial add-scoped-form owner) proposed scoped))
+                               :proposed (reduce (fn [definition certificate]
+                                                   (add-scoped-form owner definition certificate (get scoped (:source-path certificate))))
+                                                 proposed certificates))
                         (assoc-in [:legacy :arguments] arguments))]
       (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package)))))))
 

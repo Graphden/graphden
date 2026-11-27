@@ -75,6 +75,29 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest one-legacy-literal-feeds-both-checked-reference-occurrences
+  (let [source (into (declarations "packages/core/logic/fns.edn" #{:if})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             (declarations "packages/core/strings/fns.edn" #{:str-upper})
+                             [{:namespace "fixture" :name :upper-word :parent :str-upper
+                               :args {:string {:as :word}}}
+                              {:namespace "fixture" :name :choose :parent :if
+                               :args {:then :upper-word :else :upper-word :word "hello"}}]))
+        owner (ids/fn-id "fixture" :choose)
+        compile-owner (fn [package root roots implementations]
+                        (let [migrated (snapshot/with-migrated-bindings package [root] roots)
+                              proof (get-in migrated [:closure-baselines root])
+                              copied (some #(when (:copy-of (val %)) (key %)) (get-in proof [:v2 :scoped-inputs]))
+                              omitted (update-in proof [:proposed :bind] dissoc copied)
+                              replay (source/verify-module {:definitions [omitted]} (:prepared migrated))]
+                          (is (vector? copied))
+                          (is (= :scoped-origin-mismatch (get-in replay [:definitions 0 :blockers 0 :code])))
+                          (execution/compile-package migrated root roots implementations)))
+        {:keys [canonical legacy]} (runtimes source owner compile-owner)]
+    (doseq [test-value [true false]]
+      (is (= "HELLO" (legacy {:test test-value}) (canonical {:test test-value}))))))
+
+
 (deftest scoped-value-reference-retains-the-checks-of-its-new-use
   (let [operation (fn [name field input-type result]
                     {:namespace "scoped" :name name :args {field {:type input-type}} :return-type result})
@@ -114,7 +137,7 @@
   (let [root (ids/fn-id "fixture" :has-error)
         source (into [{:namespace "fixture" :name :error? :parent :some?
                        :args {:value {:parent :get :args {:coll {:as :listing :type [:map :keyword :any]}
-                                                         :key {:value :error} :default nil}}}}
+                                                          :key {:value :error} :default nil}}}}
                       {:namespace "fixture" :name :has-error :parent :error?
                        :args {:listing {:value {:kind "fns" :error "bad-kind"}}}}]
                      cat [(declarations "packages/core/logic/fns.edn" #{:some?})

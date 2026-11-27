@@ -26,10 +26,15 @@
       result)))
 
 
-(defn- index
+(defn- owner-rows
   [prepared owner]
-  (let [by-id (into {} (map (juxt :fn-id identity)) (vals (:defs-by-name prepared)))
-        kinds (group-by :kind (closure-rows prepared by-id owner))]
+  (let [by-id (into {} (map (juxt :fn-id identity)) (vals (:defs-by-name prepared)))]
+    (closure-rows prepared by-id owner)))
+
+
+(defn- index-rows
+  [rows]
+  (let [kinds (group-by :kind rows)]
     (lookups/build-lookups {:fns (:fn kinds) :slots (:slot kinds) :fn-slots (:fn-slot kinds)
                             :bindings (:binding kinds) :list-items (:binding-list-item kinds)})))
 
@@ -63,6 +68,34 @@
   (into #{} (comp (filter #(= field (:ext-name %))) (map :slot-id)) entries))
 
 
+(defn scoped-literal-witness
+  "The original compiler must install one literal at the repeated field's
+   physical ID. Check the free reader surface without that row and reject an
+   inner environment write that can replace the name or the reader ID."
+  [prepared owner roots]
+  (let [rows (delay (owner-rows prepared owner))
+        graph (delay (index-rows @rows))]
+    (fn [field {:keys [id slot-id value] :as binding}]
+      (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (let [original @graph
+              written (filter #(= field (:env-name %)) (bindings/collect-env-bindings owner original))
+              expected {:kind :value :env-name field :slot-id slot-id :value value}]
+          (when (and (= binding (get-in original [:binding-by-fn-slot [owner slot-id]]))
+                     (= [expected] (vec written)))
+            (let [free (index-rows (remove #(= id (:id %)) @rows))
+                  installed (reader-ids (renames/deep-free-ext-entries owner free) field)]
+              (and (= #{slot-id} installed)
+                   (not-any? (fn [target]
+                               (let [owned (lookups/fn-owned-slot-ids target free)
+                                     native (bindings/collect-bindings target free)]
+                                 (some (fn [writer]
+                                         (or (= field (:env-name writer))
+                                             (some #{slot-id} (lookups/env-binding-route-ids target writer native owned free))))
+                                       (bindings/collect-env-bindings target free))))
+                             (keys (:fn-map free)))))))))))
+
+
 (defn- named-leaf-readers
   [graph incoming compiler roots owner field slot]
   (when (and (not (contains? @incoming owner))
@@ -91,7 +124,7 @@
   ([prepared owner roots] (prepare prepared owner roots nil nil))
   ([prepared owner roots graph incoming]
    (if (seq roots)
-     (let [compiler (delay (index prepared owner))
+     (let [compiler (delay (index-rows (owner-rows prepared owner)))
            incoming (or incoming (delay (incoming-targets graph)))]
        (cond-> (assoc prepared ::forward/value-edge? (partial value-edge? compiler roots))
          graph (assoc ::forward/named-leaf-readers (partial named-leaf-readers graph incoming compiler roots))))

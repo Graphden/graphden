@@ -106,7 +106,7 @@
                                 (assoc :public-input {:bindings {from bound}
                                                       :scope-contracts {builder-use {:fields [{:id field :name :item-1}]}}}))
                       snapshot (-> snapshot (update :bindings dissoc (:id row)) (assoc-in [:bindings id] changed))]
-                  (try (#'scope/checked-edge graph snapshot (first builder-use) prefix)
+                  (try (#'scope/checked-edge graph snapshot (first builder-use) prefix nil)
                        (catch clojure.lang.ExceptionInfo failure (ex-data failure)))))]
     (is (= (:id row) (:binding-id (check (:id row)))))
     (is (= :unsupported-reference-use (:code (check (ids/binding-id builder field)))))

@@ -87,13 +87,16 @@
 
 (defn- parse-route
   [ctx local-state public-path form]
-  (let [{:keys [address row owner use-path field-id] :as certificate} (checked-route ctx local-state public-path)]
+  (let [{:keys [address row owner use-path field-id copy-of] :as certificate} (checked-route ctx local-state public-path)]
     (when (contains? certificate :configuration) (reject! :unsupported-scoped-expression public-path))
     (let [expression (read-leaf ctx certificate public-path form)
           projection? (= :projection (:kind expression))
-          id (if projection?
-               (migration/derived-id :forwarded-field owner (if (:nested-reader? certificate) use-path (first use-path)) field-id)
-               (ids/binding-id owner field-id))
+          id (cond
+               projection? (migration/derived-id :forwarded-field owner (if (:nested-reader? certificate) use-path (first use-path)) field-id)
+               copy-of (do (when-not (and (= :value (:kind expression)) (= copy-of (ids/binding-id owner field-id)))
+                             (reject! :scoped-origin-mismatch public-path))
+                           (migration/derived-id :scoped-literal-read owner use-path field-id))
+               :else (ids/binding-id owner field-id))
           parsed (rows/normalize
                    (merge (select-keys row [:org-id])
                           {:kind :input-binding :id id :fn-id owner
@@ -107,6 +110,7 @@
       (when-not (migration/same-edn? parsed row)
         (reject! :scoped-origin-mismatch public-path))
       (cond-> {:address address :row parsed :expression expression}
+        copy-of (assoc :copy-of copy-of)
         (and (= :ref (:kind expression)) (map? (second form))) (assoc :inline-body (second form))
         (:named-leaf? certificate) (assoc :named-leaf? true)
         projection? (assoc :source-names (:source-names certificate))))))
@@ -114,9 +118,17 @@
 
 (defn parse-bindings
   [ctx state bind]
-  (into {} (keep (fn [[path form]]
-                   (when (vector? path) [path (parse-route ctx state path form)])))
-        (when (map? bind) bind)))
+  (let [parsed (into {} (keep (fn [[path form]]
+                                (when (vector? path) [path (parse-route ctx state path form)])))
+                     (when (map? bind) bind))
+        by-id (into {} (map (juxt (comp :id :row) identity)) (vals parsed))]
+    (doseq [[path {:keys [copy-of]}] (:scoped-inputs ctx) :when copy-of]
+      (let [copy (get parsed path)
+            original (get by-id copy-of)]
+        (when-not (and (= copy-of (:copy-of copy)) (= :value (get-in original [:expression :kind]))
+                       (migration/same-edn? (:expression original) (:expression copy)))
+          (reject! :scoped-origin-mismatch path))))
+    parsed))
 
 
 (defn parse-annotation

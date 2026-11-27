@@ -162,14 +162,19 @@
     graph))
 
 
-(defn- occurrence
+(defn- occurrences
   [graph slot-id & [root-use-id]]
   ;; Look at every declared scope, including occupied/hidden occurrences.
   ;; Picking the sole FREE route would conflate a shared target's uses.
-  (let [candidates (for [[scope contract] (get-in graph [:public-input :scope-contracts])
-                         :when (and (or (nil? root-use-id) (= root-use-id (first (second scope))))
-                                    (some #(= slot-id (:id %)) (:fields contract)))]
-                     [scope [slot-id]])]
+  (for [[scope contract] (get-in graph [:public-input :scope-contracts])
+        :when (and (or (nil? root-use-id) (= root-use-id (first (second scope))))
+                   (some #(= slot-id (:id %)) (:fields contract)))]
+    [scope [slot-id]]))
+
+
+(defn- occurrence
+  [graph slot-id & [root-use-id]]
+  (let [candidates (occurrences graph slot-id root-use-id)]
     (when (empty? candidates) (reject! :missing-reference-input))
     (only candidates :nonunique-reference-input)))
 
@@ -276,10 +281,9 @@
 
 
 (defn- public-route
-  [graph snapshot arg binding]
+  [graph snapshot arg binding [[_ use-path] _ :as address]]
   (let [owner (:fn-id binding)
         slot (:slot-id binding)
-        [[_ use-path] _ :as address] (occurrence graph slot)
         [names route] (only (filter #(= address (:address (val %))) (get-in graph [:public-input :routes]))
                             :unavailable-reference-input)
         edges (mapv #(checked-edge graph snapshot owner (subvec use-path 0 %) address) (range 1 (inc (count use-path))))
@@ -335,9 +339,9 @@
 
 
 (defn- binding-certificate
-  [snapshot before [arg binding]]
+  [snapshot before [arg binding] address]
   (let [owner (:fn-id binding)
-        [public-path address edges declaring] (public-route before snapshot arg binding)
+        [public-path address edges declaring] (public-route before snapshot arg binding address)
         annotation (:scoped-annotation arg)]
     (when (and annotation (not= declaring (:declaring-id annotation)))
       (reject! :reference-field-origin-mismatch))
@@ -349,21 +353,46 @@
       (:target-type-origin arg) (assoc :target-type-origin (:target-type-origin arg)))))
 
 
+(defn- binding-certificates
+  [snapshot before literal-witness [arg {:keys [id fn-id slot-id value-present] :as binding} :as origin]]
+  (let [addresses (occurrences before slot-id)
+        field (peek (:source-path arg))]
+    (if (and (next addresses) literal-witness value-present (empty? (:policy arg))
+             (every? (fn [[_ contract]]
+                       (every? #(or (not= field (:name %)) (= slot-id (:id %))) (:fields contract)))
+                     (get-in before [:public-input :scope-contracts]))
+             (literal-witness field binding))
+      (let [addresses (sort-by context/address-sort-key addresses)
+            [primary & additional] (map (partial binding-certificate snapshot before origin) addresses)
+            common {:literal-occurrences (set addresses)}]
+        (into [(merge primary common)]
+              (map (fn [{[[_ use-path]] :address :as certificate}]
+                     (-> (merge certificate common)
+                         (assoc :copy-of id)
+                         (assoc-in [:row :id] (migration/derived-id :scoped-literal-read fn-id use-path slot-id)))))
+              additional))
+      [(binding-certificate snapshot before origin (occurrence before slot-id))])))
+
+
 (defn- verified-addition?
-  [before after binding {:keys [address row public-path] :as certificate}]
+  [before after binding {:keys [address row public-path literal-occurrences] :as certificate}]
   (let [added (get-in after [:public-input :bindings address])
         expression (if (:value-present binding)
                      {:kind :value :value (:value binding)}
                      {:kind :ref :fn-id (:ref-fn-id binding)})]
-    (and (= address (occurrence after (:slot-id binding)))
+    (and (= (:id binding) (or (:copy-of certificate) (:id row)))
+         (if literal-occurrences
+           (= literal-occurrences (set (occurrences after (:slot-id binding))))
+           (= address (occurrence after (:slot-id binding))))
          (if (contains? certificate :configuration)
            (let [quantities [:address :completion-type :required :required-now? :whole-bindable?]]
              (and (nil? added)
                   (migration/same-edn? (select-keys (get-in before [:public-input :routes public-path]) quantities)
                                        (select-keys (get-in after [:public-input :routes public-path]) quantities))))
-           (and (= (:id binding) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
+           (and (= (:id row) (:binding-id added)) (= (:fn-id binding) (:origin-fn-id added))
                 (migration/same-edn? expression (:expression added))))
-         (migration/same-edn? (meaning binding) (meaning (migration/legacy-binding (assoc row :scope-path [])))))))
+         (migration/same-edn? (meaning binding)
+                              (meaning (migration/legacy-binding (assoc row :scope-path [] :id (:id binding))))))))
 
 
 (defn- nested-field-check
@@ -618,10 +647,11 @@
    interdependent type constraints and occupancy use the completed graph.
    Existing field-read obligations must survive exactly. New value ref uses
    may bring the exact field checks of their independently checked targets."
-  [{owner :identity :as plan-entry} paths snapshot analyze projections]
+  [{owner :identity :as plan-entry} paths snapshot analyze projections literal-witness]
   (let [omitted (legacy-omissions plan-entry paths snapshot projections)
         before (checked-graph analyze snapshot owner true)
-        certificates (mapv (partial binding-certificate snapshot before) omitted)
+        grouped (mapv (partial binding-certificates snapshot before literal-witness) omitted)
+        certificates (into [] cat grouped)
         additions (into {} (map (juxt :id identity)) (map :row certificates))]
     (when-not (= (count certificates) (count additions) (count (set (map :address certificates))))
       (reject! :scope-replay-mismatch))
@@ -629,7 +659,8 @@
           after (checked-graph analyze updated owner true)
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
-      (when-not (and (every? true? (map #(verified-addition? before after (second %1) %2) omitted certificates))
+      (when-not (and (every? true? (map (fn [[_ binding] group]
+                                          (every? (partial verified-addition? before after binding) group)) omitted grouped))
                      (preserves-projection-readers? after projections)
                      (preserves-occupancy? prior current certificates)
                      (external/preserves-capture-inputs? before after certificates (partial replacement-inputs? snapshot analyze after))
@@ -641,8 +672,9 @@
 (defn verify-bindings
   "Check exactly the complete omitted binding group, preserving all existing
    occupancy and runtime obligations. No forwarding declarations are admitted."
-  [entry paths snapshot analyze]
-  (verify-bindings* entry paths snapshot analyze []))
+  ([entry paths snapshot analyze] (verify-bindings entry paths snapshot analyze nil))
+  ([entry paths snapshot analyze literal-witness]
+   (verify-bindings* entry paths snapshot analyze [] literal-witness)))
 
 
 (defn verify-bindings-after-forwarding
@@ -652,7 +684,7 @@
   [original projected snapshot analyze]
   (let [{:keys [entry projections]} (joint/scope-view original projected snapshot)
         {:keys [paths]} (joint/groups original)]
-    (verify-bindings* entry paths snapshot analyze projections)))
+    (verify-bindings* entry paths snapshot analyze projections nil)))
 
 
 (defn verify-binding

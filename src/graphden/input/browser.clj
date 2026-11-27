@@ -41,10 +41,11 @@
   [type]
   (cond
     (contains? browser-input-types type) (name type)
-    (and (types/union-type? type)
-         (seq (types/union-members type))
-         (every? browser-input-types (types/union-members type)))
-    {:anyOf (mapv name (types/union-members type))}
+    (and (types/union-type? type) (seq (types/union-members type)))
+    {:anyOf (mapv supplied-type! (types/union-members type))}
+    (and (types/record-type? type) (every? keyword? (keys type)))
+    {:recordFields (mapv (fn [[field t]] [(namespace field) (name field) (supplied-type! t)])
+                         (sort-by key type))}
     (types/list-type? type) {:listOf (supplied-type! (types/list-elem type))}
     (types/map-type? type) {:mapOf [(supplied-type! (types/map-key type))
                                     (supplied-type! (types/map-val type))]}

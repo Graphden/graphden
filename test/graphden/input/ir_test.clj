@@ -4,7 +4,8 @@
     [graphden.input.arguments :as arguments]
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.ir :as ir]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.validator :as validator]))
 
 
 (deftest materializing-a-projected-native-record-requires-its-exact-argument-identity
@@ -33,6 +34,48 @@
                    (assoc-in abi [:root-entry :name] :other)
                    (assoc-in abi [:argument-paths :request] [(random-uuid)])]]
       (is (= :runtime-obligations-required (check other))))))
+
+
+(deftest computed-map-checks-retain-their-native-read-boundary
+  (let [owner (random-uuid)
+        read-type (fn [module native field expected actual]
+                    (let [id (ids/fn-id module native)
+                          path [(ids/slot-id id field)]
+                          address [[owner []] path]
+                          source {:base-fn-id id :root-entry {:fn-id id :namespace module :name native}
+                                  :argument-paths {field path}}
+                          node {:signature-source source :bindings {address {:reference {:mode :value :actual-type actual}}}}]
+                      (#'ir/field-read-type {:scopes {[] node}} address expected :invoke)))
+        record {:name :text :required :bool}
+        dictionary [:map [:union :keyword :text] :any]
+        lookup [:union :null [:list :any] dictionary]
+        asserted (read-type "core.logic" :assert-eq :actual record [:map :any :any])]
+    (is (= record asserted))
+    (is (= {:name "one" :required false :extra nil}
+           (validator/validate! asserted {:name "one" :required false :extra nil})))
+    (is (thrown? clojure.lang.ExceptionInfo (validator/validate! asserted {:name "one"})))
+    (is (nil? (read-type "core.logic" :assert-eq :expected record [:map :any :any])))
+    (doseq [native [:get :contains?]]
+      (is (= lookup (read-type "core.collections" native :coll lookup dictionary))))
+    (is (nil? (read-type "core.collections" :get :key lookup dictionary)))))
+
+
+(deftest generated-merge-operands-require-the-private-map-key-contract
+  (let [owner (random-uuid) binding (random-uuid)
+        merge-id (ids/fn-id "core.collections" :merge)
+        input [(ids/slot-id merge-id :maps)] item [(random-uuid)]
+        scope [owner [binding]] operand [scope item]
+        args '{:maps [:list [:union :null [:map a :any]]]}
+        contract {:fn-id merge-id :namespace "core.collections" :name :merge :args args :return [:map :any :any]}
+        graph {:scopes {[] {:signature-source {:base-fn-id merge-id :root-entry contract :argument-paths {:maps input}}}
+                        [binding] {:signature-source {:generated-list {:operands [:item-0]} :argument-paths {:item-0 item}}
+                                   :bindings {operand {:reference {:mode :value :actual-type [:union :empty-map {:name :text}]}}}}}
+               :dependencies [{:from [[owner []] input] :to scope :mode :value}]}
+        validator #(when-let [t (#'ir/field-read-type % operand '[:union :null [:map a$builder :any]] :invoke)] t)]
+    (is (= [:union :null [:map :any :any]] (validator graph)))
+    (is (nil? (validator (assoc-in graph [:scopes [] :signature-source :root-entry :return] '[:map a :any]))))
+    (is (nil? (validator (assoc graph :dependencies []))))
+    (is (nil? (validator (assoc-in graph [:scopes [binding] :bindings operand :reference :actual-type] :text))))))
 
 
 (def ^:private base-definitions

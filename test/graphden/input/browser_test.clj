@@ -24,6 +24,12 @@
     [graphden.types.core :as types]))
 
 
+(deftest nested-collection-checks-retain-every-record-field-type-on-the-wire
+  (let [wire (#'browser/supplied-type! [:list [:union :null {:required :bool :name :text}]])]
+    (is (= {:listOf {:anyOf ["null" {:recordFields [[nil "name" "text"] [nil "required" "bool"]]}]}} wire))
+    (is (thrown? clojure.lang.ExceptionInfo (#'browser/supplied-type! [:union :null {:invalid 'free}])))))
+
+
 (def ^:private definitions
   {:root {:input {:coll {:name :text :unsafe :int} :key :keyword :default :any}
           :return :any

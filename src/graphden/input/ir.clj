@@ -90,6 +90,51 @@
           [:union :null [:list :any] [:map :any :any]])))))
 
 
+(defn- generated-merge-read
+  [analysis [[_ scope] :as address] expected op]
+  (let [binding (get-in analysis [:scopes scope :bindings address])
+        literal-tail? (and (= :literal op) (= {:kind :value :value []} (:expression binding)))
+        element (if literal-tail? (types/list-elem expected) expected)
+        [dictionary :as maps] (remove #{:null} (types/union-members element))
+        actual (get-in binding [:reference :actual-type])
+        map-arm? #(or (#{:null :empty-map} %) (types/map-type? %) (types/record-type? %))]
+    (when (and (= 1 (count maps)) (open-key-map? dictionary)
+               (= #{:null dictionary} (set (types/union-members element)))
+               (or literal-tail?
+                   (and (= :invoke op) (= :value (get-in binding [:reference :mode]))
+                        (every? map-arm? (or (types/union-members actual) [actual]))))
+               (when-let [from (generated-list-source analysis address (if literal-tail? :tail :operand))]
+                 (and (native-argument? analysis from "core.collections" :merge :maps)
+                      (= '{:maps [:list [:union :null [:map a :any]]]}
+                         (get-in analysis [:scopes (second (first from)) :signature-source :root-entry :args]))
+                      (= [:map :any :any]
+                         (get-in analysis [:scopes (second (first from)) :signature-source :root-entry :return])))))
+      (let [element [:union :null [:map :any :any]]]
+        (if literal-tail? [:list element] element)))))
+
+
+(defn- computed-collection-read
+  [analysis [[_ scope] :as address] expected op]
+  (when (= :invoke op)
+    (let [{:keys [mode actual-type]} (get-in analysis [:scopes scope :bindings address :reference])
+          dictionary [:map [:union :keyword :text] :any]]
+      (when (and (= :value mode)
+                 (or
+                   (and (= dictionary actual-type)
+                        (= #{:null [:list :any] dictionary} (set (types/union-members expected)))
+                        (or (native-argument? analysis address "core.collections" :get :coll)
+                            (native-argument? analysis address "core.collections" :contains? :coll)))
+                   (and (= actual-type [:map :any :any])
+                        (or (= expected actual-type) (obligations/materializable-record? expected))
+                        (native-argument? analysis address "core.logic" :assert-eq :actual))
+                   (and (= actual-type expected)
+                        (or (and (obligations/materializable-record? expected)
+                                 (native-argument? analysis address "core.logic" :if :then))
+                            (and (= [:list :jsonb] expected)
+                                 (native-argument? analysis address "core.collections" :zipmap :vals))))))
+        expected))))
+
+
 (defn- field-read-type
   [analysis [[_ scope] :as address] expected op]
   (or (cond
@@ -132,6 +177,8 @@
               (or (when (some #{arm} (types/union-members expected)) arm)
                   (literal-lookup/keyword-map-read-type analysis address expected actual-type))))))
       (open-map-read analysis address expected op)
+      (generated-merge-read analysis address expected op)
+      (computed-collection-read analysis address expected op)
       (lookup-abi/collection-read-domain analysis address expected op)))
 
 

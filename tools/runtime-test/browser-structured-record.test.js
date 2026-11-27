@@ -227,4 +227,14 @@ const repeatedRecord = {...broadcastRecord, records: [broadcastRecord.records[0]
 assert.throws(() => [...runCallback(mapRecords(repeatedRecord), {items: [recordValue([])]}, readTwoRecords)],
   /Invalid checked browser callback record/);
 
+const requiredName = {recordFields: [[null, 'name', 'text']]};
+const formMaps = {listOf: {anyOf: ['null', requiredName]}};
+const validateForm = (value) => runCallback(scopedFn('entry', 'entry', 'const', {
+  value: {kind: 'validate', type: formMaps, expr: literal(value)},
+}));
+const validForm = new Map([[graph.keyword('name'), 'form'], ['extra', false]]);
+assert.deepEqual(validateForm([null, validForm]), [null, validForm]);
+assert.throws(() => validateForm([new Map()]), /does not match/);
+assert.throws(() => validateForm([new Map([[graph.keyword('name'), false]])]), /does not match/);
+
 console.log('PASS deferred browser record fields, presence, and version admission');

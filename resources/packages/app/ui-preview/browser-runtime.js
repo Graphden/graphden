@@ -497,7 +497,19 @@
   }
   function matchesInput(value, type, tick) {
     if (typeof type === 'string') return matchesPrimitiveInput(value, type);
-    if (Array.isArray(type?.anyOf)) return type.anyOf.some((candidate) => matchesPrimitiveInput(value, candidate));
+    if (Array.isArray(type?.anyOf)) {
+      return type.anyOf.some((candidate) => {
+        tick();
+        return matchesInput(value, candidate, tick);
+      });
+    }
+    if (Array.isArray(type?.recordFields) && value instanceof Map) {
+      return type.recordFields.every(([ns, name, fieldType]) => {
+        tick();
+        const key = keyword(name, ns);
+        return value.has(key) && matchesInput(value.get(key), fieldType, tick);
+      });
+    }
     if (Array.isArray(type?.recordKeys) && value instanceof Map) {
       for (const key of value.keys()) {
         tick();

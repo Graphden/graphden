@@ -261,7 +261,7 @@
         graph (-> original
                   (update-in [:scopes [edge] :declared-contract] descriptor/update-node [slot] #(assoc % :type source-type))
                   (assoc-in [:public-input :routes public-path :completion-type] scoped))
-        prove (fn [g] (#'scope/public-route g snapshot arg binding))]
+        prove (fn [g] (#'scope/public-route g snapshot arg binding address))]
     (is (= [public-path address] (take 2 (prove graph))))
     (doseq [wrong [(assoc-in graph [:public-input :routes public-path :completion-type]
                              (variables/type-in-scope [owner []] source-type))

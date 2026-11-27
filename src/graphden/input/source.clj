@@ -479,14 +479,16 @@
   (when-let [{:keys [proposed legacy legacy-leaf] :as certificate} (get-in context [::certified-inlines (:fn-id child)])]
     (let [original (assoc source :description (or (:description source) (:description child)))
           arguments (:arguments legacy)
-          names (into {} (mapcat (fn [{:keys [source-path scope-certificate scoped-literal-copies]}]
-                                   (when scope-certificate
-                                     (map #(vector (:public-path %) (second source-path))
-                                          (into [scope-certificate] scoped-literal-copies))))) arguments)]
+          names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
+                                 (when scope-certificate [(:public-path scope-certificate) (second source-path)]))) arguments)
+          copies (into {} (mapcat (fn [{:keys [scope-certificate scoped-literal-copies]}]
+                                    (map #(vector (:public-path %) (:public-path scope-certificate)) scoped-literal-copies))) arguments)]
       (when (and (or (seq names) legacy-leaf)
                  (migration/same-edn? (normalize-source original context)
                                       (normalize-source (:source certificate) context)))
-        (cond-> {:proposed (cond-> proposed (seq names) (assoc :legacy-scope-names names))
+        (cond-> {:proposed (cond-> proposed
+                             (seq names) (assoc :legacy-scope-names names)
+                             (seq copies) (assoc :legacy-scope-copies copies))
                  :arguments arguments :blockers []}
           legacy-leaf (assoc :legacy-leaf legacy-leaf))))))
 

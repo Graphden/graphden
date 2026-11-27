@@ -18,6 +18,20 @@
    :return-type :any})
 
 
+(deftest repeated-inline-literals-round-trip-to-one-authored-argument
+  (let [primary [:then :word]
+        copy [:else :word]
+        raw {:parent :chooser :args {:word "again"}}
+        proposed {:bind {primary [:value "again"] copy [:value "again"]}
+                  :legacy-scope-names {primary :word}
+                  :legacy-scope-copies {copy primary}}
+        migrated (format/migrate-inline raw proposed)]
+    (is (= raw (format/inline-origin migrated)))
+    (is (= (get-in proposed [:bind copy]) (get-in migrated [:bind copy])))
+    (is (nil? (format/inline-origin (assoc-in migrated [:bind copy] [:value "changed"]))))
+    (is (nil? (format/inline-origin (update migrated :bind dissoc copy))))))
+
+
 (def producer
   {:name :producer :namespace "demo" :args {} :return-type :any})
 
@@ -940,7 +954,7 @@
     (is (= source (format/inline-origin body)))
     (is (nil? (format/inline-origin (assoc-in body [:input :render :type] [:fn {} :int]))))
     (is (nil? (format/inline-origin (-> body (assoc-in [:configure [:func] :type] '[:fn {} a])
-                                             (assoc-in [:input :render :type] '[:fn {} a])))))
+                                        (assoc-in [:input :render :type] '[:fn {} a])))))
     (is (nil? (format/inline-origin (assoc-in body [:bind :func] [:ref :other]))))))
 
 

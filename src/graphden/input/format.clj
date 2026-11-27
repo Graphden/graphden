@@ -42,7 +42,7 @@
         (keep (fn [[k v]]
                 (cond
                   (= from k) [to fields]
-                  (#{:legacy-forms :legacy-order :legacy-args-order :legacy-scope-names :input :configure} k) nil
+                  (#{:legacy-forms :legacy-order :legacy-args-order :legacy-scope-names :legacy-scope-copies :input :configure} k) nil
                   :else [k v])))
         body))
 
@@ -313,17 +313,25 @@
 
 (defn inline-source-fields
   "Map each inline binding and scoped annotation to its original name. Scoped keys
-   require an explicit one-to-one spelling map. This does not prove a route."
-  [{:keys [bind configure legacy-scope-names] :as body}]
+   need an explicit spelling. Verified copies share the original literal."
+  [{:keys [bind configure legacy-scope-names legacy-scope-copies] :as body}]
   (when (and (map? bind) (or (nil? configure) (map? configure)))
     (let [local (filter simple-keyword? (keys bind))
           scoped-binds (remove simple-keyword? (keys bind))
           scoped-configs (filter #(and (vector? %) (< 1 (count %))) (keys configure))
           scoped (concat scoped-binds scoped-configs)
+          copies (or legacy-scope-copies {})
           names (or legacy-scope-names {})]
-      (when (and (map? names) (= (set scoped) (set (keys names)))
-                 (= (count scoped) (count names))
+      (when (and (map? names) (map? copies)
+                 (= (set scoped) (into (set (keys names)) (keys copies)))
+                 (= (count scoped) (+ (count names) (count copies)))
                  (or (seq scoped) (not (contains? body :legacy-scope-names)))
+                 (or (seq copies) (not (contains? body :legacy-scope-copies)))
+                 (every? (fn [[copy origin]]
+                           (let [form (get bind origin)]
+                             (and (contains? names origin) (not (contains? configure copy))
+                                  (vector? form) (= 2 (count form)) (= :value (first form))
+                                  (= form (get bind copy))))) copies)
                  (every? #(and (vector? %) (> (count %) 1) (every? simple-keyword? %)) scoped)
                  (every? (fn [path]
                            (let [form (get bind path)]
@@ -340,11 +348,14 @@
    spellings that explicit expressions or configuration would erase.
    The prefix and position of an inline use are supplied by its parent."
   [body]
-  (when (inline-shape? body #{:parent :parents :bind :legacy-forms :legacy-order :legacy-args-order :legacy-scope-names :input :configure})
+  (when (inline-shape? body #{:parent :parents :bind :legacy-forms :legacy-order :legacy-args-order :legacy-scope-names
+                              :legacy-scope-copies :input :configure})
     (if-not (contains? body :bind)
-      (when-not (some #(contains? body %) [:legacy-forms :legacy-order :legacy-args-order :legacy-scope-names :input :configure]) body)
-      (let [{:keys [bind input legacy-forms configure]} body
+      (when-not (some #(contains? body %) [:legacy-forms :legacy-order :legacy-args-order :legacy-scope-names
+                                           :legacy-scope-copies :input :configure]) body)
+      (let [{:keys [bind input legacy-forms configure legacy-scope-copies]} body
             source-fields (inline-source-fields body)
+            bind (apply dissoc bind (keys legacy-scope-copies))
             source-names (into #{} (map #(get source-fields %)) (keys (when source-fields bind)))]
         (when (and source-fields (valid-inline-configuration? body) (valid-inline-input? body)
                    (or (not (contains? body :legacy-forms))
@@ -429,7 +440,7 @@
 (defn migrate-inline
   "Form a v2 body with the source argument order and spelling. The
    caller must compare the reconstructed body and independently check its UUID."
-  [body {:keys [bind configure legacy-scope-names] :as proposed}]
+  [body {:keys [bind configure legacy-scope-names legacy-scope-copies] :as proposed}]
   (if-not (contains? body :args)
     body
     (let [source-fields (inline-source-fields (assoc proposed :bind (get proposed :bind {})))
@@ -449,11 +460,13 @@
                        (:args body))]
       (when (and source-fields (every? some? leaves))
         (let [fields (into (empty (:args body)) (keep (fn [[_ target form _]] (when (not= ::annotation form) [target form]))) leaves)
+              fields (into fields (select-keys bind (keys legacy-scope-copies)))
               spellings (into (array-map) (keep (fn [[k _ _ spelling]] (when spelling [k spelling]))) leaves)
               migrated (cond-> (into (replace-inline-fields body :args :bind fields)
                                      (select-keys proposed [:input :configure]))
                          (seq spellings) (assoc :legacy-forms spellings)
                          (seq legacy-scope-names) (assoc :legacy-scope-names legacy-scope-names)
+                         (seq legacy-scope-copies) (assoc :legacy-scope-copies legacy-scope-copies)
                          (some #(= ::annotation (nth % 2)) leaves) (assoc :legacy-args-order (vec (keys (:args body)))))
               restored (inline-origin migrated)]
           (cond-> migrated

@@ -884,3 +884,21 @@
         (is (= callback-id (:graphden.executor/fn-id (meta handler))))
         (is (= "request" (handler "request")))
         (is (= "other thread" @(future (handler "other thread"))))))))
+
+
+(deftest a-forwarded-value-reaches-every-legacy-list-reader
+  (let [source (into (declarations "packages/core/strings/fns.edn" #{:str})
+                     (map #(assoc % :namespace "forwarded-list")
+                          [{:name :_item :parent :str :args {:parts [{:as :label}]}}
+                           {:name :left :parent :str :args {:parts [{:value "left="} :_item]}}
+                           {:name :right :parent :str :args {:parts [{:value ";right="} :_item]}}
+                           {:name :both :parent :str
+                            :args {:parts [:left :right] :label {:type :text}}}]))
+        root (ids/fn-id "forwarded-list" :both)
+        compile-certified (fn [package id roots implementations]
+                            (execution/compile-package (snapshot/with-certified-owner package id roots)
+                                                       id roots implementations))
+        {:keys [canonical legacy]} (runtimes source root compile-certified)]
+    (doseq [label ["shared" ""]]
+      (let [args {:label label}]
+        (is (= (str "left=" label ";right=" label) (legacy args) (canonical args)))))))

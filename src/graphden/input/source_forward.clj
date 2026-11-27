@@ -75,12 +75,15 @@
                     (let [lineage (slots/chain-of target-ref defs-by-name)
                           declaring-id (get name->id declaring-ref)
                           target-id (get name->id target-ref)
+                          field-type (slots/slot-type-of declaring-ref field defs-by-name)
+                          untyped-rename? (and (nil? field-type)
+                                               (slots/rename-target (get defs-by-name declaring-ref) field))
                           return-owner (some #(when (get-in defs-by-name [% :return-type]) %) lineage)]
                       (when-not (and (= field name) (uuid? declaring-id) (uuid? target-id))
                         (reject! :unsupported-reference-field-origin))
                       {:target-ref target-ref :target-id target-id :field-id (ids/slot-id declaring-id field)
                        :direct? (boolean (some #{declaring-ref} lineage))
-                       :field-type (slots/slot-type-of declaring-ref field defs-by-name)
+                       :field-type field-type :untyped-rename? (boolean untyped-rename?)
                        :return-owner-ref return-owner
                        :return-type (get-in defs-by-name [return-owner :return-type])}))))
           (slots/ref-targets-of owner defs-by-name))))
@@ -156,21 +159,20 @@
 
 
 (defn- checked-reference-binding
-  [prepared entry {:keys [target-id multiple-readers?] :as target}]
-  (if (or multiple-readers?
-          (some #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %))) (get-in entry [:legacy :records])))
+  [prepared entry {:keys [target-id] :as target}]
+  (if (some #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %))) (get-in entry [:legacy :records]))
     (checked-direct-reference prepared entry target)
     (checked-list-reference entry target-id)))
 
 
 (defn- proof
   [prepared {owner-id :identity :as entry} field {:keys [slot membership type]}
-   {:keys [field-id field-type target-id direct? multiple-readers?] :as target}]
+   {:keys [field-id field-type target-id direct? multiple-readers? untyped-rename?] :as target}]
   (let [{:keys [binding-id generic-reference root-target-id list-operand]}
         (checked-reference-binding prepared entry target)]
     (when-not (and (= field-id (:source-slot-id slot))
                    (or (= type field-type)
-                       (and list-operand (nil? field-type))
+                       (and (nil? field-type) (or list-operand (and multiple-readers? untyped-rename?)))
                        (and (primitive-field? type) (primitive-field? field-type) (types/subtype? type field-type))))
       (reject! :unproved-forwarded-target))
     (cond-> {:owner-id owner-id :field-id (:id slot) :membership-id (:id membership)
@@ -182,6 +184,7 @@
              :target-address (when direct?
                                [[owner-id (cond-> [binding-id] list-operand (conj (:item-id list-operand)))] [field-id]])}
       list-operand (assoc :list-operand list-operand)
+      (and multiple-readers? untyped-rename?) (assoc :untyped-rename? true)
       generic-reference (assoc :generic-reference generic-reference)
       multiple-readers? (assoc :multiple-readers? true))))
 
@@ -232,15 +235,20 @@
 
 
 (defn- reader-proofs
-  [prepared entry field declaration {:keys [direct? field-id target-ref] :as target}]
-  (let [{:keys [owner-id root-use-id] :as base} (proof prepared entry field declaration target)
-        paths (when (and (not direct?) (nil? (:list-operand base)))
-                (authored-reader-paths prepared target-ref field field-id [root-use-id] #{}))]
-    (if (next paths)
-      (mapv (fn [path]
-              (assoc base :multiple-readers? true :nested-reader? true
-                     :target-address [[owner-id path] [field-id]]
-                     :projection-id (migration/derived-id :forwarded-field owner-id path field-id))) paths)
+  [prepared entry field declaration {:keys [direct? field-id target-ref multiple-readers?] :as target}]
+  (let [{:keys [owner-id root-use-id list-operand] :as base} (proof prepared entry field declaration target)
+        prefix (cond-> [root-use-id] list-operand (conj (:item-id list-operand)))
+        paths (if direct?
+                [prefix]
+                (when (or multiple-readers? (nil? list-operand))
+                  (authored-reader-paths prepared target-ref field field-id prefix #{})))]
+    (if (or (next paths) (and multiple-readers? list-operand))
+      (do
+        (when-not (seq paths) (reject! :unproved-forwarded-target))
+        (mapv (fn [path]
+                (assoc base :multiple-readers? true :nested-reader? true
+                       :target-address [[owner-id path] [field-id]]
+                       :projection-id (migration/derived-id :forwarded-field owner-id path field-id))) paths))
       [base])))
 
 
@@ -260,7 +268,7 @@
                        (and (format/configuration-type? type)
                             (= (count targets) (count (set (map :target-id targets))))
                             (every? #(and (= (:source-slot-id slot) (:field-id %))
-                                          (= type (:field-type %))) targets))))
+                                          (or (= type (:field-type %)) (:untyped-rename? %))) targets))))
       (reject! :nonunique-reference-use))
     (into [] (mapcat #(reader-proofs prepared entry field declaration (cond-> % multiple? (assoc :multiple-readers? true)))) targets)))
 

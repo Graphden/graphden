@@ -603,7 +603,7 @@
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
                            field-id source-type target-type target-fn-id target-field-id root-use-id
-                           multiple-readers? nested-reader? generic-reference list-operand]}]
+                           multiple-readers? nested-reader? generic-reference list-operand untyped-rename?]}]
   (let [address (if nested-reader? target-address (occurrence before target-field-id (when multiple-readers? root-use-id)))
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
@@ -616,7 +616,7 @@
                    (not (contains? (:bindings snapshot) projection-id)))
       (reject! :unproved-forwarded-identity))
     (let [source-names (free-route! before source-address source-type)
-          target-names (if (and list-operand (nil? target-type))
+          target-names (if (and (or list-operand untyped-rename?) (nil? target-type))
                          (let [[names route] (checked-free-route before address)
                                type (:completion-type route)]
                            (when-not (and (some? type)

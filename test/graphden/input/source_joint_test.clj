@@ -83,8 +83,8 @@
                                    :data {:type :text} :string {:value "label"}}}])
         prepared (parse/prepare-module definitions {} {})
         original (peek (:definitions (source/plan-module definitions prepared)))
-        reduced (update-in definitions [5 :args] dissoc :string)
-        reduced-prepared (parse/prepare-module reduced {} {})
-        reduced-entry (peek (:definitions (source/plan-module reduced reduced-prepared)))]
+        reduced-definitions (update-in definitions [5 :args] dissoc :string)
+        reduced-prepared (parse/prepare-module reduced-definitions {} {})
+        reduced-entry (peek (:definitions (source/plan-module reduced-definitions reduced-prepared)))]
     (is (= {:fields [:data] :paths [[:args :string]]} (joint/groups original)))
     (is (nil? (code #(joint/check-full-reference-origins! prepared original reduced-prepared reduced-entry))))))

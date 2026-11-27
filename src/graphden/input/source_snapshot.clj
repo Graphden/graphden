@@ -797,7 +797,7 @@
    write it into the source proposal. Require the stock type checker and the
    same implementation registry evidence used by other source certificates."
   [{:keys [prepared] :as package} owner fields roots]
-  (let [prepared (readers/prepare prepared owner roots)
+  (let [prepared (readers/prepare prepared owner roots (:legacy-graph package) (:incoming-legacy-targets package))
         original (plan-entry package owner)
         {:keys [proofs entry]} (source/forwarded-fields-baseline prepared original fields)]
     (when-not (= :authored-source-equivalent (:verification entry))

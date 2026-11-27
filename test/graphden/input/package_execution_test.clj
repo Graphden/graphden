@@ -989,3 +989,34 @@
                                                        id roots implementations))
         {:keys [legacy canonical]} (runtimes source root compile-certified)]
     (is (= "attached!" (legacy {}) (canonical {})))))
+
+
+(deftest terminal-named-input-feeds-distinct-legacy-slot-identities
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:zipmap})
+                     (concat (declarations "packages/core/strings/fns.edn" #{:str :to-str})
+                             [{:namespace "fixture" :name :first-text :parent :str
+                               :args {:parts [{:value "["} {:as :word} {:value "]"}]}}
+                              {:namespace "fixture" :name :second-text :parent :str
+                               :args {:parts [{:as :word} {:value "!"}]}}
+                              {:namespace "fixture" :name :count-text :parent :to-str
+                               :args {:value {:as :n}}}
+                              {:namespace "fixture" :name :template :parent :zipmap
+                               :args {:keys [{:value :first} {:value :second} {:value :n}]
+                                      :vals [:first-text :second-text :count-text]
+                                      :word {:type :text} :n {:type :int}}}]))
+        root (ids/fn-id "fixture" :template)
+        compile-template (fn [package owner roots implementations]
+                           (let [rows (group-by :kind (parse/parse-prepared-module (:prepared package)))
+                                 graph (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
+                                                               :bindings (:binding rows) :list-items (:binding-list-item rows)})
+                                 hydrated (assoc package :legacy-graph graph)
+                                 migrated (snapshot/with-migrated-forwarding hydrated owner [:word :n] roots)]
+                             (execution/compile-package migrated owner roots implementations)))
+        {:keys [canonical legacy]} (runtimes source root compile-template)
+        args {:word "sample" :n 7}]
+    (is (= {:first "[sample]" :second "sample!" :n "7"} (legacy args) (canonical args)))
+    (doseq [use [{:name :descendant :parent :template}
+                 {:name :list-client :parent :str :args {:parts [:template]}}
+                 {:name :client :parent :to-str :args {:value :template}}]]
+      (is (= :nonunique-reference-use
+             (rejection-code #(runtimes (conj source (assoc use :namespace "fixture")) root compile-template)))))))

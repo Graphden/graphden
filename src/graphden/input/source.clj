@@ -956,7 +956,7 @@
 
 
 (defn- checked-forwarded-certificate!
-  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id generic-reference list-operand]}
+  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id generic-reference list-operand named-leaf?]}
    field {:keys [source-names public-path row address edges] :as certificate}]
   (when-not (and (= [field] source-names) (vector? public-path) (= (inc (count edges)) (count public-path))
                  (= field (peek public-path)) (= (or target-address address) address)
@@ -966,6 +966,7 @@
                  (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
                  (= target-fn-id (:target-fn-id (first edges)))
                  (or (nil? list-operand) (= list-operand (:source-list-operand (second edges))))
+                 (= named-leaf? (:named-leaf? certificate))
                  (= generic-reference (:generic-reference certificate)))
     (throw (ex-info "Forwarded field differs from its checked projection"
                     {:type :input/source-verification :code :forwarded-certificate-mismatch}))))
@@ -1012,11 +1013,12 @@
   [context {owner-id :identity :keys [verification v2]}]
   (let [projections (filter :source-names (vals (:scoped-inputs v2)))
         rows (set (:bindings v2))
+        terminal? (some :named-leaf? projections)
         pairs (into #{} (map (fn [{:keys [row]}] [(first (:projection-path row)) (first (:target-path row))]))
                     projections)
         links (into {} pairs)]
     (when-not (and (= :authored-source-equivalent verification) (uuid? owner-id) (seq links)
-                   (= (count links) (count pairs))
+                   (or terminal? (= (count links) (count pairs)))
                    (every? (fn [{:keys [row]}]
                              (and (contains? rows row) (= "projection" (:expression-kind row))
                                   (= owner-id (:fn-id row)) (empty? (:projection-scope-path row))
@@ -1024,4 +1026,4 @@
                            projections))
       (throw (ex-info "Cannot reuse an unchecked parent forwarding"
                       {:type :input/source-verification :code :forwarded-parent-required})))
-    (assoc-in context [::source-context/forwarded-parent-links owner-id] links)))
+    (if terminal? context (assoc-in context [::source-context/forwarded-parent-links owner-id] links))))

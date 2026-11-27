@@ -167,10 +167,10 @@
 
 (defn- proof
   [prepared {owner-id :identity :as entry} field {:keys [slot membership type]}
-   {:keys [field-id field-type target-id direct? multiple-readers? untyped-rename?] :as target}]
+   {:keys [field-id field-type target-id direct? multiple-readers? untyped-rename? named-leaf?] :as target}]
   (let [{:keys [binding-id generic-reference root-target-id list-operand]}
         (checked-reference-binding prepared entry target)]
-    (when-not (and (= field-id (:source-slot-id slot))
+    (when-not (and (or named-leaf? (= field-id (:source-slot-id slot)))
                    (or (= type field-type)
                        (and (nil? field-type) (or list-operand (and multiple-readers? untyped-rename?)))
                        (and (primitive-field? type) (primitive-field? field-type) (types/subtype? type field-type))))
@@ -184,6 +184,7 @@
              :target-address (when direct?
                                [[owner-id (cond-> [binding-id] list-operand (conj (:item-id list-operand)))] [field-id]])}
       list-operand (assoc :list-operand list-operand)
+      named-leaf? (assoc :named-leaf? true)
       (and multiple-readers? untyped-rename?) (assoc :untyped-rename? true)
       generic-reference (assoc :generic-reference generic-reference)
       multiple-readers? (assoc :multiple-readers? true))))
@@ -234,15 +235,33 @@
             path))))))
 
 
+(defn- named-reader-paths
+  [{:keys [name->id defs-by-name] :as prepared} field eligible ref path seen]
+  (when-not (contains? seen ref)
+    (let [[owner name] (slots/resolve-slot-owner-strict ref field defs-by-name #{})
+          id (get name->id owner)]
+      (if (and id (= field name) (some #{owner} (slots/chain-of ref defs-by-name)))
+        (let [field-id (ids/slot-id id field)
+              field-type (slots/slot-type-of owner field defs-by-name)]
+          (when (contains? eligible field-id)
+            [{:field-id field-id :field-type field-type
+              :untyped-rename? (and (nil? field-type) (boolean (slots/rename-target (get defs-by-name owner) field)))
+              :named-path path}]))
+        (mapcat (fn [[child step]]
+                  (named-reader-paths prepared field eligible child (into path step) (conj seen ref)))
+                (authored-reference-steps prepared ref))))))
+
+
 (defn- reader-proofs
-  [prepared entry field declaration {:keys [direct? field-id target-ref multiple-readers?] :as target}]
+  [prepared entry field declaration {:keys [direct? field-id target-ref multiple-readers? named-path] :as target}]
   (let [{:keys [owner-id root-use-id list-operand] :as base} (proof prepared entry field declaration target)
         prefix (cond-> [root-use-id] list-operand (conj (:item-id list-operand)))
-        paths (if direct?
-                [prefix]
-                (when (or multiple-readers? (nil? list-operand))
-                  (authored-reader-paths prepared target-ref field field-id prefix #{})))]
-    (if (or (next paths) (and multiple-readers? list-operand))
+        paths (cond
+                named-path [(into prefix named-path)]
+                direct? [prefix]
+                (or multiple-readers? (nil? list-operand))
+                (authored-reader-paths prepared target-ref field field-id prefix #{}))]
+    (if (or named-path (next paths) (and multiple-readers? list-operand))
       (do
         (when-not (seq paths) (reject! :unproved-forwarded-target))
         (mapv (fn [path]
@@ -260,14 +279,24 @@
   (when-not (and (uuid? owner-id) (simple-keyword? field))
     (reject! :missing-field-origin))
   (let [{:keys [slot type] :as declaration} (linked-declaration entry field name->id)
-        targets (reference-occurrences prepared entry field)
+        refs (reference-occurrences prepared entry field)
+        eligible (when (and (> (count refs) 1) (::named-leaf-readers prepared))
+                   ((::named-leaf-readers prepared) owner-id field slot))
+        targets (if eligible
+                  (into [] (mapcat (fn [{:keys [target-ref] :as target}]
+                                     (map #(merge target % {:named-leaf? true})
+                                          (named-reader-paths prepared field eligible target-ref [] #{})))) refs)
+                  refs)
         multiple? (> (count targets) 1)
         declaration (assoc declaration :type (qualified-type prepared (:source entry) type))]
     (when-not (and (seq targets)
                    (or (not multiple?)
                        (and (format/configuration-type? type)
-                            (= (count targets) (count (set (map :target-id targets))))
-                            (every? #(and (= (:source-slot-id slot) (:field-id %))
+                            (= (count refs) (count (set (map :target-id refs))))
+                            (or (nil? eligible)
+                                (and (= eligible (set (map :field-id targets)))
+                                     (= (set (map :target-id refs)) (set (map :target-id targets)))))
+                            (every? #(and (or (:named-leaf? %) (= (:source-slot-id slot) (:field-id %)))
                                           (or (= type (:field-type %)) (:untyped-rename? %))) targets))))
       (reject! :nonunique-reference-use))
     (into [] (mapcat #(reader-proofs prepared entry field declaration (cond-> % multiple? (assoc :multiple-readers? true)))) targets)))

@@ -2,6 +2,7 @@
   "Certify supported legacy scope rewrites in the order their proofs require."
   (:require
     [graphden.input.source :as source]
+    [graphden.input.source-legacy-readers :as legacy-readers]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]))
 
@@ -113,7 +114,7 @@
         package (snapshot/package-index prepared visible)
         package (-> package
                     (assoc :closure-baselines baselines)
-                    (cond-> legacy-graph (assoc :legacy-graph legacy-graph))
+                    (cond-> legacy-graph (assoc :legacy-graph legacy-graph :incoming-legacy-targets (delay (legacy-readers/incoming-targets legacy-graph))))
                     (update :prepared assoc ::source/originals-by-id (:originals package)))
         initial-context (:prepared package)
         preliminary (source/plan-module originals initial-context)

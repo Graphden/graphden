@@ -108,6 +108,7 @@
         (reject! :scoped-origin-mismatch public-path))
       (cond-> {:address address :row parsed :expression expression}
         (and (= :ref (:kind expression)) (map? (second form))) (assoc :inline-body (second form))
+        (:named-leaf? certificate) (assoc :named-leaf? true)
         projection? (assoc :source-names (:source-names certificate))))))
 
 

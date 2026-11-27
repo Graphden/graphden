@@ -680,7 +680,7 @@
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
                            field-id source-type target-type target-fn-id target-field-id root-use-id
-                           multiple-readers? nested-reader? generic-reference list-operand untyped-rename?]}]
+                           multiple-readers? nested-reader? generic-reference list-operand untyped-rename? named-leaf?]}]
   (let [address (if nested-reader? target-address (occurrence before target-field-id (when multiple-readers? root-use-id)))
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
@@ -693,14 +693,15 @@
                    (not (contains? (:bindings snapshot) projection-id)))
       (reject! :unproved-forwarded-identity))
     (let [source-names (free-route! before source-address source-type)
-          target-names (if (and (or list-operand untyped-rename?) (nil? target-type))
-                         (let [[names route] (checked-free-route before address)
-                               type (:completion-type route)]
-                           (when-not (and (some? type)
-                                          (context/call-with-types snapshot #(types/subtype? source-type type)))
-                             (reject! :unproved-forwarded-input))
-                           names)
-                         (free-route! before address target-type))
+          inferred? (and (or list-operand untyped-rename?) (nil? target-type))
+          [target-names target-route] (checked-free-route before address)
+          expected (:completion-type target-route)
+          variable (when (and inferred? (types/type-var? expected)) expected)
+          _ (when-not (if inferred?
+                        (and (some? expected)
+                             (or variable (context/call-with-types snapshot #(types/subtype? source-type expected))))
+                        (migration/same-edn? target-type expected))
+              (reject! :unproved-forwarded-input))
           edges (mapv #(checked-edge before snapshot owner-id (subvec uses 0 %) address) (range 1 (inc (count uses))))
           field-owner (only (filter #(= target-field-id (ids/slot-id % (peek target-names)))
                                     (get-in before [:scopes uses :declaration-order]))
@@ -718,6 +719,8 @@
                :edges edges :field-owner field-owner :owner-parents (get-in snapshot [:fns owner-id :parent-ids])
                :address address :public-path target-names :source-names source-names}
         generic-reference (assoc :generic-reference generic-reference)
+        variable (assoc :target-variable variable)
+        named-leaf? (assoc :named-leaf? true)
         nested-reader? (assoc :nested-reader? true)))))
 
 
@@ -732,6 +735,34 @@
                            [scope [(:id field)]]))]
       (when-not (= addresses (into #{source} (map (comp :address second)) readers))
         (reject! :unproved-forwarded-readers)))))
+
+
+(defn- projected-variable?
+  [before after {:keys [address target-variable source-names]}]
+  (let [source-type (get-in before [:public-input :routes source-names :completion-type])]
+    (and target-variable source-type
+         (not (types/type-any? types/type-var? source-type))
+         (= source-type (types/resolve (:substitution after) target-variable)
+            (get-in after [:public-input :routes source-names :completion-type]))
+         (= :checked (get-in after [:proofs address :status])))))
+
+
+(defn- discharged-forwarded-variable?
+  [before after certificates {:keys [address kind trigger expected-type]}]
+  (let [old (get-in before [:public-input :bindings address])
+        installed (get-in after [:public-input :bindings address])
+        from (get-in old [:reference :source])
+        cert (get certificates from)
+        concrete (get-in after [:public-input :routes (:source-names cert) :completion-type])]
+    (and (= [:value-type :field-read] [kind trigger]) cert
+         (= expected-type (:target-variable cert) (:expected-type old) (get-in old [:reference :actual-type]))
+         (= :projection (get-in old [:reference :mode]) (get-in installed [:reference :mode]))
+         (= from (get-in installed [:reference :source]))
+         (= (select-keys old [:binding-id :origin-fn-id :expression])
+            (select-keys installed [:binding-id :origin-fn-id :expression]))
+         (= concrete (:expected-type installed) (get-in installed [:reference :actual-type]))
+         (= :checked (get-in after [:proofs address :status]))
+         (projected-variable? before after cert))))
 
 
 (defn- preserved-field-checks?
@@ -754,10 +785,11 @@
                                           (get-in after [:public-input :routes source-names :completion-type]))))))))
                  current)
          (every? (fn [{:keys [address] :as obligation}]
-                   (when-let [source (get sources address)]
-                     (let [check (select-keys obligation [:kind :trigger :expected-type])]
-                       (some #(and (= source (:address %))
-                                   (= check (select-keys % [:kind :trigger :expected-type]))) current))))
+                   (or (when-let [source (get sources address)]
+                         (let [check (select-keys obligation [:kind :trigger :expected-type])]
+                           (some #(and (= source (:address %))
+                                       (= check (select-keys % [:kind :trigger :expected-type]))) current)))
+                       (discharged-forwarded-variable? before after certified obligation)))
                  (remove current prior)))))
 
 
@@ -781,10 +813,12 @@
       (when-not (and (preserves-occupancy? prior current certificates)
                      (external/preserves-capture-inputs? before after certificates (constantly false))
                      (preserved-field-checks? before after certificates)
-                     (every? (fn [{:keys [address row public-path source-names]}]
+                     (every? (fn [{:keys [address row public-path source-names target-variable] :as cert}]
                                (let [added (get current address)
                                      source [[owner []] (:projection-path row)]]
-                                 (and (= (:id row) (:binding-id added)) (= owner (:origin-fn-id added))
+                                 (and (or (nil? target-variable)
+                                          (projected-variable? before after cert))
+                                      (= (:id row) (:binding-id added)) (= owner (:origin-fn-id added))
                                       (= {:kind :projection :scope [owner []] :path (:projection-path row)} (:expression added))
                                       (not (contains? (get-in after [:public-input :routes]) public-path))
                                       (= source-names (free-route! after source

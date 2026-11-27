@@ -112,6 +112,37 @@
           (signatures/binding-facts (update graph :scopes dissoc [edge]) scope {:argument [text]})))))
 
 
+(deftest closed-generated-list-exposes-ordered-operand-facts
+  (let [{:keys [scope text graph]} (fixture)
+        edge (random-uuid)
+        address [scope [text]]
+        builder-path [:scopes [edge]]
+        node {:signature-source {:generated-list {:operands [:item-0 :item-1]}}
+              :signature {:return [:list :any] :effects #{}
+                          :resolved-bindings {:item-0 {:type :keyword :value-present true :value :id}
+                                              :item-1 {:type 'a :ref (random-uuid)}
+                                              :tail {:type [:list :text]
+                                                     :list-elements [{:type :text :value-present true :value "tail"}]}}}}
+        graph (-> graph
+                  (assoc :dependencies [{:from address :to [(first scope) [edge]]}])
+                  (assoc-in builder-path node)
+                  (assoc-in [:scopes [] :bindings address]
+                            {:address address :expected-type [:list :any]
+                             :expression {:kind :ref :fn-id (random-uuid)}
+                             :reference {:mode :value}}))
+        read-argument #(get-in (signatures/binding-facts % scope {:items [text]}) [:bindings-info :items])
+        fact (read-argument graph)
+        signature (variables/resolve-signature {'a :bool} {:resolved-bindings {:items fact}})]
+    (is (= [{:type :keyword :value-present true :value :id}
+            {:type 'a}
+            {:type :text :value-present true :value "tail"}]
+           (:list-elements fact)))
+    (is (nil? (:value-present fact)))
+    (is (= [:keyword :bool :text] (mapv :type (get-in signature [:resolved-bindings :items :list-elements]))))
+    (is (nil? (:list-elements (read-argument (update-in graph (into builder-path [:signature :resolved-bindings :tail])
+                                                        dissoc :list-elements)))))))
+
+
 (deftest abi-never-falls-back-to-a-matching-display-name-test
   (let [{:keys [scope graph]} (fixture)]
     (is (thrown? clojure.lang.ExceptionInfo

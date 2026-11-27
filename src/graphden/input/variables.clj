@@ -71,4 +71,10 @@
       (:return signature) (update :return resolve-type)
       (:args signature) (update :args #(update-vals % resolve-type))
       (:execution signature) (update :execution #(execution/resolve-constraint substitution %))
-      (:resolved-bindings signature) (update :resolved-bindings #(update-vals % (fn [info] (update info :type resolve-type)))))))
+      (:resolved-bindings signature)
+      (update :resolved-bindings
+              #(update-vals % (fn [info]
+                                (cond-> (update info :type resolve-type)
+                                  (:list-elements info) (update :list-elements
+                                                                (partial mapv (fn [element]
+                                                                                (update element :type resolve-type)))))))))))

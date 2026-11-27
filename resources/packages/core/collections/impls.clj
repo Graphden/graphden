@@ -480,7 +480,8 @@
 
 (defn merge-return-rule
   [bindings-info default-ret]
-  (let [elem-types (get-in bindings-info [:maps :elem-types])]
+  (let [{:keys [elem-types list-elements]} (:maps bindings-info)
+        elem-types (if list-elements (mapv :type list-elements) elem-types)]
     (cond
       (not (and (sequential? elem-types) (seq elem-types)))
       default-ret
@@ -512,7 +513,11 @@
 (defn select-keys-return-rule
   [bindings-info default-ret]
   (let [m-type (get-in bindings-info [:m :type])
-        ks-form (get-in bindings-info [:ks :value])
+        ks (:ks bindings-info)
+        elements (:list-elements ks)
+        ks-form (if (and elements (every? :value-present elements))
+                  (mapv #(select-keys % [:value]) elements)
+                  (:value ks))
         literal-kws (when (vector? ks-form)
                       (mapv (fn [item]
                               (when (and (map? item) (contains? item :value))
@@ -984,7 +989,8 @@
           :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :vals {:impl vals-fn :return-type-rule vals-return-rule
           :local-type-rules #{:return-type-rule} :taint-propagate? true}
-   :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
+   :merge {:impl merge-fn :return-type-rule merge-return-rule
+           :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :into {:impl into-fn :return-type-rule into-return-rule
           :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule :taint-propagate? true}
@@ -998,7 +1004,8 @@
             :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :flatten {:impl flatten-fn :return-type-rule flatten-return-rule :taint-propagate? true}
    :distinct {:impl distinct-fn :taint-propagate? true}
-   :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
+   :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule
             :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule

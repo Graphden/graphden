@@ -69,11 +69,27 @@
       (assoc :value (get-in (:value fact) names) :value-present true))))
 
 
+(defn- checked-list-elements
+  "Use only the ordered operands of a verified generated builder whose tail
+   is statically empty or itself a checked list. Values are never evaluated."
+  [{:keys [signature signature-source]}]
+  (when-let [operands (get-in signature-source [:generated-list :operands])]
+    (let [facts (:resolved-bindings signature)
+          prefix (mapv facts operands)
+          tail (:tail facts)
+          tail-elements (if (and (:value-present tail) (= [] (:value tail)))
+                          []
+                          (:list-elements tail))]
+      (when (and (vector? tail-elements) (every? :type prefix))
+        (into (mapv #(select-keys % [:type :value-present :value]) prefix) tail-elements)))))
+
+
 (defn- reference-fact
   [graph {:keys [address expression reference dispatch-type expected-type]}]
   (let [mode (:mode reference)
         target-scope (:to (first (filter #(= address (:from %)) (:dependencies graph))))
-        signature (get-in graph [:scopes (second target-scope) :signature])
+        target-node (get-in graph [:scopes (second target-scope)])
+        signature (:signature target-node)
         reference (cond
                     (= :resolved-value mode) (assoc reference :actual-type (:return signature))
                     (and signature (= :ref (:kind expression)) (not (:capture-resolved? reference)))
@@ -100,8 +116,10 @@
       (do
         (when-not (and target-scope signature (set? (:effects signature)))
           (context/reject! :reference-signature-required {:address address}))
-        {:type actual :effects (:effects signature) :reference-address address
-         (if (= :graph-callable mode) :bound-ref :ref) (use-id target-scope)})
+        (let [list-elements (when (= :value mode) (checked-list-elements target-node))]
+          (cond-> {:type actual :effects (:effects signature) :reference-address address
+                   (if (= :graph-callable mode) :bound-ref :ref) (use-id target-scope)}
+            list-elements (assoc :list-elements list-elements))))
       (context/reject! :reference-mode-required {:address address :mode mode}))))
 
 
@@ -262,6 +280,6 @@
     (when-not (and (:return signature) (set? (:effects signature))
                    (map? (:substitution result)) (map? (:argument-proofs result)))
       (context/reject! :invalid-signature-result {:scope scope}))
-    {:signature signature :signature-source (select-keys implementation [:base-fn-id :root-entry :argument-paths])
+    {:signature signature :signature-source (select-keys implementation [:base-fn-id :root-entry :argument-paths :generated-list])
      :substitution (:substitution result)
      :argument-proofs (:argument-proofs result)}))

@@ -365,7 +365,15 @@
   (let [{fns :fn fields :slot members :fn-slot bindings :input-binding}
         (reduce merge-record {} (concat (mapcat val (:type-rows named))
                                         (mapcat #(concat (:declaration-records %) (:bindings %)) (vals entries))))
-        inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))]
+        inputs (into {} (map (fn [{:keys [input-type-id contract]}] [input-type-id (:type contract)])) (vals entries))
+        record-returns (into {} (keep (fn [{:keys [owner source]}]
+                                        (let [type (:return-type source)]
+                                          (when (types/record-type? type) [(:return-type-fn-id owner) type])))) (vals entries))
+        return-fields (into {} (for [[type-id type] record-returns
+                                     [name field-type] type
+                                     :when (vector? field-type)
+                                     :let [field-id (ids/slot-id type-id name)]]
+                                 [[field-id (get-in fields [field-id :type-fn-id])] field-type]))]
     (context/build-context
       (assoc (dissoc named :type-rows)
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
@@ -381,7 +389,7 @@
              (into {} (map (juxt :reference-binding-id identity))
                    (mapcat #(vals (get-in % [:origin-ledger :mapping :occupied-reference-aliases])) (vals entries)))
              :members (merge (zipmap (keys inputs) (repeat [])) (group-by :fn-id (vals members)))
-             :type-bodies (merge (:type-bodies named) inputs)
+             :type-bodies (merge (:type-bodies named) inputs record-returns)
              :source-return-types
              (into {} (keep (fn [[id {:keys [owner source list-implementation]}]]
                               (let [type-id (:return-type-fn-id owner)
@@ -392,7 +400,7 @@
                    entries)
              :source-list-fragments (into {} (keep (fn [[id entry]]
                                                      (when-let [fragment (:list-fragment entry)] [id fragment]))) entries)
-             :source-field-types (merge (:source-field-types named) (source-field-types entries))
+             :source-field-types (merge (:source-field-types named) (source-field-types entries) return-fields)
              :source-binding-types
              (into {}
                    (for [{:keys [owner source contract configurations bindings]} (vals entries)
@@ -426,6 +434,8 @@
                         (if row
                           (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
                             (and (some #{row} bindings)
+                                 (or (nil? (:named-refinement-pin config))
+                                     (= (:type-override-fn-id config) (get named-ids (:type config))))
                                  (or (exact-annotation? owner contract config)
                                      (rich/exact-self-pin? owner field config type-rows))))
                           (original-type-pin type-ids owner source contract bindings config type-rows)))

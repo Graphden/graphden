@@ -51,6 +51,23 @@
         (is (= :blocked (:status entry)))))))
 
 
+(deftest a-same-name-refinement-keeps-the-original-type-id
+  (let [refinement {:namespace "fixture" :name :label :refine {:base :text :constraint [:matches "^[a-z]+"]}}
+        base {:namespace "fixture" :name :base :args {:value :text} :return-type :text}
+        child {:namespace "fixture" :name :child :parent :base :args {:value {:as :value :type :label}}}
+        definitions [refinement base child]
+        context (parse/prepare-module definitions {} {})
+        planned (source/plan-module definitions context)
+        replay #(last (:definitions (source/verify-module % context)))
+        entry (replay planned)
+        [row] (get-in entry [:v2 :bindings])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= (ids/fn-id "fixture" :label) (:type-override-fn-id row)))
+    (is (= [(ids/slot-id (ids/fn-id "fixture" :base) :value)] (:target-path row)))
+    (is (false? (:value-present row)))
+    (is (= :blocked (:status (replay (assoc-in planned [:definitions 2 :proposed :configure [:value] :type] :text)))))))
+
+
 (deftest renamed-field-description-stays-on-the-original-binding
   (let [spec {:as :public-title :type :text :description "Authored title"}
         {:keys [entry context plan]} (fixture {:title spec})

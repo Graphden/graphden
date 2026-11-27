@@ -70,6 +70,15 @@
              (rich/authored-callable-field? (group-by :id named-rows) (records/resolve-type-ref body name->id) body))))))
 
 
+(defn- named-refinement-pin
+  [{:keys [defs-by-name] :as context} declared type type-id]
+  (when (and (contains? primitive-ids declared) (keyword? type)
+             (= declared (get-in defs-by-name [type :refine :base]))
+             (= type-id ((::rename/named-type-id context) type))
+             (rename/compatible-pin? context declared type))
+    {:base declared :type-id type-id}))
+
+
 (defn- annotation-origin
   [{:keys [name->id defs-by-name] :as context} definition rows field]
   (let [spec (get-in definition [:args field])]
@@ -79,6 +88,7 @@
             value (get-in prepared [:args field])
             [declaring key] (slots/resolve-slot-owner own-ref field defs-by-name value)
             declaring-id (get name->id declaring)
+            inherited? (boolean (some #{declaring} (rest (slots/chain-of own-ref defs-by-name))))
             owner-id (ids/fn-id (:namespace definition) (:name definition))
             slot-id (when (uuid? declaring-id) (ids/slot-id declaring-id key))
             type-id (when (contains? spec :type) (records/resolve-type-ref (:type value) name->id))
@@ -88,6 +98,8 @@
             declared-type (when type-id (slots/slot-type-of declaring key defs-by-name))
             generic (when (and slot-id authored-type (nil? declared-type) (= authored-type (:type value)))
                       (generic-parent-alias context prepared declaring key slot-id authored-type))
+            refinement (when (and inherited? (uuid? type-id) (= authored-type (:type value)))
+                         (named-refinement-pin context declared-type authored-type type-id))
             id (when slot-id (ids/binding-id owner-id slot-id))
             matches (filter #(and (= :binding (:kind %)) (= id (:id %))) rows)
             expected (cond-> {:kind :binding :id id :fn-id owner-id :slot-id slot-id :value-present false}
@@ -96,23 +108,24 @@
         (when (and (uuid? slot-id) (= field key) (= 1 (count matches))
                    (or (not (contains? spec :type))
                        (and (uuid? type-id)
-                            (or generic (= authored-type (:type value) declared-type)
+                            (or generic refinement (= authored-type (:type value) declared-type)
                                 (and (= :any declared-type) (= authored-type (:type value))
                                      (named-callable-override? context prepared declaring key slot-id authored-type type-id)))))
                    (= expected (into {} (remove (comp nil? val)) (first matches))))
           (cond-> {:declaring-id declaring-id
-                   :inherited? (boolean (some #{declaring} (rest (slots/chain-of own-ref defs-by-name))))
+                   :inherited? inherited?
                    :target-path [slot-id]
                    :row (-> expected (dissoc :slot-id) (assoc :kind :input-binding
                                                               :scope-path [] :target-path [slot-id]
                                                               :expression-kind nil))}
             generic (assoc :generic-parent-alias generic)
+            refinement (assoc :named-refinement-pin refinement)
             type-id (assoc :type (:type spec) :type-override-fn-id type-id)
             (contains? spec :description) (assoc :description (:description spec))))))))
 
 
 (defn annotation
-  "Keep the exact empty binding and unchanged type of an inherited field."
+  "Keep the exact empty binding and its proved type on an inherited field."
   [context definition rows field]
   (when-let [{:keys [inherited?] :as evidence} (annotation-origin context definition rows field)]
     (when inherited? (dissoc evidence :declaring-id :inherited?))))
@@ -134,7 +147,7 @@
 
 (defn exact?
   "Check the original metadata row and its declared or specialized field type.
-   A specialized primitive needs its direct parent's checked generic rename."
+   Specializations need the checked parent rename or named refinement."
   [owner field {:keys [row type target-path type-override-fn-id] :as evidence}]
   (let [id (:id field)
         {:keys [parent-id alias-id source-id variable] :as generic} (:generic-parent-alias evidence)
@@ -145,7 +158,11 @@
                           (= (ids/primitive-fn-id :any) (:type-id field))
                           (some? (get primitive-ids type))
                           (= (get primitive-ids type) type-override-fn-id))
-        field-type-id (if specialized? type-override-fn-id (:type-id field))
+        refinement (:named-refinement-pin evidence)
+        refined? (and refinement (= (:base refinement) (:type field))
+                      (= (get primitive-ids (:base refinement)) (:type-id field))
+                      (keyword? type) (uuid? type-override-fn-id) (= type-override-fn-id (:type-id refinement)))
+        field-type-id (if (or specialized? refined?) type-override-fn-id (:type-id field))
         expected (when (and (uuid? (:id owner)) (uuid? id))
                    (cond-> {:kind :input-binding :id (ids/binding-id (:id owner) id)
                             :fn-id (:id owner) :scope-path [] :target-path [id]
@@ -153,7 +170,7 @@
                      (contains? evidence :type) (assoc :type-override-fn-id field-type-id)
                      (contains? evidence :description) (assoc :description (:description evidence))))]
     (and (uuid? (:id owner)) (uuid? id)
-         (or specialized? (not (contains? evidence :type)) (= type (:type field)))
+         (or specialized? refined? (not (contains? evidence :type)) (= type (:type field)))
          (= [id] target-path)
          (= (when (contains? evidence :type) field-type-id) type-override-fn-id)
          (= expected row))))

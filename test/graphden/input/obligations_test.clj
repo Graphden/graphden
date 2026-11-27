@@ -87,7 +87,7 @@
     (is (= [:list :text] (separate [:list :text] envelope)))
     (is (= {:id :uuid} (separate {:id :uuid} [:union :null [:map :any :any]])))
     (is (= :conflicting-runtime-obligations (try (separate {:id :uuid} envelope) nil
-                                                (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))))
+                                                 (catch clojure.lang.ExceptionInfo e (:code (ex-data e))))))))
 
 
 (deftest equal-shapes-from-independent-binders-remain-distinct-checks

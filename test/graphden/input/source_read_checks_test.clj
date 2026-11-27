@@ -78,8 +78,9 @@
     (is (= [target used] (prove after)))
     (let [variable 'a
           source-proof (assoc certificate :checked-open {:original variable :type :any})
-          binding-type (fn [g t] (-> g (assoc-in [:scopes [] :bindings dest :expected-type] t)
-                                        (assoc-in [:scopes [] :bindings dest :reference :actual-type] t)))
+          binding-type (fn [g t]
+                         (-> g (assoc-in [:scopes [] :bindings dest :expected-type] t)
+                             (assoc-in [:scopes [] :bindings dest :reference :actual-type] t)))
           b (binding-type before variable)
           g (-> (binding-type after :any) (assoc-in [:scopes [] :bindings source :reference :actual-type] :any)
                 (assoc-in [:scopes [row-id] :signature :return] :any))

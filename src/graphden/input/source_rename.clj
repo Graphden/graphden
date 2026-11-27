@@ -78,7 +78,8 @@
            ::named-type-id (fn [type] (when (contains? (:aliases @frozen) type) (get (:name->id prepared) type))))))
 
 
-(defn- compatible-pin?
+(defn compatible-pin?
+  "Check a source pin using the prepared module's frozen type declarations."
   [context target alias-type]
   (or (= target alias-type) (= :any target) (types/type-var? target)
       ((::source-pin? context) target alias-type)))

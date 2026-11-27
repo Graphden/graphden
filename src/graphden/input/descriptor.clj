@@ -109,7 +109,9 @@
         (= field-type-id (records/resolve-type-ref type named-ids)))))
 
 
-(defn- source-union-shape?
+(defn source-return-shape?
+  "Verify the authored leaves of a stored structural return. Inline record
+   fields can themselves be supported collections of known declarations."
   [type named-ids]
   (binding [types/*type-aliases-override* (atom {})]
     (expansion/assert-finite! type))
@@ -125,11 +127,12 @@
 
 (defn stored-source-return-type?
   "Check a frozen return against its physical FK and independently verified
-   named type IDs. An inline union uses :any even with nested record arms."
+   named type IDs. Legacy collections can erase nested record types."
   [type type-id named-ids]
   (or (stored-source-type? type type-id named-ids)
-      (and (types/union-type? type) (= type-id (:any primitive-ids))
-           (source-union-shape? type named-ids))))
+      (and (vector? type) (contains? #{:list :map :tuple :union} (first type))
+           (source-return-shape? type named-ids)
+           (= type-id (records/resolve-type-ref type named-ids)))))
 
 
 (defn- declared-field-node
@@ -138,7 +141,7 @@
         node (resolve-node ctx field-type-id seen)
         witnessed (get (:source-field-types ctx) [(:id field) field-type-id])]
     (if (and (some? witnessed) (not= source (:type node)) (contains? (:type-bodies ctx) type-id)
-             (= source (types/resolve-alias witnessed)) (stored-source-type? witnessed field-type-id (:alias-ids ctx)))
+             (= source (types/resolve-alias witnessed)) (stored-source-return-type? witnessed field-type-id (:alias-ids ctx)))
       (cond-> {:type-id field-type-id :type source}
         (types/union-type? source) (assoc :alternatives (vec (types/union-members source))))
       node)))

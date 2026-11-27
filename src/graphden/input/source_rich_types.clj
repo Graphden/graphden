@@ -87,7 +87,7 @@
    Each field must resolve directly to its verified stored type."
   [rows-by-id type-id type type-ids]
   (and (types/record-type? type) (seq type) (every? simple-keyword? (keys type))
-       (every? #(and (keyword? %) (uuid? (get type-ids %))) (vals type))
+       (every? #(and (not (map? %)) (descriptor/source-return-shape? % type-ids)) (vals type))
        (let [[record :as expected] (parse/inline-record-rows-for-return-type type type-ids)]
          (and (uuid? type-id) (= type-id (:id record))
               (every? (fn [{:keys [id] :as row}]

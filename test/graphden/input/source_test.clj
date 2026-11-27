@@ -672,14 +672,20 @@
                 :args {:name {:type :text} :identifier {:type :int}}
                 :return-type :any}
         child {:name :profile :namespace "fixture" :parent :record-value
-               :args (array-map :identifier {:as :profile-id} :name {:as :profile-name})}
+               :args (array-map :identifier {:as :profile-id} :context {:type :text} :name {:as :profile-name})}
         ctx (prepared [parent child])
         entry (first (:definitions (source/verify-module (source/plan-module [child] ctx) ctx)))
         parent-id (ids/fn-id "fixture" :record-value)
         owner (:identity entry)
         binding-paths (set (map (juxt :target-path :projection-path) (get-in entry [:v2 :bindings])))
+        own-slots (fn [rows]
+                    (into {} (keep #(when (and (= :fn-slot (:kind %)) (= owner (:fn-id %)))
+                                      [(:slot-id %) (:position %)])) rows))
+        migrated-slots (own-slots (get-in entry [:v2 :declaration-records]))
         duplicate (assoc-in child [:args :name :as] :profile-id)]
     (is (= :authored-source-equivalent (:verification entry)) (pr-str (:blockers entry)))
+    (is (= (own-slots (get-in entry [:legacy :records])) migrated-slots))
+    (is (= 0 (get migrated-slots (ids/slot-id owner :context))))
     (is (= #{[[(ids/slot-id parent-id :identifier)] [(ids/slot-id owner :profile-id)]]
              [[(ids/slot-id parent-id :name)] [(ids/slot-id owner :profile-name)]]}
            binding-paths))

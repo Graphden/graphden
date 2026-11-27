@@ -191,7 +191,40 @@
         graph (analysis/analyze-effective-input context owner options)]
     (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
     (is (empty? (:obligations graph)))
-    (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))))
+    (is (= {:first :text :second :int} (get-in graph [:scopes [] :signature :return])))))
+
+
+(deftest collection-returns-retain-the-shapes-erased-by-legacy-storage
+  (let [base (some #(when (= :const (:name %)) %) (sources "logic"))
+        rows [{:name "Ada"}]
+        row-type [:list {:name :text}]]
+    (doseq [[return-type value] [[row-type rows] [{:rows row-type} {:rows rows}]]]
+      (let [owner (ids/fn-id "fixture" :data)
+            definitions [base {:namespace "fixture" :name :data :parent :const
+                               :args {:value {:value value}} :return-type return-type}]
+            package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+            {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+            graph (analysis/analyze-effective-input context owner options)]
+        (is (= :checked (:status graph)))
+        (is (= return-type (get-in graph [:scopes [] :signature :return])))))))
+
+
+(deftest the-refinement-on-an-inherited-field-is-frozen-by-id
+  (let [base (some #(when (= :str-upper (:name %)) %) (sources "strings"))
+        constraint [:matches "^[a-z]+"]
+        label {:namespace "fixture" :name :label :refine {:base :text :constraint constraint}}
+        child {:namespace "fixture" :name :upper-label :parent :str-upper
+               :args {:string {:as :string :type :label}}}
+        definitions [base label child]
+        owner (ids/fn-id "fixture" :upper-label)
+        label-id (ids/fn-id "fixture" :label)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)
+        [field] (get-in graph [:scopes [] :configured-contract :fields])]
+    (is (= :checked (:status graph)))
+    (is (= label-id (:type-id field)))
+    (is (= [:refine :text constraint] (:type field)))))
 
 
 (deftest shipped-generic-return-retains-per-use-substitutions-and-legacy-values
@@ -219,7 +252,7 @@
     (is (= 'a (get-in context [:source-return-types [base (ids/primitive-fn-id :any)]])))
     (is (= :checked (:status graph)) (pr-str (:diagnostics graph)))
     (is (= {(ids/fn-id "fixture" :number) :int (ids/fn-id "fixture" :text) :text} per-use))
-    (is (= [:map :keyword [:union :int :text]] (get-in graph [:scopes [] :signature :return])))
+    (is (= {:number :int :text :text} (get-in graph [:scopes [] :signature :return])))
     (is (= {:number 7 :text "seven"} ((legacy owner) {} {})))
     (is (= :implementation-signature-required
            (:code (failure #(snapshot/freeze-closure package [owner] (assoc-in @roots [base :return] :any))))))))
@@ -953,8 +986,8 @@
       (if (contains? default :value)
         (is (= [(ids/binding-id owner default-id) "value"] [(:id default-row) (:expression-kind default-row)]))
         (is (nil? default-row)))
-      (is (= :incomplete (:status report)) (pr-str (:diagnostics report)))
-      (is (some #(= :conflicting-runtime-obligations (:code %)) (:diagnostics report)))
+      (is (= :checked (:status report)) (pr-str (:diagnostics report)))
+      (is (true? (get-in report [:coverage :signatures])))
       (is (= (ids/binding-id owner target) (:binding-id route)))
       (is (= [[owner []] [(ids/slot-id owner alias-name)]] (:source route)))
       (is (= (get-in record [:source :type]) body (:actual-type route)))

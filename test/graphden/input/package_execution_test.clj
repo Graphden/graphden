@@ -291,10 +291,10 @@
            (canonical {:source-branch-id #uuid "00112233-4455-6677-8899-aabbccddeeff"})))))
 
 
-(deftest described-rename-keeps-unrepresented-runtime-intersections-blocked
+(deftest described-rename-requires-a-typed-list-read-validator
   (let [source (into (declarations "packages/core/collections/fns.edn" #{:empty?})
                      (declarations "packages/web/crud-delete/fns.edn" #{:_owner-fn-ids-empty?}))]
-    (is (= :conflicting-runtime-obligations
+    (is (= :runtime-obligations-required
            (rejection-code #(runtimes source (ids/fn-id "web.crud" :_owner-fn-ids-empty?)))))))
 
 
@@ -1015,8 +1015,8 @@
         {:keys [canonical legacy]} (runtimes source root compile-template)
         args {:word "sample" :n 7}]
     (is (= {:first "[sample]" :second "sample!" :n "7"} (legacy args) (canonical args)))
-    (doseq [use [{:name :descendant :parent :template}
-                 {:name :list-client :parent :str :args {:parts [:template]}}
-                 {:name :client :parent :to-str :args {:value :template}}]]
+    (doseq [consumer [{:name :descendant :parent :template}
+                      {:name :list-client :parent :str :args {:parts [:template]}}
+                      {:name :client :parent :to-str :args {:value :template}}]]
       (is (= :nonunique-reference-use
-             (rejection-code #(runtimes (conj source (assoc use :namespace "fixture")) root compile-template)))))))
+             (rejection-code #(runtimes (conj source (assoc consumer :namespace "fixture")) root compile-template)))))))

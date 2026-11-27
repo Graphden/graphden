@@ -328,11 +328,12 @@
                      (or (not= (count names) (count (set names)))
                          (some (fn [ancestor] (some #(contains? (:args ancestor) %) names))
                                (cons definition (ancestor-definitions definition context)))))
-        ;; Own fields, field changes and metadata require separate row order
-        ;; and compatibility evidence.
+        ;; The legacy parser emits own fields before renames. Source replay
+        ;; compares both memberships and separately verifies any forwarded field.
         rename-fields (when (and (seq aliases) (not collision?)
-                                 (not-any? #(or (= :declaration (:kind %))
-                                                (and (not (:rename %)) (not= :list-builder (first (:expression %))) (seq (:policy %)))) arguments))
+                                 (not-any? (fn [{:keys [rename expression policy]}]
+                                             (and (not rename) (not= :list-builder (first expression)) (seq policy)))
+                                           arguments))
                         (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
         explained-fields (into (set rename-fields)
                                (keep #(when (or (:self-pin %) (:annotation %) (:scoped-annotation %))

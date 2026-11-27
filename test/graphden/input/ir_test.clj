@@ -141,6 +141,29 @@
     (is (nil? (read-type "core.collections" :get :key lookup dictionary)))))
 
 
+(deftest lookup-literal-keeps-the-private-key-domain-at-its-physical-reader
+  (let [native (ids/fn-id "core.collections" :get)
+        scope [(random-uuid) []]
+        path [(ids/slot-id native :coll)]
+        alias [scope [(random-uuid)]]
+        reader [scope path]
+        args '{:coll [:union :null [:list :any] [:map a :any]] :key :any :default :any}
+        declared (variables/type-in-scope scope (:coll args))
+        binder (variables/type-in-scope scope 'a)
+        node {:signature-source {:base-fn-id native :argument-paths {:coll path}
+                                 :root-entry {:fn-id native :name :get :namespace "core.collections" :args args :return :any}}
+              :bindings {reader {:expression {:kind :projection :scope scope :path (second alias)}
+                                 :reference {:mode :projection :source alias} :expected-type declared}
+                         alias {:expression {:kind :value :value {:name "n"}} :reference {:mode :literal}}}}
+        graph {:scopes {[] node}}
+        domain #(lookup/collection-read-domain % alias declared :literal)]
+    (is (= [:union :null [:list :any] [:map :any :any]] (domain graph)))
+    (is (nil? (domain (assoc graph :substitution {binder :keyword}))))
+    (is (nil? (domain (assoc-in graph [:scopes [] :signature :return] binder))))
+    (is (nil? (domain (assoc-in graph [:scopes [] :bindings reader :expression :path] [(random-uuid)]))))
+    (is (nil? (domain (assoc-in graph [:scopes [] :bindings alias :reference :mode] :value))))))
+
+
 (deftest computed-assoc-input-keeps-its-checked-key-domain
   (let [native (ids/fn-id "core.collections" :assoc)
         scope [(random-uuid) []]

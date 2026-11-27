@@ -2,6 +2,7 @@
   "Static evidence for field-read checks changed by scoped bindings."
   (:require
     [graphden.input.context :as context]
+    [graphden.input.lookup-abi :as lookup-abi]
     [graphden.types.core :as types]
     [graphden.types.validator :as validator]))
 
@@ -70,9 +71,11 @@
   [snapshot after {:keys [address] :as certificate} {:keys [expected-type] :as check}]
   (when (and (= address (:address check)) (field-read? check) (installed-literal? after certificate)
              (= expected-type (:expected-type (binding-at after address))))
-    (context/call-with-types snapshot
-                             #(some (fn [arm] (validates? arm (get-in certificate [:row :value])))
-                                    (or (types/union-members expected-type) [expected-type])))))
+    (let [value (get-in certificate [:row :value])]
+      (context/call-with-types snapshot
+                               #(or (some (fn [arm] (validates? arm value))
+                                          (or (types/union-members expected-type) [expected-type]))
+                                    (validates? (lookup-abi/collection-read-domain after address expected-type :literal) value))))))
 
 
 (defn discharged?

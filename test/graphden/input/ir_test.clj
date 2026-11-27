@@ -3,7 +3,36 @@
     [clojure.test :refer [deftest is]]
     [graphden.input.arguments :as arguments]
     [graphden.input.compiler-fixture :as fixture]
-    [graphden.input.ir :as ir]))
+    [graphden.input.ir :as ir]
+    [graphden.packages.records.ids :as ids]))
+
+
+(deftest materializing-a-projected-native-record-requires-its-exact-argument-identity
+  (let [owner (random-uuid)
+        native (ids/fn-id "fixture" :inspect)
+        use (random-uuid)
+        argument [(ids/slot-id native :request)]
+        source [[owner []] [(random-uuid)]]
+        address [[owner [use]] argument]
+        leaf [(first source) (conj (second source) (random-uuid))]
+        type {:uri :text}
+        expressions {source {:op :record :fields [[:uri leaf]] :type type}
+                     leaf {:op :supplied :type :text}
+                     address {:op :read :source source}}
+        entry {:fn-id native :namespace "fixture" :name :inspect :args {:request type}}
+        abi {:base-fn-id native :root-entry entry :argument-paths {:request argument}}
+        binding {:expression {:kind :projection} :expected-type type
+                 :reference {:mode :projection :actual-type type}}
+        analysis {:scopes {[use] {:bindings {address binding}}}}
+        check (fn [impl]
+                (try (#'ir/container-validator analysis expressions {(first address) impl}
+                                               {:address address :expected-type type :trigger :container-materialization})
+                     (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    (is (= {:source source :required [:uri] :key-type :any} (check abi)))
+    (doseq [other [(assoc-in abi [:root-entry :args :request] {:uri :any})
+                   (assoc-in abi [:root-entry :name] :other)
+                   (assoc-in abi [:argument-paths :request] [(random-uuid)])]]
+      (is (= :runtime-obligations-required (check other))))))
 
 
 (def ^:private base-definitions

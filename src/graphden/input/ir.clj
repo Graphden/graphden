@@ -6,6 +6,7 @@
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.obligations :as obligations]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]
     [graphden.types.reference :as reference]))
 
@@ -78,6 +79,16 @@
     (when-not closure check)))
 
 
+(defn- native-record-argument?
+  [{:keys [base-fn-id root-entry argument-paths]} path expected]
+  (let [{:keys [fn-id name namespace args]} root-entry]
+    (and (uuid? fn-id) (= fn-id base-fn-id) (string? namespace) (simple-keyword? name)
+         (= fn-id (ids/fn-id namespace name))
+         (some (fn [[argument type]]
+                 (and (= expected type) (= path [(ids/slot-id fn-id argument)] (get argument-paths argument))))
+               args))))
+
+
 (defn- container-validator
   [analysis expressions scopes {:keys [address trigger expected-type additional-types]}]
   (let [source (loop [at address]
@@ -92,8 +103,10 @@
         dictionary (cond
                      (and (= 1 (count additional-types))
                           (obligations/materialized-dictionary? expected-type (first additional-types))) :keyword
-                     (and (empty? additional-types) collection (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
-                          (= path original-path (get-in native [:argument-paths collection]))
+                     (and (empty? additional-types)
+                          (or (and collection (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
+                                   (= path original-path (get-in native [:argument-paths collection])))
+                              (native-record-argument? native path expected-type))
                           (= :read (get-in expressions [address :op]))
                           (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
                           (= expected-type (:expected-type binding) (get-in binding [:reference :actual-type]))

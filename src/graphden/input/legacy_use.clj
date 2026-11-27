@@ -61,6 +61,27 @@
          (not-any? #{ext-name (:env-name writer)} (renames/cache-projection-frees source graph)))))
 
 
+(defn- independent-get-key?
+  "The index and collection producer may read caller inputs, but neither
+   may observe the lexical collection write through a name, UUID or rename."
+  [graph owner writer reader arguments routes]
+  (let [base (ids/fn-id "core.collections" :get)
+        expected (into {} (map #(vector % (ids/slot-id base %))) [:coll :key :default])
+        by-field (into {} (map (juxt :base-name identity)) arguments)
+        index (by-field :key)
+        fallback (by-field :default)
+        writes (conj (set routes) (:env-name writer))]
+    (and (= base (:id (lookups/root-fn owner (:fn-map graph) graph)))
+         (= (:env-name writer) :coll (:base-name reader) (:ext-name reader))
+         (= expected (into {} (map (juxt :base-name :slot-id)) arguments)) (= 3 (count arguments))
+         (= :value (:kind fallback)) (nil? (:value fallback))
+         (= :ref (:kind index) (:kind writer)) (false? (:is-fn index)) (false? (:is-fn writer))
+         (every? (fn [target]
+                   (and (uuid? target) (empty? (renames/build-ref-renames target owner graph))
+                        (not-any? writes (renames/cache-projection-frees target graph))))
+                 [(:ref-id writer) (:ref-id index)]))))
+
+
 (defn select-binding
   "Select a legacy lexical initializer separately for each final function.
    Return the exact stored row identity and a use-local binding for the
@@ -77,16 +98,19 @@
             origin (first sources)
             reader-slot (:slot-id reader)
             routes (lookups/env-binding-route-ids final-id winner arguments
-                                                  (lookups/fn-owned-slot-ids final-id graph) graph)]
+                                                  (lookups/fn-owned-slot-ids final-id graph) graph)
+            lookup? (delay (independent-get-key? graph final-id winner reader arguments routes))]
         (when (and reader (empty? other-readers) (uuid? reader-slot) (not= reader-slot slot-id)
                    (= (hash-set slot-id reader-slot) (set routes))
                    (or (every? #(or (= :value (:kind %)) (= reader %)) arguments)
                        (coalesce-default? graph final-id winner reader arguments)
-                       (independent-rename? graph final-id winner reader arguments))
+                       (independent-rename? graph final-id winner reader arguments)
+                       @lookup?)
                    (plain-origin? winner origin)
                    (= (:id origin) (ids/binding-id (:fn-id origin) slot-id)))
           {:stored-slot slot-id
            :stored-owner (:fn-id origin)
+           :pure-lookup? @lookup?
            :declarations (mapv #(vector (:fn-id %) env-name) sources)
            :binding (rows/normalize
                       (merge (select-keys origin [:id :fn-id :org-id])

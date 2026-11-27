@@ -1806,3 +1806,61 @@
         (is (= :execution-error/type-mismatch
                (try (canonical (assoc-in {} needle 7)) nil
                     (catch clojure.lang.ExceptionInfo failure (:type (ex-data failure))))))))))
+
+
+(deftest uri-segment-keeps-the-local-index-assertion-lazy
+  (let [root (ids/fn-id "app.branches" :_branches-target-ref)
+        originals (vec (mapcat (fn [[package names]] (declarations (str "packages/" package "/fns.edn") names))
+                               [["core/refinements" #{:nullable-int :nullable-text :positive-int :non-negative-int :text-map :path-segment}]
+                                ["core/logic" #{:const :not :some? :if}]
+                                ["core/collections" #{:vec :get :position-in}]
+                                ["core/strings" #{:str-split :non-blank? :blank?}]
+                                ["core/hof" #{:filter}] ["core/arithmetic" #{:add}]
+                                ["web/ring-adapter" #{:ring-request-shape :ring-uri :ring-request-field :ring-request
+                                                      :_uri-split :_uri-filtered-segments :_uri-segments :_uri-marker-pos
+                                                      :_uri-marker-found? :_uri-marker-next-pos :_uri-marker-next-segment :uri-segment-after}]
+                                ["app/branches" #{:_branches-target-ref}]]))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! originals)
+      (let [{:keys [analysis legacy canonical]} (runtimes originals root (partial compile-certified-staged originals))
+            routes (filterv #(= :request (peek %)) (keys (get-in analysis [:public-input :routes])))
+            request (fn [uri] {:request-method :get :uri uri :headers {} :query-string "" :body nil :async-channel nil})
+            paths (keys (get-in analysis [:public-input :routes]))
+            [guard & extra] (for [node (vals (:scopes analysis))
+                                  [address binding] (:bindings node)
+                                  :when (= :int (:guarded-read-type binding))]
+                              [address (get-in binding [:reference :actual-type])])]
+        (is (= [[:request]] routes))
+        (is (= [[:limit]] (filterv #(= :limit (peek %)) paths)))
+        (is (not-any? #(= :tail (peek %)) paths))
+        (is (empty? extra))
+        (is (= #{:null :int} (set (types/union-members (second guard)))))
+        (is (some #(= [(first guard) :int :value-type :field-read]
+                      ((juxt :address :expected-type :kind :trigger) %)) (:obligations analysis)))
+        (doseq [[uri result] [["/elsewhere" nil] ["/branches" nil] ["/api/branches/" nil]
+                              ["/api/branches/test" "test"] ["/api/branches/main/approve" "main"]]]
+          (let [input {:request (request uri)}]
+            (is (= result (legacy input) (canonical input)))))
+        (doseq [limit [nil 0 1 2 3 4]]
+          (let [input {:request (request "/api/branches/test") :limit limit}]
+            (is (= (legacy input) (canonical input)))))
+        (is (= :unknown-input-field
+               (rejection-code #(canonical {:request (request "/api/branches/test")
+                                            :then {:coll {:request (request "/independent")}}})))))
+      (let [uri-reader (ids/fn-id "web.ring-adapter" :uri-segment-after)
+            remove-request-edge
+            (fn [{:keys [prepared]} owner roots impls]
+              (let [graph (legacy-readers/owner-index prepared owner)
+                    {:keys [package]} (certification/verify-plan prepared originals {:legacy-graph graph} roots)
+                    {:keys [source proposed]} (get-in package [:closure-baselines owner])
+                    path (some (fn [[path expr]] (when (= [:project [:request]] expr) path)) (:bind proposed))
+                    legacy {:namespace (:namespace source) :fns [(dissoc source :namespace)]}
+                    draft (-> proposed (dissoc :namespace) (update :bind dissoc path))
+                    staged (assoc legacy :input-format 2 :fns [draft])]
+                (execution/compile-staged-module package owner roots impls
+                                                 (staged-options legacy staged (set (keys (:declarations package)))))))]
+        (is (= :unverified-staged-declaration
+               (rejection-code #(runtimes originals uri-reader remove-request-edge)))))
+      (let [changed (mapv #(if (= :_uri-split (:name %)) (assoc-in % [:args :limit] {:as :cutoff}) %) originals)]
+        (is (= :unproved-shared-input
+               (rejection-code #(runtimes changed root (partial compile-certified-staged changed)))))))))

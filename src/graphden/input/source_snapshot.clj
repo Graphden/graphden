@@ -24,6 +24,7 @@
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.input.source-scope :as scope]
+    [graphden.input.source-surface :as surface]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
     [graphden.types.check.literals :as literals]
@@ -268,7 +269,7 @@
 
 (defn- closure-entries
   [package id resolve-named]
-  (let [{:keys [verification blockers v2 legacy]} (plan-entry package id)]
+  (let [{:keys [verification blockers v2 legacy implicit-legacy]} (plan-entry package id)]
     (when-not (= :authored-source-equivalent verification)
       (throw (ex-info "Unverified dependency in source closure"
                       {:type :input/source-snapshot :code :unverified-source-declaration
@@ -276,7 +277,7 @@
     (when-not (:input-type-id v2) (reject! :unsupported-scope-declaration id))
     (mapv (fn [entry]
             (if (seq (:scoped-inputs entry))
-              (assoc entry :original-projection-links (original-projection-links legacy entry))
+              (assoc entry :original-projection-links (original-projection-links (or implicit-legacy legacy) entry))
               entry))
           (verified-entry-tree package v2 resolve-named))))
 
@@ -687,7 +688,7 @@
 
 
 (defn- freeze-legacy-use
-  [package owner roots {:keys [binding declarations]}]
+  [package owner roots {:keys [binding declarations pure-lookup?]}]
   (let [baseline (reduce (fn [package [declaration field]]
                            (when-not (contains? (get-in package [:declarations declaration :args]) field)
                              (reject! :missing-legacy-use-declaration declaration))
@@ -702,7 +703,8 @@
         actual (get-in graph [:scopes [] :bindings address])
         mode (if (:ref-fn-id binding) :value :literal)]
     (when-not (and (= ((juxt :id :fn-id) binding) ((juxt :binding-id :origin-fn-id) actual))
-                   (= mode (get-in actual [:reference :mode])))
+                   (= mode (get-in actual [:reference :mode]))
+                   (or (not pure-lookup?) (= #{} (get-in graph [:scopes [] :signature :effects]))))
       (reject! :legacy-use-binding-mismatch owner))
     {:baseline baseline :graph graph}))
 
@@ -1056,12 +1058,39 @@
           package owners))
 
 
+(defn- shared-uri-forwarding
+  [package owner fields roots original]
+  (let [prepared (assoc (:prepared package) ::readers/frozen-roots roots)
+        _ (surface/check-original! prepared owner (:source original))
+        expanded (surface/declare-fields (get-in package [:declarations owner]))
+        declarations (assoc (:declarations package) owner expanded)
+        normalized (-> package
+                       (assoc :declarations declarations)
+                       (update-in [:originals owner] #(mapv surface/declare-fields %))
+                       (assoc :prepared (-> prepared
+                                            (update :fn-defs #(mapv (fn [d] (if (= owner (:fn-id d)) expanded d)) %))
+                                            (update-in [::source/originals-by-id owner] #(mapv surface/declare-fields %))
+                                            (update :defs-by-name update-vals
+                                                    #(if (= owner (:fn-id %)) expanded %))
+                                            (source-context/with-declaration-index declarations))))
+        result (migrate-forwarded-fields normalized owner (into fields [:request :limit]) roots)]
+    (when-not (and (= :authored-source-equivalent (:verification result))
+                   (surface/exact-additions? owner (:legacy original) (:legacy result)))
+      (reject! :unproved-shared-input owner))
+    (assoc result :source (:source original) :legacy (:legacy original)
+           :implicit-legacy (:legacy result))))
+
+
 (defn with-migrated-forwarding
   "Keep one verified forwarding declaration available to later closures and
    to staged module replay. Bound occurrence evidence is kept in the package."
   [package owner field roots]
   (let [fields (if (vector? field) field [field])
-        {:keys [verification] :as result} (migrate-forwarded-fields package owner fields roots)]
+        result (migrate-forwarded-fields package owner fields roots)
+        {:keys [verification] :as result}
+        (if (and (= surface/uri-reader owner) (= [:marker] fields))
+          (shared-uri-forwarding package owner fields roots result)
+          result)]
     (when-not (= :authored-source-equivalent verification)
       (reject! :unverified-forwarded-declaration owner))
     (-> package

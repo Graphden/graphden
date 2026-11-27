@@ -15,6 +15,7 @@
     [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
+    [graphden.input.source-surface :as surface]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -913,13 +914,33 @@
           (assoc result :source source :legacy legacy))))))
 
 
+(defn- verify-shared-inputs
+  [{:keys [context] :as environment} {id :identity :keys [source legacy implicit-legacy] :as definition}]
+  (surface/check-original! context id source)
+  (when-not (surface/exact-additions? id legacy implicit-legacy)
+    (throw (ex-info "Shared input view changed legacy rows" {:code :unproved-shared-input})))
+  (let [expanded (surface/declare-fields (get-in environment [:definition-by-id id]))
+        context (-> context
+                    (assoc :fn-defs [expanded])
+                    (update :defs-by-name update-vals #(if (= id (:fn-id %)) expanded %)))
+        result (verify-standard-definition (source-context/environment context)
+                                           (assoc definition :source (surface/declare-fields source) :legacy implicit-legacy))
+        expected (into #{} (comp (mapcat :forwarded-certificates) (map :row)) (:arguments implicit-legacy))
+        actual (into #{} (map :row) (vals (get-in result [:v2 :scoped-inputs])))]
+    (when-not (and (seq expected) (= expected actual))
+      (throw (ex-info "Shared input projection changed" {:type :input/source-verification :code :shared-projection-mismatch})))
+    (assoc result :source source :legacy legacy)))
+
+
 (defn- verify-definition
   [environment {id :identity :as definition}]
   (if-let [verify (get-in environment [:context ::normalized-verifiers id])]
     (or (when (fn? verify) (verify definition))
         (throw (ex-info "Normalized source changed on staged replay"
                         {:type :input/source-verification :code :normalized-source-mismatch})))
-    (verify-standard-definition environment definition)))
+    (if (:implicit-legacy definition)
+      (verify-shared-inputs environment definition)
+      (verify-standard-definition environment definition))))
 
 
 (defn verify-module
@@ -1055,7 +1076,7 @@
 (defn with-forwarded-parent
   "Allow descendants to read the legacy declaration under an already verified
    forwarding proof. Bind only the exact original local and destination IDs."
-  [context {owner-id :identity :keys [verification v2]}]
+  [context {owner-id :identity :keys [verification v2 legacy implicit-legacy]}]
   (let [projections (filter :source-names (vals (:scoped-inputs v2)))
         rows (set (:bindings v2))
         terminal? (some :named-leaf? projections)
@@ -1071,4 +1092,8 @@
                            projections))
       (throw (ex-info "Cannot reuse an unchecked parent forwarding"
                       {:type :input/source-verification :code :forwarded-parent-required})))
-    (if terminal? context (assoc-in context [::source-context/forwarded-parent-links owner-id] links))))
+    (if terminal? context
+        (assoc-in context [::source-context/forwarded-parent-links owner-id]
+                  (if implicit-legacy
+                    (select-keys links (into #{} (keep #(when (= :slot (:kind %)) (:id %))) (:records legacy)))
+                    links)))))

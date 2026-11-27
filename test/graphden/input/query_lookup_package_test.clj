@@ -64,7 +64,9 @@
           lookup-fallback {:namespace "fixture" :name :lookup-fallback :parent :coalesce
                            :args {:value (keyword module-ns (name (:name original))) :default {:value "local"}}}
           fallback-id (ids/fn-id "fixture" :lookup-fallback)
-          forms (conj (source) (assoc original :namespace module-ns) lookup-fallback)
+          local-value {:namespace "fixture" :name :local-value :parent :const :args {:value {:value "local"}}}
+          local-id (ids/fn-id "fixture" :local-value)
+          forms (conj (source) (assoc original :namespace module-ns) lookup-fallback local-value)
           package (snapshot/package-index (parse/prepare-module forms {} {}) forms)
           {:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
           _ (sync/register-type-aliases! fn-defs)
@@ -87,7 +89,24 @@
       (let [package (query/certify package owner roots)
             compiled (execution/compile-package package fallback-id roots implementations)]
         (is (= "local" ((:invoke compiled) {:value {:request ring}} {})))
-        (is (= "remote" ((:invoke compiled) {:value {:request (assoc ring :query-string "name=remote")}} {}))))
+        (is (= "remote" ((:invoke compiled) {:value {:request (assoc ring :query-string "name=remote")}} {})))
+        (let [certified (reduce #(snapshot/with-certified-owner %1 %2 roots) package [fallback-id local-id])
+              proposals (mapv #(dissoc (get-in certified [:closure-baselines % :proposed]) :namespace)
+                              [fallback-id local-id])
+              caller-legacy {:namespace "fixture" :fns (mapv #(dissoc % :namespace) [lookup-fallback local-value])}
+              caller-stage (assoc caller-legacy :input-format 2 :fns proposals)
+              receipt (assoc (generated/emit package [owner] roots) :owner-ids [owner])
+              staging (assoc (pinned-stage caller-stage) :legacy-module caller-legacy
+                             :visible-fn-ids visible :generated-source receipt)
+              staged (execution/compile-staged-module package fallback-id roots implementations staging)]
+          (is (= (select-keys receipt [:sha256]) (:generated-source staged)))
+          (is (= "local" ((:invoke staged) {:value {:request ring}} {})))
+          (is (= "remote" ((:invoke staged) {:value {:request (assoc ring :query-string "name=remote")}} {})))
+          (is (= :generated-source-owner-required
+                 (rejection #(execution/compile-staged-module package local-id roots implementations staging))))
+          (is (= :generated-source-not-visible
+                 (rejection #(execution/compile-staged-module package fallback-id roots implementations
+                                                              (update staging :visible-fn-ids disj owner)))))))
       (is (= #{:request} (:accepted input-origin)))
       (is (= [:request] (mapv :name (get-in analysis [:public-input :root :fields]))))
       (is (true? (get-in analysis [:public-input :routes [:request] :required])))

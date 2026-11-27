@@ -111,15 +111,15 @@
    their expected receipt SHA-256, and the caller's visible executable UUIDs.
    Only a root from the staged module can be compiled here. Dependencies
    outside the module still come from the caller's visible prepared package.
-   No registration, package loading, or storage changes occur."
+   An optional generated-source receipt supplies private declarations for
+   normalized owners reached by the checked root. No registration, package
+   loading, or storage changes occur."
   [package root roots implementations {payload :bytes :keys [legacy-module sha256 visible-fn-ids generated-source]}]
   (require-visible-root! root visible-fn-ids)
   (let [module (staged/read-pinned payload sha256)
-        package (if generated-source
-                  (let [owners (:owner-ids generated-source)]
-                    (when-not (and (coll? owners) (some #{root} owners)) (ir/reject! :generated-source-owner-required {}))
-                    (generated/install package owners roots visible-fn-ids generated-source))
-                  package)
+        owners (:owner-ids generated-source)
+        package (cond-> package generated-source
+                  (generated/install owners roots visible-fn-ids generated-source))
         package (reduce (fn [p {:keys [name]}]
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
                             (if (query/cached p id roots)
@@ -131,23 +131,30 @@
       (ir/reject! :staged-root-required {}))
     (if-let [expansion (get-in package [:query-lookups root])]
       (do
+        (when (and generated-source (not (some #{root} owners)))
+          (ir/reject! :generated-source-owner-required {}))
         (when-not (every? visible-fn-ids (into (get-in expansion [:proof :original-targets]) (:donors expansion)))
           (ir/reject! :staged-function-not-visible {}))
         (assoc (compile-normalized expansion root implementations)
                :staged-source {:sha256 sha256 :namespace (:namespace module)}))
       (let [frozen (snapshot/freeze-source-analysis package [root] roots)
-            executable (get-in frozen [:options :implementations])]
+            executable (get-in frozen [:options :implementations])
+            reached-owners (filter executable owners)
+            private-targets (into #{} (mapcat #(get-in package [:query-lookups % :generated-ids])) reached-owners)]
+        (when (and generated-source (empty? reached-owners))
+          (ir/reject! :generated-source-owner-required {}))
         (when-not (every? (fn [[target-id {:keys [base-fn-id generated-list]}]]
                             ;; The verified authored owner grants access to its
                             ;; generated list, never to its separate operand refs.
                             (if generated-list
                               (and (= target-id base-fn-id) (contains? visible-fn-ids (:owner-id generated-list)))
-                              (and (contains? visible-fn-ids target-id)
+                              (and (or (contains? visible-fn-ids target-id) (contains? private-targets target-id))
                                    (contains? visible-fn-ids base-fn-id))))
                           executable)
           (ir/reject! :staged-function-not-visible {}))
-        (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
-               :staged-source {:sha256 sha256 :namespace (:namespace module)})))))
+        (cond-> (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
+                       :staged-source {:sha256 sha256 :namespace (:namespace module)})
+          generated-source (assoc :generated-source (select-keys generated-source [:sha256])))))))
 
 
 (defn compile-staged-primitive

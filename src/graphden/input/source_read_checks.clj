@@ -6,15 +6,36 @@
     [graphden.types.validator :as validator]))
 
 
-(defn- field-read?
+(defn field-read?
+  "Match the frozen identity, address and trigger of a field-read obligation."
   [{:keys [id address scope path kind trigger]}]
   (and (= [:value-type :field-read] [kind trigger])
        (= address [scope path]) (= id [address kind trigger])))
 
 
-(defn- binding-at
+(defn binding-at
+  "Look up a binding by its complete scope and field path."
   [graph [[_ scope] _ :as address]]
   (get-in graph [:scopes scope :bindings address]))
+
+
+(defn value-use
+  "Return the use scope of an unchanged value reference in both graphs."
+  [before after address]
+  (let [[[owner path]] address
+        old (binding-at before address)
+        new (binding-at after address)
+        {:keys [kind fn-id]} (:expression new)]
+    (when (and (= :ref kind) (uuid? fn-id) (uuid? (:binding-id new))
+               (= (select-keys old [:binding-id :origin-fn-id :expression])
+                  (select-keys new [:binding-id :origin-fn-id :expression]))
+               (= :value (get-in old [:reference :mode]) (get-in new [:reference :mode])))
+      (some (fn [{:keys [to] :as edge}]
+              (when (and (= address (:from edge)) (= :value (:mode edge)) (= fn-id (:target-fn-id edge))
+                         (= (:binding-id new) (:binding-id edge)) (= [owner (conj path (:binding-id new))] to)
+                         (some #{edge} (:dependencies before))
+                         (= fn-id (get-in before [:scopes (second to) :fn-id]) (get-in after [:scopes (second to) :fn-id])))
+                to)) (:dependencies after)))))
 
 
 (defn- installed-literal?
@@ -31,6 +52,15 @@
   (when (and (some? type) (not (types/type-any? types/type-var? type)))
     (try (validator/validate! type value) true
          (catch clojure.lang.ExceptionInfo _ false))))
+
+
+(defn installed-scalar-type
+  "The frozen scalar type of an unchanged source value at its installed row."
+  [after {:keys [address row] :as certificate}]
+  (let [type (get-in (binding-at after address) [:reference :actual-type])]
+    (when (and (installed-literal? after certificate) (types/primitive? type) (not= :any type)
+               (validates? type (:value row)))
+      type)))
 
 
 (defn literal-read?
@@ -53,19 +83,11 @@
     (or (some #(literal-read? snapshot after % check) certificates)
         (let [old (binding-at before address)
               new (binding-at after address)
-              ref-id (get-in new [:expression :fn-id])
-              [owner prefix] (some (fn [edge]
-                                     (when (and (= :value (:mode edge)) (= address (:from edge))
-                                                (= ref-id (:target-fn-id edge)) (= (:binding-id new) (:binding-id edge))
-                                                (some #{edge} (:dependencies before)))
-                                       (:to edge))) (:dependencies after))
+              [owner prefix] (value-use before after address)
               actual (get-in new [:reference :actual-type])]
-          (and (some? ref-id) (vector? prefix) (= [:deferred :runtime-type-obligation]
-                                                  ((juxt :status :reason) (get-in before [:proofs address])))
-               (= (select-keys old [:binding-id :expression :expected-type])
-                  (select-keys new [:binding-id :expression :expected-type]))
-               (= expected-type (:expected-type new)) (= :value (get-in old [:reference :mode]) (get-in new [:reference :mode]))
-               (= ref-id (get-in before [:scopes prefix :fn-id]) (get-in after [:scopes prefix :fn-id]))
+          (and (vector? prefix) (= [:deferred :runtime-type-obligation]
+                                   ((juxt :status :reason) (get-in before [:proofs address])))
+               (= expected-type (:expected-type old) (:expected-type new))
                (= actual (get-in after [:scopes prefix :signature :return])) (some? actual)
                (not (types/type-any? types/type-var? actual)) (not (types/type-any? types/type-var? expected-type))
                (some (fn [{[[root path]] :address :as c}]

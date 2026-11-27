@@ -133,6 +133,18 @@
              (canonical {:left {:deep {:inner {:sample value}}}}))))))
 
 
+(deftest secondary-record-fields-remain-visible-during-native-parent-execution
+  (let [decl {:namespace "fixture" :name :TextInput :type {:text :text}}
+        child {:namespace "fixture" :name :upper-record :parents [:str-upper :TextInput]}
+        source (into [decl child] (declarations "packages/core/strings/fns.edn" #{:str-upper}))
+        root (ids/fn-id "fixture" :upper-record)
+        {:keys [legacy canonical analysis]} (runtimes source root)]
+    (is (= [(:fn-id analysis) []] (:root-scope analysis)))
+    (is (= :text (get-in analysis [:public-input :routes [:text] :completion-type])))
+    (is (= "MIXED" (legacy {:string "MiXeD" :text "separate"})
+           (canonical {:string "MiXeD" :text "separate"})))))
+
+
 (deftest a-projected-literal-map-proves-its-checked-lookup-result
   (let [root (ids/fn-id "fixture" :has-error)
         source (into [{:namespace "fixture" :name :error? :parent :some?

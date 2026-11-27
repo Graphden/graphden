@@ -75,6 +75,33 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo error (ex-data error))))
 
 
+(deftest a-verified-record-parent-contributes-fields-to-one-executable-base
+  (let [record {:namespace "fixture" :name :ExtraInput :type {:code :uuid}}
+        child {:namespace "fixture" :name :upper-with-code :parents [:core.strings/str-upper :ExtraInput]}
+        definitions (into [record child] (filter #(= :str-upper (:name %))) strings)
+        package (snapshot/package-index (parse/prepare-module definitions {} {}) definitions)
+        owner (ids/fn-id "fixture" :upper-with-code)
+        record-id (ids/fn-id "fixture" :ExtraInput)
+        native-id (ids/fn-id "core.strings" :str-upper)
+        {:keys [context options]} (snapshot/freeze-closure package [owner] @roots)
+        graph (analysis/analyze-effective-input context owner options)]
+    (is (= :checked (:status graph)))
+    (is (= {:code :uuid} (get-in context [:type-bodies record-id])))
+    (is (= (ids/slot-id record-id :code) (get-in graph [:public-input :routes [:code] :origin-field-id])))
+    (is (= native-id (get-in options [:implementations owner :base-fn-id])))
+    (is (nil? (get-in options [:implementations record-id])))
+    (is (= :unsupported-scope-declaration (:code (failure #(snapshot/freeze-closure package [record-id] @roots)))))
+    (let [reversed (mapv #(cond-> % (= (:name %) :upper-with-code) (update :parents (comp vec reverse))) definitions)
+          reversed-package (snapshot/package-index (parse/prepare-module reversed {} {}) reversed)]
+      (is (= :named-record-evidence-required (:code (failure #(snapshot/freeze-closure reversed-package [owner] @roots))))))
+    (let [lookup named-types/lookup]
+      (with-redefs [named-types/lookup (fn [& args]
+                                         (let [resolve-type (apply lookup args)]
+                                           (fn [name]
+                                             (when-let [entry (resolve-type name)] (assoc entry :id (random-uuid))))))]
+        (is (= :named-record-evidence-required (:code (failure #(snapshot/freeze-closure package [owner] @roots)))))))))
+
+
 (deftest unique-direct-reference-preserves-package-field-and-binding-test
   (let [package (fixture "checked")
         certificate (snapshot/verify-binding package host-id @roots)

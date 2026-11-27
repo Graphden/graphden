@@ -199,13 +199,31 @@
     (mapv (partial inline-entry package v2 edges fragments) inline-definitions)))
 
 
+(defn- verified-record-parents
+  "Freeze secondary record parents as named type declarations. The primary
+   parent, separately referenced types and explicit roots require execution evidence."
+  [package owner resolve-named]
+  (into {} (keep (fn [id]
+                   (let [declaration (get-in package [:declarations id])]
+                     (when (map? (:type declaration))
+                       (let [name (keyword (:namespace declaration) (name (:name declaration)))
+                             evidence (resolve-named name)]
+                         (when-not (and (not= id (first (:parent-ids owner)))
+                                        (= id (:id evidence)) (= :type (:kind evidence))
+                                        (= (:type declaration) (:body evidence)))
+                           (reject! :named-record-evidence-required id))
+                         [id name])))))
+        (:parent-ids owner)))
+
+
 (defn- verified-entry-tree
   [package {:keys [fn-id list-builders] :as v2} resolve-named]
   (let [generated (mapv (partial list-signature/entry fn-id (get-in package [:prepared :name->id]) resolve-named)
                         (vals list-builders))
         children (inline-entries package v2 generated)
-        owner (update (owned-declaration v2) :bindings into (mapcat :owner-bindings generated))]
-    (into (conj generated owner)
+        owner (update (owned-declaration v2) :bindings into (mapcat :owner-bindings generated))
+        records (verified-record-parents package (:owner owner) resolve-named)]
+    (into (conj generated (cond-> owner (seq records) (assoc :record-parents records)))
           (mapcat #(verified-entry-tree package % resolve-named))
           children)))
 
@@ -260,7 +278,8 @@
       (if (contains? entries id)
         (recur (pop pending) entries)
         (let [added (closure-entries (declaration-package package id) id resolve-named)
-              parents (mapcat #(get-in % [:owner :parent-ids]) added)
+              parents (mapcat (fn [{:keys [owner record-parents]}]
+                                (remove (or record-parents {}) (:parent-ids owner))) added)
               refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
           (recur (into (into (pop pending) parents) refs) (reduce add-closure-entry entries added))))
       entries)))
@@ -417,7 +436,8 @@
 (defn- root-id
   [context id]
   (let [order (inheritance/declaration-order context id)
-        roots (filterv #(empty? (get-in context [:fns % :parent-ids])) order)]
+        roots (filterv #(and (empty? (get-in context [:fns % :parent-ids]))
+                             (not (map? (get-in context [:type-origins % :type])))) order)]
     (when-not (= 1 (count roots)) (reject! :multiple-implementation-roots id))
     (first roots)))
 
@@ -486,7 +506,8 @@
 
 (defn- verified-context
   [package entries resolve-named roots]
-  (let [named (named-types/evidence entries resolve-named (rule-type-aliases entries roots) (rule-type-forms entries roots))
+  (let [type-forms (concat (mapcat (comp vals :record-parents) (vals entries)) (rule-type-forms entries roots))
+        named (named-types/evidence entries resolve-named (rule-type-aliases entries roots) type-forms)
         rows-by-id (group-by :id (mapcat :declaration-records (vals entries)))]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
       (check-type-provenance! (:alias-ids named) rows-by-id entry))

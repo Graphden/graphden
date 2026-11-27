@@ -43,11 +43,30 @@
                    (types/type-any? #{variable} (get-in node [:configured-contract :type])))))) (:scopes after)))
 
 
+(defn- installed-scalar-type
+  [checked-target after {:keys [address row] :as certificate}]
+  (or (reads/installed-scalar-type after certificate)
+      (let [[[owner path]] address
+            {:keys [id ref-fn-id expression-kind]} row
+            bound (reads/binding-at after address)
+            use-scope [owner (conj path id)]
+            edge {:from address :to use-scope :mode :value :target-fn-id ref-fn-id :binding-id id}
+            type (get-in bound [:reference :actual-type])]
+        (when (and (= "ref" expression-kind) (uuid? ref-fn-id) (uuid? id) (= id (:binding-id bound))
+                   (= {:kind :ref :fn-id ref-fn-id} (:expression bound)) (= :value (get-in bound [:reference :mode]))
+                   (types/primitive? type) (not= :any type) (some #{edge} (:dependencies after))
+                   (= ref-fn-id (get-in after [:scopes (second use-scope) :fn-id]))
+                   (= type (get-in after [:scopes (second use-scope) :signature :return])))
+          (let [independent (checked-target ref-fn-id)]
+            (when (and (= ref-fn-id (:fn-id independent)) (= type (get-in independent [:scopes [] :signature :return])))
+              type))))))
+
+
 (defn refined-read?
   "Retain the same deferred read on the same value reference. Only its value
    or element type can change from :any to the checked union of the installed
-   literal types and one surviving variable of the original target."
-  [before after certificates old current]
+   scalar types and one surviving variable of the original target."
+  [checked-target before after certificates old current]
   (when (and (reads/field-read? current) (= old (assoc current :expected-type (:expected-type old))))
     (let [address (:address current)
           previous (:expected-type old)
@@ -59,10 +78,10 @@
               status (fn [g] ((juxt :status :reason) (get-in g [:proofs address])))
               use-scope (reads/value-use before after address)
               returns (fn [g] (get-in g [:scopes (second use-scope) :signature :return]))
-              literal-types (mapv #(reads/installed-scalar-type after %) certificates)
-              [variable & more] (remove (set literal-types) arms)]
-          (and (seq certificates) (every? some? literal-types)
-               (types/type-var? variable) (empty? more) (= (set arms) (conj (set literal-types) variable))
+              scalar-types (mapv #(installed-scalar-type checked-target after %) certificates)
+              [variable & more] (remove (set scalar-types) arms)]
+          (and (seq certificates) (every? some? scalar-types)
+               (types/type-var? variable) (empty? more) (= (set arms) (conj (set scalar-types) variable))
                use-scope
                (= [:deferred :runtime-type-obligation] (status before) (status after))
                (= previous (:expected-type original) (get-in original [:reference :actual-type]) (returns before))

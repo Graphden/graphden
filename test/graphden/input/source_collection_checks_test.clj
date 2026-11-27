@@ -26,8 +26,24 @@
         after (assoc-in (graph new-type) [:scopes [edge-id] :bindings literal]
                         {:binding-id literal-id :expression {:kind :value :value "name"} :reference {:mode :literal :actual-type :text}})
         prove (fn [prior scoped cs]
-                (checks/refined-read? prior scoped cs (assoc check :expected-type old-type) (assoc check :expected-type new-type)))]
+                (checks/refined-read? {} prior scoped cs (assoc check :expected-type old-type) (assoc check :expected-type new-type)))]
     (is (prove before after [certificate]))
+    (let [target (random-uuid)
+          nested [owner [edge-id literal-id]]
+          reference-row {:id literal-id :expression-kind "ref" :ref-fn-id target}
+          reference-graph (-> after
+                              (assoc-in [:scopes [edge-id] :bindings literal]
+                                        {:binding-id literal-id :expression {:kind :ref :fn-id target} :reference {:mode :value :actual-type :text}})
+                              (assoc-in [:scopes (second nested)] {:fn-id target :signature {:return :text}})
+                              (update :dependencies conj {:from literal :to nested :binding-id literal-id :target-fn-id target :mode :value}))
+          independent {:fn-id target :scopes {[] {:signature {:return :text}}}}
+          reference-proved? (fn [checked installed]
+                              (checks/refined-read? {target checked} before installed [{:address literal :row reference-row}]
+                                                    (assoc check :expected-type old-type) (assoc check :expected-type new-type)))]
+      (is (reference-proved? independent reference-graph))
+      (is (not (reference-proved? (assoc-in independent [:scopes [] :signature :return] :keyword) reference-graph)))
+      (is (not (reference-proved? independent (update reference-graph :dependencies pop))))
+      (is (not (reference-proved? independent (assoc-in reference-graph [:scopes (second nested) :fn-id] (random-uuid))))))
     (doseq [changed [(assoc-in after [:scopes [edge-id] :configured-contract :type] '{:item b})
                      (assoc-in after [:scopes [edge-id] :signature :return] old-type)
                      (assoc-in after [:scopes [] :bindings address :expected-type] old-type)

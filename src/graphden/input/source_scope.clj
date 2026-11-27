@@ -511,7 +511,8 @@
                                 (cond
                                   (current check) check
                                   (reads/discharged? snapshot before after certificates check) nil
-                                  (collections/refined-read? before after certificates check (get by-id (:id check))) (get by-id (:id check))
+                                  (collections/refined-read? #(checked-graph analyze snapshot % true) before after certificates check (get by-id (:id check)))
+                                  (get by-id (:id check))
                                   :else (or (projected-check snapshot analyze before after by-address by-id check) check)))) prior)]
     (or (= prior current)
         (and (every? current prior)

@@ -129,8 +129,9 @@
         functions {:root (fn [args _]
                            (let [callback (runtime/resolve-arg args :callback)]
                              [(callback "first") (callback "second")]))
-                   :child (fn [args _] [(runtime/resolve-arg args :left)
-                                        (runtime/resolve-arg args :right)])
+                   :child (fn [args _]
+                            [(runtime/resolve-arg args :left)
+                             (runtime/resolve-arg args :right)])
                    :reader (fn [args _] (runtime/resolve-arg args :item))}
         {:keys [closure]} (compiled definitions functions)]
     (is (= [["first" "first"] ["second" "second"]] (invoke closure)))))

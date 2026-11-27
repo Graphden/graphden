@@ -320,3 +320,19 @@
         "the child binds the propagated free, not the pinned inherited slot")
     (is (= [:stream :interval-ms] (sr/resolve-slot-owner :handler :interval-ms defs :defaulted))
         "the parent's own pin still targets the inherited slot")))
+
+
+(deftest strict-ref-resolution-expands-shared-branches-once
+  (let [visited (atom [])
+        ref-targets sr/ref-targets-of
+        definitions {:root {:name :root :args {:refs [:left :right]}}
+                     :left {:name :left :args {:refs [:shared]}}
+                     :right {:name :right :args {:refs [:shared :winner :later]}}
+                     :shared {:name :shared :args {:refs [:left]}}
+                     :winner {:name :winner :args {:needle :text}}
+                     :later {:name :later :args {:needle :int}}}]
+    (with-redefs [sr/ref-targets-of (fn [definition index]
+                                    (swap! visited conj (:name definition))
+                                    (ref-targets definition index))]
+      (is (= [:winner :needle] (sr/resolve-slot-owner-strict :root :needle definitions #{})))
+      (is (= 1 (count (filter #{:shared} @visited)))))))

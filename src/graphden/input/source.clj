@@ -486,7 +486,8 @@
           names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
                                  (when scope-certificate [(:public-path scope-certificate) (second source-path)]))) arguments)
           copies (into {} (mapcat (fn [{:keys [scope-certificate scoped-literal-copies]}]
-                                    (map #(vector (:public-path %) (:public-path scope-certificate)) scoped-literal-copies))) arguments)]
+                                    (for [copy scoped-literal-copies]
+                                      [(:public-path copy) (:public-path scope-certificate)]))) arguments)]
       (when (and (or (seq names) legacy-leaf)
                  (migration/same-edn? (normalize-source original context)
                                       (normalize-source (:source certificate) context)))

@@ -86,7 +86,7 @@
         (is (= "query" (run (assoc request :query-string "name=query"))))
         (is (= "middleware" (run (assoc request :query-params {"name" "middleware"}))))
         (is (nil? (run request)))
-        (is (= 3 (.available body))))
+        (is (= 3 (ByteArrayInputStream/.available body))))
       (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request ring :param-name "old"}))))
       (is (= :unverified-staged-declaration
              (rejection #(compile-stage (assoc-in stage [:fns 0 :return-type] :any) visible))))

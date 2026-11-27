@@ -6,6 +6,7 @@
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
     [graphden.input.package-execution :as execution]
+    [graphden.input.query-lookup-arguments :as arguments]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -68,7 +69,12 @@
           {:keys [invoke input-origin analysis]} (compile-stage stage visible)
           [_ kw raw] (:reads input-origin)
           ctx {:compiled-registry (atom {owner invoke}) :base-fns {}}
-          run #(executor/execute ctx owner %)]
+          adapt (arguments/adapter input-origin analysis)
+          run #(executor/execute ctx owner (adapt %))]
+      (is (= 7 (executor/execute ctx owner {:lookup-first {:request {:query-params {"a" 7}}}
+                                            :lookup-next {:lookup-first {:request {} :path {:item-1 {:string {:slots {}}}}}
+                                                          :lookup-next {:query-string {:request {}} :param-name {:slots {}}}}})))
+      (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request {}}))))
       (is (= [:union :null :text] (get-in analysis [:scopes [] :signature :return])))
       (is (= 0 (run {:request (delay {:query-params {"a" 0}})})))
       (is (= {:v 5} (run {(:request kw) {:query-params {:b {:v 5}}} (:param-name kw) (delay "b")})))
@@ -77,5 +83,10 @@
              (rejection #(compile-stage (assoc-in stage [:fns 0 :return-type] :any) visible))))
       (is (= :unverified-staged-declaration
              (rejection #(compile-stage (assoc-in stage [:fns 0 :parent] :core.logic/coalesce) visible))))
+      (is (= :native-view-source-mismatch
+             (rejection #(execution/compile-staged-module
+                           (query/certify package owner roots) owner
+                           (dissoc roots (ids/fn-id "core.collections" :get)) implementations
+                           (assoc (pinned-stage stage) :legacy-module legacy :visible-fn-ids visible)))))
       (is (= :staged-function-not-visible
              (rejection #(compile-stage stage (disj visible (ids/fn-id "web.crud" :_query-param-raw)))))))))

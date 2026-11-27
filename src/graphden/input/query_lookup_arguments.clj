@@ -1,5 +1,6 @@
 (ns graphden.input.query-lookup-arguments
-  "Adapt the old public argument map to five independently addressed V2 inputs."
+  "Offline differential replay of original query arguments. The compiled
+   V2 entrypoint receives its normal structured input directly."
   (:require
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.runtime :as runtime]

@@ -53,6 +53,18 @@
                  :visibility (set (keys (:declarations normalized)))}))))))))
 
 
+(defn cached
+  "A prepared normalized program is bound to the same frozen native
+   signatures, rules and capabilities as this invocation."
+  [package id roots]
+  (when-let [{frozen :roots :keys [views] :as expansion} (get-in package [:query-lookups id])]
+    (let [donors (conj (mapv :original views) (ids/fn-id "core.logic" :coalesce))]
+      (when-not (every? #(= (get roots %) (get frozen %)) donors)
+        (throw (ex-info "Normalized source requires its original native signatures"
+                        {:type :input/source-snapshot :code :native-view-source-mismatch :fn-id id})))
+      expansion)))
+
+
 (defn replay
   "Recheck a staged single definition against the canonical proposal.
    Source spans are held by the enclosing module ledger."

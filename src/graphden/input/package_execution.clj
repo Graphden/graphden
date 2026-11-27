@@ -2,7 +2,6 @@
   "Explicit offline execution boundary for prepared, verified package source.
    Does not register implementations or select a production compiler."
   (:require
-    [graphden.executor.compile-runtime :as executor]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
     [graphden.input.ir :as ir]
@@ -65,14 +64,13 @@
 
 
 (defn- compile-normalized
-  [{:keys [package roots views adapt proof]} owner implementations]
+  [{:keys [package roots views proof]} owner implementations]
   (let [implementations (reduce (fn [result {:keys [id original]}] (assoc result id (get implementations original)))
                                 implementations views)
         frozen (snapshot/freeze-source-analysis package [owner] roots)
         checked (analysis/analyze-effective-input (:context frozen) owner (:options frozen))
-        {:keys [invoke] :as compiled} (compile-frozen frozen checked implementations)]
-    (assoc compiled :structured-invoke invoke :input-origin proof
-           :invoke (executor/named-input-closure (fn [args ctx] (invoke (adapt args) ctx))))))
+        compiled (compile-frozen frozen checked implementations)]
+    (assoc compiled :input-origin proof)))
 
 
 (defn compile-package
@@ -80,9 +78,11 @@
    package comes from source-snapshot/package-index. roots are frozen rich
    entries by base UUID; implementations are explicit base UUID -> function.
    Both must originate in the same prepared package runtime. Returns evidence
-   and an ordinary executor closure, without publishing either globally."
+   and an ordinary executor closure, without publishing either globally.
+   :invoke always uses the structured V2 surface. :input-origin, when
+   present, records legacy identities for offline differential replay."
   [package root roots implementations]
-  (if-let [expansion (or (get-in package [:query-lookups root]) (query/prepare package root roots))]
+  (if-let [expansion (or (query/cached package root roots) (query/prepare package root roots))]
     (compile-normalized expansion root implementations)
     (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
       (compile-frozen frozen (check-legacy-invocation frozen root) implementations))))
@@ -106,7 +106,7 @@
   (let [module (staged/read-pinned payload sha256)
         package (reduce (fn [p {:keys [name]}]
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
-                            (if (get-in p [:query-lookups id]) p (or (query/certify p id roots) p))))
+                            (if (query/cached p id roots) p (or (query/certify p id roots) p))))
                         package (:fns legacy-module))
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)

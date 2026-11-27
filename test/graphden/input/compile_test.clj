@@ -97,6 +97,28 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest nullary-callable-keeps-undeclared-target-inputs-as-external-captures
+  (let [definitions {:root {:input {:body [:fn {} :text #{}]} :return :text
+                            :bindings {[:body] {:ref :child :id :body-use}}}
+                     :child {:input {:left :text :right :text} :return :text}}
+        calls (atom [])
+        functions {:root (fn [args _] ((runtime/resolve-arg args :body)))
+                   :child (fn [args _]
+                            (let [left (runtime/resolve-arg args :left)
+                                  right (runtime/resolve-arg args :right)]
+                              (swap! calls conj [left right])
+                              (str left right)))}
+        {:keys [analysis context]} (fixture/model definitions :root)
+        closure (compile/compile-named analysis {:context context :implementations (fixture/implementations definitions functions)})
+        plan (get-in analysis [:closures (fixture/address :root [] :root [:body])])]
+    (is (= [] (:parameters plan) (:call-sites plan)))
+    (is (= #{(fixture/address :root [:body-use] :child [:left])
+             (fixture/address :root [:body-use] :child [:right])}
+           (set (map :target (:external-captures plan)))))
+    (is (= "ab" (invoke closure {:body {:left "a" :right "b"}} {})))
+    (is (= [["a" "b"]] @calls))))
+
+
 (deftest authored-callable-parameter-can-be-read-inside-a-reference
   (let [definitions {:root {:input {:callback [:fn {:item :text} :text #{}]} :return :text
                             :bindings {[:callback] {:ref :child :id :callback-use}}}

@@ -144,7 +144,7 @@
         declared (declared-params ctx target-fn-id)
         direct (into {} (map (juxt :name identity)) fields)
         nested (delay (nested-parameter-fields fields))
-        structural-names (when (types/fn-type? expected) (keys (types/fn-args expected)))
+        structural-names (when (types/fn-type? expected) (mapv key (types/fn-args expected)))
         structural-readers (when-not declared (nested-structural-readers direct nested structural-names))
         params (reference/select-call-site-params
                  {:structural-names structural-names

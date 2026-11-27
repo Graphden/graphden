@@ -37,8 +37,8 @@
   (let [{:keys [fields paths]} (groups original)
         field-view (assoc original :blockers (filterv #(= :field-projection-required (:code %)) (:blockers original)))]
     (when-not (and (migration/same-edn? (without-scoped-source original paths) (:source baseline-entry))
-                   (migration/same-edn? (mapv #(forward/verify-forwarded-field prepared field-view %) fields)
-                                        (mapv #(forward/verify-forwarded-field reduced-prepared baseline-entry %) fields)))
+                   (migration/same-edn? (mapv #(forward/verify-forwarded-uses prepared field-view %) fields)
+                                        (mapv #(forward/verify-forwarded-uses reduced-prepared baseline-entry %) fields)))
       (reject!))))
 
 
@@ -51,24 +51,34 @@
           (get-in original [:legacy :records]))))
 
 
+(defn- valid-projection?
+  [owner field target {:keys [source-names row address nested-reader?]}]
+  (let [uses (:scope-path row)]
+    (and (uuid? target) (seq uses)
+         (= [field] source-names) (= "projection" (:expression-kind row))
+         (= owner (:fn-id row)) (= [] (:projection-scope-path row))
+         (= [(ids/slot-id owner field)] (:projection-path row))
+         (= [target] (:target-path row)) (= [[owner uses] [target]] address)
+         (= (migration/derived-id :forwarded-field owner (if nested-reader? uses (first uses)) target)
+            (:id row)))))
+
+
 (defn- projection-certificates
   [projected fields]
   (let [owner (:identity projected)
         by-path (into {} (map (juxt :source-path identity)) (get-in projected [:legacy :arguments]))
-        certificates (mapv #(get-in by-path [[:args %] :scope-certificate]) fields)]
-    (when-not (and (every? some? certificates)
-                   (= (mapv vector fields) (mapv :source-names certificates))
-                   (= (count fields) (count (set (map (comp :id :row) certificates))))
-                   (every? true? (map (fn [field {:keys [row address]}]
-                                        (let [target (get-in by-path [[:args field] :source-slot-id])
-                                              uses (:scope-path row)]
-                                          (and (uuid? target) (seq uses)
-                                               (= "projection" (:expression-kind row)) (= owner (:fn-id row))
-                                               (= [] (:projection-scope-path row))
-                                               (= [(ids/slot-id owner field)] (:projection-path row))
-                                               (= [target] (:target-path row)) (= [[owner uses] [target]] address)
-                                               (= (migration/derived-id :forwarded-field owner (first uses) target) (:id row)))))
-                                      fields certificates)))
+        certificates (into []
+                           (mapcat (fn [field]
+                                     (let [{:keys [source-slot-id scope-certificate forwarded-certificates]}
+                                           (get by-path [:args field])
+                                           reads (or forwarded-certificates (some-> scope-certificate vector))]
+                                       (when-not (and (seq reads)
+                                                      (not (and scope-certificate forwarded-certificates))
+                                                      (every? #(valid-projection? owner field source-slot-id %) reads))
+                                         (reject!))
+                                       reads)))
+                           fields)]
+    (when-not (= (count certificates) (count (set (map (comp :id :row) certificates))))
       (reject!))
     certificates))
 
@@ -105,7 +115,7 @@
                                                      (projected-records original fields)))
                                         (get-in projected [:legacy :records]))
                    (migration/same-edn? (vec (remove #(path-set (:source-path %)) arguments))
-                                        (mapv #(dissoc % :scope-certificate) (get-in projected [:legacy :arguments])))
+                                        (mapv #(dissoc % :scope-certificate :forwarded-certificates) (get-in projected [:legacy :arguments])))
                    (every? #(migration/same-edn? % (snapshot-row snapshot %)) (:declaration-records v2))
                    (migration/same-edn? (get-in v2 [:contract :type]) (get-in snapshot [:type-bodies (:input-type-id v2)]))
                    (every? (fn [{:keys [row]}]
@@ -125,11 +135,17 @@
    The caller must still verify this candidate through the complete v2 reader."
   [original projected scoped]
   (let [{:keys [fields paths]} (groups original)
-        projections (projection-certificates projected fields)
-        by-path (into (zipmap (for [field-name fields] [:args field-name]) projections)
-                      (map (juxt :source-path identity)) scoped)
-        arguments (mapv #(if-let [certificate (get by-path (:source-path %))]
-                           (assoc % :scope-certificate certificate) %) (get-in original [:legacy :arguments]))]
+        _ (projection-certificates projected fields)
+        field-paths (into #{} (map #(vector :args %)) fields)
+        fields-by-path (into {} (comp (filter (comp field-paths :source-path)) (map (juxt :source-path identity)))
+                             (get-in projected [:legacy :arguments]))
+        scoped-by-path (into {} (map (juxt :source-path identity)) scoped)
+        arguments (mapv (fn [{:keys [source-path] :as argument}]
+                          (if-let [certificate (get scoped-by-path source-path)]
+                            (assoc argument :scope-certificate certificate)
+                            (merge argument (select-keys (get fields-by-path source-path)
+                                                         [:scope-certificate :forwarded-certificates]))))
+                        (get-in original [:legacy :arguments]))]
     (when-not (and (= (set paths) (set (map :source-path scoped))) (= (count paths) (count scoped)))
       (reject!))
     (let [proposed (reduce (fn [proposal {:keys [source-path public-path]}]

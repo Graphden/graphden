@@ -69,3 +69,22 @@
     (is (= [:field-projection-required] (mapv :code (:blockers reduced-entry))))
     (is (= :nonunique-reference-use
            (code #(joint/check-full-reference-origins! prepared entry reduced-prepared reduced-entry))))))
+
+
+(deftest joint-forwarding-keeps-both-authored-occurrences-of-the-same-slot
+  (let [definitions (mapv #(assoc % :namespace "joint-fanout")
+                          [{:name :sink :args {:a :text :b :text :c :text} :return-type :text}
+                           {:name :reader :args {:data :text} :return-type :text}
+                           {:name :left :parent :reader :return-type :text}
+                           {:name :right :parent :reader :return-type :text}
+                           {:name :third :args {:string :text} :return-type :text}
+                           {:name :host :parent :sink
+                            :args {:a :left :b :right :c :third
+                                   :data {:type :text} :string {:value "label"}}}])
+        prepared (parse/prepare-module definitions {} {})
+        original (peek (:definitions (source/plan-module definitions prepared)))
+        reduced (update-in definitions [5 :args] dissoc :string)
+        reduced-prepared (parse/prepare-module reduced {} {})
+        reduced-entry (peek (:definitions (source/plan-module reduced reduced-prepared)))]
+    (is (= {:fields [:data] :paths [[:args :string]]} (joint/groups original)))
+    (is (nil? (code #(joint/check-full-reference-origins! prepared original reduced-prepared reduced-entry))))))

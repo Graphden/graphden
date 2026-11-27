@@ -521,6 +521,17 @@
                                   (some #(reads/literal-read? snapshot after % check) certificates))) current)))))))
 
 
+(defn- preserves-projection-readers?
+  [graph projections]
+  (let [by-slot (group-by #(first (get-in % [:row :target-path])) projections)]
+    (every? (fn [[slot certificates]]
+              (let [actual (set (for [[scope contract] (get-in graph [:public-input :scope-contracts])
+                                      :when (some #(= slot (:id %)) (:fields contract))]
+                                  [scope [slot]]))]
+                (= actual (into #{} (map :address) certificates))))
+            by-slot)))
+
+
 (defn- verify-bindings*
   "Check a group of legacy bindings whose complete omitted set is known.
    Resolve all addresses in one frozen baseline. Replay all rows together so
@@ -539,8 +550,7 @@
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (every? true? (map #(verified-addition? before after (second %1) %2) omitted certificates))
-                     (every? (fn [{:keys [address row]}]
-                               (= address (occurrence after (first (:target-path row))))) projections)
+                     (preserves-projection-readers? after projections)
                      (preserves-occupancy? prior current certificates)
                      (preserves-scoped-checks? snapshot analyze before after certificates))
         (reject! :scope-replay-mismatch))

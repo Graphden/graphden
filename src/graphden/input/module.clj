@@ -37,7 +37,7 @@
   (and (vector? path) (seq path) (every? simple-keyword? path)
        (map? spec) (every? #{:type :description} (keys spec))
        (or (not (contains? spec :description)) (string? (:description spec)))
-       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)))))
+       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)) (rich/closed-callable-shape? (:type spec)))))
 
 
 (defn- validate-source!
@@ -149,12 +149,12 @@
 
 
 (defn- resolve-configuration
-  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations binding-descriptions]} state [names {:keys [type] :as spec}]]
+  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations binding-descriptions named-projection-type-id]} state [names {:keys [type] :as spec}]]
   (let [path (:path (input/resolve-address contract scope names))
         expression (get-in state [[scope path] :expression])
-        callable-id (when (and (rich/callable-shape? type) (= :projection (:kind expression)) (= scope (:scope expression)))
+        callable-id (when (and (rich/closed-callable-shape? type) (= :projection (:kind expression)) (= scope (:scope expression)))
                       (rich/projected-callable-id (first scope) path (:path expression) contract
-                                                  (group-by :id declaration-records) type))]
+                                                  (group-by :id declaration-records) type (or named-projection-type-id {})))]
     (cond
       (and (not (contains? state [scope path])) (get field-annotations names))
       (let [annotation (get field-annotations names)]

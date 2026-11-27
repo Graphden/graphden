@@ -4,6 +4,7 @@
     [graphden.input.source :as source]
     [graphden.input.source-named-types :as named]
     [graphden.input.source-rich-types :as rich]
+    [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as records]
@@ -129,3 +130,31 @@
     (is (nil? (check (dissoc index (:id constraint)))))
     (is (nil? (check (assoc-in index [alias-id 0 :source-slot-id] (random-uuid)))))
     (is (nil? (check (update-in index [(:id constraint) 0] assoc :constraint [:fn {} :text]))))))
+
+
+(deftest named-leaves-in-a-callable-rename-have-their-own-frozen-declarations
+  (let [base {:namespace "fixture" :name :apply-one :args {:func {:type '[:fn {:arg a} b]}} :return-type :any}
+        request {:namespace "fixture" :name :request :type {:uri :text}}
+        response {:namespace "fixture" :name :response :type {:status :int}}
+        signature [:fn {:arg :request} :response]
+        child {:namespace "fixture" :name :run :parent :apply-one :args {:func {:as :handler :type signature}}}
+        declarations [base request response child]
+        prepared (parse/prepare-module declarations {} {})
+        owner (ids/fn-id "fixture" :run)
+        target (ids/slot-id (ids/fn-id "fixture" :apply-one) :func)
+        alias (ids/slot-id owner :handler)
+        entry (first (:definitions (source/verify-module (source/plan-module [child] prepared) prepared)))
+        {:keys [declaration-records contract]} (:v2 entry)
+        rows (group-by :id declaration-records)
+        names {:request (ids/fn-id "fixture" :request) :response (ids/fn-id "fixture" :response)}
+        package (snapshot/package-index prepared declarations)
+        ctx (:context (snapshot/freeze-declarations package [owner]))
+        evidence #(rich/projected-callable-id owner [target] [alias] contract rows signature %)
+        altered (assoc-in entry [:proposed :configure [:func] :type] [:fn {:arg :response} :request])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= [:project [:handler]] (get-in entry [:proposed :bind :func])))
+    (is (= names (select-keys (:alias-ids ctx) (keys names))))
+    (is (= (get-in entry [:v2 :configurations [:func] :type-override-fn-id]) (evidence names)))
+    (is (nil? (evidence (dissoc names :request))))
+    (is (nil? (evidence {})))
+    (is (nil? (:verification (first (:definitions (source/verify-module {:definitions [(dissoc altered :verification)]} prepared))))))))

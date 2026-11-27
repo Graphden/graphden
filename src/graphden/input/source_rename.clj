@@ -74,7 +74,8 @@
   [prepared]
   (let [policy (shapes/markers-snapshot)
         frozen (delay {:aliases (visible-aliases prepared) :markers policy})]
-    (assoc prepared ::source-pin? (memoize #(source-pin? @frozen %1 %2)))))
+    (assoc prepared ::source-pin? (memoize #(source-pin? @frozen %1 %2))
+           ::named-type-id (fn [type] (when (contains? (:aliases @frozen) type) (get (:name->id prepared) type))))))
 
 
 (defn- compatible-pin?
@@ -130,7 +131,7 @@
                  (or (= 1 (count (:parent-ids owner))) inherited?)
                  (if pin? (and (or (format/configuration-type? (:type spec))
                                    (and (rich/closed-callable-shape? alias-type)
-                                        (rich/callable-field? (group-by :id (:fn records)) (:type-fn-id slot) alias-type)))
+                                        (rich/callable-field? (group-by :id (:fn records)) (:type-fn-id slot) alias-type (::named-type-id context))))
                                (compatible-pin? context target-type alias-type))
                      (or (= target-type alias-type) inherited?))
                  (= field-id (:source-slot-id slot))

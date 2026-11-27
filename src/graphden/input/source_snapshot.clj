@@ -295,7 +295,7 @@
          (= type (:type source))
          (or (descriptor/stored-source-type? type type-override-fn-id type-ids)
              (and type-rows (= type-override-fn-id (rich/projected-callable-id (:fn-id row) target-path (:projection-path row)
-                                                                               contract type-rows type)))))))
+                                                                               contract type-rows type type-ids)))))))
 
 
 (defn- exact-reference-pin?

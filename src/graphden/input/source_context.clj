@@ -247,6 +247,7 @@
                                    (:args original))
         common {:fn-id id :declaration-records (into [] (filter #(contains? #{:fn :slot :fn-slot} (:kind %))) records)
                 :field-annotations field-annotations
+                :named-projection-type-id (get-in source-environment [:context ::rename/named-type-id])
                 :binding-descriptions binding-descriptions
                 :origin-ledger {:source-owner id}}]
     (if (or (:return-type-fn-id owner) (seq (:parent-ids owner)))

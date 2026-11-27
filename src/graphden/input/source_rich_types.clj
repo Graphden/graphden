@@ -43,29 +43,32 @@
    (and (authored-callable-field? rows-by-id type-id type)
         (every? #(format/collection-type? (fn [leaf]
                                             (or (types/primitive? leaf) (types/type-var? leaf)
-                                                (uuid? (get named-ids leaf)))) %)
+                                                (and named-ids (uuid? (named-ids leaf))))) %)
                 (conj (vec (vals (types/fn-args type))) (types/fn-ret type))))))
 
 
 (defn closed-callable-shape?
   [type]
-  (and (callable-shape? type) (not (types/type-any? types/type-var? type))))
+  (and (or (callable-shape? type) (and (types/fn-type? type) (format/projection-input-type? type)))
+       (not (types/type-any? types/type-var? type))))
 
 
 (defn projected-callable-id
   "Recover a callable pin only from the owner's typed alias slot, its link
    to the inherited field and the exact anonymous callable declaration."
-  [owner target-path alias-path contract rows-by-id type]
-  (let [[alias-id] alias-path
-        [slot & more] (get rows-by-id alias-id)
-        alias-field (some #(when (= alias-id (:id %)) %) (:fields contract))
-        type-id (:type-fn-id slot)]
-    (when (and (closed-callable-shape? type) alias-field (= type (:type alias-field))
-               (= [alias-id] alias-path) (= (ids/slot-id owner (:name alias-field)) alias-id)
-               (= 1 (count target-path)) (= (first target-path) (:source-slot-id slot))
-               (= :slot (:kind slot)) (empty? more) (= type-id (:type-id alias-field))
-               (callable-field? rows-by-id type-id type))
-      type-id)))
+  ([owner target-path alias-path contract rows-by-id type]
+   (projected-callable-id owner target-path alias-path contract rows-by-id type {}))
+  ([owner target-path alias-path contract rows-by-id type named-ids]
+   (let [[alias-id] alias-path
+         [slot & more] (get rows-by-id alias-id)
+         alias-field (some #(when (= alias-id (:id %)) %) (:fields contract))
+         type-id (:type-fn-id slot)]
+     (when (and (closed-callable-shape? type) alias-field (= type (:type alias-field))
+                (= [alias-id] alias-path) (= (ids/slot-id owner (:name alias-field)) alias-id)
+                (= 1 (count target-path)) (= (first target-path) (:source-slot-id slot))
+                (= :slot (:kind slot)) (empty? more) (= type-id (:type-id alias-field))
+                (callable-field? rows-by-id type-id type named-ids))
+       type-id))))
 
 
 (defn erased-return?

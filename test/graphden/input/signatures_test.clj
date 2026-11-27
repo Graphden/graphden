@@ -253,9 +253,15 @@
         facts (fn [rich] {:bindings-info {:coll {:type rich :address address}}})
         node (fn [rich] {:bindings {address {:expected-type rich :reference {:mode :projection :actual-type rich}}}})
         specialize (fn [entry n renaming f] (#'signatures/projected-lookup-signature entry n scope abi renaming f))]
-    (doseq [[rich key-type] [[record :any] [[:map :text :int] :text]]]
+    (doseq [[rich key-type] [[record :any] [[:map :text :int] :text] [[:union :null [:map :text :text]] :text]]]
       (is (= #{:null [:list :any] [:map key-type :any]}
              (set (rest (get-in (specialize root (node rich) {} (facts rich)) [:args :coll]))))))
+    (let [projected (node [:map :keyword :any])
+          literal (fn [value] (update-in (facts {:id :int}) [:bindings-info :coll] assoc :value-present true :value value))]
+      (is (= #{:null [:list :any] [:map :keyword :any]}
+             (set (rest (get-in (specialize root projected {} (literal {:id 1})) [:args :coll])))))
+      (is (= root (specialize root projected {} (literal {"id" 1}))))
+      (is (= root (specialize root projected {} (facts record)))))
     (doseq [[entry n renaming f] [[(assoc root :fn-id (random-uuid)) (node record) {} (facts record)]
                                   [(assoc-in root [:args :key] variable) (node record) {} (facts record)]
                                   [root (node record) {variable 'caller-key} (facts record)]

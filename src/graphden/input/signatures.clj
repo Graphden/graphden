@@ -268,21 +268,36 @@
 (def ^:private get-collection-field (ids/slot-id get-id :coll))
 
 
+(defn- projected-key-type
+  [bound {:keys [type value value-present]}]
+  (let [expected (:expected-type bound)
+        collection (types/strip-null expected)]
+    (when (and (= :projection (get-in bound [:reference :mode]))
+               (= expected (get-in bound [:reference :actual-type]))
+               (not (types/type-any? types/type-var? expected))
+               (or (= type expected)
+                   ;; A materialized literal can have a more precise record
+                   ;; type. Check all its entries against the projected map.
+                   (and (types/map-type? collection) (types/record-type? type)
+                        (not (types/type-any? types/type-var? type)) value-present (map? value)
+                        (try (validator/validate! expected value) true
+                             (catch clojure.lang.ExceptionInfo _ false)))))
+      (cond (types/record-type? collection) :any
+            (types/map-type? collection) (types/map-key collection)))))
+
+
 (defn- projected-lookup-signature
   "The native lookup has one private key variable, used only in its map arm.
    A record admits extra keys of any type. A homogeneous map supplies its
    declared key type. Neither witness changes an authored or shared binder."
   [root-entry node scope implementation-scope renaming facts]
-  (let [{:keys [type address]} (get-in facts [:bindings-info :coll])
-        bound (get-in node [:bindings address])
-        key-type (cond (types/record-type? type) :any (types/map-type? type) (types/map-key type))]
-    (if (and key-type (= get-id (:fn-id root-entry)) (= [scope [get-collection-field]] address)
-             (= "core.collections" (:namespace root-entry)) (= :get (:name root-entry))
-             (= :projection (get-in bound [:reference :mode])) (= type (:expected-type bound) (get-in bound [:reference :actual-type]))
-             (not (types/type-any? types/type-var? type)))
-      (let [variable (variables/type-in-scope implementation-scope 'a)
+  (let [{:keys [address] :as fact} (get-in facts [:bindings-info :coll])]
+    (if (and (= get-id (:fn-id root-entry)) (= [scope [get-collection-field]] address)
+             (= "core.collections" (:namespace root-entry)) (= :get (:name root-entry)))
+      (let [key-type (projected-key-type (get-in node [:bindings address]) fact)
+            variable (variables/type-in-scope implementation-scope 'a)
             domain (get-in root-entry [:args :coll])]
-        (if (and (not (contains? renaming variable)) (= :any (:return root-entry))
+        (if (and key-type (not (contains? renaming variable)) (= :any (:return root-entry))
                  (= {:key :any :default :any} (dissoc (:args root-entry) :coll))
                  (= #{:null [:list :any] [:map variable :any]} (set (types/union-members domain))))
           (assoc-in root-entry [:args :coll] (types/resolve {variable key-type} domain))

@@ -31,6 +31,8 @@
 (defn- check-implies?
   [narrow broad]
   (or (= narrow broad) (= :any broad)
+      (when-let [arms (seq (types/union-members narrow))]
+        (every? #(check-implies? % broad) arms))
       (and (not (types/type-any? types/type-var? narrow))
            ;; A single closed arm suffices. Other union arms can have private
            ;; variables. Records allow arbitrary extra keys, so they imply

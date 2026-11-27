@@ -84,6 +84,13 @@
                    (-> {:scopes {[] {:configured-contract {:fields [{:id field :type narrow}]}}}
                         :diagnostics (mapv #(hash-map :code :runtime-type-obligation :address address :expected-type %) [broad narrow])}
                        obligations/separate :obligations first :expected-type))]
+    (let [headers [:union :null [:map :text :text]]
+          lookup [:union :null [:list :any] [:map :text :any]]]
+      (is (= headers (separate headers lookup)))
+      (is (= headers (separate lookup headers)))
+      (is (= :conflicting-runtime-obligations
+             (try (separate [:union :null :bool] lookup) nil
+                  (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))))
     (is (= [:list :text] (separate [:list :text] envelope)))
     (is (= {:id :uuid} (separate {:id :uuid} [:union :null [:map :any :any]])))
     (is (= :conflicting-runtime-obligations (try (separate {:id :uuid} envelope) nil

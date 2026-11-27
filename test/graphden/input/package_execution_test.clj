@@ -75,6 +75,26 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest legacy-reference-can-open-the-reader-of-a-forwarded-input
+  (let [source (into (declarations "packages/core/logic/fns.edn" #{:if :nil?})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             (declarations "packages/core/strings/fns.edn" #{:str-trim})
+                             [{:namespace "fixture" :name :choose :parent :if
+                               :args {:test {:parent :nil? :args {:value {:as :rows}}}
+                                      :then {:value "empty"} :else {:value "nonempty"}
+                                      :rows :str-trim :string {:type :text}}}]))
+        owner (ids/fn-id "fixture" :choose)
+        compile-owner (fn [package root roots implementations]
+                        (let [migrated (snapshot/with-certified-owner package root roots)
+                              entry (get-in migrated [:closure-baselines root])]
+                          (is (= [:ref :core.strings/str-trim] (get-in entry [:proposed :bind [:test :rows]])))
+                          (is (= [:project [:string]] (get-in entry [:proposed :bind [:test :rows :string]])))
+                          (execution/compile-package migrated root roots implementations)))
+        {:keys [canonical legacy]} (runtimes source owner compile-owner)]
+    (doseq [value ["  a  " "  "]]
+      (is (= "nonempty" (legacy {:string value}) (canonical {:string value}))))))
+
+
 (deftest one-legacy-literal-feeds-both-checked-reference-occurrences
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:if})
                      (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})

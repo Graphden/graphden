@@ -930,7 +930,8 @@
            :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions))))))
 
 
-(defn- forwarded-candidate
+(defn omit-forwarded-links
+  "Build the declaration with its local fields and original membership intact."
   [{:keys [source legacy] :as entry} field-ids]
   (let [arguments (:arguments legacy)]
     (-> entry
@@ -941,7 +942,8 @@
                                     (dissoc :source-slot-id)) records))))))
 
 
-(defn- forwarded-proofs
+(defn forwarded-proofs
+  "Locate all authored forwarding origins in a forwarding-only plan view."
   [context entry fields]
   (when-not (and (vector? fields) (seq fields) (= (count fields) (count (set fields)))
                  (= (set (for [field-name fields] [[:args field-name] :field-projection-required]))
@@ -957,7 +959,7 @@
    Each link must have its own exact legacy field and reference origin."
   [context entry fields]
   (let [proofs (forwarded-proofs context entry fields)
-        candidate (forwarded-candidate entry (set (map :field-id proofs)))]
+        candidate (omit-forwarded-links entry (set (map :field-id proofs)))]
     {:proofs proofs :entry (first (:definitions (verify-module {:definitions [candidate]} context)))}))
 
 
@@ -989,33 +991,37 @@
                     {:type :input/source-verification :code :forwarded-certificate-mismatch}))))
 
 
+(defn with-checked-projections
+  "Add one explicit projection for each checked occurrence to the candidate."
+  [candidate proofs certificates]
+  (when-not (= (count proofs) (count certificates))
+    (throw (ex-info "Every forwarded field needs its checked projection"
+                    {:type :input/source-verification :code :forwarded-certificate-mismatch})))
+  (run! (fn [[proof certificate]] (checked-forwarded-certificate! proof (peek (:source-path proof)) certificate))
+        (map vector proofs certificates))
+  (let [by-path (reduce (fn [acc [proof certificate]]
+                          (update acc (:source-path proof) (fnil conj []) certificate))
+                        {} (map vector proofs certificates))]
+    (-> candidate
+        (update-in [:proposed :bind] (fnil into {}) (map (fn [{:keys [public-path source-names]}]
+                                                           [public-path [:project source-names]]) certificates))
+        (update-in [:legacy :arguments]
+                   (fn [arguments]
+                     (mapv (fn [argument]
+                             (let [[one & more :as reads] (get by-path (:source-path argument))]
+                               (cond
+                                 (seq more) (assoc argument :forwarded-certificates reads)
+                                 one (assoc argument :scope-certificate one)
+                                 :else argument))) arguments))))))
+
+
 (defn rewrite-forwarded-fields
-  "Verify authored forwarded fields against their exact scoped projections
-   certified by the checked snapshot. The legacy FK becomes an explicit
-   projection row. The local field and its membership keep their original IDs.
-   This returns offline rows and a proposed form, leaving the source untouched."
+  "Replace the legacy FK with a checked projection row, preserving local IDs."
   [context entry fields certificates]
-  (let [proofs (forwarded-proofs context entry fields)]
-    (when-not (= (count proofs) (count certificates))
-      (throw (ex-info "Every forwarded field needs its checked projection"
-                      {:type :input/source-verification :code :forwarded-certificate-mismatch})))
-    (run! (fn [[proof certificate]] (checked-forwarded-certificate! proof (peek (:source-path proof)) certificate))
-          (map vector proofs certificates))
-    (let [by-path (reduce (fn [acc [proof certificate]]
-                            (update acc (:source-path proof) (fnil conj []) certificate))
-                          {} (map vector proofs certificates))
-          candidate (-> (forwarded-candidate entry (set (map :field-id proofs)))
-                        (update-in [:proposed :bind] into (map (fn [{:keys [public-path source-names]}]
-                                                                 [public-path [:project source-names]]) certificates))
-                        (update-in [:legacy :arguments]
-                                   (fn [arguments]
-                                     (mapv (fn [argument]
-                                             (let [[one & more :as reads] (get by-path (:source-path argument))]
-                                               (cond
-                                                 (seq more) (assoc argument :forwarded-certificates reads)
-                                                 one (assoc argument :scope-certificate one)
-                                                 :else argument))) arguments))))]
-      (first (:definitions (verify-module {:definitions [candidate]} context))))))
+  (let [proofs (forwarded-proofs context entry fields)
+        baseline (omit-forwarded-links entry (set (map :field-id proofs)))
+        candidate (with-checked-projections baseline proofs certificates)]
+    (first (:definitions (verify-module {:definitions [candidate]} context)))))
 
 
 (defn rewrite-forwarded-field

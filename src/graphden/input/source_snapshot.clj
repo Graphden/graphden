@@ -852,7 +852,16 @@
   (migrate-forwarded-fields package owner [field] roots))
 
 
-(defn- migrate-joint-owner
+(defn- checked-joint-source
+  [package original projected certificates]
+  (let [candidate (joint/replay-entry original projected certificates)
+        result (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package))))]
+    (when-not (= :authored-source-equivalent (:verification result))
+      (reject! :unverified-joint-declaration (:identity original)))
+    result))
+
+
+(defn- forwarding-before-scopes
   [package owner roots]
   (let [original (plan-entry package owner)
         {:keys [fields paths]} (joint/groups original)
@@ -866,11 +875,54 @@
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
         {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)
         certificates (scope/verify-bindings-after-forwarding original projected context
-                                                             #(analysis/analyze-effective-input %1 %2 options))
-        candidate (joint/replay-entry original projected certificates)
-        result (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared package))))]
-    (when-not (= :authored-source-equivalent (:verification result))
-      (reject! :unverified-joint-declaration owner))
+                                                             #(analysis/analyze-effective-input %1 %2 options))]
+    (checked-joint-source package original projected certificates)))
+
+
+(defn- context-with-scoped-rows
+  [context certificates]
+  (-> context
+      (assoc :snapshot-id (random-uuid))
+      (update :bindings into (map (comp (juxt :id identity) :row) certificates))
+      (update :source-scoped-references into
+              (keep (fn [{:keys [address row]}]
+                      (when (= "ref" (:expression-kind row))
+                        [(:id row) {:row row :address address}]))) certificates)))
+
+
+(defn- scopes-before-forwarding
+  [package owner roots]
+  (let [original (plan-entry package owner)
+        {:keys [fields paths]} (joint/groups original)
+        reduced (omit-arguments package owner (mapv second paths))
+        reduced-entry (plan-entry reduced owner)
+        scoped-view (joint/scope-first-view original reduced-entry)
+        field-view (update original :blockers #(filterv (comp #{:field-projection-required} :code) %))
+        prepared (readers/prepare (:prepared package) owner roots)
+        proofs (source/forwarded-proofs prepared field-view fields)
+        baseline (if (= :authored-source-equivalent (:verification reduced-entry))
+                   reduced-entry
+                   (let [candidate (source/omit-forwarded-links reduced-entry (set (map :field-id proofs)))]
+                     (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared reduced))))))
+        package-view (assoc-in reduced [:closure-baselines owner] baseline)
+        targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
+        {:keys [context options]} (freeze-source-analysis package-view (into [owner] targets) roots)
+        analyze #(analysis/analyze-effective-input %1 %2 options)
+        certificates (scope/verify-bindings scoped-view paths context analyze)
+        proofs (joint/rebase-on-scoped-references proofs certificates)
+        projections (scope/verify-forwarded-projections (context-with-scoped-rows context certificates) proofs analyze)
+        draft (assoc-in baseline [:legacy :arguments] (get-in field-view [:legacy :arguments]))
+        projected (source/with-checked-projections draft proofs projections)]
+    (checked-joint-source package original projected certificates)))
+
+
+(defn- migrate-joint-owner
+  [package owner roots]
+  (let [result (try (forwarding-before-scopes package owner roots)
+                    (catch clojure.lang.ExceptionInfo failure
+                      (if (#{:unproved-field-origin :joint-source-mismatch} (:code (ex-data failure)))
+                        (scopes-before-forwarding package owner roots)
+                        (throw failure))))]
     ;; Nothing is published until both graph replays and the complete authored
     ;; source round trip succeed. A failed leaf leaves the caller's package intact.
     (-> package

@@ -576,6 +576,12 @@
           replacement)))))
 
 
+(defn- resolved-projected-check?
+  [snapshot analyze before after by-address check]
+  (when-let [[target required] (reads/resolved-projection-reference before after by-address check)]
+    (= required (get-in (checked-graph analyze snapshot target true) [:scopes [] :signature :return]))))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
@@ -603,6 +609,8 @@
                                   (current check) check
                                   (or (seq (:additional-types check)) (seq (:additional-types (get by-id (:id check))))) check
                                   (reads/discharged? snapshot before after certificates check) nil
+                                  (and (not (contains? by-id (:id check)))
+                                       (resolved-projected-check? snapshot analyze before after by-address check)) nil
                                   (collections/refined-read? #(checked-graph analyze snapshot % true) before after certificates check (get by-id (:id check)))
                                   (get by-id (:id check))
                                   :else (or (projected-check snapshot analyze before after by-address by-id check) check)))) prior)]

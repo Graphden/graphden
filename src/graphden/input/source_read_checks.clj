@@ -1,5 +1,5 @@
 (ns graphden.input.source-read-checks
-  "Static evidence for field-read checks changed by a scoped literal."
+  "Static evidence for field-read checks changed by scoped bindings."
   (:require
     [graphden.input.context :as context]
     [graphden.types.core :as types]
@@ -113,25 +113,17 @@
                 (not= :any required) (= previous reference))))))
 
 
-(defn projected-reference
-  "Match a deferred projection to its supplied value reference. A previously
-   unconstrained variable can specialize to the target's checked return. The
-   checker must corroborate both uses before transporting the read."
-  [before after by-address old current]
-  (let [{:keys [address expected-type]} current
-        original (binding-at before address)
-        projected (binding-at after address)
-        {:keys [scope path kind]} (:expression projected)
+(defn- installed-projection-reference
+  [after by-address projected expected-type]
+  (let [{:keys [scope path kind]} (:expression projected)
         source [scope path]
         {:keys [row] :as certificate} (get by-address source)
         bound (binding-at after source)
         use-scope [(first scope) (conj (second scope) (:id row))]
         target (:ref-fn-id row)
-        edge {:from source :to use-scope :binding-id (:id row) :target-fn-id target :mode :value}
-        reason (fn [graph] ((juxt :status :reason) (get-in graph [:proofs address])))]
-    (when (and (field-read? current) (projection-read-types? original projected certificate old current)
-               (= [:deferred :runtime-type-obligation] (reason before) (reason after))
-               (uuid? (:binding-id projected)) (= :projection kind (get-in projected [:reference :mode]))
+        edge {:from source :to use-scope :binding-id (:id row) :target-fn-id target :mode :value}]
+    (when (and (uuid? (:binding-id projected)) (= :projection kind (get-in projected [:reference :mode]))
+               (= source (get-in projected [:reference :source]))
                certificate (uuid? target)
                (= (:id row) (:binding-id bound))
                (= :value (get-in bound [:reference :mode])) (= {:kind :ref :fn-id target} (:expression bound))
@@ -139,3 +131,39 @@
                (= target (get-in after [:scopes (second use-scope) :fn-id]))
                (= expected-type (get-in bound [:reference :actual-type]) (get-in after [:scopes (second use-scope) :signature :return])))
       [target use-scope])))
+
+
+(defn projected-reference
+  "Match a deferred projection to its supplied value reference. The checker
+   must corroborate both uses before transporting the read."
+  [before after by-address old {:keys [address expected-type] :as current}]
+  (let [original (binding-at before address)
+        projected (binding-at after address)
+        certificate (get by-address ((juxt :scope :path) (:expression projected)))
+        reason (fn [graph] ((juxt :status :reason) (get-in graph [:proofs address])))]
+    (when (and (field-read? current) (projection-read-types? original projected certificate old current)
+               (= [:deferred :runtime-type-obligation] (reason before) (reason after)))
+      (installed-projection-reference after by-address projected expected-type))))
+
+
+(defn resolved-projection-reference
+  "Identify the exact newly supplied reference that solved an open read."
+  [before after by-address {:keys [address expected-type additional-types] :as check}]
+  (let [original (binding-at before address)
+        projected (binding-at after address)
+        required (:expected-type projected)
+        previous (:reference original)
+        reference (:reference projected)]
+    (when (and (field-read? check) (empty? additional-types)
+               (= [:deferred :runtime-type-obligation] ((juxt :status :reason) (get-in before [:proofs address])))
+               (= :checked (get-in after [:proofs address :status]))
+               (types/type-var? expected-type)
+               (= expected-type (:expected-type original) (:actual-type previous)
+                  (types/resolve (:substitution before) expected-type))
+               (= (select-keys original [:binding-id :origin-fn-id :expression])
+                  (select-keys projected [:binding-id :origin-fn-id :expression]))
+               (= (dissoc previous :actual-type) (dissoc reference :actual-type))
+               (some? required) (not= :any required) (not (types/type-any? types/type-var? required))
+               (= required (:actual-type reference) (types/resolve (:substitution after) expected-type)))
+      (when-let [[target] (installed-projection-reference after by-address projected required)]
+        [target required]))))

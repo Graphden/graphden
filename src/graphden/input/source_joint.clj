@@ -42,6 +42,40 @@
       (reject!))))
 
 
+(defn scope-first-view
+  "Return the original scoped arguments and prove which links their omission hides."
+  [original reduced]
+  (let [{:keys [fields paths]} (groups original)
+        scope-paths (set paths)
+        known-links (into #{} (map #(vector [:args %] :field-projection-required)) fields)]
+    (when-not (and (migration/same-edn? (without-scoped-source original paths) (:source reduced))
+                   (every? known-links (map (juxt :source-path :code) (:blockers reduced))))
+      (reject!))
+    (-> original
+        (assoc :blockers (filterv (comp scope-paths :source-path) (:blockers original)))
+        (update-in [:legacy :arguments] #(filterv (comp scope-paths :source-path) %)))))
+
+
+(defn rebase-on-scoped-references
+  "Keep every authored reader and insert the checked reference's host path."
+  [proofs certificates]
+  (let [by-id (into {} (map (juxt (comp :id :row) identity)) certificates)]
+    (mapv (fn [{:keys [owner-id root-use-id target-address target-field-id target-fn-id] :as proof}]
+            (let [{:keys [row edges]} (get by-id root-use-id)
+                  scope-path (:scope-path row)
+                  old-path (or (some-> target-address first second) [root-use-id])
+                  uses (into scope-path old-path)
+                  first-target (:target-fn-id (first edges))]
+              (when-not (and (= "ref" (:expression-kind row)) (= owner-id (:fn-id row))
+                             (= target-fn-id (:ref-fn-id row))
+                             (seq scope-path) (= root-use-id (first old-path)) (uuid? first-target))
+                (reject!))
+              (assoc proof :nested-reader? true :root-use-id (first uses) :target-fn-id first-target
+                     :target-address [[owner-id uses] [target-field-id]]
+                     :projection-id (migration/derived-id :forwarded-field owner-id uses target-field-id))))
+          proofs)))
+
+
 (defn- projected-records
   [original fields]
   (let [field-ids (set (map #(ids/slot-id (:identity original) %) fields))

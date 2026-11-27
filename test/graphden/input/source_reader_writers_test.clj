@@ -31,9 +31,15 @@
         incoming (writers/incoming-uses graph)
         slot (get-in graph [:slot-map (ids/slot-id owner :input)])
         targets (into #{} (keep #(when (= :input (:ext-name %)) (:slot-id %))) (surface/surface-entries owner graph))
-        check #(writers/inherited-writer? %1 (delay %2) owner :input slot targets)]
+        roots {(id :producer) {:fn-id (id :producer) :namespace "receipt" :name :producer :args {:other :int} :return :int}}
+        check #(writers/inherited-writer? %1 (delay %2) roots owner :input slot targets)]
     (is (= 2 (count targets)))
     (is (check graph incoming))
+    (doseq [bad [(assoc-in roots [(id :producer) :fn-id] (random-uuid))
+                 (assoc-in roots [(id :producer) :args] {:input :int})
+                 (assoc-in roots [(id :producer) :args] {:other :text})]]
+      (is (not (writers/inherited-writer? graph (delay incoming) bad owner :input slot targets))))
+    (is (not (check (assoc-in graph [:fn-map (id :producer) :parent-ids] [(id :value)]) incoming)))
     (is (not (check graph (update incoming owner conj {:kind :ref-fn-id :target owner :owner (id :wrapper)}))))
     (is (not (check graph (update incoming (id :wrapper) conj {:kind :resolver-fn-id :target (id :wrapper) :owner owner}))))
     (is (not (check graph (update incoming (id :bound) conj {:kind :list :target (id :bound) :owner (id :wrapper)}))))

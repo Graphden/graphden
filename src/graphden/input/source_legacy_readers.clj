@@ -215,7 +215,7 @@
                    (not-any? #(seq (bindings/collect-env-bindings % closure)) (keys (:fn-map closure))))
           (cond
             (not (contains? @incoming owner)) {:targets targets}
-            (and (::writers/incoming graph) (writers/inherited-writer? graph (::writers/incoming graph) owner field slot targets))
+            (and (::writers/incoming graph) (writers/inherited-writer? graph (::writers/incoming graph) roots owner field slot targets))
             {:targets targets :inherited-reader-slot (:source-slot-id slot)}))))))
 
 

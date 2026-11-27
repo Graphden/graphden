@@ -14,16 +14,16 @@
 (defn- value-use
   [graph [[root path] _ :as address] base-id]
   (let [binding (get-in graph [:scopes path :bindings address])
-        use (conj path (:binding-id binding))
-        target (get-in graph [:scopes use])
-        expected {:from address :to [root use] :binding-id (:binding-id binding)
+        target-path (conj path (:binding-id binding))
+        target (get-in graph [:scopes target-path])
+        expected {:from address :to [root target-path] :binding-id (:binding-id binding)
                   :target-fn-id (:fn-id target) :mode :value}]
     (when (and (= :ref (get-in binding [:expression :kind]))
                (= :value (get-in binding [:reference :mode]))
                (= (:fn-id target) (get-in binding [:expression :fn-id]))
                (= base-id (get-in target [:signature-source :base-fn-id]))
                (some #{expected} (:dependencies graph)))
-      [[root use] target])))
+      [[root target-path] target])))
 
 
 (defn- operand-address

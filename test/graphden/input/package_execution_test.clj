@@ -75,6 +75,32 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest typed-positional-inputs-retain-their-list-item-identity
+  (let [list-base (declarations "packages/core/collections/fns.edn" #{:list})
+        tuple {:name :tuple :namespace "fixture" :parent :list
+               :args {:items {:append [{:as :path}] :closed true}}}
+        typed {:name :typed :namespace "fixture" :parent :tuple :args {:path {:as :path :type :text}}}
+        renamed (assoc typed :name :renamed :args {:path {:as :url :type :text}})
+        definitions (into list-base [tuple typed renamed])
+        owner (ids/fn-id "fixture" :tuple)
+        field (ids/slot-id owner :path)
+        stored-item (ids/binding-list-item-id (ids/binding-id owner (ids/slot-id (ids/fn-id "core.collections" :list) :items)) 0)
+        compile-owner (fn [package root roots implementations]
+                        (let [entry (get-in (snapshot/freeze-declarations package [root] roots) [:entries root])
+                              anchor (get-in entry [:configurations [:path] :positional-pin])]
+                          (when (= root (ids/fn-id "fixture" :typed))
+                            (is (= [field stored-item] ((juxt :slot-id :item-id) anchor)))
+                            (let [certified (snapshot/with-certified-owner package root roots)
+                                  altered (assoc-in certified [:closure-baselines root :v2 :configurations [:path]
+                                                               :positional-pin :item-id] field)]
+                              (is (= :positional-type-origin-mismatch
+                                     (rejection-code #(snapshot/freeze-declarations altered [root] roots))))))
+                          (execution/compile-package package root roots implementations)))]
+    (doseq [[name arg] [[:typed :path] [:renamed :url]]]
+      (let [runtime (runtimes definitions (ids/fn-id "fixture" name) compile-owner)]
+        (is (= ["/about"] ((:legacy runtime) {arg "/about"}) ((:canonical runtime) {arg "/about"})))))))
+
+
 (deftest a-native-argument-reads-the-more-specific-same-name-field
   (let [root (ids/fn-id "fixture" :tag)
         base (ids/fn-id "core.strings" :str-upper)

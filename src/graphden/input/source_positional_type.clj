@@ -4,6 +4,7 @@
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slots]))
 
 
@@ -67,6 +68,15 @@
           {:version 1 :owner-id owner :field field :slot-id id :type-fn-id (:type-fn-id slot) :required false
            :membership-id (:id member) :membership-position (:position member)
            :binding-id binding :list-slot-id target :item-id item-id :item-position position :source-path source-path})))))
+
+
+(defn declared-origin
+  "Recover an untyped input introduced by a list item from its prepared
+   declaration. The parser must reproduce the slot, membership and item UUIDs."
+  [context definition field]
+  (when (and definition (seq (occurrences definition field)))
+    (origin context definition definition
+            (parse/parse-prepared-module (assoc context :fn-defs [definition])) field)))
 
 
 (defn exact?

@@ -186,3 +186,14 @@
     (let [[typed-package typed-entries] (package-entries [(assoc-in source [:refine :base] [:list :int])])]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
             ((named-types/lookup typed-package typed-entries) :style-tag))))))
+
+
+(deftest named-unconstrained-refinement-uses-the-package-alias-body
+  (let [source (declarations "packages/core/refinements/fns.edn" #{:js-source})
+        [package entries] (package-entries source)
+        id (ids/fn-id "core.refinements" :js-source)
+        lookup (fn [entries] ((named-types/lookup package entries) :js-source))]
+    (is (= [:refine :text [:any]] (:body (lookup entries))))
+    (is (= id (:id (lookup entries))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"matching source and row evidence"
+          (lookup (assoc-in entries [id :v2 :declaration-records 0 :constraint] [:any]))))))

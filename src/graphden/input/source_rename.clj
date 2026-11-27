@@ -5,6 +5,7 @@
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.input.nullable-operands :as nullable]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -119,7 +120,8 @@
     (let [author (slots/own-ref definition defs-by-name)
           prepared (get-in definition [:args field])
           [target key] (slots/resolve-slot-owner author field defs-by-name prepared)
-          target-type (slots/slot-type-of target key defs-by-name)
+          target-type (or (slots/slot-type-of target key defs-by-name)
+                          (when (positional-type/declared-origin context (get defs-by-name target) key) :any))
           exposed (:as spec)
           alias-id (ids/slot-id (:id owner) exposed)
           target-id (get name->id target)

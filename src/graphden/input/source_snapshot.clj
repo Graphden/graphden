@@ -17,6 +17,7 @@
     [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-origins :as origins]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-primitive :as primitive]
     [graphden.input.source-reference-alias :as reference-alias]
     [graphden.input.source-rename :as rename]
@@ -538,7 +539,15 @@
         rows-by-id (group-by :id (mapcat :declaration-records (vals entries)))]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
       (check-type-provenance! (:alias-ids named) rows-by-id entry))
-    (snapshot entries (:markers package) named)))
+    (let [frozen (snapshot entries (:markers package) named)]
+      (doseq [[id entry] entries
+              {:keys [positional-pin]} (vals (:configurations entry))
+              :when positional-pin]
+        (let [{:keys [field owner-id]} positional-pin]
+          (when-not (and (some #{owner-id} (inheritance/declaration-order frozen id))
+                         (positional-type/exact? positional-pin {:field field} frozen owner-id))
+            (reject! :positional-type-origin-mismatch id))))
+      frozen)))
 
 
 (defn- implementation

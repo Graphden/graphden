@@ -2,6 +2,7 @@
   "Exact metadata-only assertions on an existing inherited source field."
   (:require
     [graphden.input.format :as format]
+    [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
@@ -96,6 +97,9 @@
                             (rebase/rewrite-type-references
                               (:type spec) #(parse/normalize-ref % name->id (:namespace definition))))
             declared-type (when type-id (slots/slot-type-of declaring key defs-by-name))
+            positional (when (and inherited? (nil? declared-type) (contains? primitive-ids authored-type)
+                                  (= authored-type (:type value)))
+                         (positional-type/declared-origin context (get defs-by-name declaring) key))
             generic (when (and slot-id authored-type (nil? declared-type) (= authored-type (:type value)))
                       (generic-parent-alias context prepared declaring key slot-id authored-type))
             refinement (when (and inherited? (uuid? type-id) (= authored-type (:type value)))
@@ -108,7 +112,7 @@
         (when (and (uuid? slot-id) (= field key) (= 1 (count matches))
                    (or (not (contains? spec :type))
                        (and (uuid? type-id)
-                            (or generic refinement (= authored-type (:type value) declared-type)
+                            (or positional generic refinement (= authored-type (:type value) declared-type)
                                 (and (= :any declared-type) (= authored-type (:type value))
                                      (named-callable-override? context prepared declaring key slot-id authored-type type-id)))))
                    (= expected (into {} (remove (comp nil? val)) (first matches))))
@@ -118,6 +122,7 @@
                    :row (-> expected (dissoc :slot-id) (assoc :kind :input-binding
                                                               :scope-path [] :target-path [slot-id]
                                                               :expression-kind nil))}
+            positional (assoc :positional-pin positional)
             generic (assoc :generic-parent-alias generic)
             refinement (assoc :named-refinement-pin refinement)
             type-id (assoc :type (:type spec) :type-override-fn-id type-id)
@@ -158,11 +163,16 @@
                           (= (ids/primitive-fn-id :any) (:type-id field))
                           (some? (get primitive-ids type))
                           (= (get primitive-ids type) type-override-fn-id))
+        anchor (:positional-pin evidence)
+        positional? (and anchor (= 1 (:version anchor)) (= id (:slot-id anchor)) (= (:name field) (:field anchor))
+                         (= id (ids/slot-id (:owner-id anchor) (:name field))) (= :any (:type field))
+                         (= (ids/primitive-fn-id :any) (:type-id field) (:type-fn-id anchor))
+                         (= (get primitive-ids type) type-override-fn-id) (uuid? type-override-fn-id))
         refinement (:named-refinement-pin evidence)
         refined? (and refinement (= (:base refinement) (:type field))
                       (= (get primitive-ids (:base refinement)) (:type-id field))
                       (keyword? type) (uuid? type-override-fn-id) (= type-override-fn-id (:type-id refinement)))
-        field-type-id (if (or specialized? refined?) type-override-fn-id (:type-id field))
+        field-type-id (if (or positional? specialized? refined?) type-override-fn-id (:type-id field))
         expected (when (and (uuid? (:id owner)) (uuid? id))
                    (cond-> {:kind :input-binding :id (ids/binding-id (:id owner) id)
                             :fn-id (:id owner) :scope-path [] :target-path [id]
@@ -170,7 +180,7 @@
                      (contains? evidence :type) (assoc :type-override-fn-id field-type-id)
                      (contains? evidence :description) (assoc :description (:description evidence))))]
     (and (uuid? (:id owner)) (uuid? id)
-         (or specialized? refined? (not (contains? evidence :type)) (= type (:type field)))
+         (or positional? specialized? refined? (not (contains? evidence :type)) (= type (:type field)))
          (= [id] target-path)
          (= (when (contains? evidence :type) field-type-id) type-override-fn-id)
          (= expected row))))

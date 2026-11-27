@@ -9,6 +9,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as records]
+    [graphden.packages.type-declaration :as declaration]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]
@@ -77,14 +78,15 @@
                   (ids/primitive-fn-id :sequence)
                   (get (ids/primitive-fn-ids) base))
         by-id (into {} (map (juxt :id identity)) children)]
-    (when-not (and (= #{:base :constraint} (set (keys form))) (vector? constraint)
+    (when-not (and (or (= #{:base} (set (keys form)))
+                       (and (= #{:base :constraint} (set (keys form))) (vector? constraint)))
                    (= 2 (count children) (count by-id)) (uuid? base-id)
                    (= base-id (:base-fn-id row)) (migration/same-edn? constraint (:constraint row))
                    (empty? (:parent-ids row)) (nil? (:return-type-fn-id row))
                    (nil? (:element-fn-id row)) (nil? (:anonymous-hash row))
                    (field-membership? by-id id 0 :value base-id))
       (reject! :named-refinement-evidence-required id))
-    [:refine base constraint]))
+    (declaration/type-row-alias-body {:refine form})))
 
 
 (defn- list-body
@@ -200,13 +202,14 @@
            (recur (into (pop pending) (nested-type-names body)) (conj seen name)
                   (cond-> (-> frozen (assoc-in [:aliases name] body) (assoc-in [:alias-ids name] id)
                               (assoc-in [:fns id] row) (assoc-in [:type-rows id] rows) (assoc-in [:type-origins id] origin))
+                    (or (map? body) (and (:refine origin) (nil? (:constraint row))))
+                    (assoc-in [:type-bodies id] body)
                     (map? body)
-                    (-> (assoc-in [:type-bodies id] body)
-                        (update :source-field-types merge
-                                (into {} (for [field rows :when (= :slot (:kind field))
-                                               :let [type (get body (keyword (:name field)))]
-                                               :when (not (keyword? type))]
-                                           [[(:id field) (:type-fn-id field)] type]))))))
+                    (update :source-field-types merge
+                            (into {} (for [field rows :when (= :slot (:kind field))
+                                           :let [type (get body (keyword (:name field)))]
+                                           :when (not (keyword? type))]
+                                       [[(:id field) (:type-fn-id field)] type])))))
            (recur (pop pending) (conj seen name) frozen))
          (let [frozen (rule-aliases frozen aliases)]
            (context/call-with-types frozen

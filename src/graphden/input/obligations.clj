@@ -31,6 +31,8 @@
 (defn- check-implies?
   [narrow broad]
   (or (= narrow broad) (= :any broad)
+      ;; The native jsonb validator accepts every map, including records.
+      (and (= broad :jsonb) (or (types/map-type? narrow) (types/record-type? narrow)))
       (when-let [arms (seq (types/union-members narrow))]
         (every? #(check-implies? % broad) arms))
       (and (not (types/type-any? types/type-var? narrow))
@@ -45,14 +47,46 @@
                  (or (types/union-members broad) [broad])))))
 
 
+(defn- keyword-map-check?
+  "This dictionary check permits all values and requires keyword keys."
+  [expected]
+  (contains? #{[:map :keyword :any] [:union :null [:map :keyword :any]]} expected))
+
+
+(defn- portable-record-field?
+  [t]
+  (cond
+    (keyword? t) (contains? #{:any :jsonb :null :bool :text :keyword :int :numeric} t)
+    (types/map-type? t) (and (portable-record-field? (types/map-key t)) (portable-record-field? (types/map-val t)))
+    (types/list-type? t) (portable-record-field? (types/list-elem t))
+    :else false))
+
+
+(defn materialized-dictionary?
+  [record dictionary]
+  (and (types/record-type? record) (every? keyword? (keys record))
+       (every? portable-record-field? (vals record)) (keyword-map-check? dictionary)))
+
+
 (defn- retain-obligation
   [by-id {:keys [id expected-type] :as incoming}]
-  (if-let [{prior :expected-type} (get by-id id)]
+  (if-let [{prior :expected-type :as existing} (get by-id id)]
     (cond
-      (check-implies? prior expected-type) by-id
-      (check-implies? expected-type prior) (assoc by-id id incoming)
-      ;; A single read can require multiple checks. Their intersection needs
-      ;; an explicit representation before it can be passed to the compiler.
+      (some #(check-implies? % expected-type) (cons prior (:additional-types existing))) by-id
+      (check-implies? expected-type prior)
+      (assoc by-id id (cond-> incoming
+                        (:additional-types existing) (assoc :additional-types (:additional-types existing))))
+      ;; The JVM accepts sequential lists, while its jsonb predicate accepts
+      ;; vectors. Check both on the original occurrence, without realizing it.
+      (and (= :field-read (:trigger incoming))
+           (= #{[:list :any] :jsonb} (set [expected-type prior])))
+      (assoc by-id id (assoc incoming :expected-type [:list :any] :additional-types [:jsonb]))
+      (and (= :container-materialization (:trigger incoming))
+           (or (materialized-dictionary? expected-type prior)
+               (materialized-dictionary? prior expected-type)))
+      (let [record (if (types/record-type? prior) prior expected-type)
+            dictionary (if (keyword-map-check? prior) prior expected-type)]
+        (assoc by-id id (assoc incoming :expected-type record :additional-types [dictionary])))
       :else (context/reject! :conflicting-runtime-obligations (select-keys incoming [:address :kind :trigger])))
     (assoc by-id id incoming)))
 

@@ -14,32 +14,57 @@
     [graphden.types.validator :as validator]))
 
 
-(defn compile-checked
-  "Return the executor's ordinary (fn [address-values ctx]) closure. Supply
-   frozen :context and explicit :implementations (see ir/lower-checked).
-   This fixture API accepts leaf addresses and empty maps at checked record
-   addresses. The named adapter routes public input. Execute still applies
-   its authorization and cancellation guards.
-   Primitive field-read obligations use the existing validator. With
-   :detached-closures? only closures with no external inputs can outlive
-   their creating invocation. Container obligations and list builders
-   require separate lowering."
+(defn- check-record-keys
+  [required]
+  (fn [value]
+    (when-not (and (map? value) (every? keyword? (keys value)) (every? #(contains? value %) required))
+      (throw (ex-info "Value does not match the required type"
+                      {:type :execution-error/type-mismatch :errors [{:path [] :code :type-mismatch}]})))
+    value))
+
+
+(defn- field-validator
+  [types]
+  (let [checks (mapv validator/build (distinct types))]
+    (fn [value]
+      (doseq [check checks] (check value))
+      value)))
+
+
+(defn- compile-frame
   [analysis {:keys [context implementations detached-closures?]}]
   (let [plan (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
                                          :target-names (update-vals (:fns context) :name)
                                          :implementations implementations
                                          :detached-closures? detached-closures?})
+        checks (merge-with into
+                           (into {} (keep (fn [[address {:keys [op type]}]]
+                                            (when (= :supplied op) [address [type]])))
+                                 (:expressions plan))
+                           (:value-obligations plan))
         validators (context/call-with-types
                      context
-                     #(into {} (map (fn [[address type]] [address (validator/build type)]))
-                            (merge (into {} (keep (fn [[address {:keys [op type]}]]
-                                                    (when (= :supplied op) [address type])))
-                                         (:expressions plan))
-                                   (:value-obligations plan))))]
-    (fn [supplied ctx]
-      (let [ctx (eager/invocation-context ctx)
-            frame (frame/instantiate plan validators supplied ctx)]
-        (frame/invoke-root frame ctx)))))
+                     #(into (update-vals (:container-obligations plan) check-record-keys)
+                            (update-vals checks field-validator)))]
+    {:whole-record-inputs (:whole-record-inputs plan)
+     :invoke (fn [supplied ctx]
+               (let [ctx (eager/invocation-context ctx)
+                     frame (frame/instantiate plan validators supplied ctx)]
+                 (frame/invoke-root frame ctx)))}))
+
+
+(defn compile-checked
+  "Return the executor's ordinary (fn [address-values ctx]) closure. Supply
+   frozen :context and explicit :implementations (see ir/lower-checked).
+   This fixture API accepts leaf addresses and presence maps at checked record
+   addresses. A wholly supplied record consumed as a keyword dictionary can
+   carry its additional entries at that record address. The named adapter routes public input. Execute still applies
+   its authorization and cancellation guards.
+   Primitive field-read obligations use the existing validator. With
+   :detached-closures? only closures with no external inputs can outlive
+   their creating invocation. Unsupported obligations fail during lowering."
+  [analysis options]
+  (:invoke (compile-frame analysis options)))
 
 
 (defn compile-named
@@ -48,8 +73,8 @@
    uses the executor's ordinary two-argument closure ABI; callers must retain
    its normal authorization, effects and cancellation boundary."
   [analysis options]
-  (let [invoke (compile-checked analysis options)
-        surface (:public-input analysis)]
+  (let [{:keys [invoke whole-record-inputs]} (compile-frame analysis options)
+        surface (assoc (:public-input analysis) :whole-record-inputs whole-record-inputs)]
     (executor/named-input-closure
       (fn [supplied ctx]
         (invoke (arguments/route-values surface supplied) ctx)))))

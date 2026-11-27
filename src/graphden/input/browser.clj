@@ -34,7 +34,7 @@
   {:id id :primitive (str primitive) :frame owner :aliases [] :env [] :args args})
 
 
-(def ^:private browser-input-types #{:any :null :bool :text :int :numeric :keyword})
+(def ^:private browser-input-types #{:any :null :bool :text :int :numeric :keyword :jsonb})
 
 
 (defn- supplied-type!
@@ -73,7 +73,7 @@
         record-params (when parameter-surface
                         (mapv #(select-keys % [:fields :slot])
                               (input-fields (get-in parameter-surface [:root :fields])
-                                            address-ids record-inputs encode)))]
+                                            address-ids record-inputs #{} encode)))]
     (merge (cond-> {:kind "checked-closure" :fn (get scope-ids scope)
                     :slots (if (seq record-params) [] (mapv (comp address-ids :address) call-sites))}
              (= 1 (count record-params)) (assoc :record (first record-params))
@@ -96,11 +96,12 @@
     :supplied (cond-> {:kind "supplied" :slot (get address-ids address) :type (supplied-type! type)}
                 (contains? expression :default)
                 (assoc :kind "supplied-default" :fallback (encode (:default expression))))
-    :record {:kind "record"
-             :fields (mapv (fn [[key child]]
-                             (let [field-id (get address-ids child)]
-                               {:key (encode key) :present field-id :expr (call-expr field-id)}))
-                           fields)}))
+    :record (cond-> {:kind "record"
+                     :fields (mapv (fn [[key child]]
+                                     (let [field-id (get address-ids child)]
+                                       {:key (encode key) :present field-id :expr (call-expr field-id)}))
+                                   fields)}
+              (contains? (:whole-record-inputs wire) address) (assoc :wholeSlot (get address-ids address)))))
 
 
 (defn- validate-expression
@@ -151,19 +152,20 @@
 
 
 (defn- input-fields
-  [nodes address-ids record-inputs encode]
+  [nodes address-ids record-inputs whole-record-inputs encode]
   (mapv (fn [{:keys [name address fields] :as node}]
           (let [field {:name (subs (str name) 1) :key (encode name)}]
             (if (contains? node :fields)
-              (cond-> (assoc field :fields (input-fields fields address-ids record-inputs encode))
-                (contains? record-inputs address) (assoc :slot (get address-ids address)))
+              (cond-> (assoc field :fields (input-fields fields address-ids record-inputs whole-record-inputs encode))
+                (contains? record-inputs address) (assoc :slot (get address-ids address))
+                (contains? whole-record-inputs address) (assoc :whole true))
               (assoc field :slot (get address-ids address)))))
         nodes))
 
 
 (defn- input-plan
-  [{:keys [parameters record-inputs] :as layout} surface address-ids encode]
-  (let [fields (input-fields (get-in surface [:root :fields]) address-ids record-inputs encode)
+  [{:keys [parameters record-inputs] :as layout} surface address-ids whole-record-inputs encode]
+  (let [fields (input-fields (get-in surface [:root :fields]) address-ids record-inputs whole-record-inputs encode)
         slots (into [] (keep :slot) (tree-seq #(contains? % :fields) :fields {:fields fields}))
         expected (into #{} (map address-ids) (into parameters record-inputs))]
     (when-not (and (= (set slots) expected) (= (count slots) (count expected)))
@@ -180,14 +182,15 @@
 
 
 (defn- expression-plan
-  [{:keys [address-ids value-obligations] :as wire} owners [address expression]]
-  (let [obligation (get value-obligations address)
-        supplied? (= :supplied (:op expression))
-        expression (cond-> expression (and supplied? obligation) (assoc :type obligation))
-        emitted (browser-expression expression address wire)]
+  [{:keys [address-ids value-obligations container-obligations] :as wire} owners [address expression]]
+  (let [checks (get value-obligations address)
+        checks (if (= :supplied (:op expression)) (remove #{(:type expression)} checks) checks)
+        emitted (reduce validate-expression (browser-expression expression address wire) checks)
+        emitted (if-let [required (get container-obligations address)]
+                  {:kind "validate" :type {:recordKeys (mapv (juxt namespace name) required)} :expr emitted}
+                  emitted)]
     (function-plan (get address-ids address) const-id (get owners address)
-                   [{:name "value"
-                     :expr (validate-expression emitted (when-not supplied? obligation))}])))
+                   [{:name "value" :expr emitted}])))
 
 
 (defn- check-defaults!
@@ -231,7 +234,7 @@
           scope-ids (plan-ids "scope-" (keys scopes))
           address-ids (plan-ids "field-" (keys expressions))
           entry (get scope-ids root-scope)
-          inputs (input-plan (get frame-layouts root-scope) (:public-input analysis) address-ids encode)
+          inputs (input-plan (get frame-layouts root-scope) (:public-input analysis) address-ids (:whole-record-inputs plan) encode)
           owners (frame-owners frame-layouts scope-ids)
           wire (assoc plan :address-ids address-ids :scope-ids scope-ids :encode encode :layouts frame-layouts)
           scope-plans (map (fn [[scope {:keys [base-fn-id argument-paths]}]]

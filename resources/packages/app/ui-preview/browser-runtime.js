@@ -423,7 +423,7 @@
     operationBudgets.set(token, state);
     return token;
   }
-  function routeStructured(fields, supplied, slots, tick, remaining, root) {
+  function routeStructured(fields, supplied, slots, tick, remaining, root, extras = null) {
     const record = root
       ? supplied && typeof supplied === 'object' && !Array.isArray(supplied) && !(supplied instanceof Map)
       : supplied instanceof Map;
@@ -433,7 +433,13 @@
     for (const key of keys) {
       tick();
       const field = byKey.get(key);
-      if (!field) throw new Error('Unknown graph input field');
+      if (!field) {
+        if (!extras || !(key instanceof Keyword)) throw new Error('Unknown graph input field');
+        const value = supplied.get(key);
+        if (remaining) encodeValue(value, remaining, 0);
+        extras.set(key, value);
+        continue;
+      }
       // Internal callback inputs already belong to graph evaluation.
       // Retain deferred leaves and validate them only when the callback reads.
       if (!remaining && !field.fields && supplied instanceof DeferredRecord) {
@@ -442,8 +448,9 @@
       }
       const value = root ? supplied[key] : supplied.get(key);
       if (field.fields) {
-        routeStructured(field.fields, value, slots, tick, remaining, false);
-        if (field.slot) slots.set(field.slot, null);
+        const extras = field.whole === true && field.slot ? new Map() : null;
+        routeStructured(field.fields, value, slots, tick, remaining, false, extras);
+        if (field.slot) slots.set(field.slot, extras);
       } else {
         if (remaining) encodeValue(value, remaining, 0);
         slots.set(field.slot, value);
@@ -472,6 +479,8 @@
   function matchesPrimitiveInput(value, type) {
     switch (type) {
       case 'any': return true;
+      case 'jsonb': return value === null || typeof value === 'boolean' || typeof value === 'number'
+          || typeof value === 'string' || Array.isArray(value) || value instanceof Map;
       case 'null': return value === null;
       case 'bool': return typeof value === 'boolean';
       case 'text': return typeof value === 'string';
@@ -484,7 +493,18 @@
   function matchesInput(value, type, tick) {
     if (typeof type === 'string') return matchesPrimitiveInput(value, type);
     if (Array.isArray(type?.anyOf)) return type.anyOf.some((candidate) => matchesPrimitiveInput(value, candidate));
+    if (Array.isArray(type?.recordKeys) && value instanceof Map) {
+      for (const key of value.keys()) {
+        tick();
+        if (!(key instanceof Keyword)) return false;
+      }
+      return type.recordKeys.every(([ns, name]) => {
+        tick();
+        return value.has(keyword(name, ns));
+      });
+    }
     if (type?.listOf && (Array.isArray(value) || value instanceof LazySequence)) {
+      if (type.listOf === 'any') return true;
       for (const item of value) {
         tick();
         if (!matchesInput(item, type.listOf, tick)) return false;
@@ -640,7 +660,8 @@
             if (plan.format !== 2 || !Array.isArray(value.fields) || value.fields.length > valueNodeLimit) {
               throw new Error('Invalid browser input record');
             }
-            const fields = new Map();
+            const extras = value.wholeSlot ? frame.slots.get(value.wholeSlot) : null;
+            const fields = new Map(extras || []);
             for (const field of value.fields) {
               tick();
               if (!available(field.present, frame)) continue;

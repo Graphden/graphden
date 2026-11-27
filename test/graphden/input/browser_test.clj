@@ -14,6 +14,7 @@
     [graphden.input.field-default :as field-default]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.module :as module]
+    [graphden.input.obligations :as obligations]
     [graphden.input.source-primitive :as primitive]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -549,3 +550,62 @@
                   (assoc-in options [:context :fns field-default/nullable-text-id :constraint] :any)
                   (assoc-in options [:context :fields leaf :required] true)]]
       (is (= :browser-field-default-unsupported (refusal opts))))))
+
+
+(defn- with-read-checks
+  [model path checks]
+  (let [address (fixture/address :root [] :root path)
+        diagnostics (mapv #(hash-map :code :runtime-type-obligation :expected-type % :address address) checks)]
+    (update model :analysis #(obligations/separate (assoc % :diagnostics diagnostics)))))
+
+
+(deftest independent-read-types-survive-analysis-edn-and-both-compilers
+  (let [source {:root {:input {:coll :any :key :int :default :any} :return :any
+                       :bindings {[:key] {:value 0} [:default] {:value nil}}}}
+        model (checked-model source)
+        {:keys [analysis options]} (with-read-checks model [:coll] [:jsonb [:list :any] :jsonb])
+        receipt (:obligations analysis)
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        [accepted scalar dictionary] (run-browser plan [{:coll ["first"]} {:coll "scalar"} {:coll {:id 1}}])]
+    (is (= receipt (:obligations (:analysis (with-read-checks model [:coll] [[:list :any] :jsonb])))))
+    (is (= receipt (edn/read-string (pr-str receipt))))
+    (is (= [[[:list :any] [:jsonb]]] (mapv (juxt :expected-type :additional-types) receipt)))
+    (is (= "first" (invoke {:coll ["first"]} nil)))
+    (doseq [value ["scalar" {:id 1} (lazy-seq (throw (AssertionError. "sequence was forced")))]]
+      (is (thrown? clojure.lang.ExceptionInfo (invoke {:coll value} nil))))
+    (is (= ["string" "first"] (:value accepted)))
+    (is (and (:error scalar) (:error dictionary)))))
+
+
+(deftest materialized-keyword-record-checks-presence-without-forcing-unread-fields
+  (let [rich {:name :text :unused :int}
+        source {:root {:input {:coll rich :key :keyword :default :any} :return :any
+                       :optional #{[:coll :unused]}
+                       :bindings {[:key] {:value :name} [:default] {:value nil}}}}
+        {:keys [analysis options]} (with-read-checks (checked-model source) [:coll]
+                                     [[:union :null [:map :keyword :any]] rich])
+        invoke (jvm/compile-named analysis options)
+        plan (browser/export-named analysis options)
+        good {:coll {:name "Alice" :unused false}}
+        missing {:coll {:name "Alice"}}
+        bad {:coll {:name false :unused 1}}
+        [accepted absent incorrect] (run-browser plan [good missing bad])]
+    (is (= [[rich [[:union :null [:map :keyword :any]]]]]
+           (mapv (juxt :expected-type :additional-types) (:obligations analysis))))
+    (is (= "Alice" (invoke good nil)))
+    (is (= ["string" "Alice"] (:value accepted)))
+    (doseq [input [missing bad]]
+      (is (thrown? clojure.lang.ExceptionInfo (invoke input nil))))
+    (is (and (:error absent) (:error incorrect)))
+    (let [read-extra (assoc-in source [:root :bindings [:key] :value] :query-params)
+          plain (checked-model read-extra)
+          {:keys [analysis options]} (with-read-checks plain [:coll] [rich [:map :keyword :any]])
+          extra {:coll {:name "Alice" :unused 2 :query-params {:q false}}}
+          invalid (assoc-in extra [:coll "non-keyword"] 1)
+          [found bad-key] (run-browser (browser/export-named analysis options) [extra invalid])]
+      (is (= {:q false} ((jvm/compile-named analysis options) extra nil)))
+      (is (= (wire/encode-value {:q false}) (:value found)))
+      (is (:error bad-key))
+      (is (= :unknown-input-field (invocation-error (jvm/compile-named (:analysis plain) (:options plain)) extra)))
+      (is (:error (first (run-browser (browser/export-named (:analysis plain) (:options plain)) [extra])))))))

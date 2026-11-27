@@ -1072,3 +1072,21 @@
                       {:name :client :parent :to-str :args {:value :template}}]]
       (is (= :nonunique-reference-use
              (rejection-code #(runtimes (conj source (assoc consumer :namespace "fixture")) root compile-template)))))))
+
+
+(deftest original-query-lookup-preserves-ring-middleware-fields
+  (let [source (into (declarations "packages/core/refinements/fns.edn" #{:path-segment :text-map})
+                     (concat (declarations "packages/core/collections/fns.edn" #{:get-in})
+                             (declarations "packages/web/ring-adapter/fns.edn" #{:ring-request-shape})
+                             (declarations "packages/web/crud-delete/fns.edn" #{:_query-param-string-key})))
+        root (ids/fn-id "web.crud" :_query-param-string-key)
+        compile-query (fn [package root roots implementations]
+                        (execution/compile-package (snapshot/with-certified-owner package root roots)
+                                                   root roots implementations))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! source)
+      (let [{:keys [legacy canonical]} (runtimes source root compile-query)
+            request {:request-method :get :uri "/" :headers {} :query-string "" :body nil :async-channel nil}]
+        (doseq [value [nil false "found" 0]
+                :let [args {:request (assoc request :query-params {"q" value}) :param-name "q"}]]
+          (is (= value (legacy args) (canonical args))))))))

@@ -97,9 +97,9 @@
       :read (when (or (not nil-when-absent?) (get-in frame [:present source]))
               @(get-in frame [:cells source]))
       :record (input/record-view
-                (into {} (keep (fn [[name child]]
-                                 (when (get-in frame [:present child])
-                                   [name (get-in frame [:cells child])])) fields)))
+                (into (update-vals (get (:supplied frame) address {}) input/value-cell) (keep (fn [[name child]]
+                                                                                                (when (get-in frame [:present child])
+                                                                                                  [name (get-in frame [:cells child])])) fields)))
       :invoke (let [{:keys [base-fn-id argument-paths name]} (get-in frame [:ir :scopes scope])]
                 (executor/check-cancel!)
                 (eager/invoke-compiled
@@ -121,7 +121,12 @@
   (let [{:keys [scopes parameters record-inputs presence-program required-addresses]} (get-in ir [:frame-layouts scope])
         _ (when-not (every? (fn [[address value]]
                               (or (contains? parameters address)
-                                  (and (contains? record-inputs address) (= {} value))))
+                                  (and (contains? record-inputs address)
+                                       (or (= {} value)
+                                           (and (contains? (:whole-record-inputs ir) address)
+                                                (map? value) (every? keyword? (keys value))
+                                                (not-any? #(contains? value (first %))
+                                                          (get-in ir [:expressions address :fields])))))))
                             supplied)
             (ir/reject! :unknown-supplied-address {}))
         present (ir/present-addresses presence-program supplied (:present parent {}))

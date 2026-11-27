@@ -4,6 +4,7 @@
   (:require
     [graphden.input.descriptor :as descriptor]
     [graphden.input.literal-lookup :as literal-lookup]
+    [graphden.input.obligations :as obligations]
     [graphden.types.core :as types]))
 
 
@@ -63,22 +64,46 @@
     (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type) (= :supplied op))
       (reject! :supplied-callable-validation-required details))
     (when-not check (reject! :runtime-obligations-required details))
-    (when-not closure [address check])))
+    (when-not closure check)))
 
 
-(defn- value-obligations
+(defn- container-validator
+  [expressions {:keys [address trigger expected-type additional-types]}]
+  (let [source (loop [at address]
+                 (let [expression (get expressions at)]
+                   (if (= :read (:op expression)) (recur (:source expression)) at)))
+        origin (get expressions source)
+        fields (:fields origin)]
+    ;; Only the precise constructed record is known to keep field validators
+    ;; on its own lazy cells. Check its keys at the materializing read.
+    (when-not (and (= :container-materialization trigger) (= :record (:op origin))
+                   (= expected-type (:type origin)) (= 1 (count additional-types))
+                   (obligations/materialized-dictionary? expected-type (first additional-types))
+                   (= (set (keys expected-type)) (set (map first fields)))
+                   (every? (fn [[name address]]
+                             (= {:op :supplied :type (get expected-type name)}
+                                (select-keys (get expressions address) [:op :type]))) fields))
+      (reject! :runtime-obligations-required {:address address :kind :container-type :trigger trigger}))
+    {:source source :required (vec (sort (keys expected-type)))}))
+
+
+(defn- read-obligations
   [analysis expressions closures]
-  (let [obligations (distinct (concat (:obligations analysis)
-                                      (mapcat :obligations (vals (:scopes analysis)))))
-        validators (into {} (keep (partial read-validator analysis expressions closures)) obligations)
-        by-address (group-by :address obligations)]
-    (doseq [[address entries] by-address]
-      (when-not (= 1 (count entries))
-        (reject! :conflicting-runtime-obligations {:address address})))
-    ;; The closure is built by the compiler with the already-proved
-    ;; invocation contract. Validating an arbitrary host function cannot
-    ;; establish a structural callable type.
-    validators))
+  (let [obligations (distinct (concat (:obligations analysis) (mapcat :obligations (vals (:scopes analysis)))))
+        whole (into #{} (comp (filter #(and (= :input-field (:kind %)) (:whole-bindable? %))) (map :address))
+                    (vals (get-in analysis [:public-input :routes])))]
+    (reduce (fn [plan {:keys [address expected-type additional-types kind] :as entry}]
+              (when (or (contains? (:value-obligations plan) address)
+                        (contains? (:container-obligations plan) address))
+                (reject! :conflicting-runtime-obligations {:address address}))
+              (if (= :container-type kind)
+                (let [{:keys [source required]} (container-validator expressions entry)]
+                  (cond-> (assoc-in plan [:container-obligations address] required)
+                    (contains? whole source) (update :whole-record-inputs conj source)))
+                (let [checks (into [] (keep #(read-validator analysis expressions closures (assoc entry :expected-type %)))
+                                   (cons expected-type additional-types))]
+                  (cond-> plan (seq checks) (assoc-in [:value-obligations address] checks)))))
+            {:value-obligations {} :container-obligations {} :whole-record-inputs #{}} obligations)))
 
 
 (defn- lower-binding
@@ -443,8 +468,8 @@
                               (mapcat :record-addresses) (vals closures))
           program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})
           layouts (frame-layouts root scopes expressions closures program (:required-addresses analysis))]
-      {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
-       :closures closures :frame-layouts layouts :presence-program program
-       :required-addresses (get-in layouts [root :required-addresses])
-       :value-obligations (value-obligations analysis expressions closures)
-       :parameters (get-in layouts [root :parameters])})))
+      (merge (read-obligations analysis expressions closures)
+             {:version 1 :root-scope root :snapshot-id snapshot-id :expressions expressions :scopes scopes
+              :closures closures :frame-layouts layouts :presence-program program
+              :required-addresses (get-in layouts [root :required-addresses])
+              :parameters (get-in layouts [root :parameters])}))))

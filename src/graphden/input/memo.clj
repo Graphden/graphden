@@ -39,7 +39,8 @@
                                                  [:value type (last source-key)]
                                                  [:read type source-key]))
                                 (= :record op)
-                                [:record (into {} (map (fn [[name child]] [name (token anchor child)])) fields)]
+                                (cond-> [:record (into {} (map (fn [[name child]] [name (token anchor child)])) fields)]
+                                  (seq (get supplied address)) (conj [:whole-input (get cells address)]))
                                 (= :closure op) [:closure type (get cells address)]
                                 (= :invoke op)
                                 (if (inside? anchor (first address))

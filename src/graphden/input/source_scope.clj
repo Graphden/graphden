@@ -601,6 +601,7 @@
         prior (into #{} (keep (fn [check]
                                 (cond
                                   (current check) check
+                                  (or (seq (:additional-types check)) (seq (:additional-types (get by-id (:id check))))) check
                                   (reads/discharged? snapshot before after certificates check) nil
                                   (collections/refined-read? #(checked-graph analyze snapshot % true) before after certificates check (get by-id (:id check)))
                                   (get by-id (:id check))
@@ -612,7 +613,8 @@
                (and (every? current ref-checks)
                     (every? (fn [check]
                               (or (ref-checks check) (annotations check)
-                                  (some #(reads/literal-read? snapshot after % check) certificates))) current)))))))
+                                  (and (empty? (:additional-types check))
+                                       (some #(reads/literal-read? snapshot after % check) certificates)))) current)))))))
 
 
 (defn- preserves-projection-readers?
@@ -809,7 +811,7 @@
     (and (every? (fn [{:keys [address kind trigger expected-type] :as obligation}]
                    (or (prior obligation)
                        (when-let [{:keys [public-path source-names]} (certified address)]
-                         (and (= [:value-type :field-read] [kind trigger])
+                         (and (empty? (:additional-types obligation)) (= [:value-type :field-read] [kind trigger])
                               (or (= :any expected-type)
                                   (and (types/list-type? expected-type)
                                        (= expected-type
@@ -819,9 +821,9 @@
                  current)
          (every? (fn [{:keys [address] :as obligation}]
                    (or (when-let [source (get sources address)]
-                         (let [check (select-keys obligation [:kind :trigger :expected-type])]
+                         (let [check (select-keys obligation [:kind :trigger :expected-type :additional-types])]
                            (some #(and (= source (:address %))
-                                       (= check (select-keys % [:kind :trigger :expected-type]))) current)))
+                                       (= check (select-keys % [:kind :trigger :expected-type :additional-types]))) current)))
                        (discharged-forwarded-variable? before after certified obligation)))
                  (remove current prior)))))
 

@@ -89,11 +89,15 @@
 (defn- dictionary-argument
   [{:keys [fn-id name args return] module-ns :namespace :as entry}]
   (or (collection-argument entry 'a)
-      (when (and (= fn-id (ids/fn-id "core.collections" :count)) (= ["core.collections" :count] [module-ns name])
-                 (= #{} (:effects entry)) (contains? #{:non-negative-int [:refine :int [:>= 0]]} return)
-                 (= #{:coll} (set (keys args)))
-                 (= '#{:null :text [:map a :any] [:list :any]} (set (types/union-members (:coll args)))))
-        {:argument :coll :path [(ids/slot-id fn-id :coll)]})
+       (when (and (= fn-id (ids/fn-id "core.collections" :count)) (= ["core.collections" :count] [module-ns name])
+                  (= #{} (:effects entry)) (contains? #{:non-negative-int [:refine :int [:>= 0]]} return)
+                  (= #{:coll} (set (keys args)))
+                  (= '#{:null :text [:map a :any] [:list :any]} (set (types/union-members (:coll args)))))
+         {:argument :coll :path [(ids/slot-id fn-id :coll)]})
+      (when (and (= fn-id (ids/fn-id "core.collections" :assoc))
+                 (= [module-ns name] ["core.collections" :assoc]) (= return :any)
+                 (= args '{:map [:union :null [:map a :any]] :key :any :value :any}))
+        {:argument :map :path [(ids/slot-id fn-id :map)]})
       (when (and (= fn-id (ids/fn-id "core.collections" :update-vals))
                  (= [module-ns name] ["core.collections" :update-vals])
                  (= return :any)
@@ -108,15 +112,21 @@
         {:keys [root-entry base-fn-id argument-paths]} (:signature-source node)
         {arg :argument native-path :path} (dictionary-argument root-entry)
         binding (get-in node [:bindings [owner native-path]])
-        variable (variables/type-in-scope owner 'a)]
-    (when (and arg (or (= op :read) (and (= op :invoke) (#{:update-vals :count} (:name root-entry))))
+        variable (variables/type-in-scope owner 'a)
+        assoc-map? (= :assoc (:name root-entry))
+        actual (get-in binding [:reference :actual-type])]
+    (when (and arg (if assoc-map?
+                     (and (= op :invoke) (= native-path path) (= :value (get-in binding [:reference :mode]))
+                          (= [:union :null [:map :keyword :any]] actual))
+                     (or (= op :read) (and (= op :invoke) (#{:update-vals :count} (:name root-entry)))))
                (= base-fn-id (:fn-id root-entry)) (= native-path (get argument-paths arg))
                (= expected (variables/type-in-scope owner (get-in root-entry [:args arg])))
                (or (= native-path path)
                    (and (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
                         (= address (get-in binding [:reference :source]))
                         (= expected (:expected-type binding)))))
-      (independent-key-domain node variable expected (first path) (first native-path)))))
+      (when-let [domain (independent-key-domain node variable expected (first path) (first native-path))]
+        (if assoc-map? actual domain)))))
 
 
 (defn- single-reader-inputs

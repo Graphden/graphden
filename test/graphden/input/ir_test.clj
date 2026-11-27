@@ -5,6 +5,7 @@
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.ir :as ir]
     [graphden.input.lookup-abi :as lookup]
+    [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.types.validator :as validator]))
 
@@ -68,6 +69,51 @@
     (is (nil? (validate graph (assoc-in scopes [item :root-entry :return] :any))))))
 
 
+(deftest computed-native-record-validates-the-full-declared-value-at-the-invocation
+  (let [owner (random-uuid) binding (random-uuid) field (random-uuid)
+        root [owner []] source [owner [binding]] address [root [field]]
+        target (ids/fn-id "fixture" :receipt)
+        shape {:ok :bool :value [:union :null [:map :keyword :any]]}
+        native {:base-fn-id target :root-entry {:fn-id target :namespace "fixture" :name :receipt :return shape}}
+        bound {:binding-id binding :expression {:kind :ref :fn-id target} :expected-type shape
+               :reference {:mode :value :actual-type shape}}
+        expr {:op :invoke :scope source :binding-id binding :target-id target :type shape}
+        obligation {:kind :container-type :trigger :container-materialization :address address :expected-type shape}
+        analysis {:scopes {[] {:bindings {address bound}}
+                           [binding] {:fn-id target :signature-source native :signature {:return shape}}}
+                  :obligations [obligation]}
+        plan (#'ir/read-obligations analysis {address expr} {source native} {})
+        [read-type] (get-in plan [:value-obligations address])
+        lookup (ids/fn-id "core.collections" :get)
+        call [owner [(random-uuid)]]
+        alias-field [call [(random-uuid)]]
+        native-path [(ids/slot-id lookup :coll)]
+        input [call native-path]
+        lookup-abi {:base-fn-id lookup :argument-paths {:coll native-path}
+                    :root-entry {:fn-id lookup :namespace "core.collections" :name :get :return :any
+                                 :args '{:coll [:union :null [:list :any] [:map a :any]] :key :any :default :any}}}
+        project (fn [[scope path :as addr]] {:expected-type shape :expression {:kind :projection :scope scope :path path}
+                                             :reference {:source addr :mode :projection :actual-type shape}})
+        analysis (assoc-in analysis [:scopes (second call)] {:signature-source lookup-abi
+                                                             :bindings {input (project alias-field) alias-field (project address)}})
+        expressions {input {:op :read :source alias-field :type shape} alias-field {:op :read :source address :type shape} address expr}
+        materialize #(#'ir/lookup-native-record? analysis % {call lookup-abi source native} (assoc obligation :address %2))]
+    (is (= shape read-type))
+    (is (materialize expressions input))
+    (is (materialize expressions alias-field))
+    (is (not (materialize (assoc-in expressions [alias-field :source] input) input)))
+    (is (not (materialize (assoc-in expressions [address :op] :record) input)))
+    (is (= {:ok false :value nil :extra 1} (validator/validate! read-type {:ok false :value nil :extra 1})))
+    (is (thrown? clojure.lang.ExceptionInfo (validator/validate! read-type {:ok true})))
+    (is (thrown? clojure.lang.ExceptionInfo (validator/validate! read-type {:ok true :value {"bad" 1}})))
+    (doseq [[changed-expr changed-native changed-check]
+            [[(assoc expr :op :record) native obligation]
+             [(assoc expr :binding-id (random-uuid)) native obligation]
+             [expr (assoc-in native [:root-entry :return] :any) obligation]
+             [expr native (assoc obligation :additional-types [:jsonb])]]]
+      (is (not (#'ir/computed-native-record? analysis {address changed-expr} {source changed-native} changed-check))))))
+
+
 (deftest computed-map-checks-retain-their-native-read-boundary
   (let [owner (random-uuid)
         read-type (fn [module native field expected actual]
@@ -87,9 +133,30 @@
            (validator/validate! asserted {:name "one" :required false :extra nil})))
     (is (thrown? clojure.lang.ExceptionInfo (validator/validate! asserted {:name "one"})))
     (is (nil? (read-type "core.logic" :assert-eq :expected record [:map :any :any])))
+    (doseq [branch [:then :else]]
+      (is (= [:map :any :any] (read-type "core.logic" :if branch [:map :any :any] [:map :any :any]))))
+    (is (nil? (read-type "core.logic" :if :test [:map :any :any] [:map :any :any])))
     (doseq [native [:get :contains?]]
       (is (= lookup (read-type "core.collections" native :coll lookup dictionary))))
     (is (nil? (read-type "core.collections" :get :key lookup dictionary)))))
+
+
+(deftest computed-assoc-input-keeps-its-checked-key-domain
+  (let [native (ids/fn-id "core.collections" :assoc)
+        scope [(random-uuid) []]
+        path [(ids/slot-id native :map)] address [scope path]
+        args '{:map [:union :null [:map a :any]] :key :any :value :any}
+        declared (variables/type-in-scope scope (:map args))
+        actual [:union :null [:map :keyword :any]]
+        node {:signature-source {:base-fn-id native :argument-paths {:map path}
+                                 :root-entry {:fn-id native :name :assoc :namespace "core.collections" :args args :return :any}}
+              :bindings {address {:reference {:mode :value :actual-type actual}}}}
+        domain #(lookup-abi/collection-read-domain {:scopes {[] %}} address declared %2)]
+    (is (= actual (domain node :invoke)))
+    (is (nil? (domain node :read)))
+    (is (nil? (domain (assoc-in node [:signature-source :root-entry :args :key] 'a) :invoke)))
+    (is (nil? (domain (assoc-in node [:signature :return] (variables/type-in-scope scope 'a)) :invoke)))
+    (is (nil? (domain (assoc-in node [:bindings address :reference :mode] :callable) :invoke)))))
 
 
 (deftest generated-merge-operands-require-the-private-map-key-contract

@@ -130,6 +130,9 @@
                    (and (= actual-type expected)
                         (or (and (obligations/materializable-record? expected)
                                  (native-argument? analysis address "core.logic" :if :then))
+                            (and (= [:map :any :any] expected)
+                                 (or (native-argument? analysis address "core.logic" :if :then)
+                                     (native-argument? analysis address "core.logic" :if :else)))
                             (and (= [:list :jsonb] expected)
                                  (native-argument? analysis address "core.collections" :zipmap :vals))))))
         expected))))
@@ -238,6 +241,56 @@
       source)))
 
 
+(defn- computed-native-record?
+  [analysis expressions scopes {:keys [address trigger expected-type additional-types]}]
+  (let [[scope] address
+        {:keys [op target-id binding-id type] into-scope :scope} (get expressions address)
+        bound (get-in analysis [:scopes (second scope) :bindings address])
+        produced (get-in analysis [:scopes (second into-scope)])
+        {:keys [base-fn-id root-entry]} (get scopes into-scope)]
+    (and (= :container-materialization trigger) (empty? additional-types)
+         (= :invoke op) (= :value (get-in bound [:reference :mode]))
+         (uuid? binding-id) (= binding-id (:binding-id bound))
+         (= into-scope [(first scope) (conj (second scope) binding-id)])
+         (uuid? target-id) (= {:kind :ref :fn-id target-id} (:expression bound))
+         (= target-id (:fn-id produced) base-fn-id (:fn-id root-entry))
+         (simple-keyword? (:name root-entry)) (string? (:namespace root-entry))
+         (= target-id (ids/fn-id (:namespace root-entry) (:name root-entry)))
+         (= [base-fn-id root-entry] ((juxt :base-fn-id :root-entry) (:signature-source produced)))
+         (types/record-type? expected-type)
+         (= expected-type type (:expected-type bound) (get-in bound [:reference :actual-type])
+            (get-in produced [:signature :return]) (:return root-entry))
+         (obligations/materializable-record? (update-vals expected-type types/strip-null)))))
+
+
+(defn- record-projection
+  [analysis expressions [scope :as address] expected]
+  (let [{:keys [op source type]} (get expressions address)
+        bound (get-in analysis [:scopes (second scope) :bindings address])]
+    (when (and (= :read op) (= expected type (:expected-type bound) (get-in bound [:reference :actual-type]))
+               (= :projection (get-in bound [:reference :mode]) (get-in bound [:expression :kind]))
+               (= source (get-in bound [:reference :source]) ((juxt :scope :path) (:expression bound))))
+      source)))
+
+
+(defn- lookup-native-record?
+  [analysis expressions scopes {:keys [address expected-type] :as entry}]
+  (let [[scope] address
+        node (get-in analysis [:scopes (second scope)])
+        {:keys [base-fn-id root-entry argument-paths]} (get scopes scope)
+        {argument :argument native-path :path} (lookup-abi/collection-argument root-entry 'a)
+        input [scope native-path]
+        project #(record-projection analysis expressions % expected-type)
+        from (project input)
+        alias? (and (= :read (get-in expressions [from :op])) (= scope (first from)) (= 1 (count (second from))))
+        producer (if alias? (project from) from)]
+    (and argument (= native-path (get argument-paths argument)) (= base-fn-id (:fn-id root-entry))
+         (= [base-fn-id root-entry argument-paths]
+            ((juxt :base-fn-id :root-entry :argument-paths) (:signature-source node)))
+         (or (= input address) (and alias? (= from address)))
+         producer (computed-native-record? analysis expressions scopes (assoc entry :address producer)))))
+
+
 (defn- container-validator
   [analysis expressions scopes {:keys [address trigger expected-type additional-types]}]
   (let [[scope path] address
@@ -292,12 +345,18 @@
               (when (or (contains? (:value-obligations plan) address)
                         (contains? (:container-obligations plan) address))
                 (reject! :conflicting-runtime-obligations {:address address}))
-              (if (= :container-type kind)
+              (cond
+                (and (= :container-type kind)
+                     (or (computed-native-record? analysis expressions scopes entry)
+                         (lookup-native-record? analysis expressions scopes entry)))
+                (assoc-in plan [:value-obligations address] [expected-type])
+                (= :container-type kind)
                 (let [{:keys [source key-type] :as proof} (container-validator analysis expressions scopes entry)]
                   (cond-> (assoc-in plan [:container-obligations address] (dissoc proof :source))
                     (contains? whole source) (update-in [:whole-record-inputs source]
                                                         #(if (= :keyword %) :keyword key-type))))
-                (let [checks (into [] (keep #(read-validator analysis expressions scopes closures (assoc entry :expected-type %)))
+                 :else
+                 (let [checks (into [] (keep #(read-validator analysis expressions scopes closures (assoc entry :expected-type %)))
                                    (cons expected-type additional-types))]
                   (cond-> plan (seq checks) (assoc-in [:value-obligations address] checks)))))
             {:value-obligations {} :container-obligations {} :whole-record-inputs {}} obligations)))

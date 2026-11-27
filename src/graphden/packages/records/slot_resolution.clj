@@ -475,7 +475,8 @@
    candidate passes starts its own search."
   [defs-by-name]
   (let [expanded (volatile! #{})]
-    (fn resolve-reference [fn-name arg-name seen]
+    (fn resolve-reference
+      [fn-name arg-name seen]
       (let [vertex [fn-name arg-name]]
         (when-not (or (contains? seen vertex) (contains? @expanded vertex))
           (vswap! expanded conj vertex)

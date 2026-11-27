@@ -332,7 +332,7 @@
                      :winner {:name :winner :args {:needle :text}}
                      :later {:name :later :args {:needle :int}}}]
     (with-redefs [sr/ref-targets-of (fn [definition index]
-                                    (swap! visited conj (:name definition))
-                                    (ref-targets definition index))]
+                                      (swap! visited conj (:name definition))
+                                      (ref-targets definition index))]
       (is (= [:winner :needle] (sr/resolve-slot-owner-strict :root :needle definitions #{})))
       (is (= 1 (count (filter #{:shared} @visited)))))))

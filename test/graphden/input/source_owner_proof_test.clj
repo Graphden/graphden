@@ -234,3 +234,28 @@
         (is (zero? @publications)))
       (is (not (contains? package :closure-baselines)))
       (is (= before (source/plan-module originals (:prepared package)))))))
+
+
+(deftest joint-source-replay-preserves-both-checkable-reader-addresses
+  (let [base (into (declarations "logic" #{:if :zero?})
+                   (declarations "strings" #{:str-trim}))
+        aliases (declarations "refinements" #{:positive-int :non-negative-int})
+        left {:namespace "owner-proof" :name :left :parent :str-trim}
+        right {:namespace "owner-proof" :name :right :parent :str-trim}
+        host {:namespace "owner-proof" :name :host :parent :if
+              :args {:test :zero? :then :left :else :right
+                     :string {:type :text} :number {:value 4}}}
+        definitions (into (into base aliases) [left right host])
+        prepared (parse/prepare-module definitions {} {})
+        owner (ids/fn-id "owner-proof" :host)]
+    (doseq [{ns-id :namespace :keys [name]} base]
+      (registry/record-rich-types! (ids/fn-id ns-id name) name (get @implementations name)))
+    (let [roots (:by-id @registry/*rich-types-override*)
+          result (certification/verify-plan prepared definitions {} roots)
+          migrated (some #(when (= owner (:identity %)) %) (get-in result [:plan :definitions]))]
+      (is (= :authored-source-equivalent (:verification migrated)) (get-in result [:blocked owner]))
+      (is (= {[:then :string] [:project [:string]]
+              [:else :string] [:project [:string]]
+              [:test :number] [:value 4]}
+             (select-keys (get-in migrated [:proposed :bind])
+                          [[:then :string] [:else :string] [:test :number]]))))))

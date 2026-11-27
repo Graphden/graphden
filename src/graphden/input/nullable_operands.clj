@@ -1,6 +1,7 @@
 (ns graphden.input.nullable-operands
   "Joint evidence for the two nullable operands of the native coalesce ABI."
   (:require
+    [graphden.input.lookup-abi :as lookup]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
 
@@ -36,8 +37,33 @@
        (= (zipmap arguments (repeat '[:union :null a])) (:args root-entry))))
 
 
+(defn- lookup-with-empty-default?
+  [graph pair variable solution]
+  (let [entries (into {} (map (juxt (comp second :address) identity)) pair)
+        {address :address domain :expected-type :keys [expression binding-id reference]} (get entries (:value paths))
+        fallback (get entries (:default paths))
+        [owner prefix :as scope] (first address)
+        node (get-in graph [:scopes prefix])
+        child (get-in graph [:scopes (conj prefix binding-id)])
+        abi (:signature-source node)
+        native (:signature-source child)]
+    (and (uuid? owner) (uuid? binding-id) (evaluates-reference? abi (:value paths) domain)
+         (= #{} (get-in abi [:root-entry :effects])) (= :any (get-in node [:signature :return]))
+         (= :value (:mode reference)) (= :any (:actual-type reference) (get-in child [:signature :return]))
+         (= {:kind :ref :fn-id (:fn-id child)} expression)
+         (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
+         (lookup/collection-argument (:root-entry native) 'a)
+         (not-any? #(contains? (:metadata-proofs node) (:binding-id %)) pair)
+         (= scope (first (:address fallback)))
+         (vector? (get-in fallback [:expression :value])) (= {:kind :value :value []} (:expression fallback))
+         (= :literal (get-in fallback [:reference :mode]))
+         (= [:list :never] (get-in fallback [:reference :actual-type]) (get solution variable))
+         (not-any? #(and (not (fields [(:id %)])) (types/type-any? #{variable} (:type %)))
+                   (get-in node [:configured-contract :fields])))))
+
+
 (defn- operand-solution
-  [solution pair]
+  [graph solution pair]
   (when (and (= 2 (count pair)) (= fields (set (map (comp second :address) pair))))
     (let [by-mode (into {} (map (juxt (comp :mode :reference) identity)) pair)
           actual #(some->> (get-in by-mode [% :reference :actual-type]) (types/resolve solution))
@@ -48,6 +74,10 @@
                      (types/make-union (remove #{:null} (types/union-members reference)))
                      reference)]
       (cond
+        (and (= :any reference) (= [:list :never] literal)
+             (lookup-with-empty-default? graph pair variable solution))
+        [variable :any]
+
         (and (not (contains? solution variable))
              (every? #(= {:mode :value :actual-type :any} (select-keys (:reference %) [:mode :actual-type])) pair)
              (= :any (types/resolve {variable :any} (:expected-type (first pair)))))
@@ -65,9 +95,10 @@
    non-null result proved on the other operand. Two independently evaluated
    :any returns can instantiate the same open variable. The graph rechecks
    both bindings against the resulting shared solution."
-  [initial entries]
-  (let [pairs (group-by (juxt (comp first :address) :expected-type)
-                        (filter #(and (fields (second (:address %))) (nullable-variable (:expected-type %))) entries))]
-    (reduce (fn [solution pair]
-              (if-let [binding (operand-solution solution pair)] (conj solution binding) solution))
-            initial (vals pairs))))
+  ([initial entries] (reconcile initial entries nil))
+  ([initial entries graph]
+   (let [pairs (group-by (juxt (comp first :address) :expected-type)
+                         (filter #(and (fields (second (:address %))) (nullable-variable (:expected-type %))) entries))]
+     (reduce (fn [solution pair]
+               (if-let [binding (operand-solution graph solution pair)] (conj solution binding) solution))
+             initial (vals pairs)))))

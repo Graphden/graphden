@@ -165,7 +165,7 @@
                               :expression {:kind :value :value value}
                               :reference {:mode :literal :actual-type actual-type}}))
                       (:resolver-arguments graph))
-        initial (nullable-operands/reconcile (equality-solution initial entries) entries)
+        initial (nullable-operands/reconcile (equality-solution initial entries) entries graph)
         first-pass (check-entries entries check-expression initial)
         final-pass (check-entries entries check-expression (:substitution first-pass))
         solution (:substitution final-pass)

@@ -1481,6 +1481,19 @@
                  (canonical {:first-text {:choices {:q a}} :last-text {:last-option b}}))))))))
 
 
+(deftest empty-tag-fallback-admits-the-value-read-by-the-native-lookup
+  (let [source (into (declarations "packages/registry/registry/fns.edn" #{:_pie-tags})
+                     (concat (declarations "packages/core/logic/fns.edn" #{:coalesce})
+                             (declarations "packages/core/collections/fns.edn" #{:get})))
+        root (ids/fn-id "app.registry" :_pie-tags)
+        {:keys [analysis canonical legacy]} (runtimes source root)]
+    (is (= :any (get-in analysis [:scopes [] :signature :return])))
+    (doseq [[row expected] [[{:tags ["public" "tools"] "extra" 42} ["public" "tools"]]
+                            [{:tags [1 nil]} [1 nil]] [{:tags []} []]
+                            [{:tags nil} []] [{} []] [{:tags false} []] [{:tags "legacy"} "legacy"]]]
+      (is (= expected (legacy {:item row}) (canonical {:value {:item row}}))))))
+
+
 (deftest coalesce-projected-any-operands-preserve-values-and-short-circuit
   (let [base (declarations "packages/core/logic/fns.edn" #{:coalesce})
         definition {:namespace "fixture" :name :choose-any :parent :coalesce

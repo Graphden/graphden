@@ -525,10 +525,22 @@
            (every? (partial collection-type? leaf?) (rest type)))))
 
 
+(defn collection-with-record-leaves?
+  "Check collection operands that may themselves carry inline records.
+   A record at the root requires its own field identities and rows."
+  [leaf? type]
+  (letfn [(leaf-or-record?
+            [value]
+            (or (leaf? value)
+                (and (map? value) (seq value) (every? simple-keyword? (keys value))
+                     (every? (partial collection-type? leaf-or-record?) (vals value)))))]
+    (and (not (map? type)) (collection-type? leaf-or-record? type))))
+
+
 (defn configuration-type?
-  "Type assertions use named leaves. Inline declarations require their own records."
+  "Type assertions can retain inline records nested in collection values."
   [type]
-  (collection-type? keyword? type))
+  (collection-with-record-leaves? keyword? type))
 
 
 (defn projection-input-type?

@@ -988,6 +988,25 @@
     (is (= :blocked (get-in (source/verify-module dropped context) [:definitions 0 :status])))))
 
 
+(deftest binding-type-retains-records-inside-collections
+  (let [type [:list {:label :text :details [:map :keyword {:valid :bool}]}]
+        child {:name :child :namespace "demo" :parent :sink
+               :args {:x {:ref :producer :type type}}}
+        forms [base producer child]
+        ctx (prepared forms)
+        plan (source/plan-module forms ctx)
+        entry (result (source/verify-module plan ctx) :child)
+        changed (update plan :definitions
+                        (fn [entries]
+                          (mapv #(cond-> % (= :child (get-in % [:source :name]))
+                                   (assoc-in [:proposed :configure [:x] :type 1 :label] :int))
+                                entries)))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= type (get-in entry [:proposed :configure [:x] :type])))
+    (is (= (ids/primitive-fn-id :sequence) (get-in entry [:v2 :bindings 0 :type-override-fn-id])))
+    (is (= :blocked (:status (result (source/verify-module changed ctx) :child))))))
+
+
 (deftest an-inline-type-pin-belongs-to-its-enclosing-binding
   (let [inner (array-map :parent :producer :type :text :args {})
         outer (array-map :type :keyword :args {:x inner} :parent :sink)

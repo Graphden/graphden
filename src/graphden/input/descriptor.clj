@@ -103,8 +103,9 @@
    to a primitive by storage. Its leaves and actual FK must be accounted for."
   ([type field-type-id] (stored-source-type? type field-type-id {}))
   ([type field-type-id named-ids]
-   (and (format/collection-type? #(or (types/primitive? %) (= :never %) (types/type-var? %)
-                                      (uuid? (get named-ids %))) type)
+   (and (format/collection-with-record-leaves?
+          #(or (types/primitive? %) (= :never %) (types/type-var? %) (uuid? (get named-ids %)))
+          type)
         (or (not (keyword? type)) (contains? primitive-ids type) (= :never type) (uuid? (get named-ids type)))
         (= field-type-id (records/resolve-type-ref type named-ids)))))
 

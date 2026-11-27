@@ -1,6 +1,7 @@
 (ns graphden.input.source-external
   "Check the relationship between callable parameters, external inputs and source bindings."
   (:require
+    [graphden.input.descriptor :as descriptor]
     [graphden.types.core :as types]))
 
 
@@ -50,7 +51,7 @@
 
 
 (defn- original-call-site?
-  [snapshot {:keys [from binding-id target-fn-id]} address {:keys [parameters call-sites external-captures]}]
+  [graph snapshot {:keys [from binding-id target-fn-id]} address {:keys [parameters call-sites external-captures]}]
   (when-let [readers (:source-callback-readers snapshot)]
     (let [[[_ caller-path] [slot :as fields]] from
           {:keys [positional captured] original-parameters :parameters}
@@ -58,13 +59,19 @@
             (readers slot target-fn-id binding-id))
           [slot-id :as path] (second address)
           positional-uses (into {} (map (fn [{:keys [target parameter]}] [(first (second target)) parameter])) call-sites)
-          [{:keys [value-path]} & others] (filter #(= address (:target %)) external-captures)]
+          name (get captured slot-id)
+          same-name (fn [{[[_ scope] path] :target}]
+                      (= name (:name (descriptor/find-node (get-in graph [:scopes scope :configured-contract]) path))))
+          [{:keys [target value-path]} & others] (filter same-name external-captures)]
       (and (= parameters original-parameters) (= path [slot-id]) (uuid? slot-id)
            (every? (fn [{[scope path] :target value-path :value-path}]
                      (and (= 1 (count path)) (uuid? (first path)) (vector? (second scope)) (= [] value-path))) call-sites)
            (= (count call-sites) (count positional-uses)) (= positional positional-uses)
-           (empty? others) (= (peek value-path) (get captured slot-id))
-           (some? (get captured slot-id))))))
+           ;; One env name can supply multiple physical callback readers. A
+           ;; single scoped write must cover the complete translated reader set.
+           (simple-keyword? name) (= name (peek value-path))
+           (= address target) (empty? others)
+           (= [slot-id] (into [] (keep (fn [[id spelling]] (when (= name spelling) id))) captured))))))
 
 
 (defn- matched-callable?
@@ -89,7 +96,7 @@
          (= 1 (count (filter #(= address (:target %)) external-captures)))
          (= (set parameters) (set (map :parameter call-sites)))
          (= callable-type (get-in bound [:reference :callable-type]))
-         (let [original-use? (and (nil? declaration) (original-call-site? snapshot edge address closure))]
+         (let [original-use? (and (nil? declaration) (original-call-site? graph snapshot edge address closure))]
            (and (or original-use? (and (vector? declaration) (= parameters (mapv keyword declaration))))
                 (matched-callable? (:expected-type bound) callable-type original-use?))))))
 

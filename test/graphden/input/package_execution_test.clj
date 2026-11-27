@@ -1515,6 +1515,26 @@
                   (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))
 
 
+(deftest an-inferred-callback-cannot-consume-just-one-of-two-same-name-captures
+  (let [source (into (declarations "packages/web/crud-types/fns.edn" #{:_types-candidates-name-prefix-ok? :_types-candidates-name-str})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:nullable-text})
+                             (declarations "packages/core/hof/fns.edn" #{:filter})
+                             (declarations "packages/core/logic/fns.edn" #{:or :nil?})
+                             (declarations "packages/core/strings/fns.edn" #{:str-starts-with? :name})
+                             [{:namespace "fixture" :name :prefix-names :parent :filter
+                               :args {:pred :_types-candidates-name-prefix-ok? :coll {:value [:alpha :beta]}
+                                      :name-prefix {:value "a"}}}]))
+        owner (ids/fn-id "fixture" :prefix-names)
+        prepared (parse/prepare-module source {} {})
+        core @loaded
+        result (binding [types/*type-aliases-override* (atom {})]
+                 (sync/register-type-aliases! source)
+                 (doseq [{:keys [name] module :namespace} source :when (get core name)]
+                   (registry/record-rich-types! (ids/fn-id module name) name (get core name)))
+                 (certification/verify-plan prepared source {} (:by-id @registry/*rich-types-override*)))]
+    (is (= :unsupported-reference-use (get-in result [:blocked owner :code])) (pr-str (:blocked result)))))
+
+
 (deftest native-lookup-reads-a-record-through-the-identity
   (let [source (into (declarations "packages/core/collections/fns.edn" #{:get})
                      (concat (declarations "packages/core/logic/fns.edn" #{:const})

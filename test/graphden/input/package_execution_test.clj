@@ -105,7 +105,7 @@
         compile-owner (fn [package owner roots implementations]
                         (let [rows (group-by :kind (parse/parse-prepared-module (:prepared package)))
                               graph (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
-                                                           :bindings (:binding rows) :list-items (:binding-list-item rows)})
+                                                            :bindings (:binding rows) :list-items (:binding-list-item rows)})
                               migrated (snapshot/with-certified-owner (assoc package :legacy-graph graph) owner roots)
                               proof (get-in migrated [:closure-baselines root :legacy-leaf])]
                           (is (= (ids/slot-id (ids/fn-id "core.collections" :get) :default) (:slot-id proof)))

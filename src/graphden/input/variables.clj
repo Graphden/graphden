@@ -41,6 +41,33 @@
     @renaming))
 
 
+(defn- canonical-value-binders
+  [type]
+  (let [names (volatile! {})]
+    (types/freshen-with
+      type
+      (fn [sort variable]
+        (if (= :value sort)
+          (or (get @names variable)
+              (let [name (symbol (str "a" (count @names)))]
+                (vswap! names assoc variable name)
+                name))
+          variable)))))
+
+
+(defn shared-value-domain
+  "Find one domain for multiple scalar readers of a positional argument.
+   Independent generic readers can vary in the identities of their value
+   binders. Recheck after inference so concrete, incompatible types fail."
+  [types]
+  (let [specific (remove #{:any} types)
+        domain (first specific)]
+    (when (seq types)
+      (if domain
+        (when (or (apply = specific) (apply = (map canonical-value-binders specific))) domain)
+        :any))))
+
+
 (defn map-descriptor-types
   [f node]
   (cond-> (update node :type f)

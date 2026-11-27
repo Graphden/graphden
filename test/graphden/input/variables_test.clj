@@ -15,6 +15,15 @@
     (is (= :text (types/resolve solution right)))))
 
 
+(deftest a-single-positional-value-can-feed-independently-instantiated-readers
+  (let [left '[:union :null [:list :any] [:map a :any]]
+        right '[:union :null [:list :any] [:map local :any]]]
+    (is (= left (variables/shared-value-domain [:any left right])))
+    (is (nil? (variables/shared-value-domain [left '[:union :null [:map local :any]]])))
+    (is (nil? (variables/shared-value-domain ['[:tuple a a] '[:tuple b c]])))
+    (is (nil? (variables/shared-value-domain [[:map :keyword :any] [:map :text :any]])))))
+
+
 (deftest constructor-input-and-return-use-the-same-derived-variable-test
   (let [scope [(random-uuid) [(random-uuid)]]
         descriptor {:type {:configuration 'a}

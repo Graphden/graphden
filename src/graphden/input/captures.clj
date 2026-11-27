@@ -84,8 +84,9 @@
   [fields]
   (and (seq fields)
        (every? whole-parameter-field? fields)
-       (apply = (map :type fields))
-       (apply = (map #(contains? % :fields) fields))))
+       (if (some #(contains? % :fields) fields)
+         (and (every? #(contains? % :fields) fields) (apply = (map :type fields)))
+         (some? (variables/shared-value-domain (map :type fields))))))
 
 
 (defn- matching-scalar-readers?
@@ -166,8 +167,13 @@
                        captured-fields)
         target-info (or (get-in graph [:scopes (second to) :signature])
                         (variables/signature-in-scope to (get-in ctx [:signatures target-fn-id])))
-        raw (reference/callable-contract (assoc target-info :args (into {} (map (juxt :name :type))
-                                                                        (concat fields parameter-fields))))
+        parameter-types (into {} (map (fn [[name readers]]
+                                        [name (if (next readers)
+                                                (variables/shared-value-domain (map :type readers))
+                                                (:type (first readers)))]))
+                              (group-by :name parameter-fields))
+        raw (reference/callable-contract (assoc target-info :args (into (into {} (map (juxt :name :type)) fields)
+                                                                        parameter-types)))
         callable (if (types/fn-type? expected)
                    (reference/call-site-contract expected raw (assoc target-info :lambda-params params)) raw)]
     {:parameters params :call-sites call-sites :captures captures :callable-type callable

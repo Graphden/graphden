@@ -7,6 +7,7 @@
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.obligations :as obligations]
+    [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]
     [graphden.types.reference :as reference]))
@@ -464,7 +465,13 @@
     (when-not (= (frequencies call-sites) (frequencies routes))
       (reject! :callback-parameter-shape-required {:scope scope}))
     (when-not (and (= (set (keys (types/fn-args callable-type))) (set (map :name nodes)))
-                   (every? #(= (:type %) (get (types/fn-args callable-type) (:name %))) nodes))
+                   (every? (fn [[name readers]]
+                             (let [type (get (types/fn-args callable-type) name)
+                                   reader-types (map :type readers)]
+                               (or (every? #{type} reader-types)
+                                   (and (next readers) (not-any? :fields readers)
+                                        (= type (variables/shared-value-domain (cons type reader-types)))))))
+                           (group-by :name nodes)))
       (reject! :callback-parameter-type-mismatch {:scope scope}))
     {:call-sites (into [] (comp (remove :fields) (map #(select-keys % [:name :address :required?]))) tree)
      :required-parameters (into #{} (comp (filter :required?) (map :address)) nodes)

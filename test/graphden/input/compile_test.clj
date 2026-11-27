@@ -13,7 +13,8 @@
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.obligations :as obligations]
     [graphden.input.runtime :as input]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :each
@@ -201,7 +202,13 @@
                                                :implementations (fixture/implementations definitions functions)})))]
       (is (= "through the reference" (invoke (replay [:fn {:arg :text} :text #{} :unknown]))))
       (is (= :runtime-obligations-required (rejection-code #(replay [:fn {:arg :int} :text #{} :unknown])))))
-    (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))))
+    (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))
+    (let [compatible (assoc-in competing [:other :input :item] :any)
+          compatible-functions (assoc functions :other (fn [args _] (runtime/resolve-arg args :item)))
+          {:keys [analysis closure]} (compiled compatible compatible-functions)]
+      (is (= "through the reference" (invoke closure)))
+      (is (= 2 (count (get-in analysis [:closures address :call-sites]))))
+      (is (= {:item :text} (types/fn-args (get-in analysis [:closures address :callable-type])))))))
 
 
 (deftest authored-record-parameter-feeds-each-nested-reader

@@ -142,14 +142,14 @@
         prepared (parse/prepare-module declarations {} {})
         owner (ids/fn-id "fixture" :run)
         target (ids/slot-id (ids/fn-id "fixture" :apply-one) :func)
-        alias (ids/slot-id owner :handler)
+        alias-slot (ids/slot-id owner :handler)
         entry (first (:definitions (source/verify-module (source/plan-module [child] prepared) prepared)))
         {:keys [declaration-records contract]} (:v2 entry)
         rows (group-by :id declaration-records)
         names {:request (ids/fn-id "fixture" :request) :response (ids/fn-id "fixture" :response)}
         package (snapshot/package-index prepared declarations)
         ctx (:context (snapshot/freeze-declarations package [owner]))
-        evidence #(rich/projected-callable-id owner [target] [alias] contract rows signature %)
+        evidence #(rich/projected-callable-id owner [target] [alias-slot] contract rows signature %)
         altered (assoc-in entry [:proposed :configure [:func] :type] [:fn {:arg :response} :request])]
     (is (= :authored-source-equivalent (:verification entry)))
     (is (= [:project [:handler]] (get-in entry [:proposed :bind :func])))

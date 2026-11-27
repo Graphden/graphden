@@ -73,7 +73,8 @@
                  (= (set (for [path paths] [path :ref-scope-required]))
                     (set (map (juxt :source-path :code) blockers)))
                  (every? #(and (= :binding (:kind %))
-                               (or (empty? (:policy %)) (:annotation %) (:scoped-annotation %)))
+                               (or (empty? (:policy %)) (:annotation %) (:scoped-annotation %)
+                                   (and (not-any? #{(:source-path %)} paths) (rename/preserved-pin? snapshot owner-id %))))
                          (:arguments legacy)))
     (reject! :unsupported-scope-source))
   (let [records (:records legacy)
@@ -174,8 +175,21 @@
          {:binding-id (:binding-id fragment) :position position :item-id (:id row) :ref-fn-id (:ref-fn-id row)})))
 
 
+(defn- source-scope-path
+  [snapshot graph [owner path] row]
+  (let [local (:scope-path row)
+        start (- (count path) (count local))
+        origin (:fn-id row)
+        prior (get-in snapshot [:source-scoped-references (:id row)])]
+    (when (and (seq local) (<= 0 start) (= local (subvec path start))
+               (= row (:row prior)) (= [[origin local] (:target-path row)] (:address prior))
+               (some #{origin} (get-in graph [:scopes (subvec path 0 start) :declaration-order]))
+               (= owner (:fn-id graph)))
+      local)))
+
+
 (defn- checked-edge
-  [graph snapshot owner prefix]
+  [graph snapshot owner prefix scoped-target]
   (let [to [owner prefix]
         {address :from target :target-fn-id id :binding-id :as edge}
         (only (filter #(= to (:to %)) (:dependencies graph)) :missing-reference-use)
@@ -188,13 +202,17 @@
         fragment (get-in snapshot [:source-list-fragments target])
         fragment (when (and fragment (list-use? graph snapshot to fragment))
                    (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id :scope-path :target-path]))
+        source-path (source-scope-path snapshot graph parent row)
+        capture? (external/captured-input? graph snapshot edge scoped-target)
         certificate (cond-> {:from address :binding-id id :target-fn-id target :origin-fn-id (:fn-id row) :name name}
+                      capture? (assoc :captured-input scoped-target)
+                      source-path (assoc :source-scope-path source-path)
                       operand (assoc :source-list-operand operand)
                       fragment (assoc :source-list-fragment fragment))]
-    (when-not (and (= :value (:mode edge)) (= [owner (pop prefix)] parent)
+    (when-not (and (or (= :value (:mode edge)) capture?) (= [owner (pop prefix)] parent)
                    (= id (peek prefix) (:binding-id bound) (:id row))
                    (= "ref" (:expression-kind row)) (= (:fn-id row) (:origin-fn-id bound))
-                   (empty? (:scope-path row)) (= path [field] (:target-path row))
+                   (or (empty? (:scope-path row)) source-path) (= path [field] (:target-path row))
                    (or operand
                        (and (not (contains? (:source-list-fragments snapshot) (:fn-id row)))
                             (= id (ids/binding-id (:fn-id row) field))))
@@ -223,7 +241,7 @@
         [[_ use-path] _ :as address] (occurrence graph slot)
         [names route] (only (filter #(= address (:address (val %))) (get-in graph [:public-input :routes]))
                             :unavailable-reference-input)
-        edges (mapv #(checked-edge graph snapshot owner (subvec use-path 0 %)) (range 1 (inc (count use-path))))
+        edges (mapv #(checked-edge graph snapshot owner (subvec use-path 0 %) address) (range 1 (inc (count use-path))))
         field (get-in arg [:target :field])
         declaring (only (filter #(= slot (ids/slot-id % field)) (get-in graph [:scopes use-path :declaration-order]))
                         :reference-field-origin-mismatch)
@@ -535,6 +553,21 @@
             by-slot)))
 
 
+(defn- replacement-inputs?
+  [snapshot analyze after {:keys [address public-path row]} capture-path inputs]
+  (let [[[owner path]] address
+        {:keys [id ref-fn-id]} row
+        use-scope [owner (conj path id)]
+        bound (reads/binding-at after address)
+        edge {:from address :to use-scope :binding-id id :target-fn-id ref-fn-id :mode :value}]
+    (when (and (uuid? ref-fn-id) (uuid? id) (= id (:binding-id bound)) (= :value (get-in bound [:reference :mode]))
+               (= {:kind :ref :fn-id ref-fn-id} (:expression bound)) (some #{edge} (:dependencies after)))
+      (let [original (checked-graph analyze snapshot ref-fn-id true)]
+        (external/matching-inputs? original after use-scope public-path inputs
+                                   (partial type-at-use (nested-binders original after use-scope))
+                                   #(into capture-path %))))))
+
+
 (defn- verify-bindings*
   "Check a group of legacy bindings whose complete omitted set is known.
    Resolve all addresses in one frozen baseline. Replay all rows together so
@@ -555,6 +588,7 @@
       (when-not (and (every? true? (map #(verified-addition? before after (second %1) %2) omitted certificates))
                      (preserves-projection-readers? after projections)
                      (preserves-occupancy? prior current certificates)
+                     (external/preserves-capture-inputs? before after certificates (partial replacement-inputs? snapshot analyze after))
                      (preserves-scoped-checks? snapshot analyze before after certificates))
         (reject! :scope-replay-mismatch))
       (mapv #(assoc % :obligations (:obligations after)) certificates))))
@@ -624,7 +658,7 @@
                              (reject! :unproved-forwarded-input))
                            names)
                          (free-route! before address target-type))
-          edges (mapv #(checked-edge before snapshot owner-id (subvec uses 0 %)) (range 1 (inc (count uses))))
+          edges (mapv #(checked-edge before snapshot owner-id (subvec uses 0 %) address) (range 1 (inc (count uses))))
           field-owner (only (filter #(= target-field-id (ids/slot-id % (peek target-names)))
                                     (get-in before [:scopes uses :declaration-order]))
                             :reference-field-origin-mismatch)]
@@ -702,6 +736,7 @@
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (preserves-occupancy? prior current certificates)
+                     (external/preserves-capture-inputs? before after certificates (constantly false))
                      (preserved-field-checks? before after certificates)
                      (every? (fn [{:keys [address row public-path source-names]}]
                                (let [added (get current address)

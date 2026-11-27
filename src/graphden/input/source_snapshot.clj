@@ -370,6 +370,13 @@
       (assoc (dissoc named :type-rows)
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
              :source-optional-renames (optional-rename-bindings entries fields)
+             :source-scoped-references
+             (into {} (for [[owner {:keys [scoped-inputs]}] entries
+                            {:keys [address row expression]} (vals scoped-inputs)
+                            :when (and (= :ref (:kind expression)) (= owner (:fn-id row)) (seq (:scope-path row))
+                                       (= address [[owner (:scope-path row)] (:target-path row)])
+                                       (= expression {:kind :ref :fn-id (:ref-fn-id row)}))]
+                        [(:id row) {:address address :row row}]))
              :source-reference-aliases
              (into {} (map (juxt :reference-binding-id identity))
                    (mapcat #(vals (get-in % [:origin-ledger :mapping :occupied-reference-aliases])) (vals entries)))

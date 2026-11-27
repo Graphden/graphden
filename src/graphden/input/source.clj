@@ -824,7 +824,7 @@
             origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
         (-> (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
                                         (source-list/verified-traces args) args type-names)
-            (merge (source-context/scoped-reference-context environment lowered rows args))
+            (merge (source-context/scoped-reference-context (assoc environment :inline-proofs proofs) lowered rows args))
             (legacy-leaf-context legacy-leaf origins))))))
 
 

@@ -5,6 +5,8 @@
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.source :as source]
+    [graphden.input.source-context :as source-context]
+    [graphden.input.source-rename :as rename]
     [graphden.input.source-scope :as scope]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
@@ -292,3 +294,51 @@
     (is (nil? (prove (assoc-in after [:dependencies 0 :mode] :graph-callable) target-graph)))
     (is (nil? (prove (assoc after :substitution {}) target-graph)))
     (is (= :incomplete-reference-analysis (code #(prove after (assoc target-graph :status :incomplete)))))))
+
+
+(deftest an-unchanged-rename-retains-its-authored-pin-and-field-origin
+  (let [owner (demo-id :reader)
+        alias-id (ids/slot-id owner :registry)
+        field-id (ids/slot-id (demo-id :parent) :coll)
+        pin (random-uuid)
+        id (ids/binding-id owner field-id)
+        argument {:origin {:fn-id owner :binding-id id :slot-id field-id}
+                  :rename {:alias :registry :alias-id alias-id :field-id field-id :pin-id pin}
+                  :policy {:type-override-fn-id pin} :expression [:project [:registry]]}
+        snapshot {:fields {alias-id {:kind :slot :id alias-id :name "registry" :source-slot-id field-id :type-fn-id pin}}
+                  :bindings {id {:fn-id owner :id id :target-path [field-id] :projection-path [alias-id] :scope-path []
+                                 :projection-scope-path [] :expression-kind "projection" :type-override-fn-id pin}}}]
+    (is (rename/preserved-pin? snapshot owner argument))
+    (doseq [changed [(assoc-in snapshot [:fields alias-id :source-slot-id] (random-uuid))
+                     (assoc-in snapshot [:fields alias-id :type-fn-id] (random-uuid))
+                     (assoc-in snapshot [:bindings id :projection-scope-path] [(random-uuid)])
+                     (assoc-in snapshot [:bindings id :type-override-fn-id] (random-uuid))]]
+      (is (not (rename/preserved-pin? changed owner argument))))
+    (is (not (rename/preserved-pin? snapshot owner (assoc-in argument [:policy :terminal] true))))))
+
+
+(deftest a-nested-reference-keeps-its-declaring-scope-and-legacy-certificate
+  (let [[root owner target outer inner field] (repeatedly 6 random-uuid)
+        binding-id (ids/binding-id owner field)
+        row {:id binding-id :fn-id owner :target-path [field] :scope-path [inner] :expression-kind "ref" :ref-fn-id target}
+        original [[owner [inner]] [field]]
+        certificate {:snapshot-id (random-uuid) :row row :address original :edges [{:binding-id inner}]}
+        graph {:fn-id root :scopes {[outer] {:declaration-order [owner]}}}
+        snapshot {:source-scoped-references {binding-id {:row row :address original}}}
+        frozen (fn [g s r] (#'scope/source-scope-path s g [root [outer inner]] r))
+        env {:inline-proofs {owner {:arguments [{:scope-certificate certificate}]}}}
+        edge {:from [[root [outer inner]] [field]] :origin-fn-id owner :binding-id binding-id :target-fn-id target :source-scope-path [inner]}
+        lineage (fn [environment reference]
+                  (with-redefs-fn {#'source-context/certified-lineage (fn [_ id] id)}
+                    #(#'source-context/scoped-origin environment [{:target-fn-id owner}] reference [:input])))]
+    (is (= [inner] (frozen graph snapshot row)))
+    (is (nil? (frozen (assoc-in graph [:scopes [outer] :declaration-order] [root]) snapshot row)))
+    (is (nil? (frozen graph (assoc-in snapshot [:source-scoped-references binding-id :address] [[root [inner]] [field]]) row)))
+    (is (nil? (frozen graph snapshot (assoc row :ref-fn-id (random-uuid)))))
+    (is (= owner (lineage env edge)))
+    (doseq [changed [(assoc edge :source-scope-path [outer]) (assoc edge :target-fn-id (random-uuid))
+                     (assoc edge :binding-id (random-uuid))]]
+      (is (= :reference-use-drift (code #(lineage env changed)))))
+    (is (= :reference-use-drift (code #(lineage
+                                        (update-in env [:inline-proofs owner :arguments] conj {:scope-certificate certificate})
+                                        edge))))))

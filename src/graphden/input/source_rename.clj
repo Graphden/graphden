@@ -145,19 +145,44 @@
           (contains? spec :description) (assoc :description (:description spec)))))))
 
 
+(defn- projection-of-slot?
+  [row slot]
+  (let [[field] (:target-path row)
+        owner (:fn-id row)
+        exposed (:id slot)]
+    (and (= :slot (:kind slot)) (= "projection" (:expression-kind row))
+         (= [] (:scope-path row) (:projection-scope-path row))
+         (= [exposed] (:projection-path row)) (= [field] (:target-path row))
+         (= field (:source-slot-id slot)) (= exposed (ids/slot-id owner (:name slot)))
+         (= (:id row) (ids/binding-id owner field)))))
+
+
 (defn legacy-binding
   "Invert a verified projection only through the authored alias-slot FK.
    All other rows use the existing shallow storage inverse."
   [declarations row]
   (if (= "projection" (:expression-kind row))
     (let [[exposed-name] (:projection-path row)
-          [field] (:target-path row)
-          owner (:fn-id row)
           slot (some #(when (and (= :slot (:kind %)) (= exposed-name (:id %))) %) declarations)]
-      (when-not (and (= [] (:scope-path row) (:projection-scope-path row))
-                     (= [exposed-name] (:projection-path row)) (= [field] (:target-path row))
-                     (= field (:source-slot-id slot))
-                     (= exposed-name (ids/slot-id owner (:name slot))) (= (:id row) (ids/binding-id owner field)))
+      (when-not (projection-of-slot? row slot)
         (throw (ex-info "Projection differs from the legacy rename" {:code :rename-origin-mismatch})))
       (migration/legacy-binding (-> row (assoc :expression-kind nil) (dissoc :projection-path :projection-scope-path))))
     (migration/legacy-binding row)))
+
+
+(defn preserved-pin?
+  "Verify the unchanged pinned rename next to a different scoped binding."
+  [snapshot owner {binding-origin :origin :keys [rename policy expression]}]
+  (let [{exposed :alias :keys [field-id alias-id pin-id]} rename
+        {:keys [binding-id]} binding-origin
+        slot (get-in snapshot [:fields alias-id])
+        row (get-in snapshot [:bindings binding-id])]
+    (and (uuid? pin-id) (uuid? field-id) (simple-keyword? exposed)
+         (= owner (:fn-id binding-origin) (:fn-id row))
+         (= alias-id (:id slot)) (= (name exposed) (:name slot))
+         (= field-id (:source-slot-id slot) (:slot-id binding-origin)) (= binding-id (:id row))
+         (= pin-id (:type-fn-id slot) (:type-override-fn-id row))
+         (= policy (cond-> {:type-override-fn-id pin-id}
+                     (contains? rename :description) (assoc :description (:description rename))))
+         (= (:description policy) (:description row))
+         (= [:project [exposed]] expression) (projection-of-slot? row slot))))

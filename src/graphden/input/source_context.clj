@@ -318,13 +318,32 @@
       (reject! :reference-use-drift public-path))))
 
 
+(defn- scoped-origin
+  [env edges {:keys [from origin-fn-id binding-id target-fn-id source-scope-path]} public-path]
+  (let [[[root path] field-path] from
+        start (- (count path) (count source-scope-path))
+        owner (when (<= 0 start) (if (zero? start) root (:target-fn-id (get edges (dec start)))))
+        certificates (keep :scope-certificate (get-in env [:inline-proofs origin-fn-id :arguments]))
+        [certificate & more] (filter #(= binding-id (get-in % [:row :id])) certificates)
+        row (:row certificate)]
+    (when-not (and owner (seq source-scope-path) (= source-scope-path (subvec path start)) (uuid? (:snapshot-id certificate))
+                   (= (:address certificate) [[origin-fn-id source-scope-path] field-path]) (empty? more)
+                   (= origin-fn-id (:fn-id row))
+                   (= source-scope-path (:scope-path row) (mapv :binding-id (:edges certificate)))
+                   (= field-path (:target-path row)) (= "ref" (:expression-kind row)) (= target-fn-id (:ref-fn-id row)))
+      (reject! :reference-use-drift public-path))
+    (certified-lineage env owner)))
+
+
 (defn- check-descendants!
   [env {:keys [edges field-owner public-path row target-type-origin]}]
   (doseq [[prior {:keys [origin-fn-id from target-fn-id binding-id source-list-fragment source-list-operand] :as edge}]
           (partition 2 1 edges)]
     (if source-list-operand
       (check-list-operand! env prior edge public-path)
-      (let [scope (certified-lineage env (:target-fn-id prior))]
+      (let [scope (if (:source-scope-path edge)
+                    (scoped-origin env edges edge public-path)
+                    (certified-lineage env (:target-fn-id prior)))]
         (if source-list-fragment
           (source-list-link scope edge public-path)
           (let [origin (some #(when (= origin-fn-id (get-in % [:owner :id])) %) scope)

@@ -46,8 +46,8 @@
   (let [names (volatile! {})]
     (types/freshen-with
       type
-      (fn [sort variable]
-        (if (= :value sort)
+      (fn [variable-sort variable]
+        (if (= :value variable-sort)
           (or (get @names variable)
               (let [name (symbol (str "a" (count @names)))]
                 (vswap! names assoc variable name)

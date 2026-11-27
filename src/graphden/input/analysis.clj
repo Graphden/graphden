@@ -74,11 +74,11 @@
                                 {:mode :resolved-value :actual-type (:return signature)}
                                 {:mode :unresolved :reason :missing-resolver-signature}))
                             {:mode :literal :actual-type (literal-type (:value expression))})
-                   :projection {:mode :unresolved :reason :projection-analysis-required})]
-    (let [owner (when (= :ref (:kind expression)) (lexical-value-owner ctx scope row))]
-      (cond-> {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
-               :expression expression :dispatch-type expected :expected-type expected :reference dispatch}
-        owner (assoc :lexical-value-owner owner)))))
+                   :projection {:mode :unresolved :reason :projection-analysis-required})
+        owner (when (= :ref (:kind expression)) (lexical-value-owner ctx scope row))]
+    (cond-> {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
+             :expression expression :dispatch-type expected :expected-type expected :reference dispatch}
+      owner (assoc :lexical-value-owner owner))))
 
 
 (defn- resolve-ambiguous-value

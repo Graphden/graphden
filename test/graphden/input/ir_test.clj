@@ -4,6 +4,7 @@
     [graphden.input.arguments :as arguments]
     [graphden.input.compiler-fixture :as fixture]
     [graphden.input.ir :as ir]
+    [graphden.input.lookup-abi :as lookup]
     [graphden.packages.records.ids :as ids]
     [graphden.types.validator :as validator]))
 
@@ -34,6 +35,37 @@
                    (assoc-in abi [:root-entry :name] :other)
                    (assoc-in abi [:argument-paths :request] [(random-uuid)])]]
       (is (= :runtime-obligations-required (check other))))))
+
+
+(deftest a-fixed-keyword-list-producer-requires-the-complete-zipmap-key-list
+  (let [abi (fn [module name args result]
+              (let [id (ids/fn-id module name)]
+                {:base-fn-id id :root-entry {:fn-id id :namespace module :name name :args args :return result :effects #{}}
+                 :argument-paths (into {} (map #(vector % [(ids/slot-id id %)])) (keys args))}))
+        filter-abi (abi "core.hof" :filter '{:coll [:list a] :pred [:fn {:item a} :bool #{} :unknown]} '[:list a])
+        map-abi (abi "core.hof" :map '{:coll [:list a] :func [:fn {:item a} b :any :unknown]} '[:list b])
+        zip-abi (abi "core.collections" :zipmap '{:keys [:list k] :vals [:list v]} '[:map k v])
+        root [(random-uuid) []]
+        rows [(first root) [(random-uuid)]]
+        item [(first root) (conj (second rows) (random-uuid))]
+        address [root (get-in filter-abi [:argument-paths :coll])]
+        expected [:list [:map :keyword :any]]
+        type {:label :text}
+        evidence [{:value-present true :type :keyword :value :label}]
+        scopes {root filter-abi rows map-abi item zip-abi}
+        graph {:scopes {[] {:signature-source filter-abi
+                            :bindings {address {:expected-type expected :reference {:actual-type [:list type]}}}}
+                        (second rows) {:signature-source map-abi :signature {:return [:list type]}}
+                        (second item) {:signature-source zip-abi :signature {:return type :resolved-bindings {:keys {:list-elements evidence}}}}}}
+        expressions {address {:op :invoke :scope rows}}
+        closures {[root (get-in filter-abi [:argument-paths :pred])] {:parameters [:item] :type [:fn {:item (second expected)} :bool #{} :unknown]}
+                  [rows (get-in map-abi [:argument-paths :func])] {:scope item :parameters [:item] :type [:fn {:item :any} type :any :unknown]}}
+        validate #(lookup/lookup-item-list-type %1 expressions %2 closures address expected)
+        proof [:scopes (second item) :signature :resolved-bindings :keys :list-elements]]
+    (is (= expected (validate graph scopes)))
+    (doseq [keys [nil [] [{:value-present false :type :keyword}] [{:value-present true :value "label" :type :text}]]]
+      (is (nil? (validate (assoc-in graph proof keys) scopes))))
+    (is (nil? (validate graph (assoc-in scopes [item :root-entry :return] :any))))))
 
 
 (deftest computed-map-checks-retain-their-native-read-boundary

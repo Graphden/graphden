@@ -194,7 +194,7 @@
 
 
 (defn- read-validator
-  [analysis expressions closures {:keys [address kind trigger expected-type]}]
+  [analysis expressions scopes closures {:keys [address kind trigger expected-type]}]
   (let [op (get-in expressions [address :op])
         details {:address address :kind kind :trigger trigger}
         closure (compiled-closure-origin expressions closures address)
@@ -209,7 +209,7 @@
                               binding (get-in node [:bindings address])]
                           (when (= expected-type (metadata/asserted-read-type node binding (get-in binding [:reference :actual-type])))
                             expected-type)))
-                      (lookup-abi/lookup-item-list-type analysis expressions closures address expected-type))))]
+                      (lookup-abi/lookup-item-list-type analysis expressions scopes closures address expected-type))))]
     (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type) (= :supplied op))
       (reject! :supplied-callable-validation-required details))
     (when-not check (reject! :runtime-obligations-required details))
@@ -297,7 +297,7 @@
                   (cond-> (assoc-in plan [:container-obligations address] (dissoc proof :source))
                     (contains? whole source) (update-in [:whole-record-inputs source]
                                                         #(if (= :keyword %) :keyword key-type))))
-                (let [checks (into [] (keep #(read-validator analysis expressions closures (assoc entry :expected-type %)))
+                (let [checks (into [] (keep #(read-validator analysis expressions scopes closures (assoc entry :expected-type %)))
                                    (cons expected-type additional-types))]
                   (cond-> plan (seq checks) (assoc-in [:value-obligations address] checks)))))
             {:value-obligations {} :container-obligations {} :whole-record-inputs {}} obligations)))
@@ -823,7 +823,7 @@
           expressions (lookup-abi/single-collection-inputs analysis expressions scopes)
           expressions (optional-native-inputs expressions scopes original-projections)
           closures (closure-plans analysis expressions routes detached-closures?)
-          expressions (lookup-abi/single-list-inputs analysis expressions closures)
+          expressions (lookup-abi/single-list-inputs analysis expressions scopes closures)
           record-inputs (into (public-record-inputs analysis expressions)
                               (mapcat :record-addresses) (vals closures))
           program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})

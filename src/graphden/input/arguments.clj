@@ -34,3 +34,17 @@
                                      {address (leaf-value value field)}))))
                        fields))))]
      (route (:root surface) supplied []))))
+
+
+(defn route-sources
+  "Route explicit record cells without forcing them. Ordinary map leaves
+   are opaque supplied values, including functions, atoms and delays."
+  [surface args]
+  (let [sources (volatile! {})
+        supplied (route-values surface args
+                               (fn [record {:keys [address name]}]
+                                 (if (input/record-view? record)
+                                   (do (vswap! sources assoc address (get (input/cache-token record) name))
+                                       nil)
+                                   (get record name))))]
+    [supplied @sources]))

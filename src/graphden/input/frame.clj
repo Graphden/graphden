@@ -42,17 +42,7 @@
     (when-not (every? known (keys args))
       (ir/reject! :unknown-callback-parameter {})))
   (if parameter-surface
-    ;; Presence routing needs a supplied address. Its deferred source
-    ;; remains separate from eager values and is only read by the new cell.
-    (let [input-sources (volatile! {})
-          supplied (arguments/route-values
-                     parameter-surface args
-                     (fn [record {:keys [name address]}]
-                       (if (input/record-view? record)
-                         (do (vswap! input-sources assoc address (get (input/cache-token record) name))
-                             nil)
-                         (get record name))))]
-      [supplied @input-sources])
+    (arguments/route-sources parameter-surface args)
     [(into {} (keep (fn [{:keys [name address]}]
                       (when (contains? args name) [address (get args name)]))) call-sites) nil]))
 
@@ -166,8 +156,9 @@
 (defn instantiate
   "Freeze the outer frame before exposing any resolver. Callback cells are
    allocated only when the tagged callable is actually invoked."
-  [ir validators supplied ctx]
-  (instantiate-frame ir validators (:root-scope ir) supplied nil nil ctx))
+  ([ir validators supplied ctx] (instantiate ir validators supplied nil ctx))
+  ([ir validators supplied sources ctx]
+   (instantiate-frame ir validators (:root-scope ir) supplied sources nil ctx)))
 
 
 (defn- invoke-frame

@@ -821,3 +821,18 @@
                           eager/*always-fresh-fn-ids* (atom #{(fixture/id :source)})]
                   [[(invoke closure) (invoke closure)] @reads])))]
     (is (= [[1 2] 2] (run old-compiler) (run captured-computation-closure)))))
+
+
+(deftest named-invocation-preserves-explicit-input-cells
+  (let [definitions {:root {:input {:selected :any :unused :any} :return :any}}
+        {:keys [analysis context]} (fixture/model definitions :root)
+        impl (fn [args _] [(runtime/resolve-arg args :selected) (runtime/resolve-arg args :selected)])
+        closure (compile/compile-named analysis {:context context :implementations (fixture/implementations definitions {:root impl})})
+        calls (atom [])
+        value (atom :opaque)
+        record (input/record-view {:selected (input/field-cell #(do (swap! calls conj :selected) value))
+                                   :unused (input/field-cell #(throw (ex-info "Unused argument forced" {})))})
+        actual (invoke closure record {})]
+    (is (= [:selected] @calls))
+    (is (= 2 (count actual)))
+    (is (every? #(identical? value %) actual))))

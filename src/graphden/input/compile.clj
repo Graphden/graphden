@@ -47,9 +47,9 @@
                      #(into (update-vals (:container-obligations plan) check-record-keys)
                             (update-vals checks field-validator)))]
     {:whole-record-inputs (:whole-record-inputs plan)
-     :invoke (fn [supplied ctx]
+     :invoke (fn [supplied sources ctx]
                (let [ctx (eager/invocation-context ctx)
-                     frame (frame/instantiate plan validators supplied ctx)]
+                     frame (frame/instantiate plan validators supplied sources ctx)]
                  (frame/invoke-root frame ctx)))}))
 
 
@@ -64,7 +64,8 @@
    :detached-closures? only closures with no external inputs can outlive
    their creating invocation. Unsupported obligations fail during lowering."
   [analysis options]
-  (:invoke (compile-frame analysis options)))
+  (let [{:keys [invoke]} (compile-frame analysis options)]
+    (fn [supplied ctx] (invoke supplied nil ctx))))
 
 
 (defn compile-named
@@ -77,7 +78,8 @@
         surface (assoc (:public-input analysis) :whole-record-inputs whole-record-inputs)]
     (executor/named-input-closure
       (fn [supplied ctx]
-        (invoke (arguments/route-values surface supplied) ctx)))))
+        (let [[values sources] (arguments/route-sources surface supplied)]
+          (invoke values sources ctx))))))
 
 
 (defn analyze-stored

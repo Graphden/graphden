@@ -66,13 +66,13 @@ Compares original source forms with a prepared legacy module to plan supported r
 :PROPERTIES:
 :CUSTOM_ID: types/verify-module
 :FILE: src/graphden/input/source.clj
-:LINE: 903
+:LINE: 912
 :MINS: 2.4
 :END:
 
 Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
 
-- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:903]]
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:912]]
 - same file :: [[file:types.org::#types/plan-module][plan-module]]
 - referenced from :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 
@@ -80,13 +80,13 @@ Derives declared input contexts for supported rewrites using the frozen package 
 :PROPERTIES:
 :CUSTOM_ID: types/verify-plan
 :FILE: src/graphden/input/source_certification.clj
-:LINE: 107
+:LINE: 111
 :MINS: 2.6
 :END:
 
 Certifies scoped bindings and forwarded fields with trusted implementation signatures. A blocked source owner retries when its exact dependency is certified. The planner then rebuilds the requested package plan with the updated inherited field evidence.
 
-- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:107]]
+- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:111]]
 - see also :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
 - referenced from :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
 
@@ -193,13 +193,13 @@ Freezes both endpoints of an authored field passed to a value-producing referenc
 :PROPERTIES:
 :CUSTOM_ID: types/plan-verified-module
 :FILE: scripts/structured_input_cst.clj
-:LINE: 980
+:LINE: 1024
 :MINS: 2.2
 :END:
 
 Builds replacement text only when every definition in a module has a verified source plan. Edits retain comments and literal payloads, and repeat verification on the patched text. The artifact records the original and replacement byte digests.
 
-- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:980]]
+- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:1024]]
 - see also :: [[file:types.org::#types/stage!][stage!]]
 
 * 15. stage!
@@ -245,13 +245,13 @@ Exports offline definitions using the same declared descriptors and identity cal
 :PROPERTIES:
 :CUSTOM_ID: types/require-legacy!
 :FILE: src/graphden/input/format.clj
-:LINE: 539
+:LINE: 550
 :MINS: 1.7
 :END:
 
 Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
 
-- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:539]]
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:550]]
 
 * 19. resolve-contract
 :PROPERTIES:
@@ -311,13 +311,13 @@ Includes checked named residual routes and the wire type for each supported supp
 :PROPERTIES:
 :CUSTOM_ID: types/infer-use
 :FILE: src/graphden/input/signatures.clj
-:LINE: 343
+:LINE: 346
 :MINS: 3.5
 :END:
 
 Feeds canonical scoped input facts through the existing type-rule engine using explicit implementation argument paths. Frozen registry views preserve rule lookup isolation; implementation functions never run here. Returned substitutions and proofs must join graph checking before the inferred signature can be treated as checked.
 
-- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:343]]
+- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:346]]
 - referenced from :: [[file:types.org::#types/resolve-closure][resolve-closure]]
 
 * 24. resolve-closure
@@ -402,13 +402,13 @@ Bounds source type expansion before alias resolution or variant/union normalizat
 :PROPERTIES:
 :CUSTOM_ID: types/build
 :FILE: src/graphden/types/validator.clj
-:LINE: 163
+:LINE: 170
 :MINS: 1.5
 :END:
 
 Builds a pure boundary validator from the same supported data declaration used by static checking. Success returns the original value. Failure reports safe path/code diagnostics without rejected contents; unsupported definitions fail construction. The companion checked-type returns the same canonical variant/alias shape used by the ensure-type return rule.
 
-- source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:163]]
+- source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:170]]
 
 * 31. native-execution
 :PROPERTIES:

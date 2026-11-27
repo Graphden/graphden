@@ -28,13 +28,13 @@ The executor compiles this description into a callable Clojure function. Referen
 :PROPERTIES:
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1598
+:LINE: 1577
 :MINS: 3.9
 :END:
 
 Runs a previously compiled [[file:glossary.org::#term/graph-function][graph function]]. It first checks cancellation and any configured execution-permission guard, then binds the [[file:glossary.org::#term/effect][allowed effects]] for the call. The [[file:glossary.org::#term/compiled-registry][compiled registry]] maps function IDs to [[file:glossary.org::#term/closure][closures]]: callable Clojure functions retaining their prepared dependencies. ~execute~ uses the selected closure's input ABI. Legacy closures receive name and slot-ID keys. A structured closure routes the original named input.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1598]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1577]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
@@ -241,13 +241,13 @@ Reads one argument: evaluates a [[file:glossary.org::#term/thunk][thunk]] when n
 :PROPERTIES:
 :CUSTOM_ID: executor/record-effect!
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1533
+:LINE: 1512
 :MINS: 2.1
 :END:
 
 An effectful primitive calls this before touching external state. It rejects an operation outside the execution's allowed effect set, then records the effect for tracing. Declaring effects for type inference is a separate responsibility; this runtime check enforces the current policy. An empty allowed set rejects every recorded effect, while nil means unrestricted execution.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1533]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1512]]
 - see also :: [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]], [[file:editor.org::#editor/evaluate][evaluate]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]], [[file:editor.org::#editor/evaluate][evaluate]]

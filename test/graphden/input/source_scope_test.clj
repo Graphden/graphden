@@ -1,4 +1,5 @@
-(ns graphden.input.source-scope-test
+(ns ^:serial graphden.input.source-scope-test
+  "Scope proof tests replace the shared lineage reader."
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.input.analysis :as analysis]

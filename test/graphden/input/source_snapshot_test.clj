@@ -1,4 +1,5 @@
-(ns graphden.input.source-snapshot-test
+(ns ^:serial graphden.input.source-snapshot-test
+  "Snapshot proof tests replace shared analysis and named-type readers."
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]

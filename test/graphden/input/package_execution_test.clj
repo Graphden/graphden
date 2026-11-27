@@ -1,4 +1,5 @@
-(ns graphden.input.package-execution-test
+(ns ^:serial graphden.input.package-execution-test
+  "Package replay tests replace shared lookup proof readers."
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]

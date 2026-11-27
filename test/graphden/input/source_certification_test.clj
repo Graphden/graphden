@@ -44,3 +44,24 @@
     (is (uuid? id))
     (is (= :authored-source-equivalent (get-in proof [:baselines id :verification])))
     (is (= #{sink reader owner id} (set (keys (:baselines proof)))))))
+
+
+(deftest a-later-source-proof-wakes-the-owner-of-a-failed-recursive-proof
+  (let [[outer independent normalized] (sort (map #(ids/fn-id "fixture" %) [:outer :unrelated :normalized]))
+        entries (mapv (fn [id] {:identity id :blockers [{:code :ref-scope-required :source-path [:args :value]}]})
+                      [outer independent normalized])
+        attempts (atom [])
+        result (with-redefs [snapshot/with-migrated-bindings
+                             (fn [package [id] _]
+                               (swap! attempts conj id)
+                               (cond
+                                 (= independent id) (throw (ex-info "Missing reader" {:type :input/source :code :missing-reference-use}))
+                                 (and (= outer id) (nil? (get-in package [:closure-baselines normalized])))
+                                 (throw (ex-info "Unresolved recursive reader"
+                                                 {:type :input/source :code :nonunique-reference-use
+                                                  ::snapshot/certificate-owners #{outer normalized}}))
+                                 :else (assoc-in package [:closure-baselines id :verification] :authored-source-equivalent)))]
+                 (#'certification/certify {} entries {}))]
+    (is (= [outer independent normalized outer] @attempts))
+    (is (= #{outer normalized} (:certified result)))
+    (is (= {independent {:code :missing-reference-use}} (:blocked result)))))

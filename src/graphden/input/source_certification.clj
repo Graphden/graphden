@@ -56,8 +56,9 @@
         {:blocked (cond-> (assoc (select-keys data [:fn-id :blockers])
                                  :code (or code type))
                     (keyword? (:reason data)) (assoc :reason (:reason data)))
-         :dependency (when (and (= :unverified-source-declaration code) (not= fn-id id))
-                       fn-id)}))))
+         :dependencies (cond-> (disj (::snapshot/certificate-owners data #{}) id)
+                         (and (= :unverified-source-declaration code) (not= fn-id id))
+                         (conj fn-id))}))))
 
 
 (defn- ready-candidates
@@ -86,16 +87,18 @@
       (if-let [id (peek pending)]
         (if (contains? certified id)
           (recur package (pop pending) waiting certified blocked)
-          (let [{next-package :package diagnostic :blocked dependency :dependency}
+          (let [{next-package :package diagnostic :blocked dependencies :dependencies}
                 (attempt package roots id (get by-id id))]
             (if next-package
               (let [ready (sort (remove certified (ready-candidates next-package by-id id)))]
-                (recur next-package (into (pop pending) (mapcat waiting ready)) (apply dissoc waiting ready)
+                (recur next-package (into (pop pending) (sort (set (mapcat waiting ready)))) (apply dissoc waiting ready)
                        (into certified ready) (apply dissoc blocked ready)))
               (recur package (pop pending)
-                     (if (and (contains? by-id dependency) (not (contains? certified dependency)))
-                       (update waiting dependency (fnil conj []) id)
-                       waiting)
+                     (reduce (fn [waiters dependency]
+                               (if (and (contains? by-id dependency) (not (contains? certified dependency)))
+                                 (update waiters dependency (fnil conj #{}) id)
+                                 waiters))
+                             waiting dependencies)
                      certified (assoc blocked id diagnostic)))))
         {:package package :certified certified :blocked blocked}))))
 

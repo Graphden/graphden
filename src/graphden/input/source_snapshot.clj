@@ -1123,11 +1123,18 @@
   (let [active (conj active owner)
         outcome (try {:package (certify-owner-step package owner roots active)}
                      (catch clojure.lang.ExceptionInfo failure
-                       (let [{:keys [code fn-id]} (ex-data failure)]
-                         (if (and (= :unverified-source-declaration code) (uuid? fn-id)
-                                  (not (contains? (:closure-baselines package) fn-id)))
+                       (let [{:keys [code fn-id] :as data} (ex-data failure)]
+                         (cond
+                           (and (= :unverified-source-declaration code) (uuid? fn-id)
+                                (not (contains? (:closure-baselines package) fn-id)))
                            {:dependency fn-id}
-                           (throw failure)))))]
+
+                           (or (= 1 (count active)) (contains? (::certificate-owners data) owner))
+                           (throw failure)
+
+                           ;; The package queue may independently certify a named
+                           ;; declaration whose recursive proof failed here.
+                           :else (throw (ex-info (ex-message failure) (assoc data ::certificate-owners active) failure))))))]
     (if-let [dependency (:dependency outcome)]
       (let [updated (certify-owner package dependency roots active)]
         (certify-owner updated owner roots (disj active owner)))

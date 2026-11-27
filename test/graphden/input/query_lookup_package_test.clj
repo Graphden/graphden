@@ -15,10 +15,14 @@
     [graphden.types.core :as types]
     [graphden.util.hex :as hex])
   (:import
+    (java.io
+      ByteArrayInputStream)
     (java.nio.charset
       StandardCharsets)
     (java.security
-      MessageDigest)))
+      MessageDigest)
+    (org.httpkit.server
+      AsyncChannel)))
 
 
 (defn- source
@@ -47,9 +51,10 @@
 (deftest original-query-owner-replays-with-its-native-result-and-original-static-type
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             types/*type-aliases-override* (atom {})]
-    (let [original {:name :query :parent :query-param :args {:param-name {:value "a"}}}
-          owner (ids/fn-id "fixture" :query)
-          forms (conj (source) (assoc original :namespace "fixture"))
+    (let [{module-ns :namespace :keys [fns]} (edn/read-string (slurp (io/resource "packages/registry/registry/fns.edn")))
+          original (first (filter #(= :_pkg-fork-name-raw (:name %)) fns))
+          owner (ids/fn-id module-ns (:name original))
+          forms (conj (source) (assoc original :namespace module-ns))
           package (snapshot/package-index (parse/prepare-module forms {} {}) forms)
           {:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
           _ (sync/register-type-aliases! fn-defs)
@@ -58,7 +63,7 @@
                                      (do (registry/record-rich-types! id name entry) [id (:impl entry)])))
           roots (:by-id @registry/*rich-types-override*)
           {:keys [proposed]} (query/prepare package owner roots)
-          legacy {:namespace "fixture" :fns [original]}
+          legacy {:namespace module-ns :fns [original]}
           stage (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)])
           visible (set (keys (:declarations package)))
           compile-stage (fn [module visible]
@@ -73,9 +78,15 @@
       (is (= [:request] (mapv :name (get-in analysis [:public-input :root :fields]))))
       (is (true? (get-in analysis [:public-input :routes [:request] :required])))
       (is (= [:union :null :text] (get-in analysis [:scopes [] :signature :return])))
-      (is (zero? (run {"extra" true :query-params {"a" 0}})))
-      (is (= {:v 5} (run {7 nil :query-params {:a {:v 5}}})))
-      (is (= "c" (run {:query-string "a=c"})))
+      (is (zero? (run {"extra" true :query-params {"name" 0}})))
+      (is (= {:v 5} (run {7 nil :query-params {:name {:v 5}}})))
+      (is (= "c" (run {:query-string "name=c"})))
+      (let [body (ByteArrayInputStream. (byte-array [1 2 3]))
+            request {:body body :async-channel (AsyncChannel. nil nil)}]
+        (is (= "query" (run (assoc request :query-string "name=query"))))
+        (is (= "middleware" (run (assoc request :query-params {"name" "middleware"}))))
+        (is (nil? (run request)))
+        (is (= 3 (.available body))))
       (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request ring :param-name "old"}))))
       (is (= :unverified-staged-declaration
              (rejection #(compile-stage (assoc-in stage [:fns 0 :return-type] :any) visible))))

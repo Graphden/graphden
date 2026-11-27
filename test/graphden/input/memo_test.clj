@@ -1,7 +1,10 @@
 (ns graphden.input.memo-test
   (:require
     [clojure.test :refer [deftest is]]
-    [graphden.input.memo :as memo]))
+    [graphden.input.memo :as memo])
+  (:import
+    (java.io
+      ByteArrayInputStream)))
 
 
 (defn- frame
@@ -83,3 +86,20 @@
     (is (= inner-key (memo/scope-keys inner)))
     (is (not= inner-key (memo/scope-keys (assoc inner :invocation-key (Object.)))))
     (is (not-any? realized? (vals (:cells f))))))
+
+
+(deftest input-streams-use-their-invocation-local-cell-without-reading
+  (let [scope [:root []]
+        address [scope [:body]]
+        read-at [scope [:copy]]
+        stream (ByteArrayInputStream. (byte-array [1 2]))
+        make-frame #(assoc (frame {address {:op :supplied :type :any}
+                                   read-at {:op :read :source address :type :any}}
+                                  {scope {:body [:body] :copy [:copy]}})
+                           :supplied {address stream})
+        first-frame (make-frame)
+        first-key (get (memo/scope-keys first-frame) scope)]
+    (is (= [:cell :any (get-in first-frame [:cells address])] (:body first-key)))
+    (is (= [:read :any (:body first-key)] (:copy first-key)))
+    (is (not= first-key (get (memo/scope-keys (make-frame)) scope)))
+    (is (= 2 (.available stream)))))

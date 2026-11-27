@@ -110,6 +110,35 @@
              (canonical {:left {:deep {:inner {:sample value}}}}))))))
 
 
+(deftest a-projected-literal-map-proves-its-checked-lookup-result
+  (let [root (ids/fn-id "fixture" :has-error)
+        source (into [{:namespace "fixture" :name :error? :parent :some?
+                       :args {:value {:parent :get :args {:coll {:as :listing :type [:map :keyword :any]}
+                                                         :key {:value :error} :default nil}}}}
+                      {:namespace "fixture" :name :has-error :parent :error?
+                       :args {:listing {:value {:kind "fns" :error "bad-kind"}}}}]
+                     cat [(declarations "packages/core/logic/fns.edn" #{:some?})
+                          (declarations "packages/core/collections/fns.edn" #{:get})])
+        evidence (atom nil)
+        prove literal-lookup/proves-read?
+        compile-source (fn [package owner roots native]
+                         (execution/compile-package (snapshot/with-certified-owner package owner roots) owner roots native))
+        {:keys [legacy canonical]}
+        (with-redefs [literal-lookup/proves-read?
+                      (fn [before after certs check]
+                        (when (prove before after certs check)
+                          (reset! evidence [before after certs check])
+                          true))]
+          (runtimes source root compile-source @loaded))]
+    (is (= true (legacy {}) (canonical {})))
+    (is (some? @evidence))
+    (when-let [[before after certs check] @evidence]
+      (is (= :any (:expected-type check)))
+      (is (not (prove before after [] check)))
+      (is (not (prove before after (mapv #(assoc-in % [:row :value :error] 7) certs) check)))
+      (is (not (prove before after certs (assoc check :id (random-uuid))))))))
+
+
 (deftest read-of-a-constant-record-retains-a-checked-keyword-result
   (let [root (ids/fn-id "fixture" :tagged?)
         source (into [{:namespace "fixture" :name :tagged :parent :const

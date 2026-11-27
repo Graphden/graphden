@@ -38,7 +38,8 @@
                 to)) (:dependencies after)))))
 
 
-(defn- installed-literal?
+(defn installed-literal?
+  "Match the certified literal row to its installed binding and expression."
   [after {:keys [address row]}]
   (let [binding (binding-at after address)]
     (and (= "value" (:expression-kind row)) (true? (:value-present row))

@@ -366,6 +366,27 @@ fixed length. The owner keeps its original UUID and declared `:nullable-text`
 return type. Middleware can supply other values at runtime. The planner
 keeps old reader UUIDs in the receipt for differential checks.
 
+An offline package consumer can emit the two shared V2 declarations with
+`graphden.input.generated-source/emit`. The returned `:bytes` are UTF-8 EDN
+and `:sha256` is their SHA-256 hex digest. Supply the original owner UUIDs
+independently when replaying the sidecar. Its ledger records a source hash,
+a proposal hash, and the referenced generated UUIDs for each original owner.
+
+```clojure
+(let [sidecar (generated-source/emit package owner-ids roots)
+      prepared (generated-source/install package owner-ids roots visible-fn-ids sidecar)]
+  (package-execution/compile-staged-module prepared root roots implementations staged))
+```
+
+For a single staged compilation, `:generated-source (assoc sidecar :owner-ids
+owner-ids)` in the staged options performs the same replay. A sidecar can
+cover owners from several source files. Its module entries use ordinary V2
+declarations and each shared helper appears once under its actual namespace.
+The verifier checks the declarations against their source proofs, replays
+the received forms, and keeps them in each owner's private compiled package.
+The compiler returns the sidecar digest in `:generated-source` for that owner.
+Original module files and their inventory retain their own declaration lists.
+
 ## Expression grammar and source edits
 
 `graphden.input.syntax/parse-expression` accepts a resolved descriptor,

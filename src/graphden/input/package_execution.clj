@@ -4,6 +4,7 @@
   (:require
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
+    [graphden.input.generated-source :as generated]
     [graphden.input.ir :as ir]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as list-execution]
@@ -65,11 +66,12 @@
 
 
 (defn- compile-normalized
-  [{:keys [package roots proof]} owner implementations]
+  [{:keys [package roots proof generated-source]} owner implementations]
   (let [frozen (snapshot/freeze-source-analysis package [owner] roots)
         checked (analysis/analyze-effective-input (:context frozen) owner (:options frozen))
         compiled (compile-frozen frozen checked implementations)]
-    (assoc compiled :input-origin proof)))
+    (cond-> (assoc compiled :input-origin proof)
+      generated-source (assoc :generated-source generated-source))))
 
 
 (defn compile-package
@@ -102,9 +104,14 @@
    Only a root from the staged module can be compiled here. Dependencies
    outside the module still come from the caller's visible prepared package.
    No registration, package loading, or storage changes occur."
-  [package root roots implementations {payload :bytes :keys [legacy-module sha256 visible-fn-ids]}]
+  [package root roots implementations {payload :bytes :keys [legacy-module sha256 visible-fn-ids generated-source]}]
   (require-visible-root! root visible-fn-ids)
   (let [module (staged/read-pinned payload sha256)
+        package (if generated-source
+                  (let [owners (:owner-ids generated-source)]
+                    (when-not (and (coll? owners) (some #{root} owners)) (ir/reject! :generated-source-owner-required {}))
+                    (generated/install package owners roots visible-fn-ids generated-source))
+                  package)
         package (reduce (fn [p {:keys [name]}]
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
                             (if (query/cached p id roots)

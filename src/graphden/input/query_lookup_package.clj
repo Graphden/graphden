@@ -53,6 +53,7 @@
                          (= (:request-type-id proof) (get-in context [:fields (:origin-field-id input) :type-fn-id])))
                 {:original source :expanded expanded :proposed (:proposed entry) :entry entry
                  :package normalized :roots roots :donors donors :proof proof
+                 :generated-ids (mapv #(ids/fn-id (:namespace %) (:name %)) helpers)
                  :visibility (set (keys (:declarations normalized)))}))))))))
 
 

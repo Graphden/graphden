@@ -5,6 +5,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.generated-source :as generated]
     [graphden.input.package-execution :as execution]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.source-snapshot :as snapshot]
@@ -106,3 +107,61 @@
                            (assoc (pinned-stage stage) :legacy-module legacy :visible-fn-ids visible)))))
       (doseq [donor [(ids/fn-id "web.crud" :_query-param-raw) (ids/fn-id "core.logic" :const)]]
         (is (= :staged-function-not-visible (rejection #(compile-stage stage (disj visible donor)))))))))
+
+
+(deftest staged-queries-read-their-shared-checked-declarations-from-the-sidecar
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [module "fixture"
+          owners [{:name :one :parent :query-param :args {:param-name {:value "a"}}}
+                  {:name :two :parent :query-param :args {:param-name {:value "b"}}}]
+          forms (into (source) (map #(assoc % :namespace module)) owners)
+          package (snapshot/package-index (parse/prepare-module forms {} {}) forms)
+          {:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
+          _ (sync/register-type-aliases! fn-defs)
+          _ (doseq [[name {module-ns :namespace :as base}] base-fn-defs]
+              (registry/record-rich-types! (ids/fn-id module-ns name) name base))
+          roots (:by-id @registry/*rich-types-override*)
+          impls (into {} (map (fn [[name base]] [(ids/fn-id (:namespace base) name) (:impl base)])) base-fn-defs)
+          owner-ids (mapv #(ids/fn-id module (:name %)) owners)
+          visible (set (keys (:declarations package)))
+          {payload :bytes :keys [sha256] :as content} (generated/emit package owner-ids roots)
+          artifact (edn/read-string (String. ^bytes payload StandardCharsets/UTF_8))
+          [one two] (:owners artifact)
+          replay #(generated/install package owner-ids roots visible %)
+          installed (replay content)
+          legacy {:namespace module :fns owners}
+          proposed (mapv #(dissoc (get-in installed [:query-lookups % :proposed]) :namespace) owner-ids)
+          stage (assoc (pinned-stage (assoc legacy :fns proposed :input-format 2))
+                       :visible-fn-ids visible :legacy-module legacy)
+          ring {:request-method :get :uri "/" :headers {} :body nil :async-channel nil :query-string "a=first&b=second"}]
+      (is (= sha256 (:sha256 (generated/emit package (reverse owner-ids) roots))))
+      (is (= (set owner-ids) (set (map :owner-id (:owners artifact)))))
+      (is (= 2 (count (get-in artifact [:modules 0 :fns])) (count (:generated-ids one))))
+      (is (= (:generated-ids one) (:generated-ids two)))
+      (is (= #{"web.crud"} (set (map :namespace (:modules artifact)))))
+      (is (= #{:core.logic/const :core.logic/coalesce} (set (map :parent (get-in artifact [:modules 0 :fns])))))
+      (doseq [[owner value] (map vector owner-ids ["first" "second"])]
+        (let [normalized (get-in installed [:query-lookups owner :package])
+              materialized (set (keys (:staged-proposals normalized)))
+              compiled (execution/compile-staged-module installed owner roots impls stage)]
+          (is (= (set (:generated-ids one)) materialized))
+          (is (= {:sha256 sha256} (:generated-source compiled)))
+          (is (= value ((:invoke compiled) {:request ring} {})))))
+      (is (= "first" ((:invoke (execution/compile-staged-module package (first owner-ids) roots impls
+                                                              (assoc stage :generated-source
+                                                                     (assoc content :owner-ids owner-ids))))
+                      {:request ring} {})))
+      (doseq [changed [(assoc-in artifact [:modules 0 :fns 0 :parent] :core.logic/const)
+                       (assoc-in artifact [:owners 0 :source-sha256] "other")
+                       (update-in artifact [:modules 0 :fns] pop)
+                       (update-in artifact [:modules 0 :fns] conj {:name :extra :parent :core.logic/const})]]
+        (is (= :generated-source-ledger-mismatch (rejection #(replay (pinned-stage changed))))))
+      (is (= :generated-source-ledger-mismatch
+             (rejection #(generated/install package [(first owner-ids)] roots visible content))))
+      (is (= :generated-source-owner-required
+             (rejection #(generated/emit package (conj owner-ids (first owner-ids)) roots))))
+      (is (= :staged-module-checksum-mismatch
+             (rejection #(replay (assoc content :sha256 "invalid")))))
+      (is (= :generated-source-not-visible
+             (rejection #(generated/install package owner-ids roots (disj visible (ids/fn-id "core.logic" :const)) content)))))))

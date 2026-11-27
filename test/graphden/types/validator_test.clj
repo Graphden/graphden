@@ -1,6 +1,7 @@
 (ns graphden.types.validator-test
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.input.runtime :as input]
     [graphden.types.core :as types]
     [graphden.types.validator :as validator]))
 
@@ -24,6 +25,22 @@
         check (validator/build [:list :any])]
     (is (identical? never-read (check never-read)))
     (is (thrown? clojure.lang.ExceptionInfo (check {:not-a-list true})))))
+
+
+(deftest unconstrained-map-values-remain-unread
+  (let [unread (input/field-cell #(throw (ex-info "Read an unconstrained value" {})))
+        check (validator/build [:map [:union :keyword :text] :any])
+        attributes (input/dictionary-view {"title" unread :class unread})]
+    (is (identical? attributes (check attributes)))
+    (is (= {:type :execution-error/type-mismatch :errors [{:path [0 :key] :code :type-mismatch}]}
+           (try (check (input/dictionary-view {9 unread}))
+                (catch clojure.lang.ExceptionInfo error (ex-data error)))))))
+
+
+(deftest unconstrained-refinement-still-checks-its-base-type
+  (let [check (validator/build [:refine :text [:any]])]
+    (is (= "" (check "")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Value does not match" (check 4)))))
 
 
 (deftest declaration-aliases-and-variants-use-the-same-validator

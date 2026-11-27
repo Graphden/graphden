@@ -27,30 +27,102 @@
     (reject! :snapshot-mismatch {})))
 
 
+(def ^:private hiccup-elements [:union :bool :float :int :null :text [:list :any]])
+
+
+(defn- native-argument?
+  [analysis [[_ scope] path] module-ns native-name argument]
+  (let [id (ids/fn-id module-ns native-name)
+        {:keys [base-fn-id root-entry argument-paths]} (get-in analysis [:scopes scope :signature-source])]
+    (and (= id base-fn-id (:fn-id root-entry))
+         (= [module-ns native-name] ((juxt :namespace :name) root-entry))
+         (= path [(ids/slot-id id argument)] (get argument-paths argument)))))
+
+
+(defn- hiccup-children?
+  [analysis address expected]
+  (let [element (when (types/list-type? expected) (types/list-elem expected))]
+    (and (types/union-type? element)
+         (= (set (types/union-members hiccup-elements)) (set (types/union-members element)))
+         (native-argument? analysis address "web.html" :hiccup :children))))
+
+
+(defn- generated-list-source
+  [analysis [scope path] argument]
+  (let [{:keys [generated-list argument-paths]} (get-in analysis [:scopes (second scope) :signature-source])]
+    (when (and (map? generated-list)
+               (some #(= path (get argument-paths %))
+                     (if (= :tail argument) [:tail] (:operands generated-list))))
+      (some (fn [{:keys [from to mode]}]
+              (when (and (= :value mode) (= scope to)) from))
+            (:dependencies analysis)))))
+
+
+(defn- hiccup-tail?
+  [analysis address expected op]
+  (and (= :supplied op) (= [:list :hiccup-node] expected)
+       (when-let [source (generated-list-source analysis address :tail)]
+         (native-argument? analysis source "web.html" :hiccup :children))))
+
+
+(defn- open-key-map?
+  [shape]
+  (and (types/map-type? shape) (types/type-var? (types/map-key shape))
+       (= :any (types/map-val shape))))
+
+
+(defn- open-map-read
+  [analysis address expected op]
+  (when (#{:invoke :read} op)
+    (let [outer-list? (types/list-type? expected)
+          arms (set (types/union-members (if outer-list? (types/list-elem expected) expected)))
+          maps (filter open-key-map? arms)]
+      (when (= 1 (count maps))
+        (cond
+          (and outer-list? (= #{:null} (disj arms (first maps)))
+               (native-argument? analysis address "core.collections" :merge :maps))
+          [:list [:union :null [:map :any :any]]]
+          (and (not outer-list?) (= #{:null [:list :any]} (disj arms (first maps)))
+               (native-argument? analysis address "core.collections" :get :coll))
+          [:union :null [:list :any] [:map :any :any]])))))
+
+
 (defn- field-read-type
   [analysis [[_ scope] :as address] expected op]
-  (cond
-    (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
-                     :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
-        (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))) expected
-    (and (types/union-type? expected) (seq (types/union-members expected))
-         (every? #{:null :bool :text :int :numeric :keyword} (types/union-members expected))) expected
-    (and (types/list-type? expected) (#{:invoke :read} op))
-    (let [actual (get-in analysis [:scopes scope :bindings address :reference :actual-type])]
-      (when (or (= [:list [:map :keyword :any]] expected actual)
-                (and (= [:list :any] actual) (contains? #{:bool :text :int :numeric :keyword :uuid} (types/list-elem expected))))
-        expected))
-    ;; A checked literal or producer can select a concrete arm without
-    ;; interpreting variables in the other arms. Keep the check at the read.
-    (types/union-type? expected)
-    (let [{:keys [mode actual-type]} (get-in analysis [:scopes scope :bindings address :reference])]
-      (when (#{[:invoke :value] [:literal :literal]} [op mode])
-        (let [arm (cond
-                    (= :null actual-type) :null
-                    (= [:map :keyword :any] actual-type) actual-type
-                    (types/list-type? actual-type) [:list :any])]
-          (or (when (some #{arm} (types/union-members expected)) arm)
-              (literal-lookup/keyword-map-read-type analysis address expected actual-type)))))))
+  (or (cond
+        (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
+                         :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
+            (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))) expected
+        (and (types/union-type? expected) (seq (types/union-members expected))
+             (every? #{:null :bool :text :int :float :numeric :keyword [:list :any]}
+                     (types/union-members expected))) expected
+        (hiccup-children? analysis address expected) expected
+        (hiccup-tail? analysis address expected op) [:list hiccup-elements]
+        (and (= [:union :null [:map [:union :keyword :text] :any]] expected)
+             (native-argument? analysis address "web.html" :hiccup :attrs)) expected
+        (and (= :supplied op) (= [:list [:union :null [:map :any :any]]] expected)
+             (when-let [source (generated-list-source analysis address :tail)]
+               (native-argument? analysis source "core.collections" :merge :maps))) expected
+        (and (= :read op) (= [:union :null [:map :any :any]] expected)
+             (when-let [source (generated-list-source analysis address :operand)]
+               (native-argument? analysis source "core.collections" :merge :maps))) expected
+        (and (types/list-type? expected) (#{:invoke :read} op))
+        (let [actual (get-in analysis [:scopes scope :bindings address :reference :actual-type])]
+          (when (or (= [:list [:map :keyword :any]] expected actual)
+                    (and (= [:list :any] actual) (contains? #{:bool :text :int :numeric :keyword :uuid} (types/list-elem expected))))
+            expected))
+        ;; A checked literal or producer can select a concrete arm without
+        ;; interpreting variables in the other arms. Keep the check at the read.
+        (types/union-type? expected)
+        (let [{:keys [mode actual-type]} (get-in analysis [:scopes scope :bindings address :reference])]
+          (when (#{[:invoke :value] [:literal :literal]} [op mode])
+            (let [arm (cond
+                        (= :null actual-type) :null
+                        (= [:map :keyword :any] actual-type) actual-type
+                        (types/list-type? actual-type) [:list :any])]
+              (or (when (some #{arm} (types/union-members expected)) arm)
+                  (literal-lookup/keyword-map-read-type analysis address expected actual-type))))))
+      (open-map-read analysis address expected op)))
 
 
 (defn- compiled-closure-origin
@@ -599,9 +671,13 @@
         _ (doseq [[address entries] routes]
             (when-not (= 1 (count entries)) (reject! :duplicate-input-route {:address address})))
         routes (update-vals routes first)
-        expressions (into {} (mapcat (fn [[use-path node]]
-                                       (lower-tree analysis routes [(first root) use-path]
-                                                   (:configured-contract node) []))) (:scopes analysis))
+        expressions (into {} (map (fn [[address {:keys [type op] :as expression}]]
+                                    [address (cond-> expression
+                                               (hiccup-tail? analysis address type op)
+                                               (assoc :type [:list hiccup-elements]))]))
+                          (mapcat (fn [[use-path node]]
+                                    (lower-tree analysis routes [(first root) use-path] (:configured-contract node) []))
+                                  (:scopes analysis)))
         scopes (into {} (map (fn [[use-path node]]
                                (let [scope [(first root) use-path]]
                                  [scope (assoc (implementation! expressions scope

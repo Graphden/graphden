@@ -185,8 +185,9 @@
 
 (defn evidence
   ([entries resolve-named] (evidence entries resolve-named {}))
-  ([entries resolve-named aliases]
-   (let [forms (mapcat (fn [{:keys [contract source]}] (cons (:return-type source) (map :type (:fields contract)))) (vals entries))]
+  ([entries resolve-named aliases] (evidence entries resolve-named aliases []))
+  ([entries resolve-named aliases rule-types]
+   (let [forms (concat rule-types (mapcat (fn [{:keys [contract source]}] (cons (:return-type source) (map :type (:fields contract)))) (vals entries)))]
      (loop [pending (into (vec (mapcat nested-type-names forms)) (vals aliases))
             seen #{}
             frozen {:aliases {} :alias-ids {} :fns {} :type-rows {} :type-origins {}}]

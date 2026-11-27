@@ -8,7 +8,8 @@
     [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
     [graphden.types.core :as types]
-    [graphden.types.reference :as reference])
+    [graphden.types.reference :as reference]
+    [graphden.types.validator :as validator])
   (:import
     (java.nio.charset
       StandardCharsets)
@@ -34,6 +35,24 @@
                 (true? (:graphden.input/local-type-rule (meta callback)))
                 (identical? (get-in signature [:local-type-rule-evidence rule]) callback)))
           (select-keys signature [:return-type-rule :slot-types-rule :nav-types-rule])))
+
+
+(defn validated-type-argument
+  "An audited rule can use a bound argument as a runtime type declaration."
+  [entry]
+  (get (meta (:return-type-rule entry)) :graphden.input/validated-type-argument))
+
+
+(defn- check-rule-type!
+  [entry bindings]
+  (when-let [argument (validated-type-argument entry)]
+    (let [{:keys [value value-present]} (get bindings argument)]
+      (when (and value-present (some? value) (not (types/primitive? value)))
+        ;; The native rule conservatively falls back for unsupported types.
+        ;; A missing frozen alias cannot establish that the legacy rule did so.
+        (try (validator/checked-type value)
+             (catch clojure.lang.ExceptionInfo _
+               (context/reject! :rule-type-source-required {:fn-id (:fn-id entry)})))))))
 
 
 (defn- names-at
@@ -265,6 +284,7 @@
                       (and stored-return (not (:infer-return? generated-list)))
                       (assoc :return-type (types/resolve renaming (variables/type-in-scope implementation-scope stored-return))))
         facts (binding-facts graph scope argument-paths)
+        _ (check-rule-type! root-entry (:bindings-info facts))
         result (infer-signature
                  (assoc facts :fn-id (:fn-id node) :root-entry root-entry
                         :signature-view (frozen-view ctx graph base-fn-id root-entry)

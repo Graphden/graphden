@@ -527,5 +527,6 @@
                           :taint-propagate? true}
    :is-a? {:impl is-a?-fn :taint-propagate? true}
    :ensure-type {:impl ensure-type-fn
-                 :return-type-rule ensure-type-return-rule
+                 :return-type-rule (with-meta ensure-type-return-rule {:graphden.input/validated-type-argument :type})
+                 :local-type-rules #{:return-type-rule}
                  :taint-propagate? true}})

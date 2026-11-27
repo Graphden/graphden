@@ -1,6 +1,7 @@
 (ns graphden.input.signatures-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.input.context :as context]
     [graphden.input.signatures :as signatures]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]))
@@ -25,6 +26,22 @@
     (is (signatures/local-type-rules? captured))
     (is (not (signatures/local-type-rules? (assoc captured :return-type-rule (fn [_ default] default)))))
     (is (signatures/local-type-rules? {:return-type-rule nil}))))
+
+
+(deftest literal-validator-rules-require-their-frozen-type-definition
+  (let [rule (with-meta (fn [_ fallback] fallback) {:graphden.input/validated-type-argument :type})
+        signature {:fn-id (random-uuid) :return-type-rule rule}
+        prove (fn [aliases facts]
+                (context/call-with-types {:aliases aliases}
+                                         (fn []
+                                           (try (#'signatures/check-rule-type! signature facts) :checked
+                                                (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))))
+        given (fn [value] {:type {:value value :value-present true}})]
+    (is (= :checked (prove {} (given [:map :text :text]))))
+    (is (= :checked (prove {:tag :text} (given [:list :tag]))))
+    (is (= :rule-type-source-required (prove {} (given [:list :tag]))))
+    (is (= :checked (prove {} {:type {:type :any}})))
+    (is (= :checked (prove {} (given :int))))))
 
 
 (deftest abi-paths-read-partial-records-without-parsing-literal-data-test

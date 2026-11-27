@@ -439,9 +439,20 @@
             (:local-type-rule-aliases signature {}))))
 
 
+(defn- rule-type-forms
+  [entries roots]
+  (let [fields (into #{} (keep (fn [[id {:keys [contract]}]]
+                                 (when-let [argument (signatures/validated-type-argument (get roots id))]
+                                   (some #(when (= argument (:name %)) (:id %)) (:fields contract))))) entries)]
+    (for [entry (vals entries)
+          {:keys [target-path value-present value]} (:bindings entry)
+          :when (and value-present (= 1 (count target-path)) (contains? fields (first target-path)))]
+      value)))
+
+
 (defn- verified-context
   [package entries resolve-named roots]
-  (let [named (named-types/evidence entries resolve-named (rule-type-aliases entries roots))
+  (let [named (named-types/evidence entries resolve-named (rule-type-aliases entries roots) (rule-type-forms entries roots))
         rows-by-id (group-by :id (mapcat :declaration-records (vals entries)))]
     (doseq [entry (vals entries) :when (nil? (:list-implementation entry))]
       (check-type-provenance! (:alias-ids named) rows-by-id entry))

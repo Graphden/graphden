@@ -185,6 +185,35 @@
     (is (= "empty" (legacy {:test false}) (canonical {:test false})))))
 
 
+(deftest an-inline-scoped-reference-keeps-its-authored-pin-and-order
+  (let [body {:parent :if
+              :args {:then :str-trim :else {:value "empty"}
+                     :string {:type :text :ref :producer}}}
+        source (into (declarations "packages/core/logic/fns.edn" #{:if :const})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             (declarations "packages/core/strings/fns.edn" #{:str-trim})
+                             [{:namespace "fixture" :name :producer :parent :const
+                               :args {:value " trim me "} :return-type :text}
+                              {:namespace "fixture" :name :choose-inline :parent :const
+                               :args {:value body}}]))
+        root (ids/fn-id "fixture" :choose-inline)
+        child (parse/inline-declaration body [:choose-inline :value] "fixture")
+        child-id (ids/fn-id "fixture" (:name child))
+        compile-owner (fn [package owner roots implementations]
+                        (let [migrated (snapshot/with-certified-owner package owner roots)
+                              record (get-in migrated [:closure-baselines owner])
+                              inline (first (vals (get-in record [:v2 :inline-definitions])))
+                              target (ids/slot-id (ids/fn-id "core.strings" :str-trim) :string)
+                              row (get-in inline [:scoped-inputs [:then :string] :row])]
+                          (is (= child-id (:fn-id inline)))
+                          (is (= [(ids/binding-id child-id target) (ids/primitive-fn-id :text)]
+                                 ((juxt :id :type-override-fn-id) row)))
+                          (execution/compile-package migrated owner roots implementations)))
+        {:keys [legacy canonical]} (runtimes source root compile-owner)]
+    (is (= "trim me" (legacy {:test true}) (canonical {:value {:test true}})))
+    (is (= "empty" (legacy {:test false}) (canonical {:value {:test false}})))))
+
+
 (deftest an-original-reference-type-refines-the-binding-before-execution
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:const})
                      (concat (declarations "packages/core/collections/fns.edn" #{:first})

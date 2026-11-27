@@ -241,6 +241,13 @@
        (= type (get-in input [(first (second form)) :type]))))
 
 
+(defn- scoped-reference-type?
+  [form assertion]
+  (and (vector? form) (= 2 (count form)) (= :ref (first form))
+       (keyword? (second form)) (map? assertion) (= #{:type} (set (keys assertion)))
+       (configuration-type? (:type assertion))))
+
+
 (defn- valid-inline-configuration?
   [{:keys [bind configure input legacy-forms legacy-scope-names] :as body}]
   (or (not (contains? body :configure))
@@ -251,7 +258,8 @@
                            spelling (get legacy-forms field)
                            annotation? (and (vector? spelling) (= :annotation (first spelling)))]
                        (and (simple-keyword? field)
-                            (or annotation? (and local? (contains? bind field)))
+                            (or annotation? (and local? (contains? bind field))
+                                (and (not local?) (scoped-reference-type? (get bind path) spec)))
                             (map? spec) (every? #{:type :description} (keys spec))
                             (or (contains? spec :type) annotation? (described-rename? spelling))
                             (or (not (contains? spec :description)) (string? (:description spec)))
@@ -319,12 +327,14 @@
     (let [local (filter simple-keyword? (keys bind))
           scoped-binds (remove simple-keyword? (keys bind))
           scoped-configs (filter #(and (vector? %) (< 1 (count %))) (keys configure))
-          scoped (concat scoped-binds scoped-configs)
+          both (filter #(contains? bind %) scoped-configs)
+          scoped (set (concat scoped-binds scoped-configs))
           copies (or legacy-scope-copies {})
           names (or legacy-scope-names {})]
       (when (and (map? names) (map? copies)
-                 (= (set scoped) (into (set (keys names)) (keys copies)))
+                 (= scoped (into (set (keys names)) (keys copies)))
                  (= (count scoped) (+ (count names) (count copies)))
+                 (every? #(scoped-reference-type? (get bind %) (get configure %)) both)
                  (or (seq scoped) (not (contains? body :legacy-scope-names)))
                  (or (seq copies) (not (contains? body :legacy-scope-copies)))
                  (every? (fn [[copy origin]]
@@ -368,7 +378,7 @@
                 originals (mapv (fn [[key-path form]]
                                   (let [field (get source-fields key-path)]
                                     (when-let [[original] (original-leaf form (get legacy-forms field)
-                                                                         (get configure [field]) input
+                                                                         (get configure (if (vector? key-path) key-path [field])) input
                                                                          (vector? key-path))]
                                       [field original])))
                                 bind)
@@ -453,7 +463,7 @@
                                     (= (select-keys raw [:type :description]) (get configure config-path))
                                     (contains? #{#{:as} #{:as :description} #{:as :type} #{:as :type :description}} (set (keys raw))))
                              [k target ::annotation [:annotation (vec (keys raw))]]
-                             (when-let [[form spelling] (migrated-leaf raw expression (get configure [k]))]
+                             (when-let [[form spelling] (migrated-leaf raw expression (get configure config-path))]
                                (if (and (vector? target) (= :value (first expression)) (= raw form) (nil? spelling))
                                  [k target expression :bare-value]
                                  [k target form spelling])))))

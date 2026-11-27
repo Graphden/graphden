@@ -194,6 +194,7 @@
                    ;; Pins on binding rows are checked by check-type-provenance!.
                    (every? (fn [config]
                              (or (nil? (:row config))
+                                 (and (:address config) (= "ref" (get-in config [:row :expression-kind])))
                                  (exact-annotation? (:owner entry) (:contract child) config)))
                            (vals (:configurations child))))
       (reject! :unsupported-scope-declaration fn-id))

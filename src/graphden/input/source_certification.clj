@@ -1,6 +1,7 @@
 (ns graphden.input.source-certification
   "Certify supported legacy scope rewrites in the order their proofs require."
   (:require
+    [graphden.input.form-query :as form-query]
     [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.source :as source]
@@ -42,6 +43,7 @@
   (try
     {:package (or (query/certify package id roots)
                   (query/certify package id roots query-inline/prepare)
+                  (query/certify package id roots form-query/prepare)
                   (cond
                     (= :joint field) (snapshot/with-certified-owner package id roots)
                     field (snapshot/with-migrated-forwarding package id field roots)

@@ -4,6 +4,7 @@
   (:require
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as compile]
+    [graphden.input.form-query :as form-query]
     [graphden.input.generated-source :as generated]
     [graphden.input.ir :as ir]
     [graphden.input.list-builder :as builder]
@@ -69,6 +70,11 @@
 (defn- compile-normalized
   [{:keys [package roots proof generated-source]} owner implementations]
   (let [frozen (snapshot/freeze-source-analysis package [owner] roots)
+        frozen (if-let [prior (:form-callback proof)]
+                 (let [{:keys [frozen proof]} (form-query/checked-form package frozen owner)]
+                   (when-not (= prior proof) (ir/reject! :form-source-mismatch {}))
+                   frozen)
+                 frozen)
         checked (analysis/analyze-effective-input (:context frozen) owner (:options frozen))
         compiled (compile-frozen frozen checked implementations)]
     (cond-> (assoc compiled :input-origin proof)
@@ -86,7 +92,8 @@
   [package root roots implementations]
   (if-let [expansion (or (query/cached package root roots)
                          (query/prepare package root roots)
-                         (query-inline/prepare package root roots))]
+                         (query-inline/prepare package root roots)
+                         (form-query/prepare package root roots))]
     (compile-normalized expansion root implementations)
     (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
       (compile-frozen frozen (check-legacy-invocation frozen root) implementations))))
@@ -117,7 +124,7 @@
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
                             (if (query/cached p id roots)
                               p
-                              (or (query/certify p id roots) (query/certify p id roots query-inline/prepare) p))))
+                              (or (query/certify p id roots) (query/certify p id roots query-inline/prepare) (query/certify p id roots form-query/prepare) p))))
                         package (:fns legacy-module))
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)

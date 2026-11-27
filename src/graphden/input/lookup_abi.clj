@@ -59,6 +59,16 @@
       (when (= (:fn-id expression) (:fn-id node))
         (identity-record-source node [[root path] value-path] expected-type)))))
 
+
+(defn- independent-key-domain
+  [node variable expected field native-field]
+  (when (and (not (types/type-any? #{variable} (get-in node [:signature :return])))
+             (not-any? #(and (not= field (:id %)) (not= native-field (:id %))
+                             (types/type-any? #{variable} (:type %)))
+                       (get-in node [:configured-contract :fields])))
+    (types/resolve {variable :any} expected)))
+
+
 (defn- projected-collection-domain
   [analysis scopes [scope path :as source] type [reader reader-path :as address]]
   (let [{:keys [root-entry base-fn-id argument-paths]} (get scopes scope)
@@ -72,12 +82,36 @@
                (= source (get-in binding [:reference :source]))
                (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
                (= type (:expected-type binding) (get-in binding [:reference :actual-type])
-                  (variables/type-in-scope scope declared))
-               (not (types/type-any? #{binder} (get-in node [:signature :return])))
-               (not-any? #(and (not (contains? #{(first path) (first native-path)} (:id %)))
-                               (types/type-any? #{binder} (:type %)))
-                         (get-in node [:configured-contract :fields])))
-      (types/resolve {binder :any} type))))
+                  (variables/type-in-scope scope declared)))
+      (independent-key-domain node binder type (first path) (first native-path)))))
+
+
+(defn- dictionary-argument
+  [{:keys [fn-id name args return] module-ns :namespace :as entry}]
+  (or (collection-argument entry 'a)
+      (when (and (= fn-id (ids/fn-id "core.collections" :update-vals))
+                 (= [module-ns name] ["core.collections" :update-vals])
+                 (= return :any)
+                 (= args '{:m [:union :null [:map a :any]] :f [:fn {:value v} w :any :unknown]}))
+        {:argument :m :path [(ids/slot-id fn-id :m)]})))
+
+
+(defn collection-read-domain
+  "Reify an independent native dictionary-key binder at its argument or its same-scope projected alias."
+  [analysis [[_ scope :as owner] path :as address] expected op]
+  (let [node (get-in analysis [:scopes scope])
+        {:keys [root-entry base-fn-id argument-paths]} (:signature-source node)
+        {arg :argument native-path :path} (dictionary-argument root-entry)
+        binding (get-in node [:bindings [owner native-path]])
+        variable (variables/type-in-scope owner 'a)]
+    (when (and arg (or (= op :read) (and (= op :invoke) (= :update-vals (:name root-entry))))
+               (= base-fn-id (:fn-id root-entry)) (= native-path (get argument-paths arg))
+               (= expected (variables/type-in-scope owner (get-in root-entry [:args arg])))
+               (or (= native-path path)
+                   (and (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
+                        (= address (get-in binding [:reference :source]))
+                        (= expected (:expected-type binding)))))
+      (independent-key-domain node variable expected (first path) (first native-path)))))
 
 
 (defn single-collection-inputs

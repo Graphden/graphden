@@ -85,7 +85,7 @@
   ([package id roots prepare-expansion]
    (when-let [{:keys [original entry proof wrapper-origin] :as expansion} (prepare-expansion package id roots)]
      (let [before (first (:definitions (source/plan-module [original] (:prepared package))))
-           physical (select-keys proof [:owner-id :binding-id :slot-id :write-mask :reads :return-type-id])
+           physical (select-keys proof [:owner-id :binding-id :slot-id :write-mask :reads :return-type-id :form-fingerprint :form-callback])
            normalized (assoc entry :source original :identity id
                              :kind (if wrapper-origin :query-lookup-inline :query-lookup)
                              :origins (:origins before) :legacy (:legacy before)

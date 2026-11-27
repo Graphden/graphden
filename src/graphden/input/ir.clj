@@ -94,6 +94,9 @@
         (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
                          :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
             (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))
+            (and (types/union-type? expected)
+                 (contains? #{#{:null [:map :keyword :any]} #{:null [:map :any :any]} #{:null [:map :any :any] [:list :any]}}
+                            (set (types/union-members expected))))
             (and (types/union-type? expected) (seq (types/union-members expected))
                  (every? #{:null :bool :text :int :float :numeric :keyword [:list :any]}
                          (types/union-members expected)))
@@ -123,7 +126,8 @@
                         (types/list-type? actual-type) [:list :any])]
               (or (when (some #{arm} (types/union-members expected)) arm)
                   (literal-lookup/keyword-map-read-type analysis address expected actual-type))))))
-      (open-map-read analysis address expected op)))
+      (open-map-read analysis address expected op)
+      (lookup-abi/collection-read-domain analysis address expected op)))
 
 
 (defn- compiled-closure-origin

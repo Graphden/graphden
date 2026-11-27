@@ -59,6 +59,16 @@
                                                                          {:root (fn [_ _]) :child (fn [_ _])})})))
 
 
+(deftest nullable-unconstrained-map-operands-keep-their-structural-check
+  (let [check #(#'ir/field-read-type {} [[(random-uuid) []] []] % :read)]
+    (doseq [shape [[:union :null [:map :keyword :any]]
+                   [:union :null [:map :any :any]]
+                   [:union [:map :any :any] [:list :any] :null]]]
+      (is (= shape (check shape))))
+    (is (nil? (check '[:union :null [:map a :any]])))
+    (is (nil? (check [:union :null [:map :text :int]])))))
+
+
 (deftest checked-plan-seam-lowers-with-free-required-parameters
   (let [model (structural-model)
         plan (lower model)]

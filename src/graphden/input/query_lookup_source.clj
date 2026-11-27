@@ -49,12 +49,19 @@
       result)))
 
 
+(defn closure-evidence
+  "Fingerprint the original executable graph and return its required visibility set."
+  [graph root]
+  (when-let [rows (closure-rows graph root)]
+    {:fingerprint (migration/fingerprint (group-by :kind (map #(dissoc % :description) rows)))
+     :targets (into #{} (comp (filter #(= :fn (:kind %))) (map :id)) rows)}))
+
+
 (defn- reviewed-targets
   [graph]
-  (when-let [rows (closure-rows graph query-id)]
-    (when (= "01f40c0422914248794ee93d02af105ce5c7f8e0b595390190ab3f376e2c664a"
-             (migration/fingerprint (group-by :kind (map #(dissoc % :description) rows))))
-      (into #{} (comp (filter #(= :fn (:kind %))) (map :id)) rows))))
+  (let [{:keys [fingerprint targets]} (closure-evidence graph query-id)]
+    (when (= "01f40c0422914248794ee93d02af105ce5c7f8e0b595390190ab3f376e2c664a" fingerprint)
+      targets)))
 
 
 (def ^:private branches

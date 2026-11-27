@@ -734,6 +734,14 @@
           plans)))
 
 
+(defn- direct-list-operand?
+  "Match a generated operand in the immediate value scope below its reader's owner."
+  [scopes [[owner path] field-path] [parent-scope]]
+  (let [{:keys [argument-paths generated-list]} (get scopes [owner path])]
+    (and (seq path) (= [owner (pop path)] parent-scope)
+         (some #(= field-path (get argument-paths %)) (:operands generated-list)))))
+
+
 (defn- frame-layouts
   [root scopes expressions closures program required]
   (let [callbacks (into {} (map (juxt :scope identity)) (vals closures))
@@ -769,7 +777,9 @@
                 :read (and (not= local (if (external source) (owner (first source)) (address-owner source)))
                            (or (:detachable? (get callbacks local))
                                (and (not= root (first source))
-                                    (not (and (contains? lexical-addresses source) (= (first address) (first source))))
+                                    (not (and (contains? lexical-addresses source)
+                                              (or (= (first address) (first source))
+                                                  (direct-list-operand? scopes address source))))
                                     (not= source (get-in callbacks [local :capture-sources address])))))
                 :invoke (not= local (owner scope))
                 false)

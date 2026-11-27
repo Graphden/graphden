@@ -1965,3 +1965,23 @@
       (sync/register-type-aliases! originals)
       (let [{:keys [legacy canonical]} (runtimes originals root compile-owner)]
         (is (= {:a {:x 1 :y 2}} (legacy {}) (canonical {})))))))
+
+
+(deftest captured-merge-defaults-can-be-computed-in-the-declaring-invocation
+  (let [root (ids/fn-id "fixture" :settings)
+        defaults {:namespace "fixture" :name :settings-defaults :parent :const
+                  :return-type [:map :keyword :any]
+                  :args {:value {:x 0 :y 2}}}
+        merge-settings {:namespace "fixture" :name :settings :parent :merge-in
+                        :args {:m {:value {:a {:x 1}}} :path [{:value :a}] :defaults :settings-defaults}}
+        originals (vec (concat (declarations "packages/core/refinements/fns.edn" #{:path-segment})
+                               (declarations "packages/core/collections/fns.edn" #{:merge-in :_merge-in-fn :merge :update-in})
+                               (declarations "packages/core/logic/fns.edn" #{:const})
+                               [defaults merge-settings]))
+        compile-owner (fn [{:keys [prepared]} owner roots impls]
+                        (let [{:keys [package]} (certification/verify-plan prepared originals {} roots)]
+                          (execution/compile-package package owner roots impls)))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! originals)
+      (let [{:keys [legacy canonical]} (runtimes originals root compile-owner)]
+        (is (= {:a {:x 1 :y 2}} (legacy {}) (canonical {})))))))

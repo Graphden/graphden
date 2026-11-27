@@ -294,6 +294,33 @@
                            {:reference {:mode :projection :source item}}))))))
 
 
+(deftest a-generated-list-operand-can-read-its-parent-callables-captured-initializer
+  (let [id (random-uuid)
+        root [id []]
+        callback [id [(random-uuid)]]
+        child (fn [parent] [id (conj (second parent) (random-uuid))])
+        producer (child callback)
+        builder (child callback)
+        operand [(random-uuid)]
+        source [callback [(random-uuid)]]
+        reader [builder operand]
+        creator [root [(random-uuid)]]
+        scopes {root {} callback {} producer {}
+                builder {:generated-list {:operands [:item-0]}
+                         :argument-paths {:item-0 operand}}}
+        expressions {source {:op :invoke :scope producer :lexical-value-owner root}
+                     reader {:op :read :source source}}
+        closures {creator {:scope callback :record-addresses #{}}}
+        layouts #(#'ir/frame-layouts root %1 expressions %2 [] #{})
+        rejection (fn [scopes closures]
+                    (try (layouts scopes closures)
+                         (catch clojure.lang.ExceptionInfo e (:code (ex-data e)))))]
+    (is (= #{root callback} (set (keys (layouts scopes closures)))))
+    (is (= :cross-frame-expression (rejection (update scopes builder dissoc :generated-list) closures)))
+    (is (= :cross-frame-expression (rejection (assoc-in scopes [builder :generated-list :operands] []) closures)))
+    (is (= :cross-frame-expression (rejection scopes (assoc-in closures [creator :detachable?] true))))))
+
+
 (deftest polymorphic-closure-contract-must-agree-for-every-substitution
   (let [actual '[:fn {:value b} [:union :null a b] #{} #{:jvm-server}]
         expected (assoc actual 3 :any 4 :unknown)

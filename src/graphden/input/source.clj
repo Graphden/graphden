@@ -97,9 +97,13 @@
 
 
 (defn- ref-index
-  [context]
-  (into {} (keep (fn [[ref id]] (when (qualified-keyword? ref) [id ref])))
-        (:name->id context)))
+  [{names :name->id}]
+  (into {}
+        (keep (fn [[ref id]]
+                (when (qualified-keyword? ref)
+                  (let [bare (keyword (name ref))]
+                    [id (if (and (= "" (namespace ref)) (= id (get names bare))) bare ref)]))))
+        names))
 
 
 (defn with-reference-index

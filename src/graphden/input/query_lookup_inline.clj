@@ -140,7 +140,9 @@
   [package {:keys [source owner site child declaration prior support]} roots]
   (when-let [{child-package :package native :roots :keys [proof] :as expanded}
              (query/prepare (assoc-in package [:originals child] [declaration]) child roots)]
-    (let [reference (keyword (or (:namespace declaration) "") (name (:name declaration)))
+    (let [reference (if (seq (:namespace declaration))
+                      (keyword (:namespace declaration) (name (:name declaration)))
+                      (:name declaration))
           outer (assoc-in source site reference)
           forms (->> (concat [outer] support (mapcat val (:originals child-package)))
                      distinct (sort-by (juxt :namespace :name)) vec)

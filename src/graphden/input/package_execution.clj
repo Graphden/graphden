@@ -105,6 +105,14 @@
     (ir/reject! :staged-function-not-visible {})))
 
 
+(defn- private-replay-targets
+  [package owners]
+  (into #{}
+        (comp (mapcat #(get-in package [:query-lookups % :visibility]))
+              (remove #(contains? (:declarations package) %)))
+        owners))
+
+
 (defn compile-staged-module
   "Offline replay of one staged module against original package preparation.
    Supply the trusted legacy module and package index, the staged bytes and
@@ -140,18 +148,18 @@
       (let [frozen (snapshot/freeze-source-analysis package [root] roots)
             executable (get-in frozen [:options :implementations])
             reached-owners (filter executable owners)
-            private-targets (into #{} (mapcat #(get-in package [:query-lookups % :generated-ids])) reached-owners)]
+            ;; Verified source expansion also introduces anonymous branches.
+            ;; Original declarations and all native donors still require visibility.
+            visible-targets (into visible-fn-ids (private-replay-targets package reached-owners))]
         (when (and generated-source (empty? reached-owners))
           (ir/reject! :generated-source-owner-required {}))
-        (when-not (every? (fn [[target-id {:keys [base-fn-id generated-list]}]]
-                            ;; The verified authored owner grants access to its
-                            ;; generated list, never to its separate operand refs.
-                            (if generated-list
-                              (and (= target-id base-fn-id) (contains? visible-fn-ids (:owner-id generated-list)))
-                              (and (or (contains? visible-fn-ids target-id) (contains? private-targets target-id))
-                                   (contains? visible-fn-ids base-fn-id))))
-                          executable)
-          (ir/reject! :staged-function-not-visible {}))
+        (doseq [[target-id {:keys [base-fn-id generated-list]}] executable]
+          ;; The checked owner grants visibility to its generated list.
+          ;; Each operand reference is still checked independently.
+          (when-not (if generated-list
+                      (and (= target-id base-fn-id) (contains? visible-targets (:owner-id generated-list)))
+                      (and (contains? visible-targets target-id) (contains? visible-fn-ids base-fn-id)))
+            (ir/reject! :staged-function-not-visible {:fn-id target-id :base-fn-id base-fn-id})))
         (cond-> (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
                        :staged-source {:sha256 sha256 :namespace (:namespace module)})
           generated-source (assoc :generated-source (select-keys generated-source [:sha256])))))))

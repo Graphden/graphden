@@ -252,7 +252,7 @@
         record {:id :uuid}
         facts (fn [rich] {:bindings-info {:coll {:type rich :address address}}})
         node (fn [rich] {:bindings {address {:expected-type rich :reference {:mode :projection :actual-type rich}}}})
-        specialize (fn [entry n renaming f] (#'signatures/projected-lookup-signature entry n scope abi renaming f))]
+        specialize (fn [entry n renaming f] (#'signatures/projected-lookup-signature entry {} n scope abi renaming f))]
     (doseq [[rich key-type] [[record :any] [[:map :text :int] :text] [[:union :null [:map :text :text]] :text]]]
       (is (= #{:null [:list :any] [:map key-type :any]}
              (set (rest (get-in (specialize root (node rich) {} (facts rich)) [:args :coll]))))))

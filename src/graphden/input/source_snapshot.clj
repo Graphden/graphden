@@ -165,9 +165,17 @@
   (let [[field position] path
         id (:fn-id child)
         entry (owned-declaration child)
-        edge (get edges (ids/binding-id fn-id field))]
+        ;; A certified lexical initializer keeps the binding UUID derived from
+        ;; its stored slot while its V2 path addresses the actual reader.
+        proof (get-in package [:closure-baselines fn-id])
+        {:keys [slot-id row]} (:legacy-leaf proof)
+        lexical? (and (= :authored-source-equivalent (:verification proof))
+                      (uuid? slot-id) (= path (:target-path row)) (= [] (:scope-path row))
+                      (= (:fn-id child) (:ref-fn-id row)))
+        binding-id (ids/binding-id fn-id (if lexical? slot-id field))
+        edge (get edges binding-id)]
     (when-not (and (uuid? id) (= fn-id (:fn-id edge)) (= "ref" (:expression-kind edge))
-                   (= (ids/binding-id fn-id field) (:id edge))
+                   (= binding-id (:id edge)) (or (not lexical?) (migration/same-edn? row edge))
                    (case (count path)
                      1 (inline-binding? parent field edge child)
                      2 (list-signature/inline-operand? (get fragments (:ref-fn-id edge)) edge position id)

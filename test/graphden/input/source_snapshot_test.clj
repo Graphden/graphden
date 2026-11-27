@@ -12,6 +12,7 @@
     [graphden.input.list-builder :as list-builder]
     [graphden.input.list-execution :as list-execution]
     [graphden.input.list-signature :as list-signature]
+    [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
     [graphden.input.source-named-types :as named-types]
     [graphden.input.source-package-fixtures :as fixtures]
@@ -848,6 +849,16 @@
       (is (= [:ref :fixture/items] (get-in migrated [:proposed :bind :coll])))
       (is (= [(ids/binding-id id old-slot) [reader]] ((juxt :id :target-path) row)))
       (is (= :authored-source-equivalent (:verification inline-result)))
+      (let [certified (assoc-in package [:closure-baselines inline-id] inline-result)
+            implementations (into {} (for [{:keys [namespace name]} primitives]
+                                       [(ids/fn-id namespace name) (get-in @loaded-bases [name :impl])]))
+            v2 (:invoke (execution/compile-package certified inline-id signatures implementations))
+            v1 (get (eager/compile-all (assoc lookup :base-fns (registry/compute-base-fns-map @loaded-bases))) inline-id)]
+        (is (= true (v1 {} {}) (v2 {} {})))
+        (is (= :unsupported-scope-declaration
+               (:code (failure #(snapshot/freeze-closure
+                                  (assoc-in certified [:closure-baselines inline-id :legacy-leaf :slot-id] reader)
+                                  [inline-id] signatures))))))
       (is (= (ids/binding-id inline-id old-slot) (:id inline-row)))
       (is (= (:ref-fn-id inline-row) (:fn-id inline-child)))
       (is (= :authored-source-equivalent (:verification outer-proof)))

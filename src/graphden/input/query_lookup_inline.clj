@@ -59,28 +59,33 @@
 
 (defn- public-subtree?
   [checked prefix]
-  (let [routes (get-in checked [:public-input :routes])]
+  (let [routes (get-in checked [:public-input :routes])
+        request-path (conj prefix :request)
+        depth (count request-path)]
     (and (= :reference-inputs (get-in routes [prefix :kind]))
-         (= #{(conj prefix :request)}
-            (into #{} (keep (fn [[path {:keys [kind]}]] (when (= :input-field kind) path))) routes)))))
+         (every? (fn [[path {:keys [kind]}]]
+                   (or (not= :input-field kind)
+                       (and (<= depth (count path)) (= request-path (subvec path 0 depth)))))
+                 routes))))
 
 
 (defn- wrapper-origin
   [graph owner child field prior current]
-  (if (migration/same-edn? prior current)
-    {}
-    (let [{:keys [stored-slot declarations binding]} (legacy-use/select-binding graph owner)
-          [native-slot :as path] (:target-path binding)
-          old-id (:id binding)
-          native-id (when (uuid? native-slot) (ids/binding-id owner native-slot))
-          original (some #(when (= old-id (:id %)) %) prior)]
-      (when (and (= [[owner field]] declarations) (= [native-slot] path)
-                 (= :input-binding (:kind binding)) (= "ref" (:expression-kind binding))
-                 (= child (:ref-fn-id binding) (:ref-fn-id original))
-                 (= stored-slot (:slot-id original)) (uuid? old-id) (uuid? native-id)
-                 (migration/same-edn? (mapv #(cond-> % (= old-id (:id %)) (assoc :id native-id :slot-id native-slot)) prior)
-                                      current))
-        {:binding binding :native-id native-id :origin-slot stored-slot}))))
+  (let [{:keys [stored-slot declarations binding]} (legacy-use/select-binding graph owner)
+        [native-slot :as path] (:target-path binding)
+        old-id (:id binding)
+        native-id (when (uuid? native-slot) (ids/binding-id owner native-slot))
+        original (some #(when (= old-id (:id %)) %) prior)
+        covered (when (and (= [[owner field]] declarations) (= [native-slot] path)
+                           (= :input-binding (:kind binding)) (= "ref" (:expression-kind binding))
+                           (= child (:ref-fn-id binding) (:ref-fn-id original))
+                           (= stored-slot (:slot-id original)) (uuid? old-id) (uuid? native-id))
+                  {:ext-name field :slot-id native-slot})]
+    (cond
+      (migration/same-edn? prior current) (if covered {:covered covered} {})
+      (and covered (migration/same-edn? (mapv #(cond-> % (= old-id (:id %)) (assoc :id native-id :slot-id native-slot)) prior)
+                                        current))
+      {:covered covered :binding binding :native-id native-id :origin-slot stored-slot})))
 
 
 (defn- retain-wrapper-binding
@@ -121,14 +126,14 @@
 
 
 (defn- same-public-readers?
-  [graph owner field origin proof]
+  [graph owner {:keys [covered]} proof]
   (let [routes (surface/surface-entries owner graph)
-        path (get-in origin [:binding :target-path])
-        covered (when path {:ext-name field :slot-id (first path)})
-        exposed (if covered (filterv #(not= covered %) routes) routes)]
-    (and (or (nil? covered) (= 1 (- (count routes) (count exposed))))
-         (migration/same-edn? (:boundary proof) exposed)
-         (= (:accepted proof) (:accepted (surface/surface-names owner graph))))))
+        exposed (when covered (filterv #(not= covered %) routes))
+        boundary (:boundary proof)]
+    (and (= (:accepted proof) (:accepted (surface/surface-names owner graph)))
+         (or (migration/same-edn? boundary routes)
+             (and exposed (= 1 (- (count routes) (count exposed)))
+                  (migration/same-edn? boundary exposed))))))
 
 
 (defn- enclosing-expansion
@@ -146,7 +151,7 @@
                          (assoc :legacy-graph (readers/owner-index prepared owner)))
           graph (:legacy-graph package)
           origin (wrapper-origin graph owner child (peek site) prior (original-rows normalized owner))]
-      (when (and origin (same-public-readers? graph owner (peek site) origin proof))
+      (when (and origin (same-public-readers? graph owner origin proof))
         (when-let [wrapper (checked-wrapper normalized owner child [(peek site)] proof native origin)]
           (-> (merge expanded wrapper {:original source :expanded outer :wrapper-origin origin})
               (update :donors into (get-in graph [:fn-map owner :parent-ids]))))))))

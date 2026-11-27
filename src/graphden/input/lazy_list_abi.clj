@@ -2,22 +2,26 @@
   "Select native lazy element delivery for a checked generated list occurrence."
   (:require
     [graphden.input.list-builder :as builder]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
 
 
-(def ^:private cond-id (ids/fn-id "core.logic" :cond))
-(def ^:private clauses-id (ids/slot-id cond-id :clauses))
+(def ^:private consumers
+  (into {} (for [[module name argument] [["core.logic" :cond :clauses] ["core.concurrency" :do :steps]]
+                 :let [id (ids/fn-id module name)]]
+             [id {:module module :name name :argument argument :field (ids/slot-id id argument)}])))
 
 
-(defn- clauses-consumer?
+(defn- list-consumer
   [{:keys [base-fn-id argument-paths root-entry]}]
-  (and (= cond-id base-fn-id (:fn-id root-entry))
-       (= ["core.logic" :cond] ((juxt :namespace :name) root-entry))
-       (= {:clauses [clauses-id]} argument-paths)
-       (= {:clauses [:list :any]} (:args root-entry))
-       (= :any (:return root-entry))
-       (= #{} (:effects root-entry))
-       (= #{:clauses} (:lazy-seq-args root-entry))))
+  (when-let [{:keys [module name argument field] :as consumer} (consumers base-fn-id)]
+    (when (and (= base-fn-id (:fn-id root-entry))
+               (= [module name] ((juxt :namespace :name) root-entry))
+               (= {argument [field]} argument-paths) (= {argument [:list :any]} (:args root-entry))
+               (= :any (:return root-entry)) (= #{} (:effects root-entry))
+               (= #{argument} (:lazy-seq-args root-entry))
+               (or (= :cond name) (true? (:taint-propagate? root-entry))))
+      consumer)))
 
 
 (defn- results-covered?
@@ -36,11 +40,11 @@
                   (or (= :any return-type) (some literal-test (take-nth 2 operands))))))))
 
 
-(defn- generated-clauses?
-  [producer edge tail]
+(defn- generated-operands?
+  [field producer edge tail]
   (let [{:keys [base-fn-id root-entry argument-paths generated-list]} producer
         {:keys [owner-id operands infer-return?]} generated-list
-        origin (when (uuid? owner-id) (builder/origin owner-id clauses-id))
+        origin (when (uuid? owner-id) (builder/origin owner-id field))
         args (assoc (zipmap operands (repeat :any)) :tail [:list :any])]
     (and origin (vector? operands) (false? infer-return?)
          (= operands (mapv #(keyword (str "item-" %)) (range (count operands))))
@@ -58,20 +62,37 @@
        (select-keys (get-in analysis [:scopes (second scope) :signature-source]) abi))))
 
 
+(defn- steps-covered?
+  [analysis child paths tail return-type]
+  (let [facts (get-in analysis [:scopes (second child) :signature :resolved-bindings])]
+    (and (= :any return-type) (= (set (keys paths)) (set (keys facts)))
+         (every? (fn [[operand {:keys [address] :as fact}]]
+                   (and (= address [child (get paths operand)])
+                        (every? #(and (:type %) (not (types/contains-marker? (:type %))))
+                                (tree-seq :list-elements :list-elements fact))))
+                 facts)
+         (or (= :supplied (:op tail))
+             (= {:op :literal :value []} (select-keys tail [:op :value]))))))
+
+
 (defn delayed-producer
   "Return the checked producer scope only if delayed elements are private
-   to this cond. Its optional or literal tail still carries ordinary values."
+   to this native consumer. Its optional or literal tail carries ordinary values."
   [analysis expressions scopes consumer reads]
   (let [native (get scopes consumer)
-        address [consumer [clauses-id]]
+        {:keys [field name]} (list-consumer native)
+        address [consumer [field]]
         edge (get expressions address)
         child (:scope edge)
         producer (get scopes child)
         return-type (get-in analysis [:scopes (second consumer) :signature :return])
         tail (get expressions [child (get-in producer [:argument-paths :tail])])]
-    (when (and (clauses-consumer? native) (checked-scope? analysis consumer native)
+    (when (and field (checked-scope? analysis consumer native)
                (= :invoke (:op edge)) (= [:list :any] (:type edge))
                (not (contains? reads address)) (not (contains? reads [consumer []]))
                (fn? (:compile-delayed-list producer)) (checked-scope? analysis child producer)
-               (generated-clauses? producer edge tail) (results-covered? expressions edge producer tail return-type))
+               (generated-operands? field producer edge tail)
+               (if (= :do name)
+                 (steps-covered? analysis child (:argument-paths producer) tail return-type)
+                 (results-covered? expressions edge producer tail return-type)))
       child)))

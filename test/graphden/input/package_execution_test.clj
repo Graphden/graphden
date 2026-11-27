@@ -1339,6 +1339,53 @@
         (is (nil? (prove plan expressions scopes consumer (conj reads [consumer []]))))))))
 
 
+(deftest do-forces-steps-in-order-and-stops-at-the-first-error
+  (let [wait (fn [name ms] {:namespace "ordered" :name name :parent :sleep :args {:ms {:value ms}}})
+        root (ids/fn-id "ordered" :three-steps)
+        base (declarations "packages/core/concurrency/fns.edn" #{:do :sleep})
+        source (into base (concat (declarations "packages/core/logic/fns.edn" #{:const})
+                                  [(wait :first-wait 0) (wait :second-wait 1)
+                                   {:namespace "ordered" :name :result :parent :const :args {:value {:value "done"}}}
+                                   {:namespace "ordered" :name :three-steps :parent :do
+                                    :args {:steps {:append [:first-wait :second-wait :result] :closed true}}}]))
+        events (atom [])
+        fail? (atom false)
+        natives (-> @loaded
+                    (update-in [:sleep :impl]
+                               (fn [invoke]
+                                 (fn [args ctx]
+                                   (let [ms (runtime/resolve-arg args :ms)]
+                                     (swap! events conj ms)
+                                     (when (and @fail? (= 1 ms)) (throw (ex-info "Failed step" {:type :step-failed})))
+                                     (invoke args ctx)))))
+                    (update-in [:const :impl]
+                               (fn [invoke] (fn [args ctx] (swap! events conj :result) (invoke args ctx)))))
+        prove lazy-list/delayed-producer
+        witness (atom nil)
+        {:keys [legacy canonical analysis]} (with-redefs [lazy-list/delayed-producer
+                                                         (fn [& args] (reset! witness args) (apply prove args))]
+                                             (runtimes source root execution/compile-package natives))]
+    (is (contains? (get-in analysis [:scopes [] :signature :effects]) :time))
+    (doseq [invoke [legacy canonical] failed [false true]]
+      (reset! events [])
+      (reset! fail? failed)
+      (binding [executor/*effect-trace* (atom #{})]
+        (is (= (if failed :step-failed "done")
+               (try (invoke {}) (catch clojure.lang.ExceptionInfo ex (:type (ex-data ex))))))
+        (is (= (if failed [0 1] [0 1 :result]) @events))
+        (is (= #{:time} @executor/*effect-trace*))))
+    (let [[plan expressions scopes consumer reads] @witness
+          child (prove plan expressions scopes consumer reads)
+          operand (first (get-in scopes [child :generated-list :operands]))
+          path [:scopes (second child) :signature :resolved-bindings operand :type]]
+      (is (some? child))
+      (is (nil? (prove (assoc-in plan path [:secret :text]) expressions scopes consumer reads)))
+      (is (nil? (prove (assoc-in plan (conj (pop path) :list-elements) [{:type [:secret :text]}])
+                       expressions scopes consumer reads)))
+      (is (nil? (prove plan expressions (assoc-in scopes [consumer :root-entry :taint-propagate?] false) consumer reads))))
+    (is (= :lazy-sequence-abi-required (rejection-code #(runtimes base (ids/fn-id "core.concurrency" :do)))))))
+
+
 (deftest ordinary-numeric-list-remains-open-at-invocation
   (let [prefix {:namespace "fixture" :name :difference-prefix :parent :sub :args {:nums [20 3]}}
         suffix {:namespace "fixture" :name :difference-complete :parent :difference-prefix

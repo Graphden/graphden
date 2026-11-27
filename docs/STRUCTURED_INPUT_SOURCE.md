@@ -114,6 +114,11 @@ Metadata-only inline arguments use `[:annotation original-key-order]` in
 when annotations move to `:configure`. These source-spelling records reproduce
 the existing anonymous UUID; they do not create runtime bindings.
 
+For a renamed inline field with a description, `[:rename original-key-order]`
+retains the order of `:as`, `:description` and any authored `:type`.
+The reader recovers the alias from the projection and the metadata from
+`:configure` before checking the anonymous UUID.
+
 A type pin authored on an inline reference moves to the enclosing
 binding's `:configure`. The referenced declaration keeps its original UUID.
 For nested uses, `[:inline-type position]` records the pin's position when

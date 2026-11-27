@@ -4,6 +4,7 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.input.format :as format]
     [graphden.input.migration :as migration]
     [graphden.input.source :as source]
     [graphden.input.syntax :as syntax]
@@ -911,6 +912,36 @@
     (is (= {:x [:project [:alias]]} (get-in entry [:proposed :bind :x 1 :bind])))
     (is (= [original] (:target-path binding)))
     (is (= [alias-id] (:projection-path binding)))))
+
+
+(deftest described-inline-aliases-preserve-the-anonymous-id-and-key-order
+  (doseq [raw [(array-map :description "Exposed field" :type :text :as :alias)
+               (array-map :as :alias :description "Exposed field")]]
+    (let [sink (assoc-in base [:args :x] (get raw :type :any))
+          child {:parent :sink :args {:x raw}}
+          host {:name :host :namespace "demo" :parent :sink :args {:x child}}
+          entry (result (verified [sink host]) :host)
+          body (get-in entry [:proposed :bind :x 1])
+          restored (format/inline-origin body)]
+      (is (= :authored-source-equivalent (:verification entry)))
+      (is (= [:rename (vec (keys raw))] (get-in body [:legacy-forms :x])))
+      (is (= (seq raw) (seq (get-in restored [:args :x]))))
+      (is (nil? (format/inline-origin (update-in body [:configure [:x]] dissoc :description))))
+      (is (nil? (format/inline-origin (assoc-in body [:legacy-forms :x] [:rename [:as :description :description]]))))
+      (is (nil? (format/inline-origin (assoc-in body [:bind :x] [:value "other"])))))))
+
+
+(deftest an-inline-callable-pin-matches-its-own-projected-field
+  (let [type [:fn {} :text]
+        source {:parent :call-noargs :args {:func {:as :render :type type :description "Render"}}}
+        proposal {:bind {:func [:project [:render]]} :input {:render {:type type :required false}}
+                  :configure {[:func] {:type type :description "Render"}}}
+        body (format/migrate-inline source proposal)]
+    (is (= source (format/inline-origin body)))
+    (is (nil? (format/inline-origin (assoc-in body [:input :render :type] [:fn {} :int]))))
+    (is (nil? (format/inline-origin (-> body (assoc-in [:configure [:func] :type] '[:fn {} a])
+                                             (assoc-in [:input :render :type] '[:fn {} a])))))
+    (is (nil? (format/inline-origin (assoc-in body [:bind :func] [:ref :other]))))))
 
 
 (deftest nested-inline-order-survives-the-array-map-threshold

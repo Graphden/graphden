@@ -191,10 +191,24 @@
              (apply array-map (mapcat #(vector % (if (= % :append) items closed?)) wrapper)))])))))
 
 
+(defn- described-rename?
+  [spelling]
+  (and (vector? spelling) (= 2 (count spelling)) (= :rename (first spelling))
+       (let [order (second spelling)]
+         (and (vector? order) (= (count order) (count (set order)))
+              (contains? #{#{:as :description} #{:as :type :description}} (set order))))))
+
+
 (defn- original-leaf
-  [form spelling type input scoped?]
+  [form spelling assertion input scoped?]
   (cond
-    type (typed-origin form spelling type)
+    (described-rename? spelling)
+    (when (local-projection? form)
+      (let [order (second spelling)
+            fields (assoc assertion :as (first (second form)))]
+        (when (= (set order) (set (keys fields)))
+          [(apply array-map (mapcat (juxt identity fields) order))])))
+    (:type assertion) (typed-origin form spelling (:type assertion))
     (and (nil? spelling) (not (coll? form))) [form]
     (and (vector? form) (= 2 (count form)))
     (let [[op value] form]
@@ -214,8 +228,21 @@
         nil))))
 
 
+(defn- callable-input-type?
+  [value-type? type]
+  (and (vector? type) (= 3 (count type)) (= :fn (first type))
+       (fields? (second type)) (every? value-type? (vals (second type)))
+       (value-type? (nth type 2))))
+
+
+(defn- projected-callable-type?
+  [form input type]
+  (and (local-projection? form) (callable-input-type? configuration-type? type)
+       (= type (get-in input [(first (second form)) :type]))))
+
+
 (defn- valid-inline-configuration?
-  [{:keys [bind configure legacy-forms legacy-scope-names] :as body}]
+  [{:keys [bind configure input legacy-forms legacy-scope-names] :as body}]
   (or (not (contains? body :configure))
       (and (map? configure)
            (every? (fn [[path spec]]
@@ -226,9 +253,10 @@
                        (and (simple-keyword? field)
                             (or annotation? (and local? (contains? bind field)))
                             (map? spec) (every? #{:type :description} (keys spec))
-                            (or (contains? spec :type) annotation?)
+                            (or (contains? spec :type) annotation? (described-rename? spelling))
                             (or (not (contains? spec :description)) (string? (:description spec)))
-                            (or (not (contains? spec :type)) (configuration-type? (:type spec))))))
+                            (or (not (contains? spec :type)) (configuration-type? (:type spec))
+                                (and local? (projected-callable-type? (get bind field) input (:type spec)))))))
                    configure))))
 
 
@@ -323,13 +351,13 @@
                        (and (map? legacy-forms)
                             (every? #(or (contains? source-names %) (annotation-spelling? (get legacy-forms %))) (keys legacy-forms))
                             (every? #(or (#{:bare-value :ref-wrapper :type-first :literal-marker-first :literal-marker-last} %)
-                                         (inline-type-position? %) (list-origin? %) (annotation-spelling? %))
+                                         (inline-type-position? %) (list-origin? %) (annotation-spelling? %) (described-rename? %))
                                     (vals legacy-forms)))))
           (let [annotation-paths (into {} (map (fn [[path field]] [field path])) (:legacy-scope-names body))
                 originals (mapv (fn [[key-path form]]
                                   (let [field (get source-fields key-path)]
                                     (when-let [[original] (original-leaf form (get legacy-forms field)
-                                                                         (get-in configure [[field] :type]) input
+                                                                         (get configure [field]) input
                                                                          (vector? key-path))]
                                       [field original])))
                                 bind)
@@ -344,9 +372,16 @@
 
 
 (defn- migrated-asserted-leaf
-  [raw [op _ :as expression]]
-  (if (and (= :ref op) (inline-binding-body raw))
+  [raw [op _ :as expression] assertion]
+  (cond
+    (and (= :ref op) (inline-binding-body raw))
     [expression [:inline-type (count (take-while #(not= :type %) (keys raw)))]]
+
+    (and (local-projection? expression) (contains? assertion :description)
+         (= (assoc assertion :as (first (second expression))) raw))
+    [expression [:rename (vec (keys raw))]]
+
+    :else
     (when-let [key (case op :value :value :ref :ref :project :as nil)]
       (when (and (map? raw) (= #{:type key} (set (keys raw))))
         [(if (= op :ref) [:ref (:ref raw)] expression)
@@ -374,7 +409,7 @@
 (defn- migrated-leaf
   [raw [op _ :as expression] assertion]
   (if assertion
-    (migrated-asserted-leaf raw expression)
+    (migrated-asserted-leaf raw expression assertion)
     (case op
       :list-builder [expression (list-spelling raw)]
       :value (cond
@@ -451,11 +486,7 @@
    require a separate source witness."
   [type]
   (let [value-type? (partial collection-type? #(or (keyword? %) (simple-symbol? %)))]
-    (or (value-type? type)
-        (and (vector? type) (= 3 (count type)) (= :fn (first type))
-             (fields? (second type))
-             (every? value-type? (vals (second type)))
-             (value-type? (nth type 2))))))
+    (or (value-type? type) (callable-input-type? value-type? type))))
 
 
 (defn require-v2!

@@ -3,6 +3,7 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.nullable-operands :as nullable-operands]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]
@@ -159,7 +160,8 @@
                               :expression {:kind :value :value value}
                               :reference {:mode :literal :actual-type actual-type}}))
                       (:resolver-arguments graph))
-        first-pass (check-entries entries check-expression (equality-solution initial entries))
+        initial (nullable-operands/reconcile (equality-solution initial entries) entries)
+        first-pass (check-entries entries check-expression initial)
         final-pass (check-entries entries check-expression (:substitution first-pass))
         solution (:substitution final-pass)
         proofs (:proofs final-pass)

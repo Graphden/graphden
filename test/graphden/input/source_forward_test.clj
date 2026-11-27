@@ -345,3 +345,18 @@
     (is (= [field-id] (get-in verified [:v2 :bindings 0 :target-path])))
     (is (thrown? clojure.lang.ExceptionInfo
           (source/with-forwarded-parent prepared (assoc parent :verification nil))))))
+
+
+(deftest inherited-list-items-retain-their-distinct-reader-addresses
+  (let [[prepared entry] (fixture {:left :inherited-list-reader :data {:type :text}}
+                                  [{:name :join :args {:values {:type [:list :text]}} :return-type :text}
+                                   {:name :list-reader :parent :join :args {:values [:encode-body :encode-body]}}
+                                   {:name :inherited-list-reader :parent :list-reader}])
+        proofs (forward/verify-forwarded-uses prepared entry :data)
+        owner (:identity entry)
+        first-use (ids/binding-id owner (ids/slot-id (ids/fn-id "fixture" :combine) :left))
+        list-use (ids/binding-id (ids/fn-id "fixture" :list-reader) (ids/slot-id (ids/fn-id "fixture" :join) :values))
+        field (ids/slot-id (ids/fn-id "fixture" :encode) :data)]
+    (is (= (set (for [n [0 1]] [[owner [first-use list-use (ids/binding-list-item-id list-use n)]] [field]]))
+           (set (map :target-address proofs))))
+    (is (= 2 (count (set (map :projection-id proofs)))))))

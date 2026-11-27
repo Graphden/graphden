@@ -186,22 +186,49 @@
       multiple-readers? (assoc :multiple-readers? true))))
 
 
+(defn- local-reader-steps
+  [definition rows name->id defs-by-name hidden]
+  (let [owner (:fn-id definition)
+        items (group-by :binding-id (filter #(= :binding-list-item (:kind %)) rows))
+        children (group-by name->id (distinct (slots/ref-targets-of definition defs-by-name)))]
+    (for [row rows
+          :when (and (= :binding (:kind row)) (= owner (:fn-id row)) (not (hidden (:slot-id row)))
+                     (= (:id row) (ids/binding-id owner (:slot-id row))))
+          [target step] (if-let [target (:ref-fn-id row)]
+                          [[target [(:id row)]]]
+                          (for [item (get items (:id row))
+                                :let [position (:position item)]
+                                :when (and (:ref-fn-id item) (nat-int? position)
+                                           (= (:id item) (ids/binding-list-item-id (:id row) position)))]
+                            [(:ref-fn-id item) [(:id row) (:id item)]]))
+          child (get children target)]
+      [child step])))
+
+
+(defn- authored-reference-steps
+  [{:keys [name->id defs-by-name]} ref]
+  (:steps
+    (reduce (fn [{:keys [steps hidden]} ancestor]
+              (let [definition (get defs-by-name ancestor)
+                    rows (parse/parse-fn-def definition name->id defs-by-name)
+                    fields (keep #(when (= (:fn-id definition) (:fn-id %))
+                                    (case (:kind %) :binding (:slot-id %) :slot (:source-slot-id %) nil)) rows)]
+                {:steps (into steps (local-reader-steps definition rows name->id defs-by-name hidden))
+                 :hidden (into hidden fields)}))
+            {:steps [] :hidden #{}} (slots/chain-of ref defs-by-name))))
+
+
 (defn- authored-reader-paths
   [{:keys [name->id defs-by-name] :as prepared} ref field field-id prefix seen]
   (when-not (contains? seen ref)
-    (let [definition (get defs-by-name ref)
-          [declaring key] (slots/resolve-slot-owner-strict ref field defs-by-name #{})
+    (let [[declaring key] (slots/resolve-slot-owner-strict ref field defs-by-name #{})
           declaring-id (get name->id declaring)]
       (when (and (uuid? declaring-id) (= field key) (= field-id (ids/slot-id declaring-id key)))
         (if (some #{declaring} (slots/chain-of ref defs-by-name))
           [prefix]
-          (let [rows (group-by :ref-fn-id (filter #(and (= :binding (:kind %)) (= (:fn-id definition) (:fn-id %)))
-                                                  (parse/parse-fn-def definition name->id defs-by-name)))]
-            (for [child (distinct (slots/ref-targets-of definition defs-by-name))
-                  row (get rows (get name->id child))
-                  :when (= (:id row) (ids/binding-id (:fn-id definition) (:slot-id row)))
-                  path (authored-reader-paths prepared child field field-id (conj prefix (:id row)) (conj seen ref))]
-              path)))))))
+          (for [[child step] (authored-reference-steps prepared ref)
+                path (authored-reader-paths prepared child field field-id (into prefix step) (conj seen ref))]
+            path))))))
 
 
 (defn- reader-proofs

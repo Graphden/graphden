@@ -39,19 +39,21 @@
     (literals/classify-literal value)))
 
 
+(defn- reference-mode
+  [ctx [root use-path] binding-id target expected]
+  (if (contains? (:fns ctx) target)
+    (reference/classify expected (variables/signature-in-scope
+                                   [root (conj use-path binding-id)] (get-in ctx [:signatures target])))
+    {:mode :unresolved :reason :missing-ref-target}))
+
+
 (defn- classify-entry
   [ctx scope contract row]
   (let [path (:target-path row)
         expected (:type (descriptor/node-at contract path))
         expression (expression-of row scope)
         dispatch (case (:kind expression)
-                   :ref (if (contains? (:fns ctx) (:fn-id expression))
-                          (reference/classify
-                            expected
-                            (variables/signature-in-scope
-                              [(first scope) (conj (second scope) (:id row))]
-                              (get-in ctx [:signatures (:fn-id expression)])))
-                          {:mode :unresolved :reason :missing-ref-target})
+                   :ref (reference-mode ctx scope (:id row) (:fn-id expression) expected)
                    :value (if-let [target (:resolver-fn-id row)]
                             (let [signature (variables/signature-in-scope
                                               [(first scope) (conj (second scope) (:id row))]
@@ -64,6 +66,17 @@
     {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
      :expression expression
      :dispatch-type expected :expected-type expected :reference dispatch}))
+
+
+(defn- resolve-ambiguous-value
+  [ctx substitution {:keys [address binding-id expression expected-type reference] :as entry}]
+  (if (= :ambiguous-reference-mode (:reason reference))
+    (let [solved (types/resolve substitution expected-type)
+          dispatch (reference-mode ctx (first address) binding-id (:fn-id expression) solved)]
+      (if (= :value (:mode dispatch))
+        (assoc entry :dispatch-type solved :reference dispatch)
+        entry))
+    entry))
 
 
 (defn- container-obligations
@@ -105,6 +118,13 @@
                                               :check-expression check-expression})
              contract (:contract policy)
              entries (mapv #(classify-entry ctx scope contract %) (filter rows/occupied? local))
+             independent (filter #(contains? #{:literal :identity} (get-in % [:reference :mode])) entries)
+             ambiguous? (some #(= :ambiguous-reference-mode (get-in % [:reference :reason])) entries)
+             independent-check (when (or ambiguous? defer-reference-checks?)
+                                 (checking/check-entries independent check-expression (:substitution policy)))
+             entries (if ambiguous?
+                       (mapv (partial resolve-ambiguous-value ctx (:substitution independent-check)) entries)
+                       entries)
              state (into {} (map (fn [{:keys [address binding-id expression expected-type]}]
                                    [address {:binding-id binding-id :expression expression
                                              :expected-type expected-type}])) entries)
@@ -112,11 +132,9 @@
              ;; rejected even when they carry equal literal values.
              _ (rows/state local)
              remaining (input/remaining-input contract state scope)
-             checked (checking/check-entries
-                       (if defer-reference-checks?
-                         (filter #(contains? #{:literal :identity} (get-in % [:reference :mode])) entries)
-                         entries)
-                       check-expression (:substitution policy))
+             checked (if defer-reference-checks?
+                       independent-check
+                       (checking/check-entries entries check-expression (:substitution policy)))
              obligations (container-obligations (:descriptor remaining) scope [])
              closure-gaps (cond-> []
                             (some #(seq (:scope-path %)) owned) (conj :scoped-analysis-required)

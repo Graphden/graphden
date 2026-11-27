@@ -295,3 +295,26 @@
                           [:status :substitution]))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"does not fit"
           (check {:actual :empty-map :expected [:union :null {:required :int}]})))))
+
+
+(deftest a-checked-sibling-can-determine-an-ambiguous-reference-mode
+  (let [[owner target input variable left right ref-row literal-row] (repeatedly 8 random-uuid)
+        ctx (context/build-context
+              {:fns {owner {:input-type-fn-id input} target {}}
+               :signatures {target {:args {} :return :int}}
+               :type-bodies {variable '[:union :null a]}
+               :members {input [{:slot-id left :position 0} {:slot-id right :position 1}]}
+               :fields {left {:id left :name "value" :type-fn-id variable :required true}
+                        right {:id right :name "default" :type-fn-id variable :required true}}
+               :bindings {ref-row {:id ref-row :fn-id owner :scope-path [] :target-path [left]
+                                   :expression-kind "ref" :ref-fn-id target}
+                          literal-row {:id literal-row :fn-id owner :scope-path [] :target-path [right]
+                                       :expression-kind "value" :value 0 :value-present true}}})
+        analyze (fn [ctx] (analysis/analyze-input ctx owner {:check-expression check/check-input-binding}))
+        address [[owner []] [left]]
+        entry #(get-in (analyze %) [:bindings address])]
+    (is (= {:mode :value :actual-type :int} (:reference (entry ctx))))
+    (is (= [:union :int :null] (:dispatch-type (entry ctx))))
+    (is (= :ambiguous-reference-mode (get-in (entry (update ctx :bindings dissoc literal-row)) [:reference :reason])))
+    (is (= :ambiguous-reference-mode
+           (get-in (entry (assoc-in ctx [:type-bodies variable] [:union :int :fn-ref])) [:reference :reason])))))

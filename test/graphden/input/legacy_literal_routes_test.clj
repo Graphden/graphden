@@ -106,22 +106,19 @@
             signatures (:by-id @registry/*rich-types-override*)
             old (eager/compile-all (assoc graph :base-fns (registry/compute-base-fns-map base-fn-defs)))
             old-context {:compiled-registry (atom old) :graph-cache (atom rows) :base-fns {}}
-            {:keys [adapt roots views entry] :as migrated} (inline/prepare package owner signatures)
+            {:keys [roots entry] :as migrated} (inline/prepare package owner signatures)
             implementations (into {} (map (fn [[name {module-ns :namespace impl :impl}]]
                                             [(ids/fn-id module-ns name) impl])) base-fn-defs)
-            implementations (reduce (fn [result {:keys [id original]}] (assoc result id (get result original)))
-                                    implementations views)
-            runtime (execution/compile-package (:package migrated) owner roots implementations)]
+            runtime (execution/compile-package (:package migrated) owner roots implementations)
+            request {:request-method :get :uri "/fixture" :query-string "" :headers {} :body nil :async-channel nil}]
         (is (= [(:fn-id child)] (vec (keep :ref-fn-id (get-in entry [:v2 :bindings])))))
-        (is (true? ((:invoke runtime)
-                    {:a {:lookup-first {:request {:query-params {"id" "match"}}}
-                         :lookup-next {:lookup-first {:request {} :path {:item-1 {:string {:slots {}}}}}
-                                       :lookup-next {:query-string {:request {}} :param-name {:slots {}}}}}} {})))
         (is (= :unknown-input-field
                (try ((:invoke runtime) {:request {}} {})
                     (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))))
-        (doseq [[args expected] [[{} false]
-                                 [{:request {:query-params {"id" 17}}} false]
-                                 [{:request {:query-params {:id "match"}}} true]
-                                 [{:request {:query-string "id=match"}} true]]]
-          (is (= expected (executor/execute old-context owner args) ((:invoke runtime) (adapt args) {}))))))))
+        (doseq [[fields expected] [[{} false]
+                                   [{:query-params {"id" 17}} false]
+                                   [{:query-params {"id" "match"}} true]
+                                   [{:query-string "id=match"} true]]]
+          (let [request (merge request fields)]
+            (is (= expected (executor/execute old-context owner {:request request})
+                   ((:invoke runtime) {:a {:request request}} {})))))))))

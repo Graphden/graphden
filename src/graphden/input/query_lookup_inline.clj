@@ -5,9 +5,7 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.legacy-use :as legacy-use]
     [graphden.input.migration :as migration]
-    [graphden.input.query-lookup-arguments :as arguments]
     [graphden.input.query-lookup-package :as query]
-    [graphden.input.runtime :as input]
     [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]
@@ -63,10 +61,8 @@
   [checked prefix]
   (let [routes (get-in checked [:public-input :routes])]
     (and (= :reference-inputs (get-in routes [prefix :kind]))
-         (every? (fn [[path {:keys [kind]}]]
-                   (or (not= :input-field kind)
-                       (and (< 1 (count path)) (= prefix (subvec path 0 1)))))
-                 routes))))
+         (= #{(conj prefix :request)}
+            (into #{} (keep (fn [[path {:keys [kind]}]] (when (= :input-field kind) path))) routes)))))
 
 
 (defn- wrapper-origin
@@ -110,16 +106,18 @@
     (let [entry (get-in normalized [:closure-baselines owner])
           {:keys [context options]} (snapshot/freeze-source-analysis normalized [owner] roots)
           checked (analysis/analyze-effective-input context owner options)
-          adapt (when (public-subtree? checked prefix) (arguments/adapter proof checked prefix))]
-      (when (and adapt (= :authored-source-equivalent (:verification entry))
+          input (get-in checked [:public-input :routes (conj prefix :request)])]
+      (when (and (= :checked (:status checked)) (public-subtree? checked prefix)
+                 (= :input-field (:kind input)) (true? (:required input))
+                 (= (:request-type-id proof) (get-in context [:fields (:origin-field-id input) :type-fn-id]))
+                 (= :authored-source-equivalent (:verification entry))
                  (some (fn [{:keys [from to target-fn-id mode]}]
                          (let [node (get-in checked [:scopes (second to)])]
                            (and (= child target-fn-id (:fn-id node)) (= [owner []] (first from))
                                 (= :value mode) (= [:union :null :text] (get-in node [:signature :return])))))
                        (:dependencies checked)))
         {:proposed (:proposed entry) :entry entry :package normalized
-         :visibility (set (keys (:declarations normalized)))
-         :adapt (fn [args] (input/record-view {(peek prefix) (input/value-cell (adapt args))}))}))))
+         :visibility (set (keys (:declarations normalized)))}))))
 
 
 (defn- same-public-readers?
@@ -142,19 +140,22 @@
           forms (->> (concat [outer] support (mapcat val (:originals child-package)))
                      distinct (sort-by (juxt :namespace :name)) vec)
           prepared (parse/prepare-module forms {} {})
-          normalized (snapshot/package-index prepared forms)
+          normalized (-> (snapshot/package-index prepared forms)
+                         (assoc :legacy-graph (readers/owner-index prepared child))
+                         (snapshot/with-certified-owner child native)
+                         (assoc :legacy-graph (readers/owner-index prepared owner)))
           graph (:legacy-graph package)
           origin (wrapper-origin graph owner child (peek site) prior (original-rows normalized owner))]
       (when (and origin (same-public-readers? graph owner (peek site) origin proof))
         (when-let [wrapper (checked-wrapper normalized owner child [(peek site)] proof native origin)]
           (-> (merge expanded wrapper {:original source :expanded outer :wrapper-origin origin})
-              (update-in [:proof :original-targets] into (get-in graph [:fn-map owner :parent-ids]))))))))
+              (update :donors into (get-in graph [:fn-map owner :parent-ids]))))))))
 
 
 (defn prepare
   "Give the expanded child its original parser-generated name and prove that
    referring to it preserves every enclosing row. Only an enclosing native
-   call with literal siblings and the same public readers may use the adapter."
+   call with literal siblings and the same public readers qualifies."
   [{:keys [legacy-graph inline-origins] :as package} owner roots]
   (when-let [source (original package owner)]
     (when-let [site (query-site source)]

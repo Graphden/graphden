@@ -20,6 +20,16 @@
      :args {:value {:as :lookup-first :type :any} :default {:as :lookup-next :type :any}}}))
 
 
+(def ^:private request-slot (ids/slot-id query-id :request))
+(def ^:private request-type (ids/fn-id "web.ring-adapter" :ring-request-shape))
+
+
+(def ^:private holder
+  (let [id (migration/derived-id :query-request query-id request-slot request-type)]
+    {:namespace "web.crud" :name (keyword (str "_request-" id)) :parent :core.logic/const
+     :args {:value {:as :request :type :ring-request-shape}}}))
+
+
 (defn- closure-rows
   [graph root]
   (loop [todo [root] seen #{} result []]
@@ -77,35 +87,40 @@
                    (= 6 (count (set (concat names requests))))
                    (= (mapv (juxt :ext-name :slot-id) (:boundary writer))
                       (vec (mapcat (fn [r] [[:request (:request r)] [:param-name (:param-name r)]]) reads))))
-          (assoc writer :reads reads :return-type-id return-id :original-targets (conj targets owner)))))))
+          (when (= {:id request-slot :type-fn-id request-type :required true :source-slot-id (first requests)}
+                   (select-keys (get-in graph [:slot-map request-slot]) [:id :type-fn-id :required :source-slot-id]))
+            (assoc writer :reads reads :request-type-id request-type :request-slot-id request-slot
+                   :return-type-id return-id :original-targets (conj targets owner))))))))
 
 
 (defn- expand-owner
-  [original {:keys [value]} views]
-  (let [[lookup lookup-in to-keyword query-string] (map :ref views)
-        request {:as :request :type :any}
-        lookup-args (fn [coll key default] {:parent lookup :args {:coll coll :key key :default default}})
-        name-input (lookup-args {:as :slots :type [:map :keyword :any]} {:value :param-name} {:value value})
-        middleware (fn [key] {:parent lookup-in :args {:map request :path [{:value :query-params} key] :default nil}})
-        choose (keyword "web.crud" (name (:name chooser)))]
+  [original value]
+  (let [choose (keyword "web.crud" (name (:name chooser)))
+        request {:ref (keyword "web.crud" (name (:name holder))) :type :ring-request-shape}
+        label {:value value}
+        middleware (fn [key]
+                     {:parent :core.collections/get-in
+                      :args {:map request :path {:append [{:value :query-params} key] :closed true} :default nil}})]
     (assoc original :parent choose :return-type :nullable-text
-           :args {:lookup-first (middleware {:value value})
+           :args {:lookup-first (middleware label)
                   :lookup-next {:parent choose
-                                :args {:lookup-first (middleware {:parent to-keyword :args {:string name-input}})
-                                       :lookup-next {:parent query-string
-                                                     :args {:query-string (lookup-args request {:value :query-string} nil)
-                                                            :param-name name-input}}}}})))
+                                :args {:lookup-first (middleware {:parent :core.strings/str-to-keyword :args {:string label}})
+                                       :lookup-next {:parent :web.crud/_query-param-raw
+                                                     :args {:query-string {:parent :core.collections/get
+                                                                           :args {:coll request :key {:value :query-string} :default nil}}
+                                                            :param-name label}}}}
+                  :request {:type :ring-request-shape}})))
 
 
 (defn expansion
-  "Recompute the canonical proposal and its original-source witness using
-   visible checked-in donor ABIs. A staged file supplies neither the four
-   donor UUIDs nor their implementations. Helpers have derived identities."
+  "Recompute the named V1 query from its original public contract. Both
+   closed lookup paths were fixed in these exact branch invocations. The
+   original parameter writer is local; the only public field is a required
+   Ring request. Each get-in still evaluates its own ordered path."
   [graph owner original roots visible]
   (when-let [proof (descriptor graph owner original)]
-    (when-let [views (query-views/views roots visible)]
-      (let [chooser-id (ids/fn-id (:namespace chooser) (:name chooser))]
-        (when (and (every? visible (:original-targets proof))
-                   (not (contains? visible chooser-id)) (not (contains? roots chooser-id)))
-          {:source (expand-owner original proof views) :proof proof :chooser chooser
-           :views views})))))
+    (when-let [donors (query-views/donors roots visible)]
+      (let [helper-ids (mapv #(ids/fn-id (:namespace %) (:name %)) [chooser holder])]
+        (when (and (every? visible (:original-targets proof)) (not-any? visible helper-ids) (not-any? roots helper-ids))
+          {:source (expand-owner original (:value proof))
+           :proof (update proof :original-targets into donors) :helpers [chooser holder] :donors donors})))))

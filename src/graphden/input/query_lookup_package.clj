@@ -3,7 +3,6 @@
   (:require
     [graphden.input.analysis :as analysis]
     [graphden.input.migration :as migration]
-    [graphden.input.query-lookup-arguments :as arguments]
     [graphden.input.query-lookup-source :as query]
     [graphden.input.source :as source]
     [graphden.input.source-legacy-readers :as readers]
@@ -15,7 +14,9 @@
 (def ^:private dependencies
   [(ids/fn-id "core.refinements" :nullable-keyword)
    (ids/fn-id "core.refinements" :nullable-text)
-   (ids/fn-id "core.logic" :coalesce)])
+   (ids/fn-id "core.refinements" :text-map)
+   (ids/fn-id "core.refinements" :path-segment)
+   (ids/fn-id "web.ring-adapter" :ring-request-shape)])
 
 
 (defn- unique-original
@@ -27,29 +28,31 @@
 (defn prepare
   "Rebuild the trusted expanded package with the ordinary parser and
    checker. Compare its native result declaration and recover the exact
-   five input paths. No result or callback is admitted from staged EDN."
+   required Ring request field. No result or callback is admitted from staged EDN."
   [{:keys [declarations legacy-graph] :as package} owner roots]
   (let [source (unique-original package owner)]
     (when (contains? #{:query-param :web.crud/query-param} (:parent source))
-      (when-let [{expanded :source :keys [chooser views proof]}
+      (when-let [{expanded :source :keys [helpers donors proof]}
                  (query/expansion (or legacy-graph (readers/owner-index (:prepared package) owner)) owner source roots (set (keys declarations)))]
-        (let [support (mapv #(unique-original package %) dependencies)]
+        (let [support (mapv #(unique-original package %) (into dependencies donors))]
           (when (every? some? support)
-            (let [forms (into (conj support chooser expanded) (map :form) views)
-                  native (into roots (map (juxt :id :signature)) views)
+            (let [forms (into (conj support expanded) helpers)
                   prepared (parse/prepare-module forms {} {})
-                  normalized (snapshot/with-certified-owner (snapshot/package-index prepared forms) owner native)
+                  original-graph (readers/owner-index prepared owner)
+                  normalized (snapshot/with-certified-owner (assoc (snapshot/package-index prepared forms) :legacy-graph original-graph) owner roots)
                   entry (get-in normalized [:closure-baselines owner])
-                  {:keys [context options]} (snapshot/freeze-source-analysis normalized [owner] native)
+                  {:keys [context options]} (snapshot/freeze-source-analysis normalized [owner] roots)
                   checked (analysis/analyze-effective-input context owner options)
-                  adapter (arguments/adapter proof checked)
+                  input (get-in checked [:public-input :routes [:request]])
                   old-return (:return-type-id proof)]
               (when (and (= :authored-source-equivalent (:verification entry))
                          (= old-return (get-in context [:fns owner :return-type-fn-id]))
                          (= [:union :null :text] (get-in checked [:scopes [] :signature :return]))
-                         adapter)
+                         (= :checked (:status checked)) (= :input-field (:kind input)) (true? (:required input))
+                         (= [:request] (mapv :name (get-in checked [:public-input :root :fields])))
+                         (= (:request-type-id proof) (get-in context [:fields (:origin-field-id input) :type-fn-id])))
                 {:original source :expanded expanded :proposed (:proposed entry) :entry entry
-                 :package normalized :roots native :views views :proof proof :adapt adapter
+                 :package normalized :roots roots :donors donors :proof proof
                  :visibility (set (keys (:declarations normalized)))}))))))))
 
 
@@ -57,12 +60,11 @@
   "A prepared normalized program is bound to the same frozen native
    signatures, rules and capabilities as this invocation."
   [package id roots]
-  (when-let [{frozen :roots :keys [views] :as expansion} (get-in package [:query-lookups id])]
-    (let [donors (conj (mapv :original views) (ids/fn-id "core.logic" :coalesce))]
-      (when-not (every? #(= (get roots %) (get frozen %)) donors)
-        (throw (ex-info "Normalized source requires its original native signatures"
-                        {:type :input/source-snapshot :code :native-view-source-mismatch :fn-id id})))
-      expansion)))
+  (when-let [{frozen :roots :keys [donors] :as expansion} (get-in package [:query-lookups id])]
+    (when-not (every? #(= (get roots %) (get frozen %)) donors)
+      (throw (ex-info "Normalized source requires its original native signatures"
+                      {:type :input/source-snapshot :code :native-view-source-mismatch :fn-id id})))
+    expansion))
 
 
 (defn replay

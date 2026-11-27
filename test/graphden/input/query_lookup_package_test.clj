@@ -6,7 +6,6 @@
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
     [graphden.input.package-execution :as execution]
-    [graphden.input.query-lookup-arguments :as arguments]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -25,7 +24,7 @@
 (defn- source
   []
   (let [modules {"core/refinements" #{:nullable-text :nullable-keyword :text-map :path-segment}
-                 "core/collections" #{:get :get-in} "core/logic" #{:coalesce} "core/strings" #{:str-to-keyword}
+                 "core/collections" #{:get :get-in} "core/logic" #{:coalesce :const} "core/strings" #{:str-to-keyword}
                  "web/ring-adapter" #{:ring-request-shape}
                  "web/crud-delete" #{:_query-param-raw :_query-param-string-key :_query-param-keyword-key :_query-param-fallback :query-param}}]
     (vec (for [[path names] modules
@@ -67,18 +66,17 @@
                             package owner roots implementations
                             (assoc (pinned-stage module) :legacy-module legacy :visible-fn-ids visible)))
           {:keys [invoke input-origin analysis]} (compile-stage stage visible)
-          [_ kw raw] (:reads input-origin)
           ctx {:compiled-registry (atom {owner invoke}) :base-fns {}}
-          adapt (arguments/adapter input-origin analysis)
-          run #(executor/execute ctx owner (adapt %))]
-      (is (= 7 (executor/execute ctx owner {:lookup-first {:request {:query-params {"a" 7}}}
-                                            :lookup-next {:lookup-first {:request {} :path {:item-1 {:string {:slots {}}}}}
-                                                          :lookup-next {:query-string {:request {}} :param-name {:slots {}}}}})))
-      (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request {}}))))
+          ring {:request-method :get :uri "/" :query-string "" :headers {} :body nil :async-channel nil}
+          run #(executor/execute ctx owner {:request (merge ring %)})]
+      (is (= #{:request} (:accepted input-origin)))
+      (is (= [:request] (mapv :name (get-in analysis [:public-input :root :fields]))))
+      (is (true? (get-in analysis [:public-input :routes [:request] :required])))
       (is (= [:union :null :text] (get-in analysis [:scopes [] :signature :return])))
-      (is (= 0 (run {:request (delay {:query-params {"a" 0}})})))
-      (is (= {:v 5} (run {(:request kw) {:query-params {:b {:v 5}}} (:param-name kw) (delay "b")})))
-      (is (= "c" (run {(:request raw) {:query-string "b=c"} (:param-name raw) "b"})))
+      (is (= 0 (run {"extra" true :query-params {"a" 0}})))
+      (is (= {:v 5} (run {7 nil :query-params {:a {:v 5}}})))
+      (is (= "c" (run {:query-string "a=c"})))
+      (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request ring :param-name "old"}))))
       (is (= :unverified-staged-declaration
              (rejection #(compile-stage (assoc-in stage [:fns 0 :return-type] :any) visible))))
       (is (= :unverified-staged-declaration
@@ -88,5 +86,5 @@
                            (query/certify package owner roots) owner
                            (dissoc roots (ids/fn-id "core.collections" :get)) implementations
                            (assoc (pinned-stage stage) :legacy-module legacy :visible-fn-ids visible)))))
-      (is (= :staged-function-not-visible
-             (rejection #(compile-stage stage (disj visible (ids/fn-id "web.crud" :_query-param-raw)))))))))
+      (doseq [donor [(ids/fn-id "web.crud" :_query-param-raw) (ids/fn-id "core.logic" :const)]]
+        (is (= :staged-function-not-visible (rejection #(compile-stage stage (disj visible donor)))))))))

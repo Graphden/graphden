@@ -183,6 +183,8 @@
         lookup? (and collection (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
                      (= path original-path (get-in native [:argument-paths collection])))
         identity-input (projected-identity-record analysis expressions scopes address expected-type)
+        identity-source? (= address (projected-identity-record analysis expressions scopes
+                                                               [scope (get-in native [:argument-paths :value])] expected-type))
         holder (when (and lookup? (= :invoke (:op expression)) (= :value (get-in binding [:reference :mode]))
                           (= (:binding-id expression) (:binding-id binding))
                           (= (:target-id expression) (get-in binding [:expression :fn-id])))
@@ -199,7 +201,7 @@
                           (obligations/materialized-dictionary? expected-type (first additional-types))) :keyword
                      (and (empty? additional-types)
                           (or holder
-                              (and (or lookup? identity-input (native-record-argument? native path expected-type))
+                              (and (or lookup? identity-input identity-source? (native-record-argument? native path expected-type))
                                    (= :read (:op expression))
                                    (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))))
                           (= expected-type (:expected-type binding) (get-in binding [:reference :actual-type]))

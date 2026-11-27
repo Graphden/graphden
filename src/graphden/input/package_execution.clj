@@ -65,10 +65,8 @@
 
 
 (defn- compile-normalized
-  [{:keys [package roots views proof]} owner implementations]
-  (let [implementations (reduce (fn [result {:keys [id original]}] (assoc result id (get implementations original)))
-                                implementations views)
-        frozen (snapshot/freeze-source-analysis package [owner] roots)
+  [{:keys [package roots proof]} owner implementations]
+  (let [frozen (snapshot/freeze-source-analysis package [owner] roots)
         checked (analysis/analyze-effective-input (:context frozen) owner (:options frozen))
         compiled (compile-frozen frozen checked implementations)]
     (assoc compiled :input-origin proof)))
@@ -118,7 +116,7 @@
       (ir/reject! :staged-root-required {}))
     (if-let [expansion (get-in package [:query-lookups root])]
       (do
-        (when-not (every? visible-fn-ids (get-in expansion [:proof :original-targets]))
+        (when-not (every? visible-fn-ids (into (get-in expansion [:proof :original-targets]) (:donors expansion)))
           (ir/reject! :staged-function-not-visible {}))
         (assoc (compile-normalized expansion root implementations)
                :staged-source {:sha256 sha256 :namespace (:namespace module)}))

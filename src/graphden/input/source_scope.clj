@@ -843,6 +843,19 @@
          (projected-variable? before after cert))))
 
 
+(defn- projected-field-check?
+  [before after {:keys [public-path source-names]} {:keys [address kind trigger expected-type additional-types] :as check}]
+  (when (and public-path (empty? additional-types))
+    (let [unchanged? (= expected-type
+                        (get-in before [:public-input :routes public-path :completion-type])
+                        (get-in before [:public-input :routes source-names :completion-type])
+                        (get-in after [:public-input :routes source-names :completion-type]))]
+      (or (and (= [:value-type :field-read] [kind trigger])
+               (or (= :any expected-type) (and (types/list-type? expected-type) unchanged?)))
+          (and unchanged? (container-check? after check)
+               (= expected-type (get-in after [:public-input :bindings address :reference :actual-type])))))))
+
+
 (defn- preserved-field-checks?
   [before after certificates]
   (let [prior (set (:obligations before))
@@ -851,17 +864,7 @@
         sources (into {} (map (fn [{:keys [address row]}]
                                 [address [[(:fn-id before) []] (:projection-path row)]]))
                       certificates)]
-    (and (every? (fn [{:keys [address kind trigger expected-type] :as obligation}]
-                   (or (prior obligation)
-                       (when-let [{:keys [public-path source-names]} (certified address)]
-                         (and (empty? (:additional-types obligation)) (= [:value-type :field-read] [kind trigger])
-                              (or (= :any expected-type)
-                                  (and (types/list-type? expected-type)
-                                       (= expected-type
-                                          (get-in before [:public-input :routes public-path :completion-type])
-                                          (get-in before [:public-input :routes source-names :completion-type])
-                                          (get-in after [:public-input :routes source-names :completion-type]))))))))
-                 current)
+    (and (every? #(or (prior %) (projected-field-check? before after (certified (:address %)) %)) current)
          (every? (fn [{:keys [address] :as obligation}]
                    (or (when-let [source (get sources address)]
                          (let [check (select-keys obligation [:kind :trigger :expected-type :additional-types])]
@@ -878,14 +881,14 @@
    exact supplied list contract at its reader."
   [snapshot proofs analyze]
   (let [owner (only (distinct (map :owner-id proofs)) :unproved-forwarded-identity)
-        before (checked-graph analyze snapshot owner)
+        before (checked-graph analyze snapshot owner true)
         certificates (mapv #(forwarded-certificate snapshot before %) proofs)
         additions (into {} (map (juxt (comp :id :row) :row)) certificates)]
     (check-forwarded-readers! before proofs certificates)
     (when-not (= (count proofs) (count additions) (count (set (map :address certificates))))
       (reject! :unproved-forwarded-identity))
     (let [updated (-> snapshot (assoc :snapshot-id (random-uuid)) (update :bindings merge additions))
-          after (checked-graph analyze updated owner)
+          after (checked-graph analyze updated owner true)
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]
       (when-not (and (preserves-occupancy? prior current certificates)

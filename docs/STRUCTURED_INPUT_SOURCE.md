@@ -356,6 +356,16 @@ field type UUID; it does not add an occupied input. Existing implementation
 fallback behavior is preserved. Ordinary fields named
 `value`, `ref` or `default` do not introduce new control semantics.
 
+For a direct descendant of the reviewed Ring `:query-param` with a fixed
+parameter name, the offline planner checks the original graph, the literal
+writer and the native functions. Its V2 input is a single required
+`:request` of type `:ring-request-shape`. Calling the compiled owner with
+`{:request ring-request}` uses the same request for the string-key lookup,
+keyword-key lookup and raw query-string fallback. Both lookup paths have a
+fixed length. The owner keeps its original UUID and declared `:nullable-text`
+return type. Middleware can supply other values at runtime. The planner
+keeps old reader UUIDs in the receipt for differential checks.
+
 ## Expression grammar and source edits
 
 `graphden.input.syntax/parse-expression` accepts a resolved descriptor,

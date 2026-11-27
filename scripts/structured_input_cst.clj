@@ -605,9 +605,9 @@
     (case op
       :query-lookup-header
       (let [edit (rename-edit source starts loc definition [:args] :bind)]
-        (when (or (key-loc loc :return-type) (not= :nullable-text to))
+        (when (or (key-loc loc :return-type) (not= {:request {:type :ring-request-shape}} to))
           (refuse :planner-ledger-mismatch {:definition definition}))
-        (assoc edit :after ":return-type :nullable-text :bind"))
+        (assoc edit :after (str ":return-type :nullable-text :input " (migration/stable-edn to) " :bind")))
       :query-lookup-parent (node-edit source starts target (constantly (migration/stable-edn to)))
       :query-lookup-bind
       (let [nodes (tree-seq node/inner? node/children (z/node target))
@@ -886,13 +886,13 @@
                 :else kind)
       :query-lookup
       (do
-        (when-not (and (= (dissoc source :parent :args) (dissoc proposed :parent :bind :return-type))
+        (when-not (and (= (dissoc source :parent :args) (dissoc proposed :parent :bind :input :return-type))
                        (= :nullable-text (:return-type proposed)) (map? (:bind proposed)))
           (refuse :planner-ledger-mismatch {:definition (:name source)}))
         (mapv (fn [[op path from to]]
                 {:op op :definition (:name source) :path [path] :from from :to to})
               [[:query-lookup-parent :parent (:parent source) (:parent proposed)]
-               [:query-lookup-header :args (:args source) :nullable-text]
+               [:query-lookup-header :args (:args source) (:input proposed)]
                [:query-lookup-bind :args (:args source) (:bind proposed)]]))
 
       :query-lookup-inline

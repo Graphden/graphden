@@ -6,6 +6,7 @@
     [graphden.input.lazy-list-abi :as lazy-list]
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.lookup-abi :as lookup-abi]
+    [graphden.input.metadata :as metadata]
     [graphden.input.obligations :as obligations]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
@@ -150,7 +151,12 @@
                   (when (or (= expected-type (:type closure))
                             (reference/same-unary-contract? expected-type (:type closure)))
                     expected-type)
-                  (field-read-type analysis address expected-type op)))]
+                  (or (field-read-type analysis address expected-type op)
+                      (when (= :invoke op)
+                        (let [node (get-in analysis [:scopes (second (first address))])
+                              binding (get-in node [:bindings address])]
+                          (when (= expected-type (metadata/asserted-read-type node binding (get-in binding [:reference :actual-type])))
+                            expected-type))))))]
     (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type) (= :supplied op))
       (reject! :supplied-callable-validation-required details))
     (when-not check (reject! :runtime-obligations-required details))

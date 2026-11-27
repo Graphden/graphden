@@ -6,6 +6,7 @@
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.lookup-abi :as lookup-abi]
+    [graphden.input.metadata :as metadata]
     [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
@@ -117,7 +118,7 @@
 
 
 (defn- reference-fact
-  [graph {:keys [address expression reference dispatch-type expected-type]}]
+  [graph {:keys [address expression reference dispatch-type expected-type] :as binding}]
   (let [mode (:mode reference)
         target-scope (:to (first (filter #(= address (:from %)) (:dependencies graph))))
         target-node (get-in graph [:scopes (second target-scope)])
@@ -149,7 +150,8 @@
         (when-not (and target-scope signature (set? (:effects signature)))
           (context/reject! :reference-signature-required {:address address}))
         (let [list-elements (when (= :value mode) (checked-list-elements target-node))]
-          (cond-> {:type actual :effects (:effects signature) :reference-address address
+          (cond-> {:type (or (metadata/asserted-read-type (get-in graph [:scopes (second (first address))]) binding actual) actual)
+                   :effects (:effects signature) :reference-address address
                    (if (= :graph-callable mode) :bound-ref :ref) (use-id target-scope)}
             list-elements (assoc :list-elements list-elements))))
       (context/reject! :reference-mode-required {:address address :mode mode}))))

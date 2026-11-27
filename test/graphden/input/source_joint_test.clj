@@ -88,3 +88,15 @@
         reduced-entry (peek (:definitions (source/plan-module reduced-definitions reduced-prepared)))]
     (is (= {:fields [:data] :paths [[:args :string]]} (joint/groups original)))
     (is (nil? (code #(joint/check-full-reference-origins! prepared original reduced-prepared reduced-entry))))))
+
+
+(deftest retained-reader-must-have-its-original-checked-root-edge
+  (let [[owner reader target field] (repeatedly 4 random-uuid)
+        proof {:owner-id owner :root-use-id reader :target-fn-id target :target-field-id field}
+        edge {:from [[owner []] [field]] :to [owner [reader]] :binding-id reader :target-fn-id target :mode :value}
+        replay #(joint/rebase-on-scoped-references [proof] [] {:dependencies %})]
+    (is (= [proof] (replay [edge])))
+    (doseq [other [[] [(assoc edge :mode :projection)] [(assoc edge :target-fn-id (random-uuid))]
+                   [(assoc edge :from [[owner [(random-uuid)]] [field]])] [(assoc edge :binding-id (random-uuid))]
+                   [(assoc edge :to [owner [(random-uuid)]])]]]
+      (is (= :joint-source-mismatch (code #(replay other)))))))

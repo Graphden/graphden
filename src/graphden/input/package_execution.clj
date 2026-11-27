@@ -9,6 +9,7 @@
     [graphden.input.ir :as ir]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-execution :as list-execution]
+    [graphden.input.metadata :as metadata]
     [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
     [graphden.input.source-snapshot :as snapshot]
@@ -38,12 +39,25 @@
   (set (map #(ids/slot-id (ids/fn-id "core.collections" :zipmap) %) [:keys :vals])))
 
 
+(defn- checked-dictionary-producers
+  [checked]
+  (into #{} (keep (fn [{:keys [from to mode]}]
+                    (when (= :value mode)
+                      (let [node (get-in checked [:scopes (second (first from))])
+                            binding (get-in node [:bindings from])]
+                        (when (= [:map :text :text] (metadata/asserted-read-type node binding (get-in binding [:reference :actual-type])))
+                          (second to))))))
+        (:dependencies checked)))
+
+
 (defn- check-legacy-invocation
   "Append remains open for composition. At V1 invocation the final unused
    zipmap continuation contributes no items. Specialize only an unresolved
-   public tail of that exact generated use, then rerun the ordinary checker."
-  [{:keys [context options]} root]
+   public tail of that exact generated use, then rerun the ordinary checker.
+   Staged modules specialize only tails beneath an explicitly checked dictionary read."
+  [{:keys [context options]} root staged?]
   (let [checked (analysis/analyze-effective-input context root options)
+        producers (when staged? (checked-dictionary-producers checked))
         ends (into {}
                    (for [{:keys [name kind type required whole-bindable? origin-field-id address]}
                          (when (= :checked (:status checked)) (vals (get-in checked [:public-input :routes])))
@@ -59,6 +73,7 @@
                                     (= owner-id (get-in abi [:generated-list :owner-id]))
                                     (true? (get-in abi [:generated-list :infer-return?]))
                                     (= path [origin-field-id] [(:tail-id fragment)] (get-in abi [:argument-paths :tail]))
+                                    (or (not staged?) (some #(= % (vec (take (count %) (second scope)))) producers))
                                     (= (builder/origin owner-id target-id)
                                        (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id])))]
                      [scope (builder/empty-tail-binding fragment)]))]
@@ -96,7 +111,7 @@
                          (form-query/prepare package root roots))]
     (compile-normalized expansion root implementations)
     (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
-      (compile-frozen frozen (check-legacy-invocation frozen root) implementations))))
+      (compile-frozen frozen (check-legacy-invocation frozen root false) implementations))))
 
 
 (defn- require-visible-root!
@@ -127,7 +142,7 @@
   (let [module (staged/read-pinned payload sha256)
         owners (:owner-ids generated-source)
         package (cond-> package generated-source
-                  (generated/install owners roots visible-fn-ids generated-source))
+                        (generated/install owners roots visible-fn-ids generated-source))
         package (reduce (fn [p {:keys [name]}]
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
                             (if (query/cached p id roots)
@@ -160,7 +175,7 @@
                       (and (= target-id base-fn-id) (contains? visible-targets (:owner-id generated-list)))
                       (and (contains? visible-targets target-id) (contains? visible-fn-ids base-fn-id)))
             (ir/reject! :staged-function-not-visible {:fn-id target-id :base-fn-id base-fn-id})))
-        (cond-> (assoc (compile-frozen frozen (analysis/analyze-effective-input (:context frozen) root (:options frozen)) implementations)
+        (cond-> (assoc (compile-frozen frozen (check-legacy-invocation frozen root true) implementations)
                        :staged-source {:sha256 sha256 :namespace (:namespace module)})
           generated-source (assoc :generated-source (select-keys generated-source [:sha256])))))))
 

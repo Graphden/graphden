@@ -8,6 +8,7 @@
     [graphden.input.list-records :as list-records]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.literal-lookup :as literal-lookup]
+    [graphden.input.metadata :as metadata]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.input.source-collection-checks :as collections]
@@ -533,18 +534,22 @@
           use-scope [root (conj scope-path id)]
           edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
           proof (get-in after [:proofs address])
+          node (get-in after [:scopes scope-path])
+          binding (get-in node [:bindings address])
+          asserted (when (and (:type-override-fn-id row) (= id (:binding-id binding)) (= (:ref-fn-id row) (get-in binding [:expression :fn-id])))
+                     (metadata/asserted-read-type node binding (get-in binding [:reference :actual-type])))
           callable-type (:checked-callable certificate)]
       (when (or callable-type (some #{edge} (:dependencies after)))
         (cond-> (nested-field-checks (or (:external-graph certificate) (get-in certificate [:checked-list :graph]) (get-in certificate [:checked-open :graph])
                                          (checked-graph analyze snapshot target true))
                                      after use-scope)
-          (and (or callable-type (:checked-list certificate) (:checked-open certificate)
+          (and (or asserted callable-type (:checked-list certificate) (:checked-open certificate)
                    (= :any (get-in before [:public-input :routes public-path :completion-type])
                       (get-in after [:scopes scope-path :bindings address :expected-type])))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
           (conj {:id [address :value-type :field-read] :address address
                  :scope (first address) :path field-path
-                 :kind :value-type :trigger :field-read :expected-type (or callable-type (get-in certificate [:checked-list :type]) :any)}))))))
+                 :kind :value-type :trigger :field-read :expected-type (or asserted callable-type (get-in certificate [:checked-list :type]) :any)}))))))
 
 
 (defn- callable-alias-reference-addresses
@@ -851,7 +856,10 @@
                         (get-in before [:public-input :routes source-names :completion-type])
                         (get-in after [:public-input :routes source-names :completion-type]))]
       (or (and (= [:value-type :field-read] [kind trigger])
-               (or (= :any expected-type) (and (types/list-type? expected-type) unchanged?)))
+               (or (= :any expected-type) (and (types/list-type? expected-type) unchanged?)
+                   (and unchanged? (= [:union :null [:map :keyword :any]] expected-type)
+                        (= expected-type (get-in after [:public-input :bindings address :reference :actual-type]))
+                        (= :projection (get-in after [:public-input :bindings address :reference :mode])))))
           (and unchanged? (container-check? after check)
                (= expected-type (get-in after [:public-input :bindings address :reference :actual-type])))))))
 

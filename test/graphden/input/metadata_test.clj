@@ -4,6 +4,7 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.metadata :as metadata]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -180,3 +181,24 @@
                               (row child field {:type-override-fn-id text})]))
           error (try (analysis/analyze-input ctx child) (catch clojure.lang.ExceptionInfo e e))]
       (is (= :marker-stripping (:code (ex-data error)))))))
+
+
+(deftest reference-assertions-need-the-checked-overlay-at-the-original-address
+  (let [id (random-uuid)
+        address [[(random-uuid) []] [(random-uuid)]]
+        status [:refine :int {:min 100 :max 599}]
+        binding {:binding-id id :address address :expression {:kind :ref} :reference {:mode :value} :expected-type status}
+        proof {:status :checked :address address :binding-id id}
+        node {:metadata-proofs {id proof}}
+        asserted metadata/asserted-read-type]
+    (is (= status (asserted node binding :any)))
+    (is (nil? (asserted node binding :text)))
+    (is (nil? (asserted node (assoc-in binding [:reference :mode] :projection) :any)))
+    (doseq [changed [(assoc proof :address [[(random-uuid) []] (second address)])
+                     (assoc proof :status :deferred) (assoc proof :binding-id (random-uuid))]]
+      (is (nil? (asserted {:metadata-proofs {id changed}} binding :any))))
+    (let [binding (assoc binding :expected-type [:map :text :text])
+          branch [:map [:union :text 'k] [:union :text 'v]]]
+      (is (= [:map :text :text]
+             (asserted node binding [:union branch [:map [:union :text 'x] [:union :text 'y]]])))
+      (is (nil? (asserted node binding [:union branch [:map :int :text]]))))))

@@ -10,6 +10,30 @@
     [graphden.types.expansion :as expansion]))
 
 
+(defn- open-text-dictionary?
+  [type]
+  (and (types/map-type? type)
+       (every? (fn [operand]
+                 (and (types/union-type? operand)
+                      (some #{:text} (types/union-members operand))
+                      (every? #(or (= :text %) (types/type-var? %)) (types/union-members operand))))
+               [(types/map-key type) (types/map-val type)])))
+
+
+(defn asserted-read-type
+  "Return the scalar refinement or string dictionary explicitly checked on this value reference."
+  [node {:keys [address binding-id expected-type expression reference]} actual]
+  (let [proof (get-in node [:metadata-proofs binding-id])]
+    (when (and (= :ref (:kind expression)) (= :value (:mode reference))
+               (uuid? binding-id) (= binding-id (:binding-id proof))
+               (= address (:address proof)) (= :checked (:status proof))
+               (not (types/contains-marker? actual))
+               (or (and (= :any actual) (types/refine-type? expected-type) (= :int (types/refine-base expected-type)))
+                   (and (= [:map :text :text] expected-type)
+                        (types/union-type? actual) (every? open-text-dictionary? (types/union-members actual)))))
+      expected-type)))
+
+
 (defn- prefix?
   [a b]
   (and (<= (count a) (count b)) (= a (subvec b 0 (count a)))))

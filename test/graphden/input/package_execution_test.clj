@@ -17,6 +17,7 @@
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
     [graphden.input.source-certification :as certification]
+    [graphden.input.source-legacy-readers :as legacy-readers]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -1518,3 +1519,40 @@
         (is (= expected (legacy {:parsed parsed}) (canonical (supplied parsed))))))
     (is (thrown? clojure.lang.ExceptionInfo (canonical (supplied {:limit 0.5}))))
     (is (thrown? clojure.lang.ExceptionInfo (canonical (supplied "outside the lookup domain"))))))
+
+
+(deftest staged-json-envelope-preserves-status-headers-and-public-input
+  (let [root (ids/fn-id "web.errors" :json-envelope-response)
+        originals (vec (concat (declarations "packages/core/refinements/fns.edn"
+                                             #{:http-status :text-map :keyword-map :nullable-keyword-map :positive-int :non-negative-int})
+                               (declarations "packages/core/system/fns.edn"
+                                             #{:ring-response-shape :_ring-response--w-status :_ring-response--w-headers :ring-response :to-json-string})
+                               (declarations "packages/core/collections/fns.edn" #{:get :assoc :dissoc :zipmap})
+                               (declarations "packages/core/logic/fns.edn" #{:coalesce :if :equal?})
+                               (declarations "packages/web/errors/fns.edn"
+                                             #{:_jer-env :_jer-status-read :_jer-status :_jer-body-map :_jer-json :_jer-429?
+                                               :_jer-headers-json :_jer-headers-retry :_jer-headers :json-envelope-response})))
+        compile-staged (fn [{:keys [prepared]} owner roots impls]
+                         (let [graph (legacy-readers/owner-index prepared owner)
+                               {package :package} (certification/verify-plan prepared originals {:legacy-graph graph} roots)
+                               {:keys [source proposed]} (get-in package [:closure-baselines owner])
+                               legacy {:namespace "web.errors" :fns [(dissoc source :namespace)]}
+                               staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)])]
+                           (is (some? proposed))
+                           (execution/compile-staged-module package owner roots impls
+                                                            (staged-options legacy staged (set (keys (:declarations package)))))))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! originals)
+      (let [{:keys [legacy canonical analysis]} (runtimes originals root compile-staged)
+            headers {"Content-Type" "application/json"}]
+        (is (= #{[] [:envelope]} (set (keys (get-in analysis [:public-input :routes])))))
+        (doseq [[input expected] [[nil {:status 200 :headers headers :body "{}"}]
+                                  [{} {:status 200 :headers headers :body "{}"}]
+                                  [{:http-status 201 :data "x"} {:status 201 :headers headers :body "{\"data\":\"x\"}"}]
+                                  [{:http-status 429 :error "retry"} {:status 429 :headers (assoc headers "Retry-After" "1")
+                                                                      :body "{\"error\":\"retry\"}"}]]]
+          (is (= expected (legacy {:envelope input}) (canonical {:envelope input}))))
+        (let [failure (try (canonical {:envelope {:http-status 600}})
+                           nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+          (is (= :execution-error/type-mismatch (:type failure)))
+          (is (= :refinement-mismatch (get-in failure [:errors 0 :code]))))))))

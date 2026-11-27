@@ -279,7 +279,7 @@
                 (assoc base :multiple-readers? true :nested-reader? true
                        :target-address [[owner-id path] [field-id]]
                        :projection-id (migration/derived-id :forwarded-field owner-id path field-id))) paths))
-      [base])))
+      [(cond-> base (and (not direct?) (seq paths)) (assoc :authored-reader-path (first paths)))])))
 
 
 (defn verify-forwarded-uses

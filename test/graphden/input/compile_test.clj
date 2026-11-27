@@ -97,6 +97,28 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest authored-callable-parameter-can-be-read-inside-a-reference
+  (let [definitions {:root {:input {:callback [:fn {:item :text} :text #{}]} :return :text
+                            :bindings {[:callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:body :text} :return :text :lambda-params [:item]
+                             :bindings {[:body] {:ref :reader :id :read-item}}}
+                     :reader {:input {:item :text} :return :text}}
+        functions {:root (fn [args _] ((runtime/resolve-arg args :callback) "through the reference"))
+                   :child (fn [args _] (runtime/resolve-arg args :body))
+                   :reader (fn [args _] (runtime/resolve-arg args :item))}
+        {:keys [analysis closure]} (compiled definitions functions)
+        address (fixture/address :root [] :root [:callback])
+        item (fixture/address :root [:callback-use :read-item] :reader [:item])
+        competing (-> definitions
+                      (assoc :other {:input {:item :text} :return :text})
+                      (assoc-in [:child :input :other] :text)
+                      (assoc-in [:child :bindings [:other]] {:ref :other}))]
+    (is (= "through the reference" (invoke closure)))
+    (is (= [{:parameter :item :target item :value-path []}]
+           (get-in analysis [:closures address :call-sites])))
+    (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))))
+
+
 (deftest graph-callable-reuses-captured-cells-and-freshens-equal-call-inputs
   (let [events (atom [])
         definitions {:root {:input {:callback [:fn {:item :any} :any #{}] :config :any} :return :any

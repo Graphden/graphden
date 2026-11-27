@@ -248,14 +248,29 @@
     [{:target address :value-path path}]))
 
 
+(defn- nested-parameter!
+  [analysis [root scope-path :as scope] expressions param call-sites]
+  (let [[{[target-scope path] :target value-path :value-path} & more]
+        (filter #(= param (:parameter %)) call-sites)
+        [target-root target-path] target-scope
+        end (count scope-path)
+        contract (get-in analysis [:scopes target-path :configured-contract])
+        field (when contract (descriptor/find-node contract path))]
+    (when-not (and (empty? more) (= [] value-path) (= root target-root)
+                   (vector? target-path) (> (count target-path) end)
+                   (= scope-path (subvec target-path 0 end))
+                   (= 1 (count path)) field (= param (:name field)) (not (contains? field :fields)))
+      (reject! :callback-parameter-shape-required {:scope scope}))
+    (parameter-node! target-scope expressions field path)))
+
+
 (defn- callback-parameters!
-  [contract scope expressions parameters call-sites callable-type]
+  [analysis contract scope expressions parameters call-sites callable-type]
   (let [by-name (into {} (map (juxt :name identity)) (:fields contract))
         nodes (mapv (fn [name]
-                      (let [field (get by-name name)]
-                        (when-not field
-                          (reject! :callback-parameter-shape-required {:scope scope}))
-                        (parameter-node! scope expressions field [(:id field)])))
+                      (if-let [field (get by-name name)]
+                        (parameter-node! scope expressions field [(:id field)])
+                        (nested-parameter! analysis scope expressions name call-sites)))
                     parameters)
         routes (mapcat (fn [node]
                          (map #(assoc % :parameter (:name node))
@@ -321,7 +336,7 @@
                                     (= (select-keys capture route-keys)
                                        (select-keys (get routes from) route-keys)))
                        (reject! :closure-capture-route-mismatch {:address address})))
-                   (let [plan (callback-parameters! contract scope expressions parameters call-sites callable-type)
+                   (let [plan (callback-parameters! analysis contract scope expressions parameters call-sites callable-type)
                          external (external-addresses! public-routes contract scope expressions
                                                        (set parameters) external-captures)]
                      [address (cond-> (assoc plan :scope scope :type type :parameters parameters)

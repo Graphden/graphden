@@ -82,11 +82,11 @@
         root (ids/fn-id "core.strings" :non-blank?)
         public (ids/slot-id root :string)
         calls (atom [])
-        bases (update-in @loaded [:blank? :impl]
-                         (fn [invoke]
-                           (fn [args ctx]
-                             (swap! calls conj (set (keys args)))
-                             (invoke args ctx))))
+        base-definitions (update-in @loaded [:blank? :impl]
+                                    (fn [invoke]
+                                      (fn [args ctx]
+                                        (swap! calls conj (set (keys args)))
+                                        (invoke args ctx))))
         compile-owner (fn [package id roots impls]
                         (let [prepared (:prepared package)
                               verified (certification/verify-plan prepared source {} roots)
@@ -110,7 +110,7 @@
                             compiled)))]
     (binding [types/*type-aliases-override* (atom {})]
       (sync/register-type-aliases! source)
-      (let [{:keys [legacy canonical analysis]} (runtimes source root compile-owner bases)]
+      (let [{:keys [legacy canonical analysis]} (runtimes source root compile-owner base-definitions)]
         (is (= [public :text true]
                ((juxt :id :type :required)
                 (some #(when (= :string (:name %)) %) (get-in analysis [:scopes [] :configured-contract :fields])))))

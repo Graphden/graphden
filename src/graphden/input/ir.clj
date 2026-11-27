@@ -81,9 +81,9 @@
 
 (defn- native-record-argument?
   [{:keys [base-fn-id root-entry argument-paths]} path expected]
-  (let [{:keys [fn-id name namespace args]} root-entry]
-    (and (uuid? fn-id) (= fn-id base-fn-id) (string? namespace) (simple-keyword? name)
-         (= fn-id (ids/fn-id namespace name))
+  (let [{:keys [fn-id name args] module-ns :namespace} root-entry]
+    (and (uuid? fn-id) (= fn-id base-fn-id) (string? module-ns) (simple-keyword? name)
+         (= fn-id (ids/fn-id module-ns name))
          (some (fn [[argument type]]
                  (and (= expected type) (= path [(ids/slot-id fn-id argument)] (get argument-paths argument))))
                args))))

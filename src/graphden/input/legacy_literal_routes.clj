@@ -21,7 +21,9 @@
                (= :binding (:kind row)) (uuid? slot-id)
                (= [owner slot-id (ids/binding-id owner slot-id) value true]
                   ((juxt :fn-id :slot-id :id :value :value-present) row))
-               (not-any? row [:ref-fn-id :resolver-fn-id :list-append :list-closed])
+               (every? (comp nil? row)
+                       [:ref-fn-id :resolver-fn-id :list-append :list-closed :type-override-fn-id
+                        :required :terminal :description])
                (empty? (get-in graph [:items-by-binding (:id row)])))
       (let [routes (surface/surface-entries owner graph)
             mask (set (lookups/env-binding-route-ids owner writer (bindings/collect-bindings owner graph)

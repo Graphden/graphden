@@ -10,10 +10,10 @@
 (deftest materializing-a-projected-native-record-requires-its-exact-argument-identity
   (let [owner (random-uuid)
         native (ids/fn-id "fixture" :inspect)
-        use (random-uuid)
+        use-id (random-uuid)
         argument [(ids/slot-id native :request)]
         source [[owner []] [(random-uuid)]]
-        address [[owner [use]] argument]
+        address [[owner [use-id]] argument]
         leaf [(first source) (conj (second source) (random-uuid))]
         type {:uri :text}
         expressions {source {:op :record :fields [[:uri leaf]] :type type}
@@ -23,7 +23,7 @@
         abi {:base-fn-id native :root-entry entry :argument-paths {:request argument}}
         binding {:expression {:kind :projection} :expected-type type
                  :reference {:mode :projection :actual-type type}}
-        analysis {:scopes {[use] {:bindings {address binding}}}}
+        analysis {:scopes {[use-id] {:bindings {address binding}}}}
         check (fn [impl]
                 (try (#'ir/container-validator analysis expressions {(first address) impl}
                                                {:address address :expected-type type :trigger :container-materialization})

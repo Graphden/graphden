@@ -7,13 +7,13 @@
 (deftest a-refined-element-must-come-from-the-same-reference-and-literal-inputs
   (let [[owner callee edge-id field literal-id literal-field] (repeatedly 6 random-uuid)
         address [[owner []] [field]]
-        use [owner [edge-id]]
-        literal [use [literal-field]]
+        target-scope [owner [edge-id]]
+        literal [target-scope [literal-field]]
         old-type [:list :any]
         new-type '[:list [:union :text a]]
         check {:address address :scope (first address) :path [field] :id [address :value-type :field-read]
                :kind :value-type :trigger :field-read}
-        edge {:from address :to use :binding-id edge-id :target-fn-id callee :mode :value}
+        edge {:from address :to target-scope :binding-id edge-id :target-fn-id callee :mode :value}
         row {:id literal-id :expression-kind "value" :value-present true :value "name"}
         certificate {:address literal :row row}
         graph (fn [rich]

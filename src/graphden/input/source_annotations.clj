@@ -2,11 +2,16 @@
   "Exact metadata-only assertions on an existing inherited source field."
   (:require
     [graphden.input.format :as format]
+    [graphden.input.source-rename :as rename]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slots]
-    [graphden.packages.records.types :as records]))
+    [graphden.packages.records.types :as records]
+    [graphden.types.core :as types]))
+
+
+(def ^:private primitive-ids (ids/primitive-fn-ids))
 
 
 (defn source-form?
@@ -17,8 +22,25 @@
        (or (not (contains? spec :description)) (string? (:description spec)))))
 
 
+(defn- generic-parent-alias
+  [context definition declaring field slot-id type]
+  (let [defs (:defs-by-name context)
+        parent (get defs declaring)
+        parent-id (:fn-id parent)
+        leaf (get primitive-ids type)]
+    (when (and leaf (uuid? parent-id) (= parent-id (get-in context [:name->id (:parent definition)]))
+               (types/type-var? (slots/rename-source-type declaring field defs)))
+      (let [[source & more] (keep (fn [[name spec]] (when (= field (:as spec)) name)) (:args parent))
+            records (group-by :kind (parse/parse-prepared-module (assoc context :fn-defs [parent])))
+            owner (some #(when (= parent-id (:id %)) %) (:fn records))
+            origin (when (and source (empty? more)) (rename/origin context parent owner records source (get-in parent [:args source])))
+            variable (get-in origin [:declaration :type])]
+        (when (and (= slot-id (:alias-id origin)) (types/type-var? variable))
+          {:parent-id parent-id :alias-id slot-id :source-id (:field-id origin) :variable variable})))))
+
+
 (defn- annotation-origin
-  [{:keys [name->id defs-by-name]} definition rows field]
+  [{:keys [name->id defs-by-name] :as context} definition rows field]
   (let [spec (get-in definition [:args field])]
     (when (source-form? field spec)
       (let [own-ref (slots/own-ref definition defs-by-name)
@@ -32,6 +54,9 @@
             authored-type (when type-id
                             (rebase/rewrite-type-references
                               (:type spec) #(parse/normalize-ref % name->id (:namespace definition))))
+            declared-type (when type-id (slots/slot-type-of declaring key defs-by-name))
+            generic (when (and slot-id authored-type (nil? declared-type) (= authored-type (:type value)))
+                      (generic-parent-alias context prepared declaring key slot-id authored-type))
             id (when slot-id (ids/binding-id owner-id slot-id))
             matches (filter #(and (= :binding (:kind %)) (= id (:id %))) rows)
             expected (cond-> {:kind :binding :id id :fn-id owner-id :slot-id slot-id :value-present false}
@@ -40,7 +65,7 @@
         (when (and (uuid? slot-id) (= field key) (= 1 (count matches))
                    (or (not (contains? spec :type))
                        (and (uuid? type-id)
-                            (= authored-type (:type value) (slots/slot-type-of declaring key defs-by-name))))
+                            (or generic (= authored-type (:type value) declared-type))))
                    (= expected (into {} (remove (comp nil? val)) (first matches))))
           (cond-> {:declaring-id declaring-id
                    :inherited? (boolean (some #{declaring} (rest (slots/chain-of own-ref defs-by-name))))
@@ -48,6 +73,7 @@
                    :row (-> expected (dissoc :slot-id) (assoc :kind :input-binding
                                                               :scope-path [] :target-path [slot-id]
                                                               :expression-kind nil))}
+            generic (assoc :generic-parent-alias generic)
             type-id (assoc :type (:type spec) :type-override-fn-id type-id)
             (contains? spec :description) (assoc :description (:description spec))))))))
 
@@ -74,21 +100,29 @@
 
 
 (defn exact?
-  "An unchanged field type and a metadata-only row require no value or callable
-   invocation proof. The caller supplies the proved inherited field; narrower
-   types do not match."
+  "Check the original metadata row and its declared or specialized field type.
+   A specialized primitive needs its direct parent's checked generic rename."
   [owner field {:keys [row type target-path type-override-fn-id] :as evidence}]
   (let [id (:id field)
+        {:keys [parent-id alias-id source-id variable] :as generic} (:generic-parent-alias evidence)
+        specialized? (and generic (uuid? parent-id) (simple-keyword? (:name field))
+                          (= [parent-id] (:parent-ids owner)) (uuid? source-id)
+                          (= (ids/slot-id parent-id (:name field)) alias-id id) (not= source-id id)
+                          (types/type-var? variable) (= variable (:type field))
+                          (= (ids/primitive-fn-id :any) (:type-id field))
+                          (some? (get primitive-ids type))
+                          (= (get primitive-ids type) type-override-fn-id))
+        field-type-id (if specialized? type-override-fn-id (:type-id field))
         expected (when (and (uuid? (:id owner)) (uuid? id))
                    (cond-> {:kind :input-binding :id (ids/binding-id (:id owner) id)
                             :fn-id (:id owner) :scope-path [] :target-path [id]
                             :expression-kind nil :value-present false}
-                     (contains? evidence :type) (assoc :type-override-fn-id (:type-id field))
+                     (contains? evidence :type) (assoc :type-override-fn-id field-type-id)
                      (contains? evidence :description) (assoc :description (:description evidence))))]
     (and (uuid? (:id owner)) (uuid? id)
-         (or (not (contains? evidence :type)) (= type (:type field)))
+         (or specialized? (not (contains? evidence :type)) (= type (:type field)))
          (= [id] target-path)
-         (= (when (contains? evidence :type) (:type-id field)) type-override-fn-id)
+         (= (when (contains? evidence :type) field-type-id) type-override-fn-id)
          (= expected row))))
 
 

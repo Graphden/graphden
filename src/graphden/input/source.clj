@@ -356,11 +356,16 @@
         owner-id (ids/fn-id (:namespace ancestor) (:name ancestor))
         owner (some #(when (and (= :fn (:kind %)) (= owner-id (:id %))) %) rows)
         bindings (filter #(= :binding (:kind %)) rows)
+        empty-annotations (into #{}
+                                (keep (fn [[field spec]]
+                                        (when (= {:as field} spec)
+                                          (get-in (annotations/annotation context original rows field) [:row :id]))))
+                                (:args original))
         links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
                                 [(:id %) (:source-slot-id %)])) rows)
         occupied (into (set (vals links))
                        (comp (filter #(or (:value-present %) (:ref-fn-id %) (:terminal %))) (map :slot-id)) bindings)]
-    (cond-> {:owner (:id owner) :parents (:parent-ids owner) :occupied occupied :addresses (mapv :slot-id bindings)}
+    (cond-> {:owner (:id owner) :parents (:parent-ids owner) :occupied occupied :addresses (into [] (comp (remove #(empty-annotations (:id %))) (map :slot-id)) bindings)}
       (seq links)
       (assoc :proven? (let [original (source-context/compact-reference original witness)
                             {:keys [aliases blockers]} (local-arguments original ancestor context rows)

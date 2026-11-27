@@ -193,3 +193,38 @@
       (is (= [:ref-scope-required]
              (mapv :code (filter #(= [:args :hiccup :args :body] (:source-path %)) (:blockers planned)))))
       (is (= :blocked (:status planned))))))
+
+
+(deftest primitive-pin-on-a-direct-generic-alias-keeps-both-field-identities
+  (let [base {:namespace "fixture" :name :reader :args {:arg {:type 'a}} :return-type 'a}
+        parent {:namespace "fixture" :name :named-reader :parent :reader :args {:arg {:as :item}}}
+        child {:namespace "fixture" :name :text-reader :parent :named-reader :args {:item {:as :item :type :text}}}
+        definitions [base parent child]
+        prepared (parse/prepare-module definitions {} {})
+        verified (source/verify-module (source/plan-module definitions prepared) prepared)
+        result (last (:definitions verified))
+        owner (ids/fn-id "fixture" :text-reader)
+        parent-id (ids/fn-id "fixture" :named-reader)
+        alias-id (ids/slot-id parent-id :item)
+        source-id (ids/slot-id (ids/fn-id "fixture" :reader) :arg)
+        field {:id alias-id :name :item :type 'a :type-id (ids/primitive-fn-id :any)}
+        annotation (get-in result [:v2 :configurations [:item]])]
+    (is (= :authored-source-equivalent (:verification result)) (pr-str (:blockers result)))
+    (is (= {:parent-id parent-id :alias-id alias-id :source-id source-id :variable 'a} (:generic-parent-alias annotation)))
+    (is (= (ids/binding-id owner alias-id) (get-in annotation [:row :id])))
+    (is (= (ids/primitive-fn-id :text) (:type-override-fn-id annotation)))
+    (is (annotations/exact? {:id owner :parent-ids [parent-id]} field annotation))
+    (is (not (annotations/exact? {:id owner :parent-ids []} field annotation)))
+    (is (not (annotations/exact? {:id owner :parent-ids [parent-id]} (assoc field :type 'b) annotation)))))
+
+
+(deftest empty-self-annotation-in-the-lineage-leaves-the-field-available
+  (let [base {:namespace "fixture" :name :reader :args {:argument {:type :int} :test {:type :bool}} :return-type :int}
+        parent {:namespace "fixture" :name :named :parent :reader
+                :args {:argument {:as :item} :test {:as :test}}}
+        child {:namespace "fixture" :name :filtered :parent :named :args {:test {:value true}}}
+        descendant {:namespace "fixture" :name :use :parent :filtered :args {:item {:value 1}}}
+        definitions [base parent child descendant]
+        prepared (parse/prepare-module definitions {} {})
+        result (last (:definitions (source/verify-module (source/plan-module definitions prepared) prepared)))]
+    (is (= :authored-source-equivalent (:verification result)) (pr-str (:blockers result)))))

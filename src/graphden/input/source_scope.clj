@@ -11,6 +11,7 @@
     [graphden.input.source-external :as external]
     [graphden.input.source-forward-generic :as generic]
     [graphden.input.source-joint :as joint]
+    [graphden.input.source-literal-checks :as literal-checks]
     [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.variables :as variables]
@@ -473,7 +474,7 @@
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
-        original (set (:obligations before))
+        original (literal-checks/replay before after certificates)
         certificates (if (= current original)
                        certificates
                        (mapv (partial reference-certificate snapshot analyze before after) certificates))
@@ -487,7 +488,7 @@
                                            (= [:value-type :field-read :any] [kind trigger expected-type])
                                            (not (contains? current check)))))
                             (map #(update % :expected-type (partial types/resolve (:substitution after)))))
-                      (:obligations before)))]
+                      original))]
     (or (= prior current)
         (and (every? current prior)
              (let [ref-checks (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates)

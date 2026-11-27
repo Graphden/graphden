@@ -299,17 +299,32 @@
       (reject! :missing-original-declaration id))))
 
 
+(defn- declaration-provider
+  "Use the prepared V2 declarations of a proved dependency, including its
+   private helpers, only under the original source and native signatures."
+  [package inherited id roots]
+  (if-let [{normalized :package frozen :roots :keys [original donors]} (get-in package [:query-lookups id])]
+    (do
+      (when-not (and (= [original] (get-in package [:originals id]))
+                     (every? #(= (get roots %) (get frozen %)) donors))
+        (reject! :normalized-declaration-mismatch id))
+      normalized)
+    inherited))
+
+
 (defn- closure
-  [package roots resolve-named]
-  (loop [pending (vec roots) entries {}]
-    (if-let [id (peek pending)]
+  [package roots resolve-named signatures]
+  (loop [pending (mapv #(vector % package) roots) entries {}]
+    (if-let [[id inherited] (peek pending)]
       (if (contains? entries id)
         (recur (pop pending) entries)
-        (let [added (closure-entries (declaration-package package id) id resolve-named)
+        (let [provider (declaration-provider package inherited id signatures)
+              added (closure-entries (declaration-package provider id) id resolve-named)
               parents (mapcat (fn [{:keys [owner record-parents]}]
                                 (remove (or record-parents {}) (:parent-ids owner))) added)
-              refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)]
-          (recur (into (into (pop pending) parents) refs) (reduce add-closure-entry entries added))))
+              refs (into [] (comp (mapcat :bindings) (keep :ref-fn-id)) added)
+              dependencies (into [] (map #(vector % provider)) (concat parents refs))]
+          (recur (into (pop pending) dependencies) (reduce add-closure-entry entries added))))
       entries)))
 
 
@@ -616,7 +631,7 @@
   ([package function-ids] (freeze-declarations package function-ids {}))
   ([package function-ids roots]
    (let [resolve-named (named-types/lookup package (partial plan-entry package))
-         entries (closure package function-ids resolve-named)]
+         entries (closure package function-ids resolve-named roots)]
      {:entries entries :context (verified-context package entries resolve-named roots)})))
 
 
@@ -792,7 +807,7 @@
   [package owner roots]
   (try
     (let [resolve-named (named-types/lookup package (partial plan-entry package))
-          entries (closure package [owner] resolve-named)
+          entries (closure package [owner] resolve-named roots)
           bindings (mapcat :bindings (vals entries))
           _ (when-not (some #(and (= "projection" (:expression-kind %)) (empty? (:scope-path %))) bindings) (reject! :missing-source-projection owner))
           ctx (verified-context package entries resolve-named roots)

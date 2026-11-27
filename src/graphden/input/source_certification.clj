@@ -112,12 +112,12 @@
   "Verify local scope rewrites using source proofs from the declaring packages.
    An imported declaration keeps its original name resolution and verified
    rows even when the importing package uses a different reference spelling."
-  [prepared originals {:keys [definitions baselines legacy-graph]} roots]
+  [prepared originals {:keys [definitions baselines legacy-graph query-lookups]} roots]
   (let [visible (into originals definitions)
         prepared (shared-forwarding prepared baselines)
         package (snapshot/package-index prepared visible)
         package (-> package
-                    (assoc :closure-baselines baselines)
+                    (assoc :closure-baselines baselines :query-lookups query-lookups)
                     (cond-> legacy-graph (assoc :legacy-graph legacy-graph :incoming-legacy-targets (delay (legacy-readers/incoming-targets legacy-graph))))
                     (update :prepared assoc ::source/originals-by-id (:originals package)))
         initial-context (:prepared package)
@@ -138,4 +138,5 @@
     {:context context :plan verified :certified certified :blocked blocked :package package
      ;; Replaying a certified parent in a dependent package rechecks its
      ;; inline occurrences against their independently certified child rows.
-     :source-proof {:definitions visible :baselines (merge baselines (select-keys (:closure-baselines package) inline-ids) local-proofs)}}))
+     :source-proof {:definitions visible :query-lookups (:query-lookups package)
+                    :baselines (merge baselines (select-keys (:closure-baselines package) inline-ids) local-proofs)}}))

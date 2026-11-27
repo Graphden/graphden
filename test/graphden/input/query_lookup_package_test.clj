@@ -36,7 +36,7 @@
 (defn- pinned-stage
   [module]
   (let [bs (String/.getBytes (pr-str module) StandardCharsets/UTF_8)]
-    {:bytes bs :sha256 (hex/encode (.digest (MessageDigest/getInstance "SHA-256") bs))}))
+    {:bytes bs :sha256 (hex/encode (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") bs))}))
 
 
 (defn- rejection
@@ -49,7 +49,10 @@
             types/*type-aliases-override* (atom {})]
     (let [original {:name :query :parent :query-param :args {:param-name {:value "a"}}}
           owner (ids/fn-id "fixture" :query)
-          forms (conj (source) (assoc original :namespace "fixture"))
+          lookup-fallback {:namespace "fixture" :name :lookup-fallback :parent :coalesce
+                           :args {:value :query :default {:value "local"}}}
+          fallback-id (ids/fn-id "fixture" :lookup-fallback)
+          forms (conj (source) (assoc original :namespace "fixture") lookup-fallback)
           package (snapshot/package-index (parse/prepare-module forms {} {}) forms)
           {:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
           _ (sync/register-type-aliases! fn-defs)
@@ -69,11 +72,15 @@
           ctx {:compiled-registry (atom {owner invoke}) :base-fns {}}
           ring {:request-method :get :uri "/" :query-string "" :headers {} :body nil :async-channel nil}
           run #(executor/execute ctx owner {:request (merge ring %)})]
+      (let [package (query/certify package owner roots)
+            compiled (execution/compile-package package fallback-id roots implementations)]
+        (is (= "local" ((:invoke compiled) {:value {:request ring}} {})))
+        (is (= "remote" ((:invoke compiled) {:value {:request (assoc ring :query-string "a=remote")}} {}))))
       (is (= #{:request} (:accepted input-origin)))
       (is (= [:request] (mapv :name (get-in analysis [:public-input :root :fields]))))
       (is (true? (get-in analysis [:public-input :routes [:request] :required])))
       (is (= [:union :null :text] (get-in analysis [:scopes [] :signature :return])))
-      (is (= 0 (run {"extra" true :query-params {"a" 0}})))
+      (is (zero? (run {"extra" true :query-params {"a" 0}})))
       (is (= {:v 5} (run {7 nil :query-params {:a {:v 5}}})))
       (is (= "c" (run {:query-string "a=c"})))
       (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request ring :param-name "old"}))))

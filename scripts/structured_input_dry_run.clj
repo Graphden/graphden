@@ -109,7 +109,8 @@
   [package states]
   (let [proofs (keep #(get-in states [% :source-proof]) (:dependencies package))]
     {:definitions (vec (distinct (mapcat :definitions proofs)))
-     :baselines (reduce into {} (map :baselines proofs))}))
+     :baselines (reduce into {} (map :baselines proofs))
+     :query-lookups (reduce into {} (map :query-lookups proofs))}))
 
 
 (defn- duplicate-definition?

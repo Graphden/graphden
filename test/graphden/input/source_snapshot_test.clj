@@ -850,8 +850,8 @@
       (is (= [(ids/binding-id id old-slot) [reader]] ((juxt :id :target-path) row)))
       (is (= :authored-source-equivalent (:verification inline-result)))
       (let [certified (assoc-in package [:closure-baselines inline-id] inline-result)
-            implementations (into {} (for [{:keys [namespace name]} primitives]
-                                       [(ids/fn-id namespace name) (get-in @loaded-bases [name :impl])]))
+            implementations (into {} (for [{module-name :namespace :keys [name]} primitives]
+                                       [(ids/fn-id module-name name) (get-in @loaded-bases [name :impl])]))
             v2 (:invoke (execution/compile-package certified inline-id signatures implementations))
             v1 (get (eager/compile-all (assoc lookup :base-fns (registry/compute-base-fns-map @loaded-bases))) inline-id)]
         (is (= true (v1 {} {}) (v2 {} {})))

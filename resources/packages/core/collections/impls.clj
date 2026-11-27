@@ -587,8 +587,14 @@
 
 (defn zipmap-return-rule
   [bindings-info default-ret]
-  (let [keys-form (get-in bindings-info [:keys :value])
-        val-elems (get-in bindings-info [:vals :elem-types])
+  (let [{keys-form :value checked-keys :list-elements} (:keys bindings-info)
+        {val-elems :elem-types checked-vals :list-elements} (:vals bindings-info)
+        keys-form (if (vector? checked-keys)
+                    (when (every? :value-present checked-keys) checked-keys)
+                    keys-form)
+        val-elems (if (vector? checked-vals)
+                    (when (every? :type checked-vals) (mapv :type checked-vals))
+                    val-elems)
         literal-kws (when (vector? keys-form)
                       (mapv (fn [item]
                               (when (and (map? item) (contains? item :value))

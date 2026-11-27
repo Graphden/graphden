@@ -483,6 +483,15 @@
              (r {:keys {:value [{:value :status} {:value :body}]}
                  :vals {:elem-types [:int :text]}}
                 [:map :keyword :any]))))
+    (testing "verified closed-list operands retain key order and the last duplicate"
+      (let [key-facts {:list-elements [{:value-present true :value :id}
+                                       {:value-present true :value :count}
+                                       {:value-present true :value :id}]}
+            value-facts {:list-elements [{:type :text} {:type :int} {:type :uuid}]}
+            fallback [:map :keyword :any]]
+        (is (= {:id :uuid :count :int} (r {:keys key-facts :vals value-facts} fallback)))
+        (is (= fallback (r {:keys (assoc-in key-facts [:list-elements 0 :value-present] false) :vals value-facts} fallback)))
+        (is (= fallback (r {:keys key-facts :vals (update value-facts :list-elements pop)} fallback)))))
     (testing "a COUNT mismatch degrades — no partial record"
       (is (= [:map :keyword :any]
              (r {:keys {:value [{:value :status} {:value :body}]}

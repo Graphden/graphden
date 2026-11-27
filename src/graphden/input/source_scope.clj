@@ -13,6 +13,7 @@
     [graphden.input.source-joint :as joint]
     [graphden.input.source-literal-checks :as literal-checks]
     [graphden.input.source-positional-type :as positional-type]
+    [graphden.input.source-read-checks :as reads]
     [graphden.input.source-rename :as rename]
     [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
@@ -488,13 +489,16 @@
                                            (= [:value-type :field-read :any] [kind trigger expected-type])
                                            (not (contains? current check)))))
                             (map #(update % :expected-type (partial types/resolve (:substitution after)))))
-                      original))]
+                      original))
+        prior (into #{} (remove #(and (not (current %)) (reads/discharged? snapshot before after certificates %))) prior)]
     (or (= prior current)
         (and (every? current prior)
              (let [ref-checks (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates)
                    annotations (into #{} (keep #(annotation-field-check snapshot before after %)) certificates)]
                (and (every? current ref-checks)
-                    (every? #(or (ref-checks %) (annotations %)) current)))))))
+                    (every? (fn [check]
+                              (or (ref-checks check) (annotations check)
+                                  (some #(reads/literal-read? snapshot after % check) certificates))) current)))))))
 
 
 (defn- verify-bindings*

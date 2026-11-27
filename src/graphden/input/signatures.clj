@@ -299,8 +299,9 @@
                (= scope from) (= source ((juxt :scope :path) expression))
                (= expected-type (:actual-type reference)
                   (:type (descriptor/find-node (:configured-contract node) path)))
-               (some #{:null} (types/union-members expected-type))
-               (every? #{:null :bool :text :keyword :int :numeric} (types/union-members expected-type)))
+               (or (= :any expected-type)
+                   (and (some #{:null} (types/union-members expected-type))
+                        (every? #{:null :bool :text :keyword :int :numeric} (types/union-members expected-type)))))
       expected-type)))
 
 

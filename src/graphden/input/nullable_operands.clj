@@ -18,6 +18,14 @@
     (some #(when (types/type-var? %) %) (types/union-members expected))))
 
 
+(defn admits-any?
+  "Check the exact substitution a := :any for a nullable-variable domain.
+   Gradual unification can accept :any without binding that variable."
+  [domain]
+  (when-let [variable (nullable-variable domain)]
+    (= :any (types/resolve {variable :any} domain))))
+
+
 (defn evaluates-reference?
   "With this exact native coalesce ABI, a generic nullable operand always
    evaluates its reference as a value. Its type still uses the stock checker."

@@ -24,3 +24,9 @@
                    (assoc-in value [:reference :actual-type] [:union :null [:list :any]])
                    (assoc value :expected-type '[:union :null b])]]
       (is (= initial (operands/reconcile initial [literal other]))))))
+
+
+(deftest any-is-an-exact-instance-only-of-the-naked-nullable-variable
+  (is (operands/admits-any? '[:union :null a]))
+  (doseq [domain ['[:union :null [:list a]] '[:union :null a b] [:union :null :text] '[:list a]]]
+    (is (not (operands/admits-any? domain)))))

@@ -1187,3 +1187,16 @@
         (doseq [[a b expected] [[nil nil nil] [nil "b" "b"] ["a" "b" "a"]]]
           (is (= expected (legacy {:choices {:q a} :last-option b})
                  (canonical {:first-text {:choices {:q a}} :last-text {:last-option b}}))))))))
+
+
+(deftest coalesce-projected-any-operands-preserve-values-and-short-circuit
+  (let [base (declarations "packages/core/logic/fns.edn" #{:coalesce})
+        definition {:namespace "fixture" :name :choose-any :parent :coalesce
+                    :args {:value {:as :first-option :type :any}
+                           :default {:as :next-option :type :any}}}
+        id (ids/fn-id "fixture" :choose-any)
+        {:keys [canonical legacy]} (runtimes (conj base definition) id)]
+    (doseq [[first-value fallback expected] [[0 :skip 0] [true nil true] [{:k 1} "skip" {:k 1}]
+                                             [false "other" "other"] [nil false false] [nil nil nil]]
+            :let [args {:first-option first-value :next-option fallback}]]
+      (is (= expected (legacy args) (canonical args))))))

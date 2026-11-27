@@ -4,6 +4,7 @@
     [graphden.input.context :as context]
     [graphden.input.format :as format]
     [graphden.input.migration :as migration]
+    [graphden.input.nullable-operands :as nullable]
     [graphden.input.source-rich-types :as rich]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -65,6 +66,7 @@
                (markers/preserved? expected actual)
                (or (and (= (count vars) (count (distinct vars)))
                         (types/subtype? actual expected))
+                   (and (= :any actual) (nullable/admits-any? expected))
                    (closed-instance? expected actual))))
         (catch clojure.lang.ExceptionInfo _ false)))))
 

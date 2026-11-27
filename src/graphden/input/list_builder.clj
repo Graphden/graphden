@@ -32,7 +32,7 @@
 (defn- parse-item
   [binding-id name->id owner inline-at position form]
   (when-not (and (vector? form)
-                 (or (= 2 (count form))
+                 (or (= 2 (count form)) (format/typed-list-reference? form)
                      (and (= 3 (count form)) (= :project (first form))
                           (positions/valid-policy? (peek form)) (seq (peek form)))))
     (reject! :invalid-list-item))
@@ -48,7 +48,8 @@
                           (keyword? payload) (get name->id payload)
                           (and (map? payload) (= payload (:inline-body child))) (:fn-id child))]
              (when-not (uuid? ref-id) (reject! :unresolved-list-item-ref))
-             {:id id :position position :kind :ref :fn-id ref-id})
+             (cond-> {:id id :position position :kind :ref :fn-id ref-id}
+               (= 3 (count form)) (assoc :type (:type (peek form)))))
       (reject! :invalid-list-item))))
 
 
@@ -92,9 +93,10 @@
     {:tail tail
      :items (mapv (fn [{:keys [kind value fn-id source-id position] :as item}]
                     (case kind
-                      :ref [:ref (if-let [child (get inline-at position)]
-                                   (if (= fn-id (:fn-id child)) (:inline-body child) (reject! :list-item-origin-mismatch))
-                                   (or (get id->name fn-id) (reject! :unresolved-list-item-ref)))]
+                      :ref (let [target (if-let [child (get inline-at position)]
+                                          (if (= fn-id (:fn-id child)) (:inline-body child) (reject! :list-item-origin-mismatch))
+                                          (or (get id->name fn-id) (reject! :unresolved-list-item-ref)))]
+                             (cond-> [:ref target] (contains? item :type) (conj {:type (:type item)})))
                       :projection (positions/expression (or (get field-names source-id) (reject! :positional-list-field-mismatch)) item)
                       :value [:value value]
                       (reject! :invalid-list-item)))
@@ -108,6 +110,8 @@
     (not (map? value)) [:value value]
     (or (= #{:value} (set (keys value))) (format/legacy-literal-marker? value)) [:value (:value value)]
     (= #{:ref} (set (keys value))) [:ref (:ref value)]
+    (and (= #{:ref :type} (set (keys value))) (format/list-reference-types (:type value)) (keyword? (:ref value)))
+    [:ref (:ref value) {:type (:type value)}]
     (positions/marker? value) (positions/expression (:as value) value)
     (:as value) (reject! :positional-list-annotation-required)
     (or (:parent value) (:parents value)) (reject! :inline-list-item-origin-required)
@@ -125,6 +129,7 @@
         (map-indexed
           (fn [position {:keys [id kind value fn-id source-id] :as item}]
             (when-not (and (= position (:position item)) (= id (ids/binding-list-item-id binding-id position))
+                           (or (not (contains? item :type)) (and (= :ref kind) (format/list-reference-types (:type item))))
                            (case kind
                              :projection (and (positions/valid-policy? (positions/occurrence-policy item)) (uuid? owner-id) (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
                              :ref (and (uuid? fn-id) (not (contains? item :value)))

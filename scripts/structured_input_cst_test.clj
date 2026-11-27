@@ -16,6 +16,7 @@
 (require '[graphden.input.format :as format]
          '[graphden.input.source :as source]
          '[graphden.input.syntax :as syntax]
+         '[graphden.packages.records.ids :as ids]
          '[graphden.packages.records.parse :as parse]
          '[structured-input-cst :as cst])
 
@@ -912,6 +913,37 @@
     (doseq [comment-text ["; call inputs\r\n" "; value binding\r\n" "; request configuration\r\n" "; same public name\r\n"]]
       (is (= 1 (count (re-seq (re-pattern comment-text) target)))))
     (is (= :already-applied (:status (cst/apply-text patch target))))))
+
+
+(deftest typed-list-reference-preserves-its-occurrence-and-source-comments
+  (let [text (str "{:namespace \"demo.main\" :fns ["
+                  "{:name :sink :args {:xs {:type [:list :any]}} :return-type :any} "
+                  "{:name :read :args {} :return-type :int} "
+                  "{:name :child :parent :sink :args {:xs [{:type ; precision\r\n :int :ref ; source\r\n :read}]}}]}")
+        definitions (mapv #(assoc % :namespace "demo.main") (:fns (edn/read-string text)))
+        ctx (parse/prepare-module definitions {} {})
+        plan (source/verify-module (source/plan-module definitions ctx) ctx)
+        entry (peek (:definitions plan))
+        fragment (-> entry :legacy :arguments first :list-builder :fragments peek)
+        op (cst/list-builder-operation (peek definitions) :xs fragment (:name->id ctx))
+        patch (cst/plan text (request {:op :rename-bind :definition :child :path [:args]} op))
+        after (:text (cst/apply-text patch text))
+        item (first (:items fragment))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= (ids/binding-list-item-id (:binding-id fragment) 0) (:id item)))
+    (is (= [[:ref :read {:type :int}]] (get-in (edn/read-string after) [:fns 2 :bind :xs 1 :items])))
+    (is (str/includes? after "; precision\r\n"))
+    (is (str/includes? after "; source\r\n"))
+    (is (= :already-applied (:status (cst/apply-text patch after))))))
+
+
+(deftest typed-list-refs-require-a-compatible-declared-return
+  (let [source [{:namespace "demo" :name :typed-producer :args {} :return-type [:union :null :int]}
+                {:namespace "demo" :name :sink :args {:xs {:type [:list :int]}} :return-type :any}
+                {:namespace "demo" :name :child :parent :sink :args {:xs [{:ref :typed-producer :type :int}]}}]
+        ctx (parse/prepare-module source {} {})
+        entry (peek (:definitions (source/plan-module source ctx)))]
+    (is (some #{:list-reference-type-evidence-required} (map :code (:blockers entry))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]

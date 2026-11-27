@@ -480,8 +480,11 @@
 
 
 (defn- list-item-edit
-  [source starts path node [operator payload]]
+  [source starts path node [operator payload :as expression]]
   (cond
+    (format/typed-list-reference? expression)
+    (let [{:keys [after configuration] :as edit} (typed-leaf source starts node)]
+      (assoc (dissoc edit :configuration) :after (str (subs after 0 (dec (count after))) " " configuration "]")))
     (= :project operator) (position-item-edit source starts node)
     (and (= :ref operator) (map? payload)) (inline-edit source starts node payload path)
     :else (let [wrapped? (and (= :map (z/tag node)) (key-loc node operator))

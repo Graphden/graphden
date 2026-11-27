@@ -111,6 +111,14 @@
                        (= (:id binding) (get-in annotation [:row :id]))
                        (nil? (:generic-parent-alias annotation)))
           (let [form (get-in original [:args field])
+                _ (doseq [{:keys [ref type] :as item} (filter map? (items form))
+                          :when (and (= #{:ref :type} (set (keys item))) (keyword? ref))]
+                    (let [name (parse/normalize-ref ref name->id (:namespace original))
+                          producer (get (:defs-by-name context) name)
+                          declared (when producer
+                                     (some :return-type (reverse (ordered-ancestry producer (:defs-by-name context)))))]
+                      (when-not (and producer (or (= :any declared) (= type declared)))
+                        (reject! :list-reference-type-evidence-required))))
                 inlines (inline-items context original definition field form)
                 form (replace-inline-items form inlines)
                 typed? #(and (positions/marker? %) (contains? % :type))

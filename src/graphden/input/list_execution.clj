@@ -4,7 +4,8 @@
     [graphden.executor.compile-eager :as compile]
     [graphden.executor.runtime :as runtime]
     [graphden.input.list-builder :as builder]
-    [graphden.input.list-records :as records]))
+    [graphden.input.list-records :as records]
+    [graphden.types.validator :as validator]))
 
 
 (defn- reject!
@@ -50,7 +51,16 @@
     (reject! :invalid-list-chain))
   (let [tail (continuation-items open-continuation continuations)
         items (into [] (mapcat builder/compiler-items) fragments)
-        evaluate (compile/compile-list-items (:owner-id (peek fragments)) items lazy-seq? child-callables lookups)]
+        evaluate (compile/compile-list-items (:owner-id (peek fragments)) items lazy-seq? child-callables lookups)
+        item-types (mapcat #(map :type (:items %)) fragments)
+        evaluate (if (some some? item-types)
+                   (let [checks (mapv #(when % (validator/build %)) item-types)
+                         checked (fn [check value]
+                                   (cond (nil? check) value
+                                         lazy-seq? (delay (check @value))
+                                         :else (check value)))]
+                     (fn [args ctx] (map checked checks (evaluate args ctx))))
+                   evaluate)]
     (if (seq tail)
       (fn [free-args ctx]
         (concat (evaluate free-args ctx) (if lazy-seq? (map delayed-literal tail) tail)))

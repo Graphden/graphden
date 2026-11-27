@@ -2,6 +2,7 @@
   "Native lookup arguments whose private map-key variable does not occur elsewhere."
   (:require
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.variables :as variables]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core :as types]))
 
@@ -57,3 +58,39 @@
           node (get-in graph [:scopes path])]
       (when (= (:fn-id expression) (:fn-id node))
         (identity-record-source node [[root path] value-path] expected-type)))))
+
+(defn- projected-collection-domain
+  [analysis scopes [scope path :as source] type [reader reader-path :as address]]
+  (let [{:keys [root-entry base-fn-id argument-paths]} (get scopes scope)
+        node (get-in analysis [:scopes (second scope)])
+        {argument :argument native-path :path} (collection-argument root-entry 'a)
+        binding (get-in node [:bindings address])
+        binder (variables/type-in-scope scope 'a)
+        declared (get-in root-entry [:args argument])]
+    (when (and argument (= reader scope) (= native-path reader-path (get argument-paths argument))
+               (= base-fn-id (:fn-id root-entry))
+               (= source (get-in binding [:reference :source]))
+               (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
+               (= type (:expected-type binding) (get-in binding [:reference :actual-type])
+                  (variables/type-in-scope scope declared))
+               (not (types/type-any? #{binder} (get-in node [:signature :return])))
+               (not-any? #(and (not (contains? #{(first path) (first native-path)} (:id %)))
+                               (types/type-any? #{binder} (:type %)))
+                         (get-in node [:configured-contract :fields])))
+      (types/resolve {binder :any} type))))
+
+
+(defn single-collection-inputs
+  "A private map-key binder has no relationship with any other argument or
+   result. Reify it at the sole public projection of that native collection."
+  [analysis expressions scopes]
+  (let [readers (group-by (comp :source val) (filter #(= :read (:op (val %))) expressions))]
+    (reduce-kv (fn [result [scope path :as source] {:keys [op type]}]
+                 (if-let [domain (when (and (= :supplied op) (= 1 (count path))
+                                            (types/type-any? types/type-var? type) (empty? (get readers [scope []])))
+                                   (let [[[address] & others] (get readers source)]
+                                     (when (and address (empty? others))
+                                       (projected-collection-domain analysis scopes source type address))))]
+                   (assoc-in result [source :type] domain)
+                   result))
+               expressions expressions)))

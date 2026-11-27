@@ -23,7 +23,7 @@
         bomb (ids/fn-id "fixture" :bomb)
         binding-id (ids/binding-id owner (ids/slot-id owner :items))
         names {:source source :bomb bomb}
-        form [:list-builder {:items [[:ref :source] [:ref :source] [:ref :bomb]] :tail :open}]
+        form [:list-builder {:items [[:ref :source {:type :int}] [:ref :source] [:ref :bomb]] :tail :open}]
         fragment (assoc (builder/parse-fragment binding-id form names) :owner-id owner :target-id (ids/slot-id owner :items))
         trace (assoc (builder/link-fragments [fragment]) :fragments [fragment])
         env (lookups/build-lookups {:fns (mapv (fn [[n id]] {:id id :name (name n) :parent-ids []}) names)})]
@@ -42,6 +42,27 @@
               (is (= [42 42] (mapv deref values))))
             (is (= [42 42] (vec values)))))
         (is (= [:source] @calls))))))
+
+
+(deftest typed-list-ref-checks-only-when-its-value-is-demanded
+  (let [owner (ids/fn-id "fixture" :host)
+        target (ids/slot-id owner :items)
+        source (ids/fn-id "fixture" :source)
+        fragment (merge (builder/origin owner target)
+                        (builder/parse-fragment (ids/binding-id owner target)
+                                                [:list-builder {:items [[:value 1] [:ref :source {:type :int}]] :tail :open}]
+                                                {:source source}))
+        trace (assoc (builder/link-fragments [fragment]) :fragments [fragment])]
+    (doseq [delayed? [true false]]
+      (let [calls (atom 0)
+            options {:lazy-seq? delayed? :lookups (lookups/build-lookups {})
+                     :child-callables {source (fn [_ _] (swap! calls inc) 1.5)}}
+            values ((execution/compile-construction trace options) {} {})
+            read-value (if delayed? deref identity)]
+        (is (= 1 (read-value (first values))))
+        (is (zero? @calls))
+        (is (thrown? clojure.lang.ExceptionInfo (read-value (second values))))
+        (is (= 1 @calls))))))
 
 
 (deftest frame-list-arguments-do-not-pull-more-than-the-consumer-requests

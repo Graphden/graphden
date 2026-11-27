@@ -3,6 +3,7 @@
    callable. Keep the ordered operand rows reconstructible by stable IDs."
   (:require
     [graphden.input.core :as input]
+    [graphden.input.format :as format]
     [graphden.input.list-builder :as builder]
     [graphden.input.list-positions :as positions]
     [graphden.input.migration :as migration]
@@ -44,7 +45,8 @@
                                                :projection-scope-path [] :projection-path [source-id]}
                                               (positions/occurrence-policy item))
                            :value {:expression-kind "value" :value-present true :value value}
-                           :ref {:expression-kind "ref" :value-present false :ref-fn-id fn-id}
+                           :ref (cond-> {:expression-kind "ref" :value-present false :ref-fn-id fn-id}
+                                  (:type item) (assoc :type-override-fn-id (ids/primitive-fn-id (:type item))))
                            (reject! :invalid-list-item))))]
     [field membership binding]))
 
@@ -67,6 +69,10 @@
      (into (into [owner input] (mapcat (partial operand-rows input-id fragment use-path element-id)) items) tail))))
 
 
+(def ^:private reference-types-by-id
+  (into {} (map (juxt ids/primitive-fn-id identity)) format/list-reference-types))
+
+
 (defn- read-operand
   [by-field membership]
   (let [row (get by-field (:slot-id membership))
@@ -75,7 +81,9 @@
       "value" (assoc item :kind :value :value (:value row))
       "projection" (merge (assoc item :kind :projection :source-id (first (:projection-path row)))
                           (positions/occurrence-policy row))
-      "ref" (assoc item :kind :ref :fn-id (:ref-fn-id row))
+      "ref" (cond-> (assoc item :kind :ref :fn-id (:ref-fn-id row))
+              (:type-override-fn-id row) (assoc :type (or (reference-types-by-id (:type-override-fn-id row))
+                                                        (reject! :unsupported-list-reference-type))))
       (reject! :missing-list-operand))))
 
 

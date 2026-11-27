@@ -32,6 +32,7 @@
 (defn- check-implies?
   [narrow broad]
   (or (= narrow broad) (= :any broad)
+      (and (= :int narrow) (= :numeric broad))
       ;; The native jsonb validator accepts every map, including records.
       (and (= broad :jsonb) (or (types/map-type? narrow) (types/record-type? narrow)))
       (when-let [arms (seq (types/union-members narrow))]

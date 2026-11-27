@@ -11,6 +11,7 @@
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
     [graphden.input.literal-lookup :as literal-lookup]
+    [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
     [graphden.input.source-certification :as certification]
@@ -1438,3 +1439,29 @@
         (let [invalid (assoc record :method 42)]
           (is (= "/orders" (canonical {:coll {:request invalid} :key :uri})))
           (is (thrown? clojure.lang.ExceptionInfo (canonical {:coll {:request invalid} :key :method}))))))))
+
+
+(deftest checked-list-reference-keeps-its-primitive-read-type
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:get})
+                     (concat (declarations "packages/core/arithmetic/fns.edn" #{:gt})
+                             (declarations "packages/app/execution/fns.edn"
+                                           #{:_list-exec-limit-parsed :_list-exec-limit-less-than-1?})))
+        root (ids/fn-id "app.execution" :_list-exec-limit-less-than-1?)
+        project lookup-abi/single-collection-inputs
+        {:keys [canonical legacy]}
+        (with-redefs [lookup-abi/single-collection-inputs
+                      (fn [analysis expressions scopes]
+                        (let [result (project analysis expressions scopes)]
+                          (doseq [[address expression] expressions
+                                  :when (not= expression (get result address))]
+                            (let [competing [(first address) [(ids/slot-id root :another-reader)]]
+                                  additional (assoc expressions competing {:op :read :source address})]
+                              (is (= expression (get (project analysis additional scopes) address)))))
+                          result))]
+          (runtimes source root))
+        supplied (fn [parsed] {:nums {:item-1 {:parsed parsed}}})]
+    (doseq [[limit expected] [[0 true] [1 false] [101 false]]]
+      (let [parsed {:limit limit "extra" 7 8 :other}]
+        (is (= expected (legacy {:parsed parsed}) (canonical (supplied parsed))))))
+    (is (thrown? clojure.lang.ExceptionInfo (canonical (supplied {:limit 0.5}))))
+    (is (thrown? clojure.lang.ExceptionInfo (canonical (supplied "outside the lookup domain"))))))

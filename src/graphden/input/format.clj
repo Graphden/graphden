@@ -144,13 +144,22 @@
     nil))
 
 
+(def list-reference-types #{:int :text :bool :keyword :numeric :uuid})
+
+
+(defn typed-list-reference?
+  [form]
+  (and (vector? form) (= 3 (count form)) (= :ref (first form)) (keyword? (second form))
+       (map? (peek form)) (= #{:type} (set (keys (peek form)))) (list-reference-types (:type (peek form)))))
+
+
 (defn- list-origin?
   [spelling]
   (and (vector? spelling) (= 3 (count spelling)) (= :list-origin (first spelling))
        (contains? #{:vector [:append] [:append :closed] [:closed :append]} (second spelling))
        (map? (peek spelling))
        (every? nat-int? (keys (peek spelling)))
-       (every? #(or (#{:value-wrapper :ref-wrapper :literal-marker-first :literal-marker-last} %)
+       (every? #(or (#{:value-wrapper :ref-wrapper :literal-marker-first :literal-marker-last :type-first} %)
                     (positional-spelling? %))
                (vals (peek spelling)))))
 
@@ -159,20 +168,21 @@
   [item spelling input]
   (when (vector? item)
     (let [[op value] item]
-      (if (= :project op)
-        (original-position item spelling input)
-        (when (= 2 (count item))
-          (case op
-            :value (case spelling
-                     nil [value]
-                     :value-wrapper [{:value value}]
-                     (original-marked-literal spelling value))
-            :ref (case spelling
-                   nil (cond (keyword? value) [value]
-                             (map? value) (when-let [origin (inline-origin value)] [origin]))
-                   :ref-wrapper (when (keyword? value) [{:ref value}])
-                   nil)
-            nil))))))
+      (cond
+        (= :project op) (original-position item spelling input)
+        (typed-list-reference? item) (typed-origin [:ref value] spelling (:type (peek item)))
+        (= 2 (count item))
+        (case op
+          :value (case spelling
+                   nil [value]
+                   :value-wrapper [{:value value}]
+                   (original-marked-literal spelling value))
+          :ref (case spelling
+                 nil (cond (keyword? value) [value]
+                           (map? value) (when-let [origin (inline-origin value)] [origin]))
+                 :ref-wrapper (when (keyword? value) [{:ref value}])
+                 nil)
+          nil)))))
 
 
 (defn- original-list
@@ -433,6 +443,7 @@
                              (case (set (keys item))
                                #{:value} [position :value-wrapper]
                                #{:ref} [position :ref-wrapper]
+                               #{:ref :type} (when (= :type (ffirst item)) [position :type-first])
                                #{:value :literal?} (when (legacy-literal-marker? item)
                                                      [position (marked-literal-spelling item)])
                                (when (contains? item :as)

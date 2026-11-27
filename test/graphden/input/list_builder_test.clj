@@ -326,3 +326,18 @@
     (is (= :authored-source-equivalent (:verification child)))
     (is (= [["first"]] (mapv #(mapv :value (:items %)) fragments)))
     (is (= :unsupported-list-binding (get-in (peek (replay changed)) [:legacy :arguments 0 :list-builder :blocker])))))
+
+
+(deftest typed-list-refs-round-trip-their-own-operand-row
+  (let [fragments (fixture [{:ref :source :type :int}] [])
+        item (first (:items (first fragments)))
+        field {:type [:list :any] :type-id (ids/primitive-fn-id :sequence)}
+        records (list-records/materialize-chain fragments field {})
+        row (some #(when (= (:id item) (:id %)) %) records)
+        recover #(list-records/recover-chain (mapv :owner-id fragments) (:target-id (first fragments)) field {} %)]
+    (is (= [(ids/primitive-fn-id :int) (ids/fn-id "demo" :source)]
+           ((juxt :type-override-fn-id :ref-fn-id) row)))
+    (is (= fragments (:fragments (recover (reverse records)))))
+    (is (= :unsupported-list-reference-type
+           (reason #(recover (map (fn [r] (cond-> r (= (:id r) (:id row))
+                                             (assoc :type-override-fn-id (:id row)))) records)))))))

@@ -75,11 +75,11 @@
         [native-slot :as path] (:target-path binding)
         old-id (:id binding)
         native-id (when (uuid? native-slot) (ids/binding-id owner native-slot))
-        original (some #(when (= old-id (:id %)) %) prior)
+        prior-row (some #(when (= old-id (:id %)) %) prior)
         covered (when (and (= [[owner field]] declarations) (= [native-slot] path)
                            (= :input-binding (:kind binding)) (= "ref" (:expression-kind binding))
-                           (= child (:ref-fn-id binding) (:ref-fn-id original))
-                           (= stored-slot (:slot-id original)) (uuid? old-id) (uuid? native-id))
+                           (= child (:ref-fn-id binding) (:ref-fn-id prior-row))
+                           (= stored-slot (:slot-id prior-row)) (uuid? old-id) (uuid? native-id))
                   {:ext-name field :slot-id native-slot})]
     (cond
       (migration/same-edn? prior current) (if covered {:covered covered} {})

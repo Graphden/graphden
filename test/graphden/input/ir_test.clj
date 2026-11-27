@@ -119,6 +119,17 @@
                            {:reference {:mode :projection :source item}}))))))
 
 
+(deftest polymorphic-closure-contract-must-agree-for-every-substitution
+  (let [actual '[:fn {:value b} [:union :null a b] #{} #{:jvm-server}]
+        expected (assoc actual 3 :any 4 :unknown)
+        fits? #'ir/checked-closure-subtype?]
+    (is (fits? actual expected))
+    (is (not (fits? actual (assoc-in expected [1 :value] 'a))))
+    (is (not (fits? actual (assoc expected 2 'w))))
+    (is (not (fits? (assoc actual 3 #{:io}) (assoc expected 3 #{}))))
+    (is (not (fits? actual (assoc expected 4 #{:browser-main}))))))
+
+
 (deftest explicit-zero-parameter-closure-has-only-lexical-captures
   (let [definitions {:root {:input {:callback [:fn {} :any #{}] :config :any} :return :any
                             :bindings {[:callback] {:ref :child :id :callback-use} [:config] {:value nil}}}

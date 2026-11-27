@@ -417,6 +417,17 @@
           expressions)))
 
 
+(defn- checked-closure-subtype?
+  [actual expected]
+  (and (types/fn-type? actual) (types/fn-type? expected)
+       ;; Equal scoped argument and result expressions stay equal under every
+       ;; substitution. The ordinary subtype check still bounds effects and targets.
+       (or (and (= (types/fn-args actual) (types/fn-args expected))
+                (= (types/fn-ret actual) (types/fn-ret expected)))
+           (not-any? #(types/type-any? types/type-var? %) [actual expected]))
+       (types/subtype? actual expected)))
+
+
 (defn- closure-plans
   [analysis expressions routes detached-closures?]
   (let [plans (:closures analysis)
@@ -440,9 +451,7 @@
                                   (every? keyword? parameters) (= (count parameters) (count (set parameters))))
                      (reject! :unsupported-closure-scope {:address address}))
                    (when-not (and (= callable-type (:callable-type reference))
-                                  (types/fn-type? type) (types/fn-type? callable-type)
-                                  (not-any? #(types/type-any? types/type-var? %) [type callable-type])
-                                  (types/subtype? callable-type type))
+                                  (checked-closure-subtype? callable-type type))
                      (reject! :unproved-closure-contract {:address address}))
                    (doseq [{:keys [from source role via] :as capture} captures]
                      (when-not (and (= :capture role) (= binding-id via) (= owner (first source))

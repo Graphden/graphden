@@ -1004,7 +1004,14 @@
     (is (= :authored-source-equivalent (:verification entry)))
     (is (= type (get-in entry [:proposed :configure [:x] :type])))
     (is (= (ids/primitive-fn-id :sequence) (get-in entry [:v2 :bindings 0 :type-override-fn-id])))
-    (is (= :blocked (:status (result (source/verify-module changed ctx) :child))))))
+    (is (= :blocked (:status (result (source/verify-module changed ctx) :child))))
+    (let [renamed (assoc-in child [:args :x] {:as :rows :type type})
+          sources [base renamed]
+          context (prepared sources)
+          entry (result (source/verify-module (source/plan-module sources context) context) :child)]
+      (is (= :authored-source-equivalent (:verification entry)))
+      (is (= type (get-in entry [:proposed :input :rows :type])))
+      (is (= [:project [:rows]] (get-in entry [:proposed :bind :x]))))))
 
 
 (deftest an-inline-type-pin-belongs-to-its-enclosing-binding

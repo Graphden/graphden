@@ -548,7 +548,7 @@
    from its parent declaration. Callable effects and execution constraints
    require a separate source witness."
   [type]
-  (let [value-type? (partial collection-type? #(or (keyword? %) (simple-symbol? %)))]
+  (let [value-type? (partial collection-with-record-leaves? #(or (keyword? %) (simple-symbol? %)))]
     (or (value-type? type) (callable-input-type? value-type? type))))
 
 

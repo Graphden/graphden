@@ -159,13 +159,15 @@
         own-sources (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
                                       [(:id %) (:source-slot-id %)])) rows)
         grouped (group-by :kind rows)
+        native-links (source-context/native-field-links context definition grouped)
         own (some #(when (= (:fn-id definition) (:id %)) %) (:fn grouped))
         names (::ref-index context)]
     (mapv (fn [[arg value]]
             (if (types/own-slot-declaration? value)
               (let [source-slot-id (get own-sources (ids/slot-id (:fn-id definition) arg))]
                 (cond-> {:source-path [:args arg] :kind :declaration :spec (get-in source [:args arg])}
-                  source-slot-id (assoc :source-slot-id source-slot-id)))
+                  source-slot-id (assoc :source-slot-id source-slot-id)
+                  (and source-slot-id (contains? native-links (ids/slot-id (:fn-id definition) arg))) (assoc :native-reader? true)))
               (let [[owner field] (slots/resolve-slot-owner own-ref arg defs-by-name value)
                     owner-id (get name->id owner)
                     slot-id (ids/slot-id owner-id field)
@@ -283,7 +285,7 @@
       (conj (problem :inline-list-item-origin-required))
       (and inline-body (not= [:ref inline-body] expression))
       (conj (problem :inline-reference-mismatch))
-      (:source-slot-id entry)
+      (and (:source-slot-id entry) (not (:native-reader? entry)))
       (conj (problem :field-projection-required))
       (and (= :binding (:kind entry)) (nil? (:binding-id origin)))
       (conj (problem :missing-binding-origin))
@@ -381,7 +383,8 @@
       (seq links)
       (assoc :proven? (let [original (source-context/compact-reference original witness)
                             {:keys [aliases blockers]} (local-arguments original ancestor context rows)
-                            certified (get-in context [::source-context/forwarded-parent-links (:id owner)])]
+                            certified (merge (get-in context [::source-context/forwarded-parent-links (:id owner)])
+                                             (source-context/native-field-links context ancestor (group-by :kind rows)))]
                         (inherited-links-proved? (:id owner) links aliases certified blockers))))))
 
 

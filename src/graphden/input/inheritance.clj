@@ -77,8 +77,9 @@
     (fn []
       (let [order (declaration-order ctx fn-id)
             contracts (mapv #(declaration ctx %) order)
+            hidden (set (vals (get-in ctx [:source-native-field-links fn-id])))
             fields (:fields (reduce add-field {:by-id {} :by-name {} :fields []}
-                                    (mapcat :fields contracts)))
+                                    (remove (comp hidden :id) (mapcat :fields contracts))))
             structural (into {} (map (juxt :name :type)) fields)
             rich (reduce #(preserve-wrappers %2 %1) structural (distinct (map :type contracts)))
             visible (set order)

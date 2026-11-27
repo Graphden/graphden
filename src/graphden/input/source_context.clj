@@ -12,6 +12,7 @@
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.slot-resolution :as slots]
     [graphden.packages.records.types :as types]))
 
 
@@ -175,6 +176,65 @@
     :else (get definition :input args)))
 
 
+(defn- referenced-reader?
+  [defs definition field]
+  (some #(slots/resolve-slot-owner-strict % field defs #{})
+        (slots/ref-targets-of definition defs)))
+
+
+(defn- native-field-link
+  [{:keys [defs-by-name name->id] :as context} definition parent owned [field spec]]
+  (when (types/own-slot-declaration? spec)
+    (let [base-spec (get-in parent [:args field])
+          owner (ids/fn-id (:namespace definition) (:name definition))
+          local (ids/slot-id owner field)
+          native (ids/slot-id (:fn-id parent) field)
+          child (get owned local)
+          member (get owned (ids/fn-slot-id owner local))]
+      (when (and (map? base-spec) (= :slot (:kind child)) (= native (:source-slot-id child))
+                 (= (name field) (:name child)) (= local (:slot-id member))
+                 (= owner (:fn-id member)) (= :fn-slot (:kind member))
+                 (= (:type-fn-id child) (types/resolve-type-ref (:type spec) name->id))
+                 (not (contains? base-spec :value))
+                 (= (get base-spec :required true) (get spec :required true))
+                 (rename/compatible-pin? context (:type base-spec) (:type spec))
+                 (not (referenced-reader? defs-by-name definition field)))
+        [local native]))))
+
+
+(defn native-field-links
+  "Match a local input to its same-name argument on the native parent.
+   A ref-tree reader, an occupied native argument or a wider declaration
+   cannot establish that this field has a single public input."
+  [context definition records]
+  (when (some :source-slot-id (:slot records))
+    (let [parent (get-in context [:defs-by-name (:parent definition)])]
+      (when (and (uuid? (:fn-id parent)) (:return-type parent)
+                 (not (:parents parent)) (not (:parent parent)) (empty? (:parents definition)))
+        (let [owned (into {} (map (juxt :id identity)) (concat (:slot records) (:fn-slot records)))]
+          (into {} (keep (partial native-field-link context definition parent owned)) (:args definition)))))))
+
+
+(defn- checked-native-field-links
+  [{:keys [context]} ordered]
+  (let [links (into {} (mapcat (fn [{:keys [definition records]}]
+                                 (native-field-links context definition records))) ordered)]
+    (when (seq links)
+      (let [slots (into {} (map (juxt :id identity)) (mapcat #(get-in % [:records :slot]) ordered))
+            members (into {} (map (juxt :slot-id identity)) (mapcat #(get-in % [:records :fn-slot]) ordered))]
+        (doseq [[local native] links]
+          (let [field (keyword (:name (get slots local)))
+                source (get slots native)
+                member (get members native)]
+            (when-not (and (= (name field) (:name source))
+                           (= native (ids/slot-id (:fn-id member) field))
+                           (= (:id member) (ids/fn-slot-id (:fn-id member) native))
+                           (not-any? #(referenced-reader? (:defs-by-name context) (:definition %) field) ordered)
+                           (not-any? #(= native (:slot-id %)) (mapcat #(get-in % [:records :binding]) ordered)))
+              (reject! :ambiguous-inherited-input [:input field]))))))
+    links))
+
+
 (defn- declared-input
   [source-environment own binding-origins]
   (let [{:keys [owner]} own
@@ -185,6 +245,8 @@
                           entry))
                       (parent-order source-environment own))
         _ (ensure-acyclic! ordered)
+        links (checked-native-field-links source-environment ordered)
+        hidden (set (vals links))
         input-fields (into [] (mapcat (fn [{:keys [records definition owner]}]
                                         (let [aliases (keep (fn [[k v]] (rename/origin (:context source-environment) definition owner records k v)) (:args definition))
                                               anchors (positions/inputs (:id owner) records (get-in source-environment [:context :name->id]))
@@ -192,8 +254,8 @@
                                                           (map (juxt :alias :declaration)) aliases)
                                               checked-links (when (not= (:id owner) (get-in own [:owner :id]))
                                                               (get-in source-environment [:context ::forwarded-parent-links (:id owner)]))
-                                              sources (into (or checked-links {}) (map (juxt :alias-id :field-id)) aliases)]
-                                          (fields records (:id owner) specs [:input] sources))))
+                                              sources (into (merge checked-links links) (map (juxt :alias-id :field-id)) aliases)]
+                                          (remove (comp hidden :id) (fields records (:id owner) specs [:input] sources)))))
                            ordered)
         members (into [] (mapcat #(memberships (:records %) (get-in % [:owner :id]))) ordered)
         id (:id owner)
@@ -201,7 +263,8 @@
         input-id (:id descriptor)
         mapping (migration/identity-mapping {id members} binding-origins)
         occupied (get-in source-environment [::occupied-reference-aliases id])
-        mapping (cond-> mapping occupied (assoc :occupied-reference-aliases {(:id (:alias-slot occupied)) occupied}))]
+        mapping (cond-> mapping (seq links) (assoc :native-field-links links)
+                        occupied (assoc :occupied-reference-aliases {(:id (:alias-slot occupied)) occupied}))]
     (when (or (not= (count input-fields) (count (set (map :id input-fields))))
               (not= (count input-fields) (count (set (map :name input-fields)))))
       (reject! :ambiguous-inherited-input [:input]))
@@ -209,7 +272,7 @@
      :contract (record-node input-id input-fields)
      :declaration-records (into [(assoc descriptor :kind :fn)]
                                 (map #(migration/input-membership-record owner %))
-                                members)
+                                (remove (comp hidden :slot-id) members))
      :origin-ledger {:source-owner id :mapping mapping}
      :binding-id (partial migration/binding-origin {:mapping mapping})}))
 

@@ -75,6 +75,41 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest a-native-argument-reads-the-more-specific-same-name-field
+  (let [root (ids/fn-id "fixture" :tag)
+        base (ids/fn-id "core.strings" :str-upper)
+        field (ids/slot-id root :string)
+        native (ids/slot-id base :string)
+        source (into (declarations "packages/core/strings/fns.edn" #{:str-upper})
+                     [{:name :tag-name :namespace "fixture" :refine {:base :text :constraint [:in #{"a" "b"}]}}
+                      {:name :tag :namespace "fixture" :parent :str-upper :args {:string {:type :tag-name}}}
+                      {:name :preset :namespace "fixture" :parent :tag :args {:string "a"}}])
+        compile-owner (fn [package root roots implementations]
+                        (let [{:keys [entries]} (snapshot/freeze-declarations package [root] roots)
+                              entry (get entries root)
+                              result (execution/compile-package package root roots implementations)]
+                          (is (= {field native} (get-in entry [:origin-ledger :mapping :native-field-links])))
+                          (is (= [field] (get-in result [:analysis :scopes [] :signature-source :argument-paths :string])))
+                          result))
+        open (runtimes source root compile-owner)
+        preset (runtimes source (ids/fn-id "fixture" :preset) compile-owner)]
+    (is (= "B" ((:legacy open) {:string "b"}) ((:canonical open) {:string "b"})))
+    (is (= "A" ((:legacy preset) {}) ((:canonical preset) {})))
+    (let [wider (assoc-in (nth source 2) [:args :string :type] :any)
+          inputs (assoc source 2 wider)
+          plan (source/plan-module inputs (parse/prepare-module inputs {} {}))]
+      (is (= [:field-projection-required]
+             (mapv :code (:blockers (first (filter #(= root (:identity %)) (:definitions plan)))))))
+      (let [fn-id (ids/fn-id "fixture" :competing)
+            ;; A second parent still exposes its own independent :string.
+            ambiguous {:namespace "fixture" :name :competing :parents [:tag :str-trim]}
+            inputs (into source (conj (declarations "packages/core/strings/fns.edn" #{:str-trim})
+                                      ambiguous))
+            prepared (parse/prepare-module inputs {} {})]
+        (is (= :unverified-source-declaration
+               (rejection-code #(snapshot/freeze-declarations (snapshot/package-index prepared inputs) [fn-id]))))))))
+
+
 (deftest coalesce-evaluates-references-on-both-generic-value-slots
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:coalesce :const})
                      (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})

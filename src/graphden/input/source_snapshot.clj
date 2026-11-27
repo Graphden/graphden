@@ -404,6 +404,10 @@
     (context/build-context
       (assoc (dissoc named :type-rows)
              :fns (or fns {}) :fields (or fields {}) :bindings (or bindings {})
+             :source-native-field-links
+             (into {} (keep (fn [[id entry]]
+                              (when-let [links (get-in entry [:origin-ledger :mapping :native-field-links])]
+                                [id links]))) entries)
              :source-optional-renames (optional-rename-bindings entries fields)
              :source-scoped-references
              (into {} (for [[owner {:keys [scoped-inputs]}] entries
@@ -527,6 +531,7 @@
   (let [base (root-id context id)
         entry (get roots base)
         declaration (get entries base)
+        readers (into {} (map (fn [[local native]] [native local])) (get-in context [:source-native-field-links id]))
         fields (get-in declaration [:contract :fields])
         args (into {} (map (juxt :name (comp types/resolve-alias :type))) fields)
         return (:return-type (:source declaration))]
@@ -540,7 +545,7 @@
     (when-not (signatures/local-type-rules? entry)
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
-     :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)
+     :argument-paths (into {} (map (fn [{:keys [name id]}] [name [(get readers id id)]])) fields)
      :argument-declarations (into {} (map (juxt :name identity)) fields)}))
 
 

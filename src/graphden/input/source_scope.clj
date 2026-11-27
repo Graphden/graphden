@@ -446,9 +446,9 @@
       expected-type)))
 
 
-(defn- scoped-list-reference
-  "A value ref may instantiate a generic list. Check the solved element
-   against the independently inferred target in both of its scopes."
+(defn- scoped-value-reference
+  "Check the instantiated input against the independently inferred target in
+   both scopes, preserving whether it was a generic list or an open variable."
   [snapshot analyze before after {:keys [address row public-path]}]
   (let [[[root scope-path]] address
         {id :id target :ref-fn-id} row
@@ -456,16 +456,19 @@
         edge {:from address :to use-scope :binding-id id :target-fn-id target :mode :value}
         original (get-in before [:public-input :routes public-path :completion-type])
         {:keys [expected-type reference]} (get-in after [:scopes scope-path :bindings address])
-        node (get-in after [:scopes (second use-scope)])]
-    (when (and target (= target (:fn-id node)) (types/list-type? original)
-               (types/type-any? types/type-var? original) (types/list-type? expected-type)
-               (not (types/type-any? types/type-var? expected-type))
+        node (get-in after [:scopes (second use-scope)])
+        proof (cond
+                (and (types/list-type? original) (types/type-any? types/type-var? original) (types/list-type? expected-type)
+                     (not (types/type-any? types/type-var? expected-type))) :checked-list
+                (and (types/type-var? original) (= original (types/resolve (:substitution before) original))
+                     (= :any expected-type)) :checked-open)]
+    (when (and proof target (= target (:fn-id node))
                (= :value (:mode reference)) (some #{edge} (:dependencies after))
                (= (types/resolve (:substitution after) original) expected-type
                   (:actual-type reference) (get-in node [:signature :return])))
       (let [graph (checked-graph analyze snapshot target true)]
         (when (= expected-type (get-in graph [:scopes [] :signature :return]))
-          {:type expected-type :graph graph})))))
+          [proof {:type expected-type :original original :graph graph}])))))
 
 
 (defn- reference-field-checks
@@ -480,10 +483,10 @@
           proof (get-in after [:proofs address])
           callable-type (:checked-callable certificate)]
       (when (or callable-type (some #{edge} (:dependencies after)))
-        (cond-> (nested-field-checks (or (:external-graph certificate) (get-in certificate [:checked-list :graph])
+        (cond-> (nested-field-checks (or (:external-graph certificate) (get-in certificate [:checked-list :graph]) (get-in certificate [:checked-open :graph])
                                          (checked-graph analyze snapshot target true))
                                      after use-scope)
-          (and (or callable-type (:checked-list certificate)
+          (and (or callable-type (:checked-list certificate) (:checked-open certificate)
                    (= :any (get-in before [:public-input :routes public-path :completion-type])
                       (get-in after [:scopes scope-path :bindings address :expected-type])))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
@@ -521,8 +524,8 @@
 
 (defn- reference-certificate
   [snapshot analyze before after {:keys [address row] :as certificate}]
-  (if-let [result (scoped-list-reference snapshot analyze before after certificate)]
-    (assoc certificate :checked-list result)
+  (if-let [[proof result] (scoped-value-reference snapshot analyze before after certificate)]
+    (assoc certificate proof result)
     (let [{:keys [parameters call-sites captures external-captures]} (get-in after [:closures address])
           target (:ref-fn-id row)
           checked (cond-> certificate

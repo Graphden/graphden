@@ -287,8 +287,17 @@
                :dependencies [{:from address :to [owner [id]] :mode :value :binding-id id :target-fn-id target}]
                :scopes {[] {:bindings {address {:expected-type expected :reference {:mode :value :actual-type expected}}}}
                         [id] {:fn-id target :signature {:return expected}}}}
-        prove (fn [g result] (#'scope/scoped-list-reference snapshot (constantly result) before g certificate))]
-    (is (= {:type expected :graph target-graph} (prove after target-graph)))
+        prove (fn [g result] (#'scope/scoped-value-reference snapshot (constantly result) before g certificate))]
+    (is (= [:checked-list {:type expected :original '[:list a] :graph target-graph}] (prove after target-graph)))
+    (let [open-before (assoc-in before [:public-input :routes [:items] :completion-type] 'a)
+          open-after (-> after (assoc-in [:scopes [] :bindings address :expected-type] :any)
+                         (assoc-in [:scopes [] :bindings address :reference :actual-type] :any)
+                         (assoc-in [:scopes [id] :signature :return] :any))
+          independent (assoc-in target-graph [:scopes [] :signature :return] :any)
+          open (fn [b result] (#'scope/scoped-value-reference snapshot (constantly result) b open-after certificate))]
+      (is (= [:checked-open {:type :any :original 'a :graph independent}] (open open-before independent)))
+      (is (nil? (open (assoc open-before :substitution '{a :text}) independent)))
+      (is (nil? (open open-before target-graph))))
     (is (nil? (prove after (assoc-in target-graph [:scopes [] :signature :return] [:list :text]))))
     (is (nil? (prove (assoc-in after [:scopes [id] :signature :return] :any) target-graph)))
     (is (nil? (prove (assoc-in after [:dependencies 0 :mode] :graph-callable) target-graph)))

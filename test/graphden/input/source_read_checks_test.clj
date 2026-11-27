@@ -76,6 +76,19 @@
                                                            :reference {:mode :value :actual-type expected}}))
         prove #(reads/projected-reference before % {source certificate} old current)]
     (is (= [target used] (prove after)))
+    (let [variable 'a
+          source-proof (assoc certificate :checked-open {:original variable :type :any})
+          binding-type (fn [g t] (-> g (assoc-in [:scopes [] :bindings dest :expected-type] t)
+                                        (assoc-in [:scopes [] :bindings dest :reference :actual-type] t)))
+          b (binding-type before variable)
+          g (-> (binding-type after :any) (assoc-in [:scopes [] :bindings source :reference :actual-type] :any)
+                (assoc-in [:scopes [row-id] :signature :return] :any))
+          match (fn [b g c]
+                  (reads/projected-reference b g {source c} (assoc old :expected-type variable) (assoc current :expected-type :any)))]
+      (is (= [target used] (match b g source-proof)))
+      (is (nil? (match b g certificate)))
+      (is (nil? (match b g (assoc-in source-proof [:checked-open :original] 'other))))
+      (is (nil? (match (assoc-in b [:scopes [] :bindings dest :expression :path] [projected-field]) g source-proof))))
     (doseq [g [(assoc-in after [:scopes [row-id] :signature :return] :any)
                (assoc-in after [:scopes [] :bindings dest :expression :path] [projected-field])
                (assoc-in after [:proofs dest :status] :checked)

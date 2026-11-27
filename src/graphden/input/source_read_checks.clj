@@ -96,10 +96,26 @@
                (context/call-with-types snapshot #(types/subtype? actual expected-type)))))))
 
 
+(defn- projection-read-types?
+  [original projected certificate old current]
+  (let [prior (:expected-type old)
+        required (:expected-type current)
+        previous (:reference original)
+        reference (:reference projected)]
+    (and (= old (assoc current :expected-type prior))
+         (= (select-keys original [:binding-id :origin-fn-id :expression]) (select-keys projected [:binding-id :origin-fn-id :expression]))
+         (if-let [open (:checked-open certificate)]
+           (and (types/type-var? prior) (= prior (:original open) (:expected-type original) (:actual-type previous))
+                (= :any required (:type open) (:expected-type projected) (:actual-type reference))
+                (= (dissoc previous :actual-type) (dissoc reference :actual-type)))
+           (and (= :any prior (:expected-type original) (:expected-type projected))
+                (not= :any required) (= previous reference))))))
+
+
 (defn projected-reference
-  "Match an unchanged deferred projection from :any to the supplied value
-   reference. The caller still verifies the target's independently inferred
-   return before transporting the new check."
+  "Match a deferred projection to its supplied value reference. A previously
+   unconstrained variable can specialize to the target's checked return. The
+   checker must corroborate both uses before transporting the read."
   [before after by-address old current]
   (let [{:keys [address expected-type]} current
         original (binding-at before address)
@@ -112,12 +128,10 @@
         target (:ref-fn-id row)
         edge {:from source :to use-scope :binding-id (:id row) :target-fn-id target :mode :value}
         reason (fn [graph] ((juxt :status :reason) (get-in graph [:proofs address])))]
-    (when (and (field-read? current) (= old (assoc current :expected-type :any)) (not= :any expected-type)
+    (when (and (field-read? current) (projection-read-types? original projected certificate old current)
                (= [:deferred :runtime-type-obligation] (reason before) (reason after))
                (uuid? (:binding-id projected)) (= :projection kind (get-in projected [:reference :mode]))
-               (= (select-keys original [:binding-id :origin-fn-id :expression :expected-type :reference])
-                  (select-keys projected [:binding-id :origin-fn-id :expression :expected-type :reference]))
-               (= :any (:expected-type projected)) certificate (uuid? target)
+               certificate (uuid? target)
                (= (:id row) (:binding-id bound))
                (= :value (get-in bound [:reference :mode])) (= {:kind :ref :fn-id target} (:expression bound))
                (some #{edge} (:dependencies after))

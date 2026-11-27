@@ -49,7 +49,8 @@
                                 (= :closure op) [:closure type (get cells address)]
                                 (= :invoke op)
                                 (if (inside? anchor (first address))
-                                  [:computation binding-id target-id type (arguments anchor scope)]
+                                  (cond-> [:computation binding-id target-id type (arguments anchor scope)]
+                                    (get-in ir [:scopes scope :delayed-list?]) (conj :delayed-list))
                                   [:cell type (get cells address)])
                                 (contains? input-sources address) [:cell type (get input-sources address)]
                                 ;; Ring handles have mutable identity. Two reads of the same

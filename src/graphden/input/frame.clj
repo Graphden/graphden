@@ -100,10 +100,11 @@
                                                 (when (get-in frame [:present child])
                                                   [name (get-in frame [:cells child])])))
                             fields)))
-      :invoke (let [{:keys [base-fn-id argument-paths name]} (get-in frame [:ir :scopes scope])]
+      :invoke (let [{:keys [base-fn-id argument-paths name delayed-list?]} (get-in frame [:ir :scopes scope])]
                 (executor/check-cancel!)
                 (eager/invoke-compiled
-                  {:target-id target-id :name name :specialization [base-fn-id argument-paths]
+                  {:target-id target-id :name name
+                   :specialization (cond-> [base-fn-id argument-paths] delayed-list? (conj :delayed-list))
                    :input-key (get-in frame [:input-keys scope])}
                   #(invoke-scope frame scope %) ctx)))))
 

@@ -3,6 +3,7 @@
    an internal execution IR, not authoring syntax or a production entry point."
   (:require
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.lazy-list-abi :as lazy-list]
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.obligations :as obligations]
@@ -293,12 +294,25 @@
     (reject! :implementation-abi-mismatch {:scope scope}))
   (when (:compile-time-value? root-entry)
     (reject! :compile-time-value-compilation-required {:scope scope}))
-  (when (seq (:lazy-seq-args root-entry))
-    (reject! :lazy-sequence-abi-required {:scope scope}))
   (doseq [[_ path] argument-paths]
     (when-not (and (vector? path) (contains? expressions [scope path]))
       (reject! :implementation-path-missing {:scope scope :path path})))
-  (select-keys implementation [:base-fn-id :impl :argument-paths :root-entry :optional-native-readers]))
+  (select-keys implementation [:base-fn-id :impl :argument-paths :root-entry :optional-native-readers
+                               :generated-list :compile-delayed-list]))
+
+
+(defn- native-list-delivery
+  [analysis expressions scopes]
+  (let [consumers (keep (fn [[scope native]] (when (seq (get-in native [:root-entry :lazy-seq-args])) scope)) scopes)]
+    (if (seq consumers)
+      (let [reads (into #{} (keep :source) (vals expressions))]
+        (reduce (fn [selected scope]
+                  (if-let [child (lazy-list/delayed-producer analysis expressions scopes scope reads)]
+                    (let [{:keys [compile-delayed-list generated-list]} (get scopes child)]
+                      (update selected child assoc :impl (compile-delayed-list (:operands generated-list)) :delayed-list? true))
+                    (reject! :lazy-sequence-abi-required {:scope scope})))
+                scopes consumers))
+      scopes)))
 
 
 (defn- references!
@@ -693,7 +707,8 @@
                    (select-keys (get expressions address) [:op :source]))
         (reject! :input-route-not-lowered {:address address})))
     (references! expressions)
-    (let [expressions (lookup-abi/single-collection-inputs analysis expressions scopes)
+    (let [scopes (native-list-delivery analysis expressions scopes)
+          expressions (lookup-abi/single-collection-inputs analysis expressions scopes)
           expressions (optional-native-inputs expressions scopes original-projections)
           closures (closure-plans analysis expressions routes detached-closures?)
           record-inputs (into (public-record-inputs analysis expressions)

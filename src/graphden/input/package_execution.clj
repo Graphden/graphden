@@ -26,7 +26,8 @@
                                          (get implementations base-fn-id))]
                               (when-not (fn? impl)
                                 (ir/reject! :resolved-implementation-required {:base-fn-id base-fn-id}))
-                              (assoc entry :impl impl))))]
+                              (cond-> (assoc entry :impl impl)
+                                generated-list (assoc :compile-delayed-list list-execution/compile-delayed-arguments)))))]
     {:context context :analysis checked
      :invoke (compile/compile-named checked {:context context :implementations implementations
                                              :detached-closures? true})}))

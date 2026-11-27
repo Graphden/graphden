@@ -39,6 +39,16 @@
               (lazy-seq (seq (runtime/resolve-arg args :tail)))))))
 
 
+(defn compile-delayed-arguments
+  "Advancing past an unselected operand only constructs its delay. The native
+   consumer forces the checked operand cell on selection, including its validator."
+  [operands]
+  (let [ordered (apply list operands)]
+    (fn [args _ctx]
+      (concat (map (fn [operand] (delay (runtime/resolve-arg args operand))) ordered)
+              (lazy-seq (map delayed-literal (runtime/resolve-arg args :tail)))))))
+
+
 (defn compile-construction
   "Compile the checked chain with the receiving base's explicit delay policy
    and the ordinary child's execution context and call cache. A descendant

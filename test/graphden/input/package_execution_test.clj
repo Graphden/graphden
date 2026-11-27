@@ -10,6 +10,7 @@
     [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
+    [graphden.input.lazy-list-abi :as lazy-list]
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.lookup-abi :as lookup-abi]
     [graphden.input.package-execution :as execution]
@@ -1281,6 +1282,57 @@
     (is (= reads @calls))
     (is (= 1 (count (filter #{"VALUE"} reads))))
     (is (not-any? #{"D"} reads))))
+
+
+(deftest cond-skips-unchosen-computations-and-forces-selected-references-once
+  (let [base (declarations "packages/core/logic/fns.edn" #{:cond :const})
+        value (fn [name v] {:namespace "flat-cond" :name name :parent :const :args {:value {:value v}}})
+        source (into base [(value :never "skipped") (value :yes "selected")
+                           {:namespace "flat-cond" :name :choose :parent :cond
+                            :args {:clauses {:append [{:value false} :never :yes :yes :never :never] :closed true}}}])
+        calls (atom [])
+        result (delay (throw (ex-info "Forced a result returned as data" {})))
+        natives (update-in @loaded [:const :impl]
+                           (fn [invoke]
+                             (fn [args ctx]
+                               (let [v (invoke args ctx)]
+                                 (swap! calls conj v)
+                                 (if (= v "selected") result (throw (ex-info "Forced an unselected clause" {})))))))
+        {:keys [legacy canonical]} (runtimes source (ids/fn-id "flat-cond" :choose) execution/compile-package natives)]
+    (doseq [invoke [legacy canonical]]
+      (reset! calls [])
+      (is (identical? result (invoke {})))
+      (is (= ["selected"] @calls))
+      (is (false? (realized? result))))))
+
+
+(deftest cond-keeps-the-checked-return-when-the-caller-can-extend-the-tail
+  (let [base (declarations "packages/core/logic/fns.edn" #{:cond})
+        owner {:namespace "flat-cond" :name :prefix :parent :cond
+               :args {:clauses [{:value false} {:value "skipped"} {:value true} {:value false}]}}
+        root (ids/fn-id "flat-cond" :prefix)
+        {:keys [legacy canonical]} (runtimes (conj base owner) root)]
+    (is (false? (legacy {})))
+    (is (false? (canonical {})))
+    (is (false? (canonical {:clauses {:tail [true "extra"]}})))
+    (is (= :lazy-sequence-abi-required
+           (rejection-code #(runtimes base (ids/fn-id "core.logic" :cond)))))
+    (let [nonexhaustive (update-in owner [:args :clauses] subvec 0 2)
+          compile-owner #(runtimes (conj base %) root)
+          closed (update-in nonexhaustive [:args :clauses] #(hash-map :append % :closed true))]
+      (is (nil? ((:canonical (compile-owner closed)) {})))
+      (let [prove lazy-list/delayed-producer
+            checked (atom nil)
+            {:keys [analysis canonical]} (with-redefs [lazy-list/delayed-producer
+                                                       (fn [& args] (reset! checked args) (apply prove args))]
+                                           (compile-owner nonexhaustive))
+            [plan expressions scopes consumer reads] @checked]
+        (is (= :any (get-in analysis [:scopes [] :signature :return])))
+        (is (= 17 (canonical {:clauses {:tail [true 17]}})))
+        (is (nil? (canonical {})))
+        (is (nil? (prove (assoc-in plan [:scopes (second consumer) :signature :return] :int)
+                         expressions scopes consumer reads)))
+        (is (nil? (prove plan expressions scopes consumer (conj reads [consumer []]))))))))
 
 
 (deftest ordinary-numeric-list-remains-open-at-invocation

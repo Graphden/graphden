@@ -208,6 +208,23 @@
           (scope/verify-forwarded-projection repeated proof analyze)))))
 
 
+(deftest two-nested-readers-under-one-reference-retain-their-full-binding-paths
+  (let [[prepared entry] (fixture {:left :double-encode :data {:type :text}}
+                                  [{:name :double-encode :parent :combine :return-type :text
+                                    :args {:left :encode-body :right :encode-body}}])
+        proofs (forward/verify-forwarded-uses prepared entry :data)
+        combine (ids/fn-id "fixture" :combine)
+        child (ids/fn-id "fixture" :double-encode)
+        owner (:identity entry)
+        field (ids/slot-id (ids/fn-id "fixture" :encode) :data)
+        root (ids/binding-id owner (ids/slot-id combine :left))
+        uses (mapv (fn [name] [root (ids/binding-id child (ids/slot-id combine name))]) [:left :right])]
+    (is (= (set (map #(vector [owner %] [field]) uses)) (set (map :target-address proofs))))
+    (is (= 2 (count (set (map :projection-id proofs)))))
+    (is (every? :nested-reader? proofs))
+    (is (= :nonunique-reference-use (rejection prepared entry)))))
+
+
 (deftest forwarding-multiple-readers-requires-the-complete-reader-set
   (let [[prepared entry] (fixture {:left :encode-body :right :encode-other :data {:type :text}}
                                   [{:name :encode-other :parent :encode}])

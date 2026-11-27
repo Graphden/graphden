@@ -92,7 +92,7 @@
     (let [expression (read-leaf ctx certificate public-path form)
           projection? (= :projection (:kind expression))
           id (if projection?
-               (migration/derived-id :forwarded-field owner (first use-path) field-id)
+               (migration/derived-id :forwarded-field owner (if (:nested-reader? certificate) use-path (first use-path)) field-id)
                (ids/binding-id owner field-id))
           parsed (rows/normalize
                    (merge (select-keys row [:org-id])

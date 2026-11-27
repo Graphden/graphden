@@ -565,8 +565,8 @@
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
                            field-id source-type target-type target-fn-id target-field-id root-use-id
-                           multiple-readers? generic-reference list-operand]}]
-  (let [address (occurrence before target-field-id (when multiple-readers? root-use-id))
+                           multiple-readers? nested-reader? generic-reference list-operand]}]
+  (let [address (if nested-reader? target-address (occurrence before target-field-id (when multiple-readers? root-use-id)))
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
         target-type (context/call-with-types snapshot #(types/resolve-alias target-type))]
@@ -574,7 +574,7 @@
     (when-not (and (= owner-id root) (= source-address [[owner-id []] [field-id]])
                    (= (or target-address address) address) (= root-use-id (first uses))
                    (every? uuid? [owner-id field-id root-use-id target-field-id target-fn-id])
-                   (= projection-id (migration/derived-id :forwarded-field owner-id root-use-id target-field-id))
+                   (= projection-id (migration/derived-id :forwarded-field owner-id (if nested-reader? uses root-use-id) target-field-id))
                    (not (contains? (:bindings snapshot) projection-id)))
       (reject! :unproved-forwarded-identity))
     (let [source-names (free-route! before source-address source-type)
@@ -602,7 +602,8 @@
                                      :projection-scope-path [] :projection-path [field-id]})
                :edges edges :field-owner field-owner :owner-parents (get-in snapshot [:fns owner-id :parent-ids])
                :address address :public-path target-names :source-names source-names}
-        generic-reference (assoc :generic-reference generic-reference)))))
+        generic-reference (assoc :generic-reference generic-reference)
+        nested-reader? (assoc :nested-reader? true)))))
 
 
 (defn- check-forwarded-readers!

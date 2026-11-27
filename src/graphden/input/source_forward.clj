@@ -78,7 +78,7 @@
                           return-owner (some #(when (get-in defs-by-name [% :return-type]) %) lineage)]
                       (when-not (and (= field name) (uuid? declaring-id) (uuid? target-id))
                         (reject! :unsupported-reference-field-origin))
-                      {:target-id target-id :field-id (ids/slot-id declaring-id field)
+                      {:target-ref target-ref :target-id target-id :field-id (ids/slot-id declaring-id field)
                        :direct? (boolean (some #{declaring-ref} lineage))
                        :field-type (slots/slot-type-of declaring-ref field defs-by-name)
                        :return-owner-ref return-owner
@@ -186,6 +186,37 @@
       multiple-readers? (assoc :multiple-readers? true))))
 
 
+(defn- authored-reader-paths
+  [{:keys [name->id defs-by-name] :as prepared} ref field field-id prefix seen]
+  (when-not (contains? seen ref)
+    (let [definition (get defs-by-name ref)
+          [declaring key] (slots/resolve-slot-owner-strict ref field defs-by-name #{})
+          declaring-id (get name->id declaring)]
+      (when (and (uuid? declaring-id) (= field key) (= field-id (ids/slot-id declaring-id key)))
+        (if (some #{declaring} (slots/chain-of ref defs-by-name))
+          [prefix]
+          (let [rows (group-by :ref-fn-id (filter #(and (= :binding (:kind %)) (= (:fn-id definition) (:fn-id %)))
+                                                  (parse/parse-fn-def definition name->id defs-by-name)))]
+            (for [child (distinct (slots/ref-targets-of definition defs-by-name))
+                  row (get rows (get name->id child))
+                  :when (= (:id row) (ids/binding-id (:fn-id definition) (:slot-id row)))
+                  path (authored-reader-paths prepared child field field-id (conj prefix (:id row)) (conj seen ref))]
+              path)))))))
+
+
+(defn- reader-proofs
+  [prepared entry field declaration {:keys [direct? field-id target-ref] :as target}]
+  (let [{:keys [owner-id root-use-id] :as base} (proof prepared entry field declaration target)
+        paths (when (and (not direct?) (nil? (:list-operand base)))
+                (authored-reader-paths prepared target-ref field field-id [root-use-id] #{}))]
+    (if (next paths)
+      (mapv (fn [path]
+              (assoc base :multiple-readers? true :nested-reader? true
+                     :target-address [[owner-id path] [field-id]]
+                     :projection-id (migration/derived-id :forwarded-field owner-id path field-id))) paths)
+      [base])))
+
+
 (defn verify-forwarded-uses
   "Find the original slot and candidate reference uses for one declared field.
    Distinct references can reach the same declared slot. The frozen graph
@@ -204,8 +235,7 @@
                             (every? #(and (= (:source-slot-id slot) (:field-id %))
                                           (= type (:field-type %))) targets))))
       (reject! :nonunique-reference-use))
-    (mapv #(proof prepared entry field declaration (cond-> % multiple? (assoc :multiple-readers? true)))
-          targets)))
+    (into [] (mapcat #(reader-proofs prepared entry field declaration (cond-> % multiple? (assoc :multiple-readers? true)))) targets)))
 
 
 (defn verify-forwarded-field

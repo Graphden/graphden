@@ -345,6 +345,20 @@
     {:arguments arguments :aliases aliases :blockers blockers}))
 
 
+(defn- inherited-links-proved?
+  [owner links aliases certified blockers]
+  (let [local (into #{} (map (juxt :alias-id :field-id)) aliases)]
+    (or (= links certified)
+        ;; Local renames and certified forwarded declarations can coexist.
+        ;; Each stored FK must match exactly, including overlapping pairs.
+        (and (= (set links) (into local certified))
+             (every? (fn [{:keys [code source-path]}]
+                       (and (= :field-projection-required code) (= 2 (count source-path))
+                            (= :args (first source-path))
+                            (contains? certified (ids/slot-id owner (peek source-path)))))
+                     blockers)))))
+
+
 (defn- inherited-fields
   "A scalar projection occupies its destination and exposes its own stable
    alias slot. Prove each stored link against the declaring definition's
@@ -371,8 +385,7 @@
       (assoc :proven? (let [original (source-context/compact-reference original witness)
                             {:keys [aliases blockers]} (local-arguments original ancestor context rows)
                             certified (get-in context [::source-context/forwarded-parent-links (:id owner)])]
-                        (or (= links certified)
-                            (and (empty? blockers) (= links (into {} (map (juxt :alias-id :field-id)) aliases)))))))))
+                        (inherited-links-proved? (:id owner) links aliases certified blockers))))))
 
 
 (defn- prepare-inherited-fields

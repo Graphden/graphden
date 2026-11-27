@@ -329,6 +329,22 @@
           (source/rewrite-forwarded-field prepared entry :data (assoc-in certificate [:row :id] (random-uuid)))))))
 
 
+(deftest inherited-fields-combine-local-and-forwarded-evidence-by-original-identity
+  (let [owner (random-uuid)
+        headers (ids/slot-id owner :headers)
+        header-name (ids/slot-id owner :header-name)
+        links {headers (random-uuid) header-name (random-uuid)}
+        aliases [{:alias-id headers :field-id (get links headers)}]
+        certified (select-keys links [header-name])
+        blocker {:code :field-projection-required :source-path [:args :header-name]}
+        proved? (partial #'source/inherited-links-proved? owner links aliases)]
+    (is (proved? certified [blocker]))
+    (is (not (proved? {} [blocker])))
+    (is (not (proved? (assoc certified headers (random-uuid)) [blocker])))
+    (is (not (proved? certified [(assoc blocker :source-path [:args :other])])))
+    (is (not (proved? certified [(assoc blocker :code :ref-scope-required)])))))
+
+
 (deftest derived-source-reuses-only-its-exact-verified-parent-link
   (let [child {:namespace "fixture" :name :json-result :parent :response :args {:data "ready"}}
         [prepared entry] (fixture {:left :encode-body :data {:type :text}} [child])

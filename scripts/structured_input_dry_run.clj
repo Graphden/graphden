@@ -191,10 +191,12 @@
 
 
 (defn- capture-legacy
-  [{:keys [fn-defs name->id defs-by-name]} exports]
+  [{:keys [fn-defs name->id] :as prepared} exports]
   (let [parse-definition (fn [definition]
                            (try
-                             (parse/parse-fn-def definition name->id defs-by-name)
+                             ;; Include the module parser's anonymous callable rows.
+                             ;; Isolate a broken parent to its original declaration.
+                             (parse/parse-prepared-module (assoc prepared :fn-defs [definition]))
                              (catch clojure.lang.ExceptionInfo error
                                (when-not (= :records/unknown-parent (:type (ex-data error)))
                                  (throw error)))))

@@ -6,6 +6,7 @@
     [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.core.shapes :as shapes]
     [structured-input-cst :as cst]
     [structured-input-dry-run :as dry]
@@ -43,6 +44,29 @@
             "-c" "commit.gpgsign=false" "commit" "--allow-empty" "-m" "fixture")
       (f root [{:label "fixture" :root root}])
       (finally (fs/delete-tree root)))))
+
+
+(deftest corpus-legacy-graph-retains-the-native-callable-slot-and-its-parameter
+  (with-repository
+    (fn [root repos]
+      (let [callback-type [:fn {:item :text} :bool #{}]
+            owner (ids/fn-id "fixture" :invoke)
+            callback (ids/fn-id "fixture" :check-item)
+            field (ids/slot-id (ids/fn-id "fixture" :call) :pred)]
+        (package! root "core" []
+                  [["hof" "fixture" [{:name :call :args {:pred {:type callback-type}} :return-type :bool}
+                                     {:name :check-item :args {:item {:type :text}} :return-type :bool
+                                      :lambda-params [:item]}
+                                     {:name :invoke :parent :call :args {:pred :check-item}}
+                                     {:name :unresolved :parents [:call :missing-parent]}]]])
+        (let [graph (#'dry/corpus-legacy-graph (#'dry/read-packages repos (inventory/inventory repos)))
+              row (get-in graph [:binding-by-fn-slot [owner field]])
+              type-id (get-in graph [:slot-map field :type-fn-id])]
+          (is (= callback-type (get-in graph [:fn-map type-id :constraint])))
+          (is (contains? (:fn-typed-fn-ids graph) type-id))
+          (is (= callback (:ref-fn-id row)))
+          (is (= [:item] (mapv keyword (get-in graph [:fn-map callback :lambda-params]))))
+          (is (contains? (get-in graph [:children-by-fn (ids/fn-id "fixture" :call)]) (ids/fn-id "fixture" :unresolved))))))))
 
 
 (defn- package-result

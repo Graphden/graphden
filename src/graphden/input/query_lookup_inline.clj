@@ -155,7 +155,8 @@
           origin (wrapper-origin graph owner child (peek site) prior (original-rows normalized owner))]
       (when (and origin (same-public-readers? graph owner origin proof))
         (when-let [wrapper (checked-wrapper normalized owner child [(peek site)] proof native origin)]
-          (-> (merge expanded wrapper {:original source :expanded outer :wrapper-origin origin})
+          (-> (merge expanded wrapper {:original source :expanded outer :wrapper-origin origin :inline-site site})
+              (update :generated-ids conj child)
               (update :donors into (get-in graph [:fn-map owner :parent-ids]))))))))
 
 

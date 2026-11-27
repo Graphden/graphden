@@ -7,12 +7,14 @@
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.generated-source :as generated]
     [graphden.input.legacy-literal-routes :as literal]
     [graphden.input.package-execution :as execution]
     [graphden.input.query-lookup-inline :as inline]
     [graphden.input.query-lookup-source :as query]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]
+    [graphden.input.staged-module :as staged]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -106,11 +108,32 @@
             signatures (:by-id @registry/*rich-types-override*)
             old (eager/compile-all (assoc graph :base-fns (registry/compute-base-fns-map base-fn-defs)))
             old-context {:compiled-registry (atom old) :graph-cache (atom rows) :base-fns {}}
-            {:keys [roots entry] :as migrated} (inline/prepare package owner signatures)
+            {:keys [roots entry]} (inline/prepare package owner signatures)
             implementations (into {} (map (fn [[name {module-ns :namespace impl :impl}]]
                                             [(ids/fn-id module-ns name) impl])) base-fn-defs)
-            runtime (execution/compile-package (:package migrated) owner roots implementations)
+            visible (set (keys (:declarations package)))
+            sidecar (generated/emit package [owner] roots)
+            installed (generated/install package [owner] roots visible sidecar)
+            product (get-in installed [:query-lookups owner :inline-product-origin])
+            changed (pr-str (assoc-in (staged/read-pinned (:bytes sidecar) (:sha256 sidecar))
+                                      [:owners 0 :inline-origin :source-path] [:args :b]))
+            helper-ids (get-in installed [:query-lookups owner :generated-ids])
+            normalized (get-in installed [:query-lookups owner :package])
+            runtime (execution/compile-package installed owner roots implementations)
             request {:request-method :get :uri "/fixture" :query-string "" :headers {} :body nil :async-channel nil}]
+        (is (= (select-keys child [:fn-id :root-owner-id :enclosing-owner-id :source-path])
+               (dissoc product :source-sha256)))
+        (is (= (select-keys sidecar [:sha256]) (:generated-source runtime)))
+        (doseq [[expected candidate payload]
+                [[:unverified-generated-inline-origin (assoc installed :inline-origins (delay {})) sidecar]
+                 [:generated-source-ledger-mismatch package
+                  {:bytes (String/.getBytes changed java.nio.charset.StandardCharsets/UTF_8)
+                   :sha256 (ids/digest-hex "SHA-256" changed)}]]]
+          (is (= expected (try (generated/install candidate [owner] roots visible payload)
+                               (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))
+        (is (= 3 (count helper-ids)))
+        (is (= (set helper-ids) (set (keys (:staged-proposals normalized)))))
+        (is (= (:fn-id child) (get-in normalized [:closure-baselines (:fn-id child) :identity])))
         (is (= (:proposed entry) (edn/read-string (pr-str (:proposed entry)))))
         (is (= [(:fn-id child)] (vec (keep :ref-fn-id (get-in entry [:v2 :bindings])))))
         (is (= :unknown-input-field

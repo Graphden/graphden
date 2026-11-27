@@ -385,6 +385,10 @@ declarations and each shared helper appears once under its actual namespace.
 The verifier checks the declarations against their source proofs, replays
 the received forms, and keeps them in each owner's private compiled package.
 The compiler returns the sidecar digest in `:generated-source` for that owner.
+For a supported enclosing owner, the sidecar also contains the query child
+under its original parser-generated name. Its ledger records the child's
+UUID, original source path, enclosing owner, root owner and source digest.
+The verifier independently resolves the child at that site before replay.
 Original module files and their inventory retain their own declaration lists.
 
 ## Expression grammar and source edits

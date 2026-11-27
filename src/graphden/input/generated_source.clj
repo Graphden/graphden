@@ -2,7 +2,9 @@
   "Offline transport for checked declarations shared by normalized source owners."
   (:require
     [graphden.input.migration :as migration]
+    [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
+    [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
     [graphden.packages.records.ids :as ids])
@@ -21,26 +23,45 @@
   (ids/digest-hex "SHA-256" (migration/stable-edn (dissoc form :source-file :source-line))))
 
 
+(defn- inline-origin
+  [package owner {:keys [inline-site proof generated-ids]}]
+  (let [{:keys [fn-id root-owner-id enclosing-owner-id source-path declaration]}
+        (origins/child-at @(:inline-origins package) owner inline-site)]
+    (when-not (and (= owner root-owner-id enclosing-owner-id) (= inline-site source-path)
+                   (uuid? fn-id) (= fn-id (:owner-id proof) (get-in package [:declarations fn-id :fn-id]))
+                   (some #{fn-id} generated-ids) (nil? (get-in package [:originals fn-id]))
+                   (= fn-id (ids/fn-id (:namespace declaration) (:name declaration))))
+      (reject! :unverified-generated-inline-origin))
+    {:fn-id fn-id :root-owner-id root-owner-id :enclosing-owner-id enclosing-owner-id
+     :source-path source-path :source-sha256 (source-hash declaration)}))
+
+
 (defn- check-owner
   [package owner roots]
-  (let [package (if (query/cached package owner roots) package (query/certify package owner roots))
+  (let [package (if (query/cached package owner roots) package
+                  (or (query/certify package owner roots) (query/certify package owner roots query-inline/prepare)))
         expansion (query/cached package owner roots)
-        {:keys [generated-ids]} expansion]
-    (when-not (and (= :query-lookup (get-in package [:closure-baselines owner :kind]))
+        {:keys [generated-ids]} expansion
+        kind (get-in package [:closure-baselines owner :kind])]
+    (when-not (and (#{:query-lookup :query-lookup-inline} kind)
                    (seq generated-ids) (every? uuid? generated-ids)
                    (= (count generated-ids) (count (set generated-ids))))
       (reject! :generated-source-owner-required))
-    (when (some #(or (contains? roots %) (contains? (:declarations package) %)) generated-ids)
-      (reject! :generated-source-name-collision))
-    (let [normalized (reduce #(snapshot/with-certified-owner %1 %2 roots) (:package expansion) generated-ids)]
-      (assoc-in package [:query-lookups owner :package] normalized))))
+    (let [origin (when (= :query-lookup-inline kind) (inline-origin package owner expansion))]
+      (when (some #(or (contains? roots %)
+                       (and (not= % (:fn-id origin)) (contains? (:declarations package) %)))
+                  generated-ids)
+        (reject! :generated-source-name-collision))
+      (let [normalized (reduce #(snapshot/with-certified-owner %1 %2 roots) (:package expansion) generated-ids)]
+        (cond-> (assoc-in package [:query-lookups owner :package] normalized)
+          origin (assoc-in [:query-lookups owner :inline-product-origin] origin))))))
 
 
 (defn- add-product
   [products normalized id]
   (let [{:keys [proposed verification]} (get-in normalized [:closure-baselines id])]
     (when-not (and (= :authored-source-equivalent verification)
-                   (string? (:namespace proposed)) (simple-keyword? (:name proposed))
+                   (or (nil? (:namespace proposed)) (string? (:namespace proposed))) (simple-keyword? (:name proposed))
                    (= id (ids/fn-id (:namespace proposed) (:name proposed))))
       (reject! :unverified-generated-declaration))
     (when (and (contains? products id) (not (migration/same-edn? (get products id) proposed)))
@@ -64,9 +85,10 @@
                          :fns (mapv #(dissoc % :namespace) (sort-by :name forms))})
                       (sort-by key (group-by :namespace (vals products))))
         ledger (mapv (fn [owner]
-                       (let [{:keys [original proposed generated-ids]} (get entries owner)]
-                         {:owner-id owner :source-sha256 (source-hash original) :proposal-sha256 (source-hash proposed)
-                          :generated-ids (vec (sort generated-ids))}))
+                       (let [{:keys [original proposed generated-ids inline-product-origin]} (get entries owner)]
+                         (cond-> {:owner-id owner :source-sha256 (source-hash original) :proposal-sha256 (source-hash proposed)
+                                  :generated-ids (vec (sort generated-ids))}
+                           inline-product-origin (assoc :inline-origin inline-product-origin))))
                      owners)]
     {:package package :artifact {:artifact-format 1 :owners ledger :modules modules}}))
 

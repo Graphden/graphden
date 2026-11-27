@@ -121,13 +121,13 @@ Proves one owner and its dependencies as an immutable transaction. Verified pare
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 533
+:LINE: 563
 :MINS: 0.9
 :END:
 
 Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:533]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:563]]
 - see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
 - same file :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 - referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/with-certified-owner][with-certified-owner]]
@@ -136,13 +136,13 @@ Finds all omitted bindings in the original ledger and resolves each route agains
 :PROPERTIES:
 :CUSTOM_ID: types/scope-view
 :FILE: src/graphden/input/source_joint.clj
-:LINE: 85
+:LINE: 95
 :MINS: 3.0
 :END:
 
 Checks the exact boundary between one owner's two proof groups. The projected baseline must preserve all original rows except the scoped bindings and certified field links. Its declarations, memberships, contract and projection rows must match the frozen graph.
 
-- source :: [[file:../../../src/graphden/input/source_joint.clj::(defn scope-view][src/graphden/input/source_joint.clj:85]]
+- source :: [[file:../../../src/graphden/input/source_joint.clj::(defn scope-view][src/graphden/input/source_joint.clj:95]]
 - see also :: [[file:types.org::#types/with-certified-owner][with-certified-owner]], [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 - referenced from :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
 
@@ -150,13 +150,13 @@ Checks the exact boundary between one owner's two proof groups. The projected ba
 :PROPERTIES:
 :CUSTOM_ID: types/verify-bindings-after-forwarding
 :FILE: src/graphden/input/source_scope.clj
-:LINE: 540
+:LINE: 570
 :MINS: 1.1
 :END:
 
 Replays the remaining scoped group with the verified projections still in the graph. Their occupied addresses and unique destinations must survive, and the runtime checks must remain exactly equal. The complete source round trip precedes publication.
 
-- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:540]]
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:570]]
 - see also :: [[file:types.org::#types/scope-view][scope-view]], [[file:types.org::#types/verify-module][verify-module]]
 - same file :: [[file:types.org::#types/verify-bindings][verify-bindings]]
 - referenced from :: [[file:types.org::#types/scope-view][scope-view]]
@@ -270,13 +270,13 @@ Resolves an authored input declaration inside a frozen type snapshot. Stable fie
 :PROPERTIES:
 :CUSTOM_ID: types/analyze-effective-input
 :FILE: src/graphden/input/analysis.clj
-:LINE: 190
+:LINE: 208
 :MINS: 2.9
 :END:
 
 Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope; scoped overlays must fit its target's unoccupied fields. Identity refs do not import target inputs, and callable producers expose constructor inputs. Required addresses and typed projections expose their source inputs. Metadata narrows contracts; value cycles reject. Callable plans separate invocation parameters and captures by origin. Deferred field/container obligations remain explicit. Stored-value resolvers consume their own literal argument without capturing ambient caller fields; execution remains inactive.
 
-- source :: [[file:../../../src/graphden/input/analysis.clj::(defn analyze-effective-input][src/graphden/input/analysis.clj:190]]
+- source :: [[file:../../../src/graphden/input/analysis.clj::(defn analyze-effective-input][src/graphden/input/analysis.clj:208]]
 - referenced from :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]], [[file:types.org::#types/compile-stored][compile-stored]], [[file:crud.org::#crud/read-input][read-input]], [[file:crud.org::#crud/with-plan][with-plan]]
 
 * 21. export-closed

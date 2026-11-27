@@ -131,13 +131,13 @@ Parses a composed function's parents and arguments. A bound argument creates a [
 :PROPERTIES:
 :CUSTOM_ID: packages/resolve-slot-owner
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 552
+:LINE: 553
 :MINS: 5.1
 :END:
 
 Finds the function that declared an argument's [[file:glossary.org::#term/slot][slot]], searching [[file:glossary.org::#term/inheritance][inheritance]] and referenced-function paths and using types to disambiguate names. The resulting [[file:glossary.org::#term/slot][slot]] ID is stored in the [[file:glossary.org::#term/binding][binding]] so later compilation preserves argument identity.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:552]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn resolve-slot-owner][src/graphden/packages/records/slot_resolution.clj:553]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 - same file :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
 
@@ -145,13 +145,13 @@ Finds the function that declared an argument's [[file:glossary.org::#term/slot][
 :PROPERTIES:
 :CUSTOM_ID: packages/build-rename-slot-records
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 723
+:LINE: 724
 :MINS: 5.1
 :END:
 
 Represents ~{Y {:as :X}}~ by creating an own rename [[file:glossary.org::#term/slot][slot]] linked to the original [[file:glossary.org::#term/slot][slot]] through ~source-slot-id~. Parser, executor, and editor use this link to keep public names separate from underlying [[file:glossary.org::#term/slot][slot]] identity.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:723]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:724]]
 - see also :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]
 - same file :: [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]]
 

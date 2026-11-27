@@ -48,16 +48,16 @@
   (let [[sibling & more] (remove #{reader} arguments)
         {:keys [ext-name base-name slot-id]} sibling
         base (:id (lookups/root-fn owner (:fn-map graph) graph))
-        alias (when (simple-keyword? ext-name) (ids/slot-id owner ext-name))
-        row (get-in graph [:slot-map alias])
+        reader-alias (when (simple-keyword? ext-name) (ids/slot-id owner ext-name))
+        row (get-in graph [:slot-map reader-alias])
         source (:ref-id writer)]
     (and (= :ref (:kind writer)) (uuid? source) (= :free (:kind sibling)) (empty? more)
          (= [base] (get-in graph [:fn-map owner :parent-ids]))
          (simple-keyword? base-name) (not= ext-name base-name) (not= ext-name (:env-name writer))
          (= slot-id (ids/slot-id base base-name) (:source-slot-id row))
          (= ext-name (keyword (:name row)) (lookups/chain-rename-for-slot owner slot-id graph))
-         (= alias (lookups/effective-reader-slot-id owner slot-id graph))
-         (not-any? #{alias slot-id} [(:slot-id writer) (:slot-id reader)])
+         (= reader-alias (lookups/effective-reader-slot-id owner slot-id graph))
+         (not-any? #{reader-alias slot-id} [(:slot-id writer) (:slot-id reader)])
          (not-any? #{ext-name (:env-name writer)} (renames/cache-projection-frees source graph)))))
 
 

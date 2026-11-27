@@ -269,3 +269,27 @@
                                   [root (node record) {} (facts {:different :text})]
                                   [root (node '{:id k}) {} (facts '{:id k})]]]
       (is (= entry (specialize entry n renaming f))))))
+
+
+(deftest constructed-dictionary-requires-exact-assoc-operands-and-keywords
+  (let [owner (random-uuid) binding (random-uuid) target (random-uuid)
+        native (ids/fn-id "core.collections" :assoc)
+        target-scope [owner [binding]] source [[owner []] [(random-uuid)]]
+        operand {:ref (signatures/use-id target-scope) :reference-address source}
+        paths (into {} (map (fn [field] [field [(ids/slot-id native field)]])) [:map :key :value])
+        values {:map {} :key :extra :value nil}
+        facts (into {} (for [[field path] paths] [field {:address [target-scope path] :value-present true :value (values field)}]))
+        node {:fn-id target :signature {:resolved-bindings facts}
+              :signature-source {:base-fn-id native :argument-paths paths
+                                 :root-entry {:fn-id native :namespace "core.collections" :name :assoc
+                                              :args '{:map [:union :null [:map a :any]] :key :any :value :any}
+                                              :return :any :effects #{}}}}
+        graph {:scopes {[binding] node} :dependencies [{:from source :to target-scope :target-fn-id target :mode :value}]}
+        path [:scopes [binding] :signature :resolved-bindings]
+        prove #(#'signatures/keyword-map-source? % operand)]
+    (is (prove graph))
+    (is (not (prove (assoc-in graph (into path [:key :value]) "text-key"))))
+    (is (not (prove (assoc-in graph (into path [:map :value]) {"extra" 1}))))
+    (is (not (prove (update-in graph (conj path :map) dissoc :value-present))))
+    (is (not (prove (assoc-in graph (into path [:key :address]) [target-scope (:value paths)]))))
+    (is (not (prove (assoc-in graph [:dependencies 0 :mode] :graph-callable))))))

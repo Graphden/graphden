@@ -321,25 +321,51 @@
       type)))
 
 
+(def ^:private assoc-id (ids/fn-id "core.collections" :assoc))
+(def ^:private assoc-paths (into {} (map (fn [field] [field [(ids/slot-id assoc-id field)]])) [:map :key :value]))
+
+
+(defn- keyword-map-source?
+  [graph fact]
+  (loop [{:keys [value value-present reference-address ref]} fact seen #{}]
+    (if value-present
+      (and (map? value) (every? keyword? (keys value)))
+      (when (and reference-address ref (not (seen reference-address)))
+        (let [edge (some #(when (= reference-address (:from %)) %) (:dependencies graph))
+              target (get-in graph [:scopes (second (:to edge))])
+              {:keys [base-fn-id root-entry argument-paths]} (:signature-source target)
+              inputs (get-in target [:signature :resolved-bindings])]
+          ;; Native assoc adds exactly its key and retains the base map's
+          ;; keys. Values need no evaluation to prove that dictionary domain.
+          (when (and (= :value (:mode edge)) (= ref (use-id (:to edge)))
+                     (= (:target-fn-id edge) (:fn-id target))
+                     (= assoc-id base-fn-id (:fn-id root-entry))
+                     (= ["core.collections" :assoc] ((juxt :namespace :name) root-entry))
+                     (= '{:map [:union :null [:map a :any]] :key :any :value :any} (:args root-entry))
+                     (= :any (:return root-entry)) (= #{} (:effects root-entry))
+                     (= argument-paths assoc-paths)
+                     (every? (fn [[field path]] (= [(:to edge) path] (get-in inputs [field :address]))) assoc-paths)
+                     (get-in inputs [:key :value-present]) (keyword? (get-in inputs [:key :value])))
+            (recur (:map inputs) (conj seen reference-address))))))))
+
+
 (defn- projected-map-facts
-  [root-entry node scope facts]
+  [root-entry graph node scope facts]
   (let [address [scope [(ids/slot-id coalesce-id :default)]]
         domain [:union :null [:map :keyword :any]]
         binder (:return root-entry)
         args (zipmap [:value :default] (repeat [:union :null binder]))
         operand (get-in facts [:bindings-info :value])]
-    ;; Both immutable map operands share the checked projected dictionary.
-    ;; Its literal record describes one value and cannot constrain the
-    ;; native fallback to have the same fields.
+    ;; The projected dictionary admits the constructed record and the empty
+    ;; fallback. Keep its precise fields in the original binding facts.
     (if (and (= ["core.logic" :coalesce] ((juxt :namespace :name) root-entry))
              (types/type-var? binder) (= args (:args root-entry)) (empty? (:effects root-entry))
              (= domain (projected-coalesce-type node scope facts :value) (get-in node [:bindings address :expected-type]))
              (= {:mode :literal :actual-type :empty-map} (get-in node [:bindings address :reference]))
              (= {:kind :value :value {}} (get-in node [:bindings address :expression]))
              (= {:type :empty-map :value {} :value-present true :address address} (get-in facts [:bindings-info :default]))
-             (:value-present operand) (types/record-type? (:type operand)) (not (types/contains-marker? (:type operand)))
-             (map? (:value operand))
-             (every? keyword? (keys (:value operand))))
+             (types/record-type? (:type operand)) (not (types/contains-marker? (:type operand)))
+             (keyword-map-source? graph operand))
       (assoc-in facts [:bindings-info :value :type] [:map :keyword :any])
       facts)))
 
@@ -395,7 +421,7 @@
                       (and stored-return (not (:infer-return? generated-list)))
                       (assoc :return-type (types/resolve renaming (variables/type-in-scope implementation-scope stored-return))))
         facts (binding-facts graph scope argument-paths)
-        inference-facts (if (= coalesce-id base-fn-id) (projected-map-facts root-entry node scope facts) facts)
+        inference-facts (if (= coalesce-id base-fn-id) (projected-map-facts root-entry graph node scope facts) facts)
         _ (check-rule-type! root-entry (:bindings-info facts))
         result (infer-signature
                  (assoc inference-facts :fn-id (:fn-id node)

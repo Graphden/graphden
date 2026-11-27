@@ -178,7 +178,7 @@
 
 (defn- proof
   [prepared {owner-id :identity :as entry} field {:keys [slot membership type]}
-   {:keys [field-id field-type target-id direct? multiple-readers? untyped-rename? named-leaf?] :as target}]
+   {:keys [field-id field-type target-id direct? multiple-readers? untyped-rename? named-leaf? inherited-reader-slot] :as target}]
   (let [{:keys [binding-id generic-reference root-target-id list-operand]}
         (checked-reference-binding prepared entry target)]
     (when-not (and (or named-leaf? (= field-id (:source-slot-id slot)))
@@ -196,6 +196,7 @@
                                [[owner-id (cond-> [binding-id] list-operand (conj (:item-id list-operand)))] [field-id]])}
       list-operand (assoc :list-operand list-operand)
       named-leaf? (assoc :named-leaf? true)
+      inherited-reader-slot (assoc :inherited-reader-slot inherited-reader-slot)
       (and multiple-readers? untyped-rename?) (assoc :untyped-rename? true)
       generic-reference (assoc :generic-reference generic-reference)
       multiple-readers? (assoc :multiple-readers? true))))
@@ -303,8 +304,8 @@
                    ((::named-leaf-readers prepared) owner-id field slot))
         targets (if eligible
                   (into [] (mapcat (fn [{:keys [target-ref] :as target}]
-                                     (map #(merge target % {:named-leaf? true})
-                                          (named-reader-paths prepared field eligible target-ref [] #{})))) refs)
+                                     (map #(merge target % {:named-leaf? true} (select-keys eligible [:inherited-reader-slot]))
+                                          (named-reader-paths prepared field (:targets eligible) target-ref [] #{})))) refs)
                   refs)
         multiple? (> (count targets) 1)
         declaration (assoc declaration :type (qualified-type prepared (:source entry) type))]
@@ -313,7 +314,7 @@
                        (and (format/configuration-type? type)
                             (= (count refs) (count (set (map :target-id refs))))
                             (or (nil? eligible)
-                                (and (= eligible (set (map :field-id targets)))
+                                (and (= (:targets eligible) (set (map :field-id targets)))
                                      (= (set (map :target-id refs)) (set (map :target-id targets)))))
                             (every? #(and (or (:named-leaf? %) (= (:source-slot-id slot) (:field-id %)))
                                           (or (= type (:field-type %)) (:untyped-rename? %))) targets))))

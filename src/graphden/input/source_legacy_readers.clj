@@ -7,6 +7,7 @@
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as registry]
     [graphden.input.source-forward :as forward]
+    [graphden.input.source-reader-writers :as writers]
     [graphden.input.source-surface :as shared]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
@@ -192,8 +193,11 @@
 
 (defn- named-leaf-readers
   [graph incoming compiler roots owner field slot]
-  (when (and (not (contains? @incoming owner))
-             (= slot (get-in graph [:slot-map (:id slot)])))
+  (when (and (= slot (get-in graph [:slot-map (:id slot)]))
+             (or (not (contains? @incoming owner))
+                 (let [children (get-in graph [:children-by-fn owner])]
+                   (and (::writers/incoming graph) (seq children)
+                        (every? #(uuid? (get-in graph [:binding-by-fn-slot [% (:id slot)] :ref-fn-id])) children)))))
     (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
               registry/*per-org-rich-override* (atom {})]
       (let [closure @compiler
@@ -209,7 +213,10 @@
                    ;; An inner env write can intercept only some UUIDs even if
                    ;; the outermost named invocation populated all of them.
                    (not-any? #(seq (bindings/collect-env-bindings % closure)) (keys (:fn-map closure))))
-          targets)))))
+          (cond
+            (not (contains? @incoming owner)) {:targets targets}
+            (and (::writers/incoming graph) (writers/inherited-writer? graph (::writers/incoming graph) owner field slot targets))
+            {:targets targets :inherited-reader-slot (:source-slot-id slot)}))))))
 
 
 (defn prepare

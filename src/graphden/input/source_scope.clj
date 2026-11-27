@@ -851,7 +851,7 @@
 (defn- forwarded-certificate
   [snapshot before {:keys [owner-id source-address target-address projection-id
                            field-id source-type target-type target-fn-id target-field-id root-use-id
-                           multiple-readers? nested-reader? generic-reference list-operand untyped-rename? named-leaf?]}]
+                           multiple-readers? nested-reader? generic-reference list-operand untyped-rename? named-leaf? inherited-reader-slot]}]
   (let [address (if nested-reader? target-address (occurrence before target-field-id (when multiple-readers? root-use-id)))
         [[root uses] target-path] address
         source-type (context/call-with-types snapshot #(types/resolve-alias source-type))
@@ -892,6 +892,7 @@
         generic-reference (assoc :generic-reference generic-reference)
         variable (assoc :target-variable variable)
         named-leaf? (assoc :named-leaf? true)
+        inherited-reader-slot (assoc :inherited-reader-slot inherited-reader-slot)
         nested-reader? (assoc :nested-reader? true)))))
 
 

@@ -8,6 +8,7 @@
     [graphden.input.source :as source]
     [graphden.input.source-legacy-readers :as legacy-readers]
     [graphden.input.source-origins :as origins]
+    [graphden.input.source-reader-writers :as writers]
     [graphden.input.source-snapshot :as snapshot]))
 
 
@@ -125,7 +126,8 @@
         package (snapshot/package-index prepared visible)
         package (-> package
                     (assoc :closure-baselines baselines :query-lookups query-lookups)
-                    (cond-> legacy-graph (assoc :legacy-graph legacy-graph :incoming-legacy-targets (delay (legacy-readers/incoming-targets legacy-graph))))
+                    (cond-> legacy-graph (assoc :legacy-graph (assoc legacy-graph ::writers/incoming (delay (writers/incoming-uses legacy-graph)))
+                                         :incoming-legacy-targets (delay (legacy-readers/incoming-targets legacy-graph))))
                     (update :prepared assoc ::source/originals-by-id (:originals package) ::legacy-readers/frozen-roots roots))
         initial-context (:prepared package)
         preliminary (source/plan-module originals initial-context)

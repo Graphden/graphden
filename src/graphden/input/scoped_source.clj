@@ -128,6 +128,7 @@
         shared-source (assoc :shared-source shared-source)
         (and (= :ref (:kind expression)) (map? (second form))) (assoc :inline-body (second form))
         (:named-leaf? certificate) (assoc :named-leaf? true)
+        (:inherited-reader-slot certificate) (assoc :inherited-reader-slot (:inherited-reader-slot certificate))
         (and projection? (not shared-source)) (assoc :source-names (:source-names certificate))))))
 
 

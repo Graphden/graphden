@@ -1018,7 +1018,7 @@
 
 
 (defn- checked-forwarded-certificate!
-  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id generic-reference list-operand named-leaf?]}
+  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id generic-reference list-operand named-leaf? inherited-reader-slot]}
    field {:keys [source-names public-path row address edges] :as certificate}]
   (when-not (and (= [field] source-names) (vector? public-path) (= (inc (count edges)) (count public-path))
                  (= field (peek public-path)) (= (or target-address address) address)
@@ -1028,7 +1028,7 @@
                  (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
                  (= target-fn-id (:target-fn-id (first edges)))
                  (or (nil? list-operand) (= list-operand (:source-list-operand (second edges))))
-                 (= named-leaf? (:named-leaf? certificate))
+                 (= named-leaf? (:named-leaf? certificate)) (= inherited-reader-slot (:inherited-reader-slot certificate))
                  (= generic-reference (:generic-reference certificate)))
     (throw (ex-info "Forwarded field differs from its checked projection"
                     {:type :input/source-verification :code :forwarded-certificate-mismatch}))))
@@ -1079,12 +1079,22 @@
   [context {owner-id :identity :keys [verification v2 legacy implicit-legacy]}]
   (let [projections (filter :source-names (vals (:scoped-inputs v2)))
         rows (set (:bindings v2))
-        terminal? (some :named-leaf? projections)
-        pairs (into #{} (map (fn [{:keys [row]}] [(first (:projection-path row)) (first (:target-path row))]))
+        terminal? (some #(and (:named-leaf? %) (nil? (:inherited-reader-slot %))) projections)
+        pairs (into #{} (map (fn [{:keys [row inherited-reader-slot]}]
+                               [(first (:projection-path row)) (or inherited-reader-slot (first (:target-path row)))]))
                     projections)
         links (into {} pairs)]
     (when-not (and (= :authored-source-equivalent verification) (uuid? owner-id) (seq links)
                    (or terminal? (= (count links) (count pairs)))
+                   (every? (fn [{:keys [inherited-reader-slot named-leaf? row]}]
+                             (or (nil? inherited-reader-slot)
+                                 (and named-leaf?
+                                      (some (fn [{:keys [kind source-path source-slot-id]}]
+                                              (and (= :declaration kind) (= inherited-reader-slot source-slot-id)
+                                                   (= [:args (second source-path)] source-path)
+                                                   (= [(ids/slot-id owner-id (second source-path))] (:projection-path row))))
+                                            (:arguments legacy)))))
+                           projections)
                    (every? (fn [{:keys [row]}]
                              (and (contains? rows row) (= "projection" (:expression-kind row))
                                   (= owner-id (:fn-id row)) (empty? (:projection-scope-path row))

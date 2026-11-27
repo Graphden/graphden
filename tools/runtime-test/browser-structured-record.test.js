@@ -198,4 +198,33 @@ const lazyMap = scopedFn('entry', 'entry', 'map', {
 });
 assert.deepEqual([...runCallback(lazyMap, {}, readRecord)], ['kept']);
 
+const broadcastRecord = {
+  kind: 'checked-closure', fn: 'callback', slots: [], required: ['left', 'right'],
+  records: [
+    {slot: 'left', fields: [recordSlot('value', 'first-value')]},
+    {slot: 'right', fields: [recordSlot('value', 'second-value')]},
+  ],
+  presence: [
+    {id: 'first-value', kind: 'supplied', sources: []},
+    {id: 'second-value', kind: 'supplied', sources: []},
+    {id: 'left', kind: 'supplied-record', sources: ['first-value'], 'required-fields': ['first-value']},
+    {id: 'right', kind: 'supplied-record', sources: ['second-value'], 'required-fields': ['second-value']},
+  ],
+};
+const readTwoRecords = scopedFn('callback', 'callback', 'equal?', {
+  a: {kind: 'supplied', slot: 'first-value', type: 'any'},
+  b: {kind: 'supplied', slot: 'second-value', type: 'any'},
+});
+const mapRecords = (closure) => scopedFn('entry', 'entry', 'map', {
+  func: closure, coll: {kind: 'supplied', slot: 'items', type: 'any'},
+});
+assert.deepEqual([...runCallback(mapRecords(broadcastRecord), {items: [
+  recordValue([['value', null]]), recordValue([['value', false]]),
+]}, readTwoRecords)], [true, true]);
+assert.throws(() => [...runCallback(mapRecords(broadcastRecord), {items: [recordValue([])]}, readTwoRecords)],
+  /Missing graph input field/);
+const repeatedRecord = {...broadcastRecord, records: [broadcastRecord.records[0], broadcastRecord.records[0]]};
+assert.throws(() => [...runCallback(mapRecords(repeatedRecord), {items: [recordValue([])]}, readTwoRecords)],
+  /Invalid checked browser callback record/);
+
 console.log('PASS deferred browser record fields, presence, and version admission');

@@ -266,7 +266,7 @@
                         (parameter-node! target-scope expressions field path)))
                     readers)]
     (when-not (or (= 1 (count nodes))
-                  (and (seq nodes) single-parameter? (not-any? :fields nodes)))
+                  (and (seq nodes) single-parameter? (apply = (map #(contains? % :fields) nodes))))
       (reject! :callback-parameter-shape-required {:scope scope}))
     nodes))
 

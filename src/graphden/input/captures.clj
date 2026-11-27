@@ -80,14 +80,17 @@
   (and whole-bindable? (= 1 (count (second address)))))
 
 
-(defn- scalar-parameter-field?
-  [field]
-  (and (whole-parameter-field? field) (not (contains? field :fields))))
+(defn- matching-parameter-readers?
+  [fields]
+  (and (seq fields)
+       (every? whole-parameter-field? fields)
+       (apply = (map :type fields))
+       (apply = (map #(contains? % :fields) fields))))
 
 
 (defn- matching-scalar-readers?
   [fields]
-  (and (seq fields) (every? scalar-parameter-field? fields) (apply = (map :type fields))))
+  (and (matching-parameter-readers? fields) (not (contains? (first fields) :fields))))
 
 
 (defn- explicit-parameter-fields
@@ -100,7 +103,7 @@
                       (when-not (and (seq matches)
                                      (every? whole-parameter-field? matches)
                                      (or (= 1 (count matches))
-                                         (and (= 1 (count params)) (matching-scalar-readers? matches))))
+                                         (and (= 1 (count params)) (matching-parameter-readers? matches))))
                         (context/reject! :invalid-lambda-params {:fn-id target}))
                       matches))))
         params))

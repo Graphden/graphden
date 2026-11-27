@@ -121,21 +121,24 @@
     (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))))
 
 
-(deftest authored-record-parameter-can-be-read-inside-a-reference
+(deftest authored-record-parameter-feeds-each-nested-reader
   (let [item-type {:name :text :verified :bool}
-        definitions {:root {:input {:callback [:fn {:item item-type} :text #{}]} :return :text
+        definitions {:root {:input {:callback [:fn {:item item-type} :any #{}]} :return :any
                             :bindings {[:callback] {:ref :child :id :callback-use}}}
-                     :child {:input {:body :text} :return :text :lambda-params [:item]
-                             :bindings {[:body] {:ref :reader :id :read-item}}}
+                     :child {:input {:left :text :right :text} :return :any :lambda-params [:item]
+                             :bindings {[:left] {:ref :reader :id :read-left}
+                                        [:right] {:ref :reader :id :read-right}}}
                      :reader {:input {:item item-type} :return :text}}
         functions {:root (fn [args _]
                            ((runtime/resolve-arg args :callback) {:name "Ada" :verified true}))
-                   :child (fn [args _] (runtime/resolve-arg args :body))
+                   :child (fn [args _]
+                            [(runtime/resolve-arg args :left)
+                             (runtime/resolve-arg args :right)])
                    :reader (fn [args _]
                              (let [{:keys [name verified]} (runtime/resolve-arg args :item)]
                                (str name " " verified)))}
         {:keys [closure]} (compiled definitions functions)]
-    (is (= "Ada true" (invoke closure)))))
+    (is (= ["Ada true" "Ada true"] (invoke closure)))))
 
 
 (deftest authored-callable-parameter-can-feed-two-nested-readers

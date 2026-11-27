@@ -559,13 +559,16 @@
       function assertLiveCallback() {
         if (!open) throw new Error('Graph callback is outside its invocation');
       }
-      function checkedClosure(value, parent) {
+      function checkedClosure(value, parent, records) {
         const invoke = (item) => {
           assertLiveCallback();
           const slots = new Map();
-          if (value.record) {
-            routeStructured(value.record.fields, item, slots, tick, null, false);
-            slots.set(value.record.slot, null);
+          if (records.length) {
+            for (const {fields, slot} of records) {
+              tick();
+              routeStructured(fields, item, slots, tick, null, false);
+              slots.set(slot, null);
+            }
           } else {
             for (const slot of value.slots) {
               tick();
@@ -649,18 +652,23 @@
             return new DeferredRecord(fields);
           }
           case 'closure': return closure(value, frame);
-          case 'checked-closure':
+          case 'checked-closure': {
             if (!structured || frame.parent || !Array.isArray(value.slots)
                 || value.slots.length > operationLimit
                 || new Set(value.slots).size !== value.slots.length
                 || value.slots.some(slot => typeof slot !== 'string')) {
               throw new Error('Invalid checked browser callback');
             }
-            if (value.record && (value.slots.length || typeof value.record.slot !== 'string'
-                                 || !Array.isArray(value.record.fields))) {
+            const records = value.records ?? (value.record ? [value.record] : []);
+            if (!Array.isArray(records) || records.length > operationLimit
+                || (value.records && value.record)
+                || (records.length && value.slots.length)
+                || records.some(record => typeof record?.slot !== 'string' || !Array.isArray(record.fields))
+                || new Set(records.map(record => record.slot)).size !== records.length) {
               throw new Error('Invalid checked browser callback record');
             }
-            return checkedClosure(value, frame);
+            return checkedClosure(value, frame, records);
+          }
           case 'server': return new GraphClosure(item => {
             if (typeof serverCall !== 'function') throw new Error('Server call transport is unavailable');
             return serverCall(value.descriptor, item);

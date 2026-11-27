@@ -70,12 +70,14 @@
   (when (> (count parameters) 1)
     (ir/reject! :unsupported-browser-callback-arity {}))
   (let [{:keys [record-inputs] :as layout} (get layouts scope)
-        record-param (when parameter-surface
-                       (first (input-fields (get-in parameter-surface [:root :fields])
+        record-params (when parameter-surface
+                        (mapv #(select-keys % [:fields :slot])
+                              (input-fields (get-in parameter-surface [:root :fields])
                                             address-ids record-inputs encode)))]
     (merge (cond-> {:kind "checked-closure" :fn (get scope-ids scope)
-                    :slots (if record-param [] (mapv (comp address-ids :address) call-sites))}
-             record-param (assoc :record (select-keys record-param [:fields :slot])))
+                    :slots (if (seq record-params) [] (mapv (comp address-ids :address) call-sites))}
+             (= 1 (count record-params)) (assoc :record (first record-params))
+             (> (count record-params) 1) (assoc :records record-params))
            (wire-presence layout address-ids))))
 
 

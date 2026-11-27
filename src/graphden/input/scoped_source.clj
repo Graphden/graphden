@@ -87,8 +87,11 @@
 
 (defn- parse-route
   [ctx local-state public-path form]
-  (let [{:keys [address row owner use-path field-id copy-of] :as certificate} (checked-route ctx local-state public-path)]
-    (when (contains? certificate :configuration) (reject! :unsupported-scoped-expression public-path))
+  (let [{:keys [address row owner use-path field-id copy-of configuration] :as certificate} (checked-route ctx local-state public-path)
+        pin? (and (= "ref" (:expression-kind row)) (= #{:type} (set (keys configuration)))
+                  (uuid? (:type-override-fn-id row))
+                  (migration/same-edn? configuration (get-in ctx [:authored-configurations public-path])))]
+    (when (and configuration (not pin?)) (reject! :unsupported-scoped-expression public-path))
     (let [expression (read-leaf ctx certificate public-path form)
           projection? (= :projection (:kind expression))
           id (cond
@@ -98,7 +101,7 @@
                            (migration/derived-id :scoped-literal-read owner use-path field-id))
                :else (ids/binding-id owner field-id))
           parsed (rows/normalize
-                   (merge (select-keys row [:org-id])
+                   (merge (select-keys row (cond-> [:org-id] pin? (conj :type-override-fn-id)))
                           {:kind :input-binding :id id :fn-id owner
                            :scope-path use-path :target-path [field-id]}
                           (case (:kind expression)
@@ -137,8 +140,10 @@
     (reject! :unsupported-field-configuration path))
   (let [{:keys [address row owner use-path field-id field-owner configuration]} (checked-route ctx state path)
         pin (:type-override-fn-id row)
+        bound (get-in ctx [:parsed-scoped-bindings path :row])
         expected (cond-> {:kind :input-binding :id (ids/binding-id owner field-id) :fn-id owner
                           :scope-path use-path :target-path [field-id] :expression-kind nil :value-present false}
+                   (= "ref" (:expression-kind bound)) (assoc :expression-kind "ref" :ref-fn-id (:ref-fn-id bound))
                    (:org-id row) (assoc :org-id (:org-id row))
                    (contains? spec :description) (assoc :description (:description spec))
                    (contains? spec :type) (assoc :type-override-fn-id pin))]

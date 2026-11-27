@@ -182,10 +182,14 @@
                         (get-in original [:legacy :arguments]))]
     (when-not (and (= (set paths) (set (map :source-path scoped))) (= (count paths) (count scoped)))
       (reject!))
-    (let [proposed (reduce (fn [proposal {:keys [source-path public-path]}]
-                             (when (contains? (:bind proposal) public-path) (reject!))
+    (let [proposed (reduce (fn [proposal {:keys [source-path public-path configuration]}]
+                             (when (or (contains? (:bind proposal) public-path)
+                                       (and configuration (contains? (:configure proposal) public-path)))
+                               (reject!))
                              (let [argument (some #(when (= source-path (:source-path %)) %) arguments)]
-                               (assoc-in proposal [:bind public-path] (:expression argument))))
+                               (cond-> proposal
+                                 (:expression argument) (assoc-in [:bind public-path] (:expression argument))
+                                 configuration (assoc-in [:configure public-path] configuration))))
                            (:proposed projected) scoped)]
       (-> original
           (assoc :status :supported :blockers [] :proposed proposed)

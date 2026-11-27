@@ -101,8 +101,18 @@
          (= '[:union a b] (:return-type base)))))
 
 
+(defn- pinned-reference?
+  [name->id source {:keys [source-path policy]} row]
+  (let [{:keys [type] :as raw} (get-in source source-path)
+        type-id (:type-override-fn-id row)]
+    (and (map? raw) (= #{:ref :type} (set (keys raw)))
+         (format/configuration-type? type)
+         (uuid? type-id) (= {:type-override-fn-id type-id} policy)
+         (= type-id (record-types/resolve-type-ref type name->id)))))
+
+
 (defn- checked-direct-reference
-  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy]}
+  [{:keys [name->id] :as prepared} {owner-id :identity :keys [legacy source]}
    {:keys [target-id return-type multiple-readers?] :as target}]
   (let [row (single (filter #(and (= :binding (:kind %)) (= target-id (:ref-fn-id %)))
                             (:records legacy)) :missing-direct-reference-binding)
@@ -121,7 +131,8 @@
                    (= owner-id (:fn-id row) (get-in argument [:origin :fn-id]))
                    (= (:slot-id row) (get-in argument [:origin :slot-id]))
                    (uuid? (:slot-id row)) (= (:id row) (ids/binding-id owner-id (:slot-id row)))
-                   (not (:value-present row)) (empty? (:policy argument))
+                   (not (:value-present row))
+                   (or (empty? (:policy argument)) (pinned-reference? name->id source argument row))
                    (or conditional?
                        (and (or (format/configuration-type? expected) origin)
                             (format/configuration-type? return-type)

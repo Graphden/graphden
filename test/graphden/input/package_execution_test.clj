@@ -127,6 +127,38 @@
     (is (= {:name :int :ready :bool} (get-in analysis [:scopes [] :signature :return])))))
 
 
+(deftest a-scoped-typed-reference-keeps-a-single-original-row
+  (let [source (into (declarations "packages/core/logic/fns.edn" #{:if :const})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             (declarations "packages/core/strings/fns.edn" #{:str-trim})
+                             [{:namespace "fixture" :name :producer :parent :const
+                               :args {:value " trim me "} :return-type :text}
+                              {:namespace "fixture" :name :choose :parent :if
+                               :args {:then :str-trim :else {:value "empty"}
+                                      :string {:ref :producer :type :text}}}]))
+        root (ids/fn-id "fixture" :choose)
+        target (ids/slot-id (ids/fn-id "core.strings" :str-trim) :string)
+        binding-id (ids/binding-id root target)
+        compile-owner (fn [package owner roots implementations]
+                        (let [migrated (snapshot/with-certified-owner package owner roots)
+                              record (get-in migrated [:closure-baselines owner])
+                              path [:then :string]
+                              row (get-in record [:v2 :scoped-inputs path :row])
+                              tampered [(update-in record [:proposed :configure] dissoc path)
+                                        (assoc-in record [:proposed :configure path :type] :int)]]
+                          (is (= {:type :text} (get-in record [:proposed :configure path])))
+                          (is (= [:ref :fixture/producer] (get-in record [:proposed :bind path])))
+                          (is (= [binding-id (ids/primitive-fn-id :text)] ((juxt :id :type-override-fn-id) row)))
+                          (is (= 1 (count (filter #(= binding-id (:id %)) (get-in record [:v2 :bindings])))))
+                          (doseq [candidate tampered]
+                            (is (= :blocked (get-in (source/verify-module {:definitions [candidate]} (:prepared migrated))
+                                                    [:definitions 0 :status]))))
+                          (execution/compile-package migrated owner roots implementations)))
+        {:keys [canonical legacy]} (runtimes source root compile-owner)]
+    (is (= "trim me" (legacy {:test true}) (canonical {:test true})))
+    (is (= "empty" (legacy {:test false}) (canonical {:test false})))))
+
+
 (deftest an-original-reference-type-refines-the-binding-before-execution
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:const})
                      (concat (declarations "packages/core/collections/fns.edn" #{:first})

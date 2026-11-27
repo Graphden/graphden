@@ -364,6 +364,16 @@
       binding)))
 
 
+(defn- exact-scoped-reference-pin?
+  [type-ids {:keys [source scoped-inputs]} path {:keys [row type address type-override-fn-id]}]
+  (let [binding (get scoped-inputs path)]
+    (and (< 1 (count path)) (= :ref (get-in binding [:expression :kind]))
+         (= row (:row binding)) (= address (:address binding))
+         (= {:type type} (get-in source [:configure path]))
+         (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id row))
+         (descriptor/stored-source-type? type type-override-fn-id type-ids))))
+
+
 (defn- optional-rename-bindings
   [entries fields]
   (let [any-id (ids/primitive-fn-id :any)]
@@ -436,10 +446,13 @@
              :source-binding-types
              (into {}
                    (for [{:keys [owner source contract configurations bindings]} (vals entries)
-                         {:keys [row type type-override-fn-id] :as config} (vals configurations)
+                         [path {:keys [row type type-override-fn-id] :as config}] configurations
                          :when type-override-fn-id
                          :let [binding (if row
-                                         (when (exact-annotation? owner contract config) row)
+                                         (when (or (exact-annotation? owner contract config)
+                                                   (exact-scoped-reference-pin? (:alias-ids named)
+                                                                                (get entries (:id owner)) path config))
+                                           row)
                                          (original-type-pin (:alias-ids named) owner source contract bindings config))]
                          :when binding]
                      [[(:id binding) type-override-fn-id] type]))
@@ -456,23 +469,24 @@
 
 
 (defn- check-type-provenance!
-  [named-ids type-rows {:keys [source contract owner configurations bindings]}]
+  [named-ids type-rows {:keys [source contract owner configurations bindings] :as entry}]
   (let [primitives (ids/primitive-fn-ids)
         type-ids (merge primitives named-ids)
         return (:return-type source)]
     ;; A v1 storage primitive may erase an authored rich field or return.
     ;; Only freeze types whose declared forms match their exact row IDs.
     ;; A base field's documenting :value stays metadata, never a binding/default.
-    (when-not (every? (fn [{:keys [row target-path] :as config}]
+    (when-not (every? (fn [[path {:keys [row target-path] :as config}]]
                         (if row
                           (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
                             (and (some #{row} bindings)
                                  (or (nil? (:named-refinement-pin config))
                                      (= (:type-override-fn-id config) (get named-ids (:type config))))
                                  (or (exact-annotation? owner contract config)
-                                     (rich/exact-self-pin? owner field config type-rows))))
+                                     (rich/exact-self-pin? owner field config type-rows)
+                                     (exact-scoped-reference-pin? type-ids entry path config))))
                           (original-type-pin type-ids owner source contract bindings config type-rows)))
-                      (vals configurations))
+                      configurations)
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))
                        (and (contains? type-ids return)
@@ -799,10 +813,13 @@
 (defn- add-scoped-form
   [owner proposed scope-certificate expression]
   (let [path (:public-path scope-certificate)
-        keyspace (if (contains? scope-certificate :configuration) :configure :bind)]
-    (when (contains? (get proposed keyspace) path)
+        configuration (:configuration scope-certificate)]
+    (when (or (and expression (contains? (:bind proposed) path))
+              (and configuration (contains? (:configure proposed) path)))
       (reject! :unsupported-scope-source owner))
-    (assoc-in proposed [keyspace path] (get scope-certificate :configuration expression))))
+    (cond-> proposed
+      expression (assoc-in [:bind path] expression)
+      configuration (assoc-in [:configure path] configuration))))
 
 
 (defn- migrate-scoped-binding
@@ -898,9 +915,7 @@
 
 (defn- context-with-scoped-rows
   [context certificates]
-  (-> context
-      (assoc :snapshot-id (random-uuid))
-      (update :bindings into (map (comp (juxt :id identity) :row) certificates))
+  (-> (scope/with-certificate-rows context certificates)
       (update :source-scoped-references into
               (keep (fn [{:keys [address row]}]
                       (when (= "ref" (:expression-kind row))

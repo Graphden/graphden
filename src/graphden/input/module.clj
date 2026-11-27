@@ -297,19 +297,22 @@
             expression (syntax/parse-expression (:contract ctx) (:scope ctx) local (assoc ctx :list-at builders))
             state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
                                                      (:scope ctx) builders)
-            routes (scoped/parse-bindings ctx state bind)
+            routes (scoped/parse-bindings (assoc ctx :authored-configurations (:configure source)) state bind)
             local-configs (into {} (keep (fn [[path :as entry]]
                                            (when (= 1 (count path)) (resolve-configuration ctx state entry))))
                                 (:configure source))
             configs (into local-configs
                           (keep (fn [[path spec]]
-                                  (when (< 1 (count path)) (scoped/parse-annotation ctx state path spec))))
+                                  (when (< 1 (count path))
+                                    (scoped/parse-annotation (assoc ctx :parsed-scoped-bindings routes) state path spec))))
                           (:configure source))
             by-path (into {} (map (juxt :target-path identity)) (vals local-configs))
             bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
         (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
                :expression expression :binding-state (scoped/binding-state state routes)
-               :bindings (into (into bindings (keep :row) (vals configs)) (map :row) (vals routes)) :configurations configs :scoped-inputs routes
+               :bindings (into (into bindings (keep (fn [[path spec]] (when-not (contains? routes path) (:row spec)))) configs)
+                               (map :row) (vals routes))
+               :configurations configs :scoped-inputs routes
                :inline-definitions inlines :list-builders builders)))))
 
 

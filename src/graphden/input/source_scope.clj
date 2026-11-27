@@ -67,6 +67,18 @@
     [arg binding]))
 
 
+(defn- reference-configuration
+  [snapshot source {:keys [source-path policy] :as argument} binding]
+  (let [{:keys [type] :as raw} (get-in source source-path)
+        id (:type-override-fn-id binding)]
+    (when (and (map? raw) (= #{:ref :type} (set (keys raw)))
+               (uuid? (:ref-fn-id binding)) (uuid? id)
+               (= {:type-override-fn-id id} policy)
+               (= id (get-in snapshot [:fields (:slot-id binding) :type-fn-id]))
+               (migration/same-edn? type (get-in argument [:target :type])))
+      {:type type})))
+
+
 (defn- unchanged-list-binding!
   [snapshot original-bindings records {:keys [origin expression list-builder list-ref-names list-inline-items]}]
   (let [{:keys [binding-id slot-id fn-id]} origin
@@ -97,24 +109,31 @@
 
 
 (defn- legacy-omissions
-  [{owner-id :identity :keys [legacy blockers kind status]} paths snapshot projections]
+  [{owner-id :identity :keys [legacy blockers kind status source]} paths snapshot projections]
   (when-not (and (= :composed kind) (= :blocked status) (uuid? owner-id)
                  (seq paths) (= (count paths) (count (set paths)) (count blockers))
                  (= (set (for [path paths] [path :ref-scope-required]))
-                    (set (map (juxt :source-path :code) blockers)))
-                 (every? #(and (= :binding (:kind %))
-                               (or (empty? (:policy %)) (:annotation %) (:scoped-annotation %)
-                                   (and (not-any? #{(:source-path %)} paths)
-                                        (or (rename/preserved-pin? snapshot owner-id %)
-                                            (and (= :list-builder (first (:expression %)))
-                                                 (get-in % [:list-builder :records]))))))
-                         (:arguments legacy)))
+                    (set (map (juxt :source-path :code) blockers))))
     (reject! :unsupported-scope-source))
   (let [records (:records legacy)
         bindings (filter #(= :binding (:kind %)) records)
         owner (only (filter #(and (= :fn (:kind %)) (= owner-id (:id %))) records)
                     :missing-owner-declaration)
-        omitted (mapv #(legacy-origin owner-id (:arguments legacy) bindings %) paths)
+        omitted (mapv (fn [path]
+                        (let [[argument binding] (legacy-origin owner-id (:arguments legacy) bindings path)
+                              config (reference-configuration snapshot source argument binding)]
+                          [(cond-> argument config (assoc :reference-configuration config)) binding]))
+                      paths)
+        verified-pins (into #{} (comp (map first) (filter :reference-configuration) (map :source-path)) omitted)
+        _ (when-not (every? #(and (= :binding (:kind %))
+                                  (or (empty? (:policy %)) (:annotation %) (:scoped-annotation %)
+                                      (verified-pins (:source-path %))
+                                      (and (not-any? #{(:source-path %)} paths)
+                                           (or (rename/preserved-pin? snapshot owner-id %)
+                                               (and (= :list-builder (first (:expression %)))
+                                                    (get-in % [:list-builder :records]))))))
+                            (:arguments legacy))
+            (reject! :unsupported-scope-source))
         omitted-ids (into #{} (map (comp :id second)) omitted)
         projected-ids (set (map (comp :id :row) projections))
         original-bindings (into {} (map (juxt :id identity)) bindings)
@@ -342,14 +361,17 @@
   [snapshot before [arg binding] address]
   (let [owner (:fn-id binding)
         [public-path address edges declaring] (public-route before snapshot arg binding address)
-        annotation (:scoped-annotation arg)]
+        annotation (:scoped-annotation arg)
+        ref-config (:reference-configuration arg)]
     (when (and annotation (not= declaring (:declaring-id annotation)))
       (reject! :reference-field-origin-mismatch))
     (cond-> {:snapshot-id (:snapshot-id snapshot) :source-path (:source-path arg) :public-path public-path
              :address address :edges edges :field-owner declaring
              :owner-parents (get-in snapshot [:fns owner :parent-ids])
-             :row (scoped-row binding address annotation)}
+             :row (cond-> (scoped-row binding address annotation)
+                    ref-config (assoc :type-override-fn-id (:type-override-fn-id binding)))}
       annotation (assoc :configuration (select-keys annotation [:type :description]))
+      ref-config (assoc :configuration ref-config)
       (:target-type-origin arg) (assoc :target-type-origin (:target-type-origin arg)))))
 
 
@@ -384,7 +406,7 @@
          (if literal-occurrences
            (= literal-occurrences (set (occurrences after (:slot-id binding))))
            (= address (occurrence after (:slot-id binding))))
-         (if (contains? certificate :configuration)
+         (if (nil? (:expression-kind row))
            (let [quantities [:address :completion-type :required :required-now? :whole-bindable?]]
              (and (nil? added)
                   (migration/same-edn? (select-keys (get-in before [:public-input :routes public-path]) quantities)
@@ -651,6 +673,19 @@
                                    #(into capture-path %))))))
 
 
+(defn with-certificate-rows
+  "Install exact scoped rows and their authored reference type witnesses."
+  [snapshot certificates]
+  (-> snapshot
+      (assoc :snapshot-id (random-uuid))
+      (update :bindings into (map (comp (juxt :id identity) :row) certificates))
+      (update :source-binding-types (fnil into {})
+              (keep (fn [{:keys [row configuration]}]
+                      (when (and (= "ref" (:expression-kind row)) (:type configuration))
+                        [[(:id row) (:type-override-fn-id row)] (:type configuration)])))
+              certificates)))
+
+
 (defn- verify-bindings*
   "Check a group of legacy bindings whose complete omitted set is known.
    Resolve all addresses in one frozen baseline. Replay all rows together so
@@ -665,7 +700,7 @@
         additions (into {} (map (juxt :id identity)) (map :row certificates))]
     (when-not (= (count certificates) (count additions) (count (set (map :address certificates))))
       (reject! :scope-replay-mismatch))
-    (let [updated (-> snapshot (assoc :snapshot-id (random-uuid)) (update :bindings merge additions))
+    (let [updated (with-certificate-rows snapshot certificates)
           after (checked-graph analyze updated owner true)
           prior (get-in before [:public-input :bindings])
           current (get-in after [:public-input :bindings])]

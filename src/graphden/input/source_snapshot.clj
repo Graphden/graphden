@@ -238,15 +238,33 @@
           children)))
 
 
+(defn- original-projection-links
+  [legacy entry]
+  (let [owner (:id (:owner entry))
+        rows (set (map :row (vals (:scoped-inputs entry))))]
+    (into {} (keep (fn [{:keys [kind source-path source-slot-id scope-certificate]}]
+                     (let [row (:row scope-certificate)
+                           field (second source-path)]
+                       (when (and (= :declaration kind) (simple-keyword? field) (= [:args field] source-path)
+                                  (uuid? source-slot-id) (rows row) (= "projection" (:expression-kind row))
+                                  (= owner (:fn-id row)) (= [source-slot-id] (:target-path row))
+                                  (= [(ids/slot-id owner field)] (:projection-path row)))
+                         [(first (:projection-path row)) source-slot-id])))) (:arguments legacy))))
+
+
 (defn- closure-entries
   [package id resolve-named]
-  (let [{:keys [verification blockers v2]} (plan-entry package id)]
+  (let [{:keys [verification blockers v2 legacy]} (plan-entry package id)]
     (when-not (= :authored-source-equivalent verification)
       (throw (ex-info "Unverified dependency in source closure"
                       {:type :input/source-snapshot :code :unverified-source-declaration
                        :fn-id id :blockers (mapv :code blockers)})))
     (when-not (:input-type-id v2) (reject! :unsupported-scope-declaration id))
-    (verified-entry-tree package v2 resolve-named)))
+    (mapv (fn [entry]
+            (if (seq (:scoped-inputs entry))
+              (assoc entry :original-projection-links (original-projection-links legacy entry))
+              entry))
+          (verified-entry-tree package v2 resolve-named))))
 
 
 (defn- declaration-evidence
@@ -421,6 +439,7 @@
              (into {} (keep (fn [[id entry]]
                               (when-let [links (get-in entry [:origin-ledger :mapping :native-field-links])]
                                 [id links]))) entries)
+             :source-original-projections (into {} (mapcat :original-projection-links) (vals entries))
              :source-optional-renames (optional-rename-bindings entries fields)
              :source-scoped-references
              (into {} (for [[owner {:keys [scoped-inputs]}] entries
@@ -571,7 +590,13 @@
       (reject! :rule-signature-view-required base))
     {:base-fn-id base :root-entry entry
      :argument-paths (into {} (map (fn [{:keys [name id]}] [name [(get readers id id)]])) fields)
-     :argument-declarations (into {} (map (juxt :name identity)) fields)}))
+     :argument-declarations (into {} (map (juxt :name identity)) fields)
+     :optional-native-readers (into #{} (keep (fn [{:keys [id required]}]
+                                                (let [local (get readers id)]
+                                                  (when (and local (false? required)
+                                                             (true? (get-in context [:fields local :required]))
+                                                             (= id (get-in context [:fields local :source-slot-id])))
+                                                    local)))) fields)}))
 
 
 (defn- implementation-options

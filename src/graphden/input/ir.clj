@@ -203,7 +203,7 @@
   (doseq [[_ path] argument-paths]
     (when-not (and (vector? path) (contains? expressions [scope path]))
       (reject! :implementation-path-missing {:scope scope :path path})))
-  (select-keys implementation [:base-fn-id :impl :argument-paths :root-entry]))
+  (select-keys implementation [:base-fn-id :impl :argument-paths :root-entry :optional-native-readers]))
 
 
 (defn- references!
@@ -504,6 +504,44 @@
           (group-by owner (keys scopes)))))
 
 
+(defn- optional-native-source
+  [expressions scopes readers originals leaf]
+  (loop [[scope path :as address] leaf]
+    (let [{:keys [op source]} (get expressions address)
+          uses (vals (get-in scopes [scope :argument-paths]))]
+      (cond
+        (or (not= 1 (count path)) (some empty? uses) (seq (get readers [scope []]))
+            (if (= leaf address) (not= 1 (count (filter #{path} uses))) (some #{path} uses))) nil
+        (= :supplied op) (when-not (contains? (get expressions address) :default) address)
+        (#{:literal :invoke} op) ::bound
+        (= :read op)
+        (when (and (= [address] (get readers source)) (= 1 (count (second source)))
+                   (= (first path) (get originals (first (second source)))))
+          (recur source))))))
+
+
+(defn- optional-native-inputs
+  "A V1 optional primitive receives a nil argument when its required public
+   rename is omitted. Only follow a unique chain of physical source FKs to a
+   supplied field. A separate use of that field still owns its validation."
+  [expressions scopes originals]
+  (let [leaves (for [[scope {:keys [optional-native-readers argument-paths]}] scopes
+                     local optional-native-readers :when (some #{[local]} (vals argument-paths))]
+                 [scope [local]])]
+    (if (empty? leaves)
+      expressions
+      (let [readers (reduce-kv (fn [index address {:keys [op source]}]
+                                 (if (= :read op) (update index source (fnil conj []) address) index)) {} expressions)]
+        (reduce (fn [result leaf]
+                  (let [address (when-not (seq (get readers leaf))
+                                  (optional-native-source expressions scopes readers originals leaf))]
+                    (cond
+                      (= ::bound address) result
+                      address (update result address assoc :default nil :optional-native-read? true)
+                      :else (reject! :unproved-optional-native-reader {:address leaf}))))
+                expressions leaves)))))
+
+
 (defn- public-record-inputs
   [analysis expressions]
   (let [root (get-in analysis [:public-input :root])
@@ -523,7 +561,7 @@
    Context checking does not discover a composed function's base output.
    Public and callback-local leaves have separate frames. Unsupported
    closures and obligations fail closed."
-  [analysis {:keys [snapshot-id implementations target-names detached-closures?]}]
+  [analysis {:keys [snapshot-id implementations target-names detached-closures? original-projections]}]
   (checked-plan! analysis snapshot-id)
   (let [analysis (assoc analysis ::dependencies (group-by :from (:dependencies analysis)))
         root (:root-scope analysis)
@@ -547,7 +585,8 @@
                    (select-keys (get expressions address) [:op :source]))
         (reject! :input-route-not-lowered {:address address})))
     (references! expressions)
-    (let [closures (closure-plans analysis expressions routes detached-closures?)
+    (let [expressions (optional-native-inputs expressions scopes original-projections)
+          closures (closure-plans analysis expressions routes detached-closures?)
           record-inputs (into (public-record-inputs analysis expressions)
                               (mapcat :record-addresses) (vals closures))
           program (presence-program {:expressions expressions :root-scope root :record-inputs record-inputs})

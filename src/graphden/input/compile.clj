@@ -35,11 +35,12 @@
   [analysis {:keys [context implementations detached-closures?]}]
   (let [plan (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
                                          :target-names (update-vals (:fns context) :name)
+                                         :original-projections (:source-original-projections context)
                                          :implementations implementations
                                          :detached-closures? detached-closures?})
         checks (merge-with into
-                           (into {} (keep (fn [[address {:keys [op type]}]]
-                                            (when (= :supplied op) [address [type]])))
+                           (into {} (keep (fn [[address {:keys [op type optional-native-read?]}]]
+                                            (when (and (= :supplied op) (not optional-native-read?)) [address [type]])))
                                  (:expressions plan))
                            (:value-obligations plan))
         validators (context/call-with-types

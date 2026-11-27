@@ -75,6 +75,51 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo failure (:code (ex-data failure)))))
 
 
+(deftest required-callback-field-preserves-the-optional-native-read
+  (let [source (into (declarations "packages/core/refinements/fns.edn" #{:nullable-text})
+                     (concat (declarations "packages/core/logic/fns.edn" #{:not})
+                             (declarations "packages/core/strings/fns.edn" #{:blank? :non-blank?})))
+        root (ids/fn-id "core.strings" :non-blank?)
+        public (ids/slot-id root :string)
+        calls (atom [])
+        bases (update-in @loaded [:blank? :impl]
+                         (fn [invoke]
+                           (fn [args ctx]
+                             (swap! calls conj (set (keys args)))
+                             (invoke args ctx))))
+        compile-owner (fn [package id roots impls]
+                        (let [prepared (:prepared package)
+                              verified (certification/verify-plan prepared source {} roots)
+                              certified (:package verified)
+                              stored (get-in certified [:closure-baselines root :legacy :arguments])
+                              changed (mapv #(cond-> % (= [:args :string] (:source-path %))
+                                                     (assoc :source-slot-id public)) stored)]
+                          (is (= :unproved-optional-native-reader
+                                 (rejection-code #(execution/compile-package
+                                                    (assoc-in certified [:closure-baselines root :legacy :arguments] changed)
+                                                    id roots impls))))
+                          (let [compiled (execution/compile-package certified id roots impls)
+                                frozen (snapshot/freeze-source-analysis certified [id] roots)
+                                native (update-vals (get-in frozen [:options :implementations])
+                                                    #(assoc % :impl (get impls (:base-fn-id %))))
+                                competing (assoc-in native [id :argument-paths :value] [public])]
+                            (is (= :unproved-optional-native-reader
+                                   (rejection-code #(input/compile-named (:analysis compiled)
+                                                                         {:context (:context compiled)
+                                                                          :implementations competing}))))
+                            compiled)))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! source)
+      (let [{:keys [legacy canonical analysis]} (runtimes source root compile-owner bases)]
+        (is (= [public :text true]
+               ((juxt :id :type :required)
+                (some #(when (= :string (:name %)) %) (get-in analysis [:scopes [] :configured-contract :fields])))))
+        (doseq [[args expected] [[{} false] [{:string nil} false] [{:string ""} false] [{:string "x"} true]]]
+          (reset! calls [])
+          (is (= expected (legacy args) (canonical args)))
+          (is (= [#{:string} #{:string}] @calls)))))))
+
+
 (deftest typed-positional-inputs-retain-their-list-item-identity
   (let [list-base (declarations "packages/core/collections/fns.edn" #{:list})
         tuple {:name :tuple :namespace "fixture" :parent :list

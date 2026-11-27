@@ -353,6 +353,15 @@
         (into names (map (juxt identity identity)) local)))))
 
 
+(defn- direct-inline-input?
+  [input]
+  (and (fields? input) (seq input)
+       (every? (fn [spec]
+                 (and (map? spec) (= #{:type :required} (set (keys spec)))
+                      (true? (:required spec)) (configuration-type? (:type spec))))
+               (vals input))))
+
+
 (defn inline-origin
   "Recover the legacy body from direct v2 binds. :legacy-forms records
    spellings that explicit expressions or configuration would erase.
@@ -362,7 +371,11 @@
                               :legacy-scope-copies :input :configure})
     (if-not (contains? body :bind)
       (when-not (some #(contains? body %) [:legacy-forms :legacy-order :legacy-args-order :legacy-scope-names
-                                           :legacy-scope-copies :input :configure]) body)
+                                           :legacy-scope-copies :configure])
+        (if (contains? body :input)
+          (when (direct-inline-input? (:input body))
+            (replace-inline-fields body :input :args (:input body)))
+          body))
       (let [{:keys [bind input legacy-forms configure legacy-scope-copies]} body
             source-fields (inline-source-fields body)
             bind (apply dissoc bind (keys legacy-scope-copies))
@@ -451,8 +464,12 @@
   "Form a v2 body with the source argument order and spelling. The
    caller must compare the reconstructed body and independently check its UUID."
   [body {:keys [bind configure legacy-scope-names legacy-scope-copies] :as proposed}]
-  (if-not (contains? body :args)
-    body
+  (cond
+    (not (contains? body :args)) body
+    (and (empty? bind) (empty? configure) (direct-inline-input? (:input proposed))
+         (= (:args body) (:input proposed)))
+    (replace-inline-fields body :args :input (:args body))
+    :else
     (let [source-fields (inline-source-fields (assoc proposed :bind (get proposed :bind {})))
           destination (into {} (map (fn [[path field]] [field path])) source-fields)
           leaves (mapv (fn [[k raw]]

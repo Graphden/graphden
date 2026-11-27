@@ -15,6 +15,9 @@
                   {:type :input/source-snapshot :code :list-builder-signature-required :fn-id owner :reason reason})))
 
 
+(def ^:private merge-maps-slot (ids/slot-id (ids/fn-id "core.collections" :merge) :maps))
+
+
 (defn- generated-field
   [slots items return-type polymorphic? {:keys [position slot-id]}]
   (let [slot (slots slot-id)
@@ -84,11 +87,13 @@
         :contract {:type args :fields fields} :declaration-records declarations
         :bindings (filterv #(and (= builder-id (:fn-id %)) (= :input-binding (:kind %))) contribution)
         :owner-bindings (filterv #(and (= owner-id (:fn-id %)) (= "projection" (:expression-kind %))) contribution)
-        :list-implementation {:base-fn-id builder-id :root-entry root-entry
-                              :argument-declarations (into {} (map (juxt :name identity)) fields)
-                              :generated-list {:owner-id owner-id :operands (mapv :name (pop fields))
-                                               :infer-return? polymorphic?}
-                              :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}}))))
+        :list-implementation
+        (cond-> {:base-fn-id builder-id :root-entry root-entry
+                 :generated-list {:owner-id owner-id :operands (mapv :name (pop fields))
+                                  :infer-return? polymorphic?}
+                 :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}
+          (and (= merge-maps-slot target-id) (= '[:list [:union :null [:map a :any]]] type))
+          (assoc :argument-declarations (into {} (map (juxt :name identity)) fields)))}))))
 
 
 (defn inline-operand?

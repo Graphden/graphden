@@ -83,11 +83,28 @@
         generated (signature/entry (:identity entry) (:name->id context) trace)
         fields (get-in generated [:contract :fields])]
     (is (= [[:list :text] [:list :text] [:list [:list :text]]] (mapv :type fields)))
-    (is (= (into {} (map (juxt :name identity)) fields)
-           (get-in generated [:list-implementation :argument-declarations])))
+    (is (not (contains? (:list-implementation generated) :argument-declarations)))
     (is (= [:list [:list :text]] (get-in generated [:list-implementation :root-entry :return])))
     (is (= ["literal" "data"] (get-in trace [:fragments 0 :items 1 :value])))
     (is (= 2 (count (get-in generated [:list-implementation :generated-list :operands]))))))
+
+
+(deftest only-the-reviewed-merge-slot-shares-its-nested-dictionary-binder
+  (let [element '[:union :null [:map a :any]]
+        build (fn [module native field type]
+                (let [declarations [{:namespace module :name native :args {field {:type [:list type]}} :return-type :any}
+                                    {:namespace "fixture" :name :child :parent (keyword module (name native))
+                                     :args {field [{:value {}}]}}]
+                      prepared (parse/prepare-module declarations {} {})
+                      child (last (:definitions (source/plan-module declarations prepared)))
+                      trace (get-in child [:legacy :arguments 0 :list-builder])]
+                  (:list-implementation (signature/entry (:identity child) (:name->id prepared) trace))))]
+    (let [{:keys [argument-declarations argument-paths]} (build "core.collections" :merge :maps element)]
+      (is (= #{:item-0 :tail} (set (keys argument-declarations))))
+      (is (= element (get-in argument-declarations [:item-0 :type])))
+      (is (= [(get-in argument-declarations [:item-0 :id])] (:item-0 argument-paths))))
+    (is (nil? (:argument-declarations (build "fixture" :merge :maps element))))
+    (is (nil? (:argument-declarations (build "core.collections" :merge :maps :text))))))
 
 
 (deftest compiler-receives-ordered-refs-and-opaque-literals

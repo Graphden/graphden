@@ -66,26 +66,71 @@
       params)))
 
 
+(defn- nested-parameter-fields
+  [fields]
+  (->> fields
+       (filter #(= :reference-inputs (:kind %)))
+       (mapcat #(tree-seq (fn [field] (= :reference-inputs (:kind field))) :fields %))
+       (filter #(= :input-field (:kind %)))
+       (group-by :name)))
+
+
+(defn- whole-parameter-field?
+  [{:keys [address whole-bindable?]}]
+  (and whole-bindable? (= 1 (count (second address)))))
+
+
+(defn- scalar-parameter-field?
+  [field]
+  (and (whole-parameter-field? field) (not (contains? field :fields))))
+
+
+(defn- matching-scalar-readers?
+  [fields]
+  (and (seq fields) (every? scalar-parameter-field? fields) (apply = (map :type fields))))
+
+
 (defn- explicit-parameter-fields
-  [fields params target]
-  (let [direct (into {} (map (juxt :name identity)) fields)
-        nested (delay (group-by :name (into [] (comp (filter #(= :reference-inputs (:kind %)))
-                                                     (mapcat #(tree-seq (fn [f] (= :reference-inputs (:kind f))) :fields %))
-                                                     (filter #(= :input-field (:kind %))))
-                                            fields)))]
-    (into []
-          (mapcat (fn [param]
-                    (if-let [field (get direct param)]
-                      [field]
-                      (let [matches (get @nested param)]
-                        (when-not (and (seq matches)
-                                       (or (= 1 (count matches)) (= 1 (count params)))
-                                       (apply = (map :type matches))
-                                       (every? #(and (:whole-bindable? %) (not (contains? % :fields))
-                                                     (= 1 (count (second (:address %))))) matches))
-                          (context/reject! :invalid-lambda-params {:fn-id target}))
-                        matches))))
-          params)))
+  [direct nested params target]
+  (into []
+        (mapcat (fn [param]
+                  (if-let [field (get direct param)]
+                    [field]
+                    (let [matches (get @nested param)]
+                      (when-not (and (seq matches)
+                                     (every? whole-parameter-field? matches)
+                                     (or (= 1 (count matches))
+                                         (and (= 1 (count params)) (matching-scalar-readers? matches))))
+                        (context/reject! :invalid-lambda-params {:fn-id target}))
+                      matches))))
+        params))
+
+
+(defn- nested-structural-readers
+  [direct nested names]
+  (when (= 1 (count names))
+    (let [parameter (first names)]
+      (when-not (contains? direct parameter)
+        (let [matches (get @nested parameter)]
+          (when (matching-scalar-readers? matches) matches))))))
+
+
+(defn- list-append-control?
+  [ctx graph {[[_ path] field-path] :target}]
+  (let [builder (get-in graph [:scopes path :fn-id])
+        {:keys [tail tail-id]} (get-in ctx [:source-list-fragments builder])]
+    (and (= :open tail) (uuid? tail-id) (= [tail-id] field-path))))
+
+
+(defn- implicit-candidates
+  [ctx graph fields lexical]
+  (into []
+        (comp (remove #(fully-sourced? % lexical))
+              (remove (fn [field]
+                        (let [leaves (seq (direct-routes field []))]
+                          (and leaves (every? (partial list-append-control? ctx graph) leaves)))))
+              (map :name))
+        fields))
 
 
 (defn- callable-plan
@@ -94,16 +139,21 @@
         expected (reference/expected-callable (:expected-type entry))
         lexical (into [] (mapcat #(lexical-routes graph % :capture binding-id)) fields)
         declared (declared-params ctx target-fn-id)
+        direct (into {} (map (juxt :name identity)) fields)
+        nested (delay (nested-parameter-fields fields))
+        structural-names (when (types/fn-type? expected) (keys (types/fn-args expected)))
+        structural-readers (when-not declared (nested-structural-readers direct nested structural-names))
         params (reference/select-call-site-params
-                 {:structural-names (when (types/fn-type? expected) (keys (types/fn-args expected)))
+                 {:structural-names structural-names
                   :declared declared
-                  :free-names (mapv :name fields)
-                  :candidate-names (mapv :name (remove #(fully-sourced? % lexical) fields))
+                  :free-names (cond-> (mapv :name fields) structural-readers (conj (first structural-names)))
+                  :candidate-names (delay (implicit-candidates ctx graph fields lexical))
                   :own-names (into #{} (comp (filter #(= :input-field (:kind %))) (map :name)) fields)})
         selected (set params)
-        parameter-fields (if declared
-                           (explicit-parameter-fields fields declared target-fn-id)
-                           (filter #(contains? selected (:name %)) fields))
+        parameter-fields (cond
+                           declared (explicit-parameter-fields direct nested declared target-fn-id)
+                           structural-readers structural-readers
+                           :else (filter #(contains? selected (:name %)) fields))
         captured-fields (remove (set parameter-fields) fields)
         call-sites (into [] (mapcat (fn [field]
                                       (map #(assoc % :parameter (:name field)) (direct-routes field [])))) parameter-fields)

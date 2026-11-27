@@ -114,9 +114,28 @@
                       (assoc-in [:child :input :other] :text)
                       (assoc-in [:child :bindings [:other]] {:ref :other}))]
     (is (= "through the reference" (invoke closure)))
+    (let [{inferred :closure} (compiled (update definitions :child dissoc :lambda-params) functions)]
+      (is (= "through the reference" (invoke inferred))))
     (is (= [{:parameter :item :target item :value-path []}]
            (get-in analysis [:closures address :call-sites])))
     (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))))
+
+
+(deftest authored-record-parameter-can-be-read-inside-a-reference
+  (let [item-type {:name :text :verified :bool}
+        definitions {:root {:input {:callback [:fn {:item item-type} :text #{}]} :return :text
+                            :bindings {[:callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:body :text} :return :text :lambda-params [:item]
+                             :bindings {[:body] {:ref :reader :id :read-item}}}
+                     :reader {:input {:item item-type} :return :text}}
+        functions {:root (fn [args _]
+                           ((runtime/resolve-arg args :callback) {:name "Ada" :verified true}))
+                   :child (fn [args _] (runtime/resolve-arg args :body))
+                   :reader (fn [args _]
+                             (let [{:keys [name verified]} (runtime/resolve-arg args :item)]
+                               (str name " " verified)))}
+        {:keys [closure]} (compiled definitions functions)]
+    (is (= "Ada true" (invoke closure)))))
 
 
 (deftest authored-callable-parameter-can-feed-two-nested-readers
@@ -132,9 +151,10 @@
                    :child (fn [args _]
                             [(runtime/resolve-arg args :left)
                              (runtime/resolve-arg args :right)])
-                   :reader (fn [args _] (runtime/resolve-arg args :item))}
-        {:keys [closure]} (compiled definitions functions)]
-    (is (= [["first" "first"] ["second" "second"]] (invoke closure)))))
+                   :reader (fn [args _] (runtime/resolve-arg args :item))}]
+    (doseq [source [definitions (update definitions :child dissoc :lambda-params)]]
+      (let [{:keys [closure]} (compiled source functions)]
+        (is (= [["first" "first"] ["second" "second"]] (invoke closure)))))))
 
 
 (deftest graph-callable-reuses-captured-cells-and-freshens-equal-call-inputs

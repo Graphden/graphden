@@ -252,21 +252,23 @@
 (defn- nested-parameter-nodes!
   [analysis [root scope-path :as scope] expressions param call-sites single-parameter?]
   (let [sites (filterv #(= param (:parameter %)) call-sites)
-        end (count scope-path)]
-    (when-not (and (seq sites) (or (= 1 (count sites)) single-parameter?)
-                   (= (count sites) (count (set (map :target sites)))))
+        readers (distinct (map (fn [{[target-scope path] :target}]
+                                 [target-scope [(first path)]]) sites))
+        end (count scope-path)
+        nodes (mapv (fn [[[target-root target-path :as target-scope] path]]
+                      (let [contract (get-in analysis [:scopes target-path :configured-contract])
+                            field (when contract (descriptor/find-node contract path))]
+                        (when-not (and (= root target-root)
+                                       (vector? target-path) (> (count target-path) end)
+                                       (= scope-path (subvec target-path 0 end))
+                                       field (= param (:name field)))
+                          (reject! :callback-parameter-shape-required {:scope scope}))
+                        (parameter-node! target-scope expressions field path)))
+                    readers)]
+    (when-not (or (= 1 (count nodes))
+                  (and (seq nodes) single-parameter? (not-any? :fields nodes)))
       (reject! :callback-parameter-shape-required {:scope scope}))
-    (mapv (fn [{[target-scope path] :target value-path :value-path}]
-            (let [[target-root target-path] target-scope
-                  contract (get-in analysis [:scopes target-path :configured-contract])
-                  field (when contract (descriptor/find-node contract path))]
-              (when-not (and (= [] value-path) (= root target-root)
-                             (vector? target-path) (> (count target-path) end)
-                             (= scope-path (subvec target-path 0 end))
-                             (= 1 (count path)) field (= param (:name field)) (not (contains? field :fields)))
-                (reject! :callback-parameter-shape-required {:scope scope}))
-              (parameter-node! target-scope expressions field path)))
-          sites)))
+    nodes))
 
 
 (defn- callback-parameters!

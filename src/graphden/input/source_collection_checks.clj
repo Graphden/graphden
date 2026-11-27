@@ -1,6 +1,7 @@
 (ns graphden.input.source-collection-checks
-  "Corroborate deferred collection reads specialized by scoped literals."
+  "Corroborate deferred collection reads specialized by scoped values."
   (:require
+    [graphden.input.lookup-abi :as lookup]
     [graphden.input.source-read-checks :as reads]
     [graphden.types.core :as types]))
 
@@ -88,3 +89,29 @@
                (= required (:expected-type bound) (get-in bound [:reference :actual-type]) (returns after))
                (every? (fn [{:keys [address]}] (and (reaches? before use-scope address) (reaches? after use-scope address))) certificates)
                (stable-variable? before after use-scope variable)))))))
+
+
+(defn captured-lookup
+  "A captured dictionary can specialize the private key variable on the
+   native lookup's collection and its exact local projection. Its producer's
+   value type remains independently checked, including nested binders."
+  [before after address original expected actual]
+  (let [[scope] address
+        node (get-in before [:scopes (second scope)])
+        {:keys [base-fn-id root-entry argument-paths]} (:signature-source node)
+        {:keys [argument path]} (lookup/collection-argument root-entry 'a)
+        physical [scope path]
+        mapped (filter types/map-type? (types/union-members original))
+        variable (when (= 1 (count mapped)) (types/map-key (first mapped)))
+        projection (fn [graph]
+                     (let [binding (reads/binding-at graph physical)]
+                       (and (= :projection (get-in binding [:expression :kind]) (get-in binding [:reference :mode]))
+                            (= address (get-in binding [:reference :source])))))]
+    (when (and (= base-fn-id (:fn-id root-entry)) (= :coll argument) (= path (get argument-paths argument))
+               (= (:signature-source node) (get-in after [:scopes (second scope) :signature-source]))
+               (projection before) (projection after)
+               (types/type-var? variable) (= :any (types/map-val (first mapped)))
+               (types/map-type? actual) (= :any (types/map-key actual)) (types/subtype? actual expected)
+               (= expected (types/resolve {variable :any} original) (types/resolve (:substitution after) original))
+               (= expected (get-in after [:scopes (second scope) :bindings physical :expected-type])))
+      physical)))

@@ -110,12 +110,32 @@
         params))
 
 
+(defn- caller-bound-field?
+  "A value installed beneath the callback by an enclosing scope retains
+   its own inputs. None can become positional readers of this callback."
+  [ctx graph callback-path {:keys [address]}]
+  (let [[root path] (first address)]
+    (some (fn [pos]
+            (let [id (get path pos)]
+              (when-let [row (get-in ctx [:source-scoped-references id :row])]
+                (let [parent (subvec path 0 pos)
+                      reader (get-in graph [:scopes parent :bindings [[root parent] (:target-path row)]])
+                      [owner declared-at] (:lexical-value-owner reader)]
+                  (and (= root owner) (< (count declared-at) (count callback-path))
+                       (= :value (get-in reader [:reference :mode]))
+                       (= id (:binding-id reader)))))))
+          (range (count callback-path) (count path)))))
+
+
 (defn- nested-structural-readers
-  [direct nested names]
+  [ctx graph callback-path direct nested names]
   (when (= 1 (count names))
     (let [parameter (first names)]
       (when-not (contains? direct parameter)
-        (let [matches (get @nested parameter)]
+        (let [matches (get @nested parameter)
+              matches (if (seq (:source-scoped-references ctx))
+                        (remove (partial caller-bound-field? ctx graph callback-path) matches)
+                        matches)]
           (when (matching-scalar-readers? matches) matches))))))
 
 
@@ -146,7 +166,7 @@
         direct (into {} (map (juxt :name identity)) fields)
         nested (delay (nested-parameter-fields fields))
         structural-names (when (types/fn-type? expected) (mapv key (types/fn-args expected)))
-        structural-readers (when-not declared (nested-structural-readers direct nested structural-names))
+        structural-readers (when-not declared (nested-structural-readers ctx graph (second to) direct nested structural-names))
         params (reference/select-call-site-params
                  {:structural-names structural-names
                   :declared declared

@@ -45,6 +45,25 @@
   (index-rows (owner-rows prepared owner)))
 
 
+(defn callback-readers
+  "Replay the original positional and captured readers of a direct callable
+   binding. The witness is scoped to the omitted owner's original graph."
+  [prepared owner roots]
+  (let [compiler (delay (owner-index prepared owner))]
+    (fn [slot target binding-id]
+      (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (let [graph @compiler
+              row (get-in graph [:binding-by-fn-slot [owner slot]])
+              [reader & others] (filter #(= slot (:slot-id %)) (bindings/collect-bindings owner graph))]
+          (when (and (= binding-id (:id row)) (= target (:ref-fn-id row) (:ref-id reader))
+                     (empty? others) (= :ref (:kind reader)) (true? (:is-fn reader)))
+            (let [parameters (renames/hof-lambda-params target slot row owner graph)]
+              {:parameters (mapv keyword parameters)
+               :positional (renames/hof-lambda-slot-routes target parameters graph)
+               :captured (renames/build-hof-translation target parameters graph)})))))))
+
+
 (defn- value-edge?
   "Require the original compiler to evaluate the same effective slot and target
    that the source parser recorded. Callable and identity dispatch stay distinct."

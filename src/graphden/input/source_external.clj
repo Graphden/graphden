@@ -49,21 +49,49 @@
   (and (seq captures) (matching-inputs? original after use-scope public-path captures rename-type #(subvec % 1))))
 
 
+(defn- original-call-site?
+  [snapshot {:keys [from binding-id target-fn-id]} address {:keys [parameters call-sites external-captures]}]
+  (when-let [readers (:source-callback-readers snapshot)]
+    (let [[[_ caller-path] [slot :as fields]] from
+          {:keys [positional captured] original-parameters :parameters}
+          (when (and (empty? caller-path) (= fields [slot]))
+            (readers slot target-fn-id binding-id))
+          [slot-id :as path] (second address)
+          positional-uses (into {} (map (fn [{:keys [target parameter]}] [(first (second target)) parameter])) call-sites)
+          [{:keys [value-path]} & others] (filter #(= address (:target %)) external-captures)]
+      (and (= parameters original-parameters) (= path [slot-id]) (uuid? slot-id)
+           (every? (fn [{[scope path] :target value-path :value-path}]
+                     (and (= 1 (count path)) (uuid? (first path)) (vector? (second scope)) (= [] value-path))) call-sites)
+           (= (count call-sites) (count positional-uses)) (= positional positional-uses)
+           (empty? others) (= (peek value-path) (get captured slot-id))
+           (some? (get captured slot-id))))))
+
+
+(defn- matched-callable?
+  [expected callable original-use?]
+  (and (types/fn-type? callable)
+       (or (= callable expected)
+           (and original-use? (types/fn-type? expected) (= :any (types/fn-ret expected))
+                (= expected (assoc callable 2 :any))))))
+
+
 (defn captured-input?
-  "Only an explicitly parameterized callable's external input may be bound.
-   Its positional and lexical inputs belong to the call site and the caller."
-  [graph snapshot {:keys [from to mode target-fn-id]} address]
-  (let [{:keys [parameters call-sites captures external-captures callable-type]} (get-in graph [:closures from])
+  "Check a captured field against explicit parameters or the original
+   compiler's exact positional and external readers for this call site."
+  [graph snapshot {:keys [from to mode target-fn-id] :as edge} address]
+  (let [{:keys [parameters call-sites captures external-captures callable-type] :as closure} (get-in graph [:closures from])
         declaration (get-in snapshot [:fns target-fn-id :lambda-params])
         bound (get-in graph [:public-input :bindings from])]
     (and address (= :graph-callable mode (get-in bound [:reference :mode]))
          (true? (get-in bound [:reference :capture-resolved?]))
          (uuid? target-fn-id) (= target-fn-id (get-in graph [:scopes (second to) :fn-id]))
-         (vector? declaration) (= parameters (mapv keyword declaration))
-         (types/fn-type? callable-type) (= callable-type (:expected-type bound) (get-in bound [:reference :callable-type]))
-         (= (set parameters) (set (map :parameter call-sites)))
          (= [] captures) (not-any? #(= address (:target %)) call-sites)
-         (= 1 (count (filter #(= address (:target %)) external-captures))))))
+         (= 1 (count (filter #(= address (:target %)) external-captures)))
+         (= (set parameters) (set (map :parameter call-sites)))
+         (= callable-type (get-in bound [:reference :callable-type]))
+         (let [original-use? (and (nil? declaration) (original-call-site? snapshot edge address closure))]
+           (and (or original-use? (and (vector? declaration) (= parameters (mapv keyword declaration))))
+                (matched-callable? (:expected-type bound) callable-type original-use?))))))
 
 
 (defn preserves-capture-inputs?
@@ -83,10 +111,12 @@
                     [target & more] targets
                     previous (some #(when (= target (:target %)) %) (:external-captures old))
                     certificate (get by-address target)
-                    bound (get-in after [:public-input :bindings from])]
+                    bound (get-in after [:public-input :bindings from])
+                    original-bound (get-in before [:public-input :bindings from])]
                 (and (every? by-address targets) (= :graph-callable (get-in bound [:reference :mode]))
                      (true? (get-in bound [:reference :capture-resolved?]))
-                     (= (:callable-type old) (:expected-type bound) (get-in bound [:reference :callable-type]))
+                     (= (:expected-type original-bound) (:expected-type bound))
+                     (= (:callable-type old) (get-in bound [:reference :callable-type]))
                      (= (dissoc old :external-captures) (dissoc new :external-captures))
                      (= (frequencies remaining) (frequencies (filter (set remaining) installed)))
                      (if (some #(get-in by-address [% :row :ref-fn-id]) targets)

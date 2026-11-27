@@ -502,7 +502,7 @@
 (defn- scoped-value-reference
   "Check the instantiated input against the independently inferred target in
    both scopes, preserving whether it was a generic list or an open variable."
-  [snapshot analyze before after {:keys [address row public-path]}]
+  [snapshot analyze before after {:keys [address row public-path] :as certificate}]
   (let [[[root scope-path]] address
         {id :id target :ref-fn-id} row
         use-scope [root (conj scope-path id)]
@@ -510,18 +510,26 @@
         original (get-in before [:public-input :routes public-path :completion-type])
         {:keys [expected-type reference]} (get-in after [:scopes scope-path :bindings address])
         node (get-in after [:scopes (second use-scope)])
+        actual (:actual-type reference)
+        lookup (when (some #(= address (:captured-input %)) (:edges certificate))
+                 (collections/captured-lookup before after address original expected-type actual))
         proof (cond
+                lookup :checked-lookup
                 (and (types/list-type? original) (types/type-any? types/type-var? original) (types/list-type? expected-type)
                      (not (types/type-any? types/type-var? expected-type))) :checked-list
                 (and (types/type-var? original) (= original (types/resolve (:substitution before) original))
                      (= :any expected-type)) :checked-open)]
     (when (and proof target (= target (:fn-id node))
                (= :value (:mode reference)) (some #{edge} (:dependencies after))
-               (= (types/resolve (:substitution after) original) expected-type
-                  (:actual-type reference) (get-in node [:signature :return])))
-      (let [graph (checked-graph analyze snapshot target true)]
-        (when (= expected-type (get-in graph [:scopes [] :signature :return]))
-          [proof {:type expected-type :original original :graph graph}])))))
+               (= (types/resolve (:substitution after) original) expected-type)
+               (= actual (get-in node [:signature :return]))
+               (or lookup (= expected-type actual)))
+      (let [graph (checked-graph analyze snapshot target true)
+            returned (get-in graph [:scopes [] :signature :return])]
+        (when (if lookup (= actual (type-at-use (nested-binders graph after use-scope) returned))
+                  (= expected-type returned))
+          [proof (cond-> {:type expected-type :original original :graph graph}
+                   lookup (assoc :native-address lookup))])))))
 
 
 (defn- reference-field-checks
@@ -538,18 +546,19 @@
           binding (get-in node [:bindings address])
           asserted (when (and (:type-override-fn-id row) (= id (:binding-id binding)) (= (:ref-fn-id row) (get-in binding [:expression :fn-id])))
                      (metadata/asserted-read-type node binding (get-in binding [:reference :actual-type])))
-          callable-type (:checked-callable certificate)]
+          callable-type (:checked-callable certificate)
+          checked-value (some certificate [:checked-list :checked-open :checked-lookup])]
       (when (or callable-type (some #{edge} (:dependencies after)))
-        (cond-> (nested-field-checks (or (:external-graph certificate) (get-in certificate [:checked-list :graph]) (get-in certificate [:checked-open :graph])
+        (cond-> (nested-field-checks (or (:external-graph certificate) (:graph checked-value)
                                          (checked-graph analyze snapshot target true))
                                      after use-scope)
-          (and (or asserted callable-type (:checked-list certificate) (:checked-open certificate)
+          (and (or asserted callable-type checked-value
                    (= :any (get-in before [:public-input :routes public-path :completion-type])
                       (get-in after [:scopes scope-path :bindings address :expected-type])))
                (= [:deferred :runtime-type-obligation] ((juxt :status :reason) proof)))
           (conj {:id [address :value-type :field-read] :address address
                  :scope (first address) :path field-path
-                 :kind :value-type :trigger :field-read :expected-type (or asserted callable-type (get-in certificate [:checked-list :type]) :any)}))))))
+                 :kind :value-type :trigger :field-read :expected-type (or asserted callable-type (:type checked-value) :any)}))))))
 
 
 (defn- callable-alias-reference-addresses
@@ -619,6 +628,13 @@
                        certificates
                        (mapv (partial reference-certificate snapshot analyze before after) certificates))
         alias-references (callable-alias-reference-addresses snapshot after certificates)
+        specialized (into {} (keep #(when-let [lookup (:checked-lookup %)] [(:native-address lookup) lookup])) certificates)
+        original (if (seq specialized)
+                   (into #{} (map (fn [{:keys [address expected-type] :as check}]
+                                    (let [lookup (get specialized address)]
+                                      (if (and lookup (= (:original lookup) expected-type))
+                                        (assoc check :expected-type (:type lookup)) check)))) original)
+                   original)
         prior (if (and (empty? alias-references) (not-any? :checked-list certificates)
                        (not-any? :checked-callable certificates))
                 original
@@ -684,6 +700,10 @@
   (-> snapshot
       (assoc :snapshot-id (random-uuid))
       (update :bindings into (map (comp (juxt :id identity) :row) certificates))
+      (update :source-scoped-references (fnil into {})
+              (keep (fn [{:keys [address row]}]
+                      (when (= "ref" (:expression-kind row))
+                        [(:id row) {:row row :address address}]))) certificates)
       (update :source-binding-types (fnil into {})
               (keep (fn [{:keys [row configuration]}]
                       (when (and (= "ref" (:expression-kind row)) (:type configuration))

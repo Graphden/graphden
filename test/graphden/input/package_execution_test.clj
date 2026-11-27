@@ -11,6 +11,7 @@
     [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
+    [graphden.input.ir :as ir]
     [graphden.input.lazy-list-abi :as lazy-list]
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.lookup-abi :as lookup-abi]
@@ -1458,6 +1459,60 @@
                                              [false "other" "other"] [nil false false] [nil nil nil]]
             :let [args {:first-option first-value :next-option fallback}]]
       (is (= expected (legacy args) (canonical args))))))
+
+
+(deftest branch-search-captures-the-identity-row-outside-its-item-callback
+  (let [storage (declarations "packages/storage/versioned/fns.edn"
+                              #{:_rv-resolved-version-for-eid :_rv-latest-version-on-branch :_rv-versions-grouped-by-bid
+                                :_rv-versions-for-this-eid :_rv-this-eid :_rv-extract-branch-id :_rv-versions-on-bid
+                                :_rv-versions-on-bid-sorted :_rv-versions-on-bid-sorted-asc :_rv-extract-created-at})
+        source (into storage (concat (declarations "packages/core/hof/fns.edn" #{:some :group-by :sort-by})
+                                     (declarations "packages/core/collections/fns.edn" #{:first :get :reverse})))
+        owner (ids/fn-id "storage.versioned" :_rv-resolved-version-for-eid)
+        compile-owner (fn [package root roots implementations]
+                        (let [verify #(certification/verify-plan (:prepared package) source {} roots)
+                              certified (:package (verify))
+                              readers legacy-readers/callback-readers
+                              lower ir/lower-checked
+                              compile-runtime #(execution/compile-package certified root roots implementations)
+                              wrong (fn [& options]
+                                      (let [read (apply readers options)]
+                                        (fn [& args] (assoc (apply read args) :positional {}))))]
+                          (is (= :authored-source-equivalent (get-in certified [:closure-baselines root :verification])))
+                          (is (= :unsupported-reference-use
+                                 (get-in (with-redefs [legacy-readers/callback-readers wrong] (verify)) [:blocked root :code])))
+                          (is (= :unproved-captured-value-owner
+                                 (with-redefs [ir/lower-checked (fn [plan options] (lower plan (dissoc options :scoped-references)))]
+                                   (rejection-code compile-runtime))))
+                          (compile-runtime)))
+        groups (atom 0)
+        natives (update-in @loaded [:group-by :impl]
+                           (fn [invoke] (fn [args ctx] (swap! groups inc) (invoke args ctx))))
+        {:keys [analysis canonical legacy]} (runtimes source owner compile-owner natives)
+        routes (get-in analysis [:public-input :routes])
+        inputs (into {} (keep (fn [[path route]] (when (= :input-field (:kind route)) [(:name route) path]))) routes)
+        topic {:branch-id "topic" :created-at 2}
+        latest {:branch-id "main" :created-at 4}
+        versions {"a" [latest topic {:branch-id "main" :created-at 1}] "b" [{:branch-id "main" :created-at 8}]}]
+    (is (= #{:item :branch-chain :versions-by-eid} (set (keys inputs))))
+    (is (= (ids/slot-id (ids/fn-id "storage.versioned" :_rv-this-eid) :item)
+           (:origin-field-id (get routes (:item inputs)))))
+    (doseq [[id chain expected evaluations] [["a" ["unused" "topic" "main"] topic 1]
+                                             ["a" ["main"] latest 1]
+                                             ["absent" ["topic" "main"] nil 1]
+                                             ["a" [] nil 0]]]
+      (let [flat {:item {:id id} :branch-chain chain :versions-by-eid versions}
+            named (reduce-kv (fn [result field v] (assoc-in result (get inputs field) v)) {} flat)]
+        (doseq [[invoke args] [[legacy flat] [canonical named]]]
+          (reset! groups 0)
+          (is (= expected (invoke args)))
+          (is (= evaluations @groups)))))
+    (let [invalid (-> {} (assoc-in (:item inputs) {:id "a"})
+                      (assoc-in (:versions-by-eid inputs) {"a" [42]}))]
+      (is (nil? (canonical (assoc-in invalid (:branch-chain inputs) []))))
+      (is (= :execution-error/type-mismatch
+             (try (canonical (assoc-in invalid (:branch-chain inputs) ["main"])) nil
+                  (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))))
 
 
 (deftest native-lookup-reads-a-record-through-the-identity

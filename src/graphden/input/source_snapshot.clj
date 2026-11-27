@@ -846,7 +846,8 @@
           ;; belong to the frozen closure before the aggregate overlay runs.
           targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in entry [:legacy :records])))
           {:keys [context options]} (freeze-source-analysis baseline (into [owner] targets) roots)
-          witness (readers/scoped-literal-witness (:prepared package) owner roots)]
+          witness (readers/scoped-literal-witness (:prepared package) owner roots)
+          context (assoc context :source-callback-readers (readers/callback-readers (:prepared package) owner roots))]
       {:entry entry :baseline baseline
        :certificates (scope/verify-bindings entry paths context #(analysis/analyze-effective-input %1 %2 options) witness)})))
 
@@ -963,15 +964,6 @@
     (checked-joint-source package original projected certificates)))
 
 
-(defn- context-with-scoped-rows
-  [context certificates]
-  (-> (scope/with-certificate-rows context certificates)
-      (update :source-scoped-references into
-              (keep (fn [{:keys [address row]}]
-                      (when (= "ref" (:expression-kind row))
-                        [(:id row) {:row row :address address}]))) certificates)))
-
-
 (defn- scopes-before-forwarding
   [package owner roots]
   (let [original (plan-entry package owner)
@@ -991,7 +983,7 @@
         {:keys [context options]} (freeze-source-analysis package-view (into [owner] targets) roots)
         analyze #(analysis/analyze-effective-input %1 %2 options)
         certificates (scope/verify-bindings scoped-view paths context analyze)
-        installed (context-with-scoped-rows context certificates)
+        installed (scope/with-certificate-rows context certificates)
         replay (analyze installed owner)
         proofs (joint/rebase-on-scoped-references proofs certificates replay)
         bound-names (into #{} (map (comp peek :source-path)) certificates)

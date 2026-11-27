@@ -156,7 +156,8 @@
                         (let [node (get-in analysis [:scopes (second (first address))])
                               binding (get-in node [:bindings address])]
                           (when (= expected-type (metadata/asserted-read-type node binding (get-in binding [:reference :actual-type])))
-                            expected-type))))))]
+                            expected-type)))
+                      (lookup-abi/ordered-lookup-items analysis expressions closures address expected-type))))]
     (when (and (= :value-type kind) (= :field-read trigger) (types/fn-type? expected-type) (= :supplied op))
       (reject! :supplied-callable-validation-required details))
     (when-not check (reject! :runtime-obligations-required details))
@@ -250,8 +251,23 @@
             {:value-obligations {} :container-obligations {} :whole-record-inputs {}} obligations)))
 
 
+(defn- captured-value-owner
+  [analysis [[root path] field :as address] {:keys [binding-id expression lexical-value-owner origin-fn-id]}]
+  (when-let [[owner declaring-path] lexical-value-owner]
+    (when (and (vector? declaring-path) (<= (count declaring-path) (count path))
+               (some #(contains? (::callback-scopes analysis) [root (subvec path 0 %)])
+                     (range (inc (count declaring-path)) (inc (count path)))))
+      (let [{:keys [row] original :address} (get (::scoped-references analysis) binding-id)]
+        (when-not (and (= root owner) (= path (into declaring-path (:scope-path row)))
+                       (= original [[origin-fn-id (:scope-path row)] field])
+                       (= binding-id (:id row)) (= origin-fn-id (:fn-id row)) (= field (:target-path row))
+                       (= "ref" (:expression-kind row)) (= (:fn-id expression) (:ref-fn-id row)))
+          (reject! :unproved-captured-value-owner {:address address}))
+        lexical-value-owner))))
+
+
 (defn- lower-binding
-  [analysis address {:keys [expression reference binding-id]}]
+  [analysis address {:keys [expression reference binding-id] :as binding}]
   (case (:mode reference)
     :literal {:op :literal :value (:value expression)}
     :identity {:op :literal :value (:fn-id expression)}
@@ -261,13 +277,15 @@
     (let [dependency (get (::dependencies analysis) address)]
       (when-not (= 1 (count dependency))
         (reject! :dependency-mismatch {:address address :binding-id binding-id}))
-      (let [{:keys [to target-fn-id]} (first dependency)]
+      (let [{:keys [to target-fn-id]} (first dependency)
+            owner (when (= :value (:mode reference)) (captured-value-owner analysis address binding))]
         (when-not (and (= to [(ffirst address) (conj (second (first address)) binding-id)])
                        (= target-fn-id (:fn-id expression)
                           (get-in analysis [:scopes (second to) :fn-id])))
           (reject! :dependency-target-mismatch {:address address}))
-        {:op (if (= :graph-callable (:mode reference)) :closure :invoke)
-         :scope to :target-id target-fn-id :binding-id binding-id}))
+        (cond-> {:op (if (= :graph-callable (:mode reference)) :closure :invoke)
+                 :scope to :target-id target-fn-id :binding-id binding-id}
+          owner (assoc :lexical-value-owner owner))))
     (reject! :reference-mode-required {:address address :mode (:mode reference)})))
 
 
@@ -524,7 +542,8 @@
                        (= (:name field) (:name route) (peek leaf-path)) (empty? siblings)
                        (= :supplied (get-in expressions [target :op]))
                        (= :input-field (:kind route)) (:whole-bindable? route)
-                       (= (:type field) (:completion-type route) (get-in expressions [target :type])))
+                       (= (:type field) (:completion-type route)
+                          (or (get-in expressions [target :declared-collection-type]) (get-in expressions [target :type]))))
           (reject! :unsupported-closure-scope {:scope scope}))))
     targets))
 
@@ -549,16 +568,27 @@
        ;; Equal scoped argument and result expressions stay equal under every
        ;; substitution. The ordinary subtype check still bounds effects and targets.
        (or (and (= (types/fn-args actual) (types/fn-args expected))
-                (= (types/fn-ret actual) (types/fn-ret expected)))
+                (or (= (types/fn-ret actual) (types/fn-ret expected)) (= :any (types/fn-ret expected))))
            (not-any? #(types/type-any? types/type-var? %) [actual expected]))
        (types/subtype? actual expected)))
+
+
+(defn- enclosing-value-callbacks
+  [expressions]
+  (into #{}
+        (mapcat (fn [[[[root path]] {:keys [lexical-value-owner]}]]
+                  (when lexical-value-owner
+                    (map #(vector root (subvec path 0 %))
+                         (range (inc (count (second lexical-value-owner))) (inc (count path)))))))
+        expressions))
 
 
 (defn- closure-plans
   [analysis expressions routes detached-closures?]
   (let [plans (:closures analysis)
         addresses (into #{} (keep (fn [[address expr]] (when (= :closure (:op expr)) address))) expressions)
-        root-dependent (when (and detached-closures? (seq plans)) (root-projection-scopes analysis expressions))
+        root-dependent (when (and detached-closures? (seq plans))
+                         (into (root-projection-scopes analysis expressions) (enclosing-value-callbacks expressions)))
         route-keys [:from :source :role :via :required?]
         by-address (group-by (fn [[_ route]] (or (:address route) (:result-address route)))
                              (get-in analysis [:public-input :routes]))]
@@ -597,16 +627,25 @@
   [root scopes expressions closures program required]
   (let [callbacks (into {} (map (juxt :scope identity)) (vals closures))
         external (into #{} (mapcat :external-addresses) (vals closures))
-        owner (fn [[fn-id path]]
-                (or (some (fn [length]
-                            (let [branch [fn-id (subvec path 0 length)]]
-                              (when (contains? callbacks branch) branch)))
-                          (range (count path) 0 -1))
-                    root))
-        ;; A callback's exposed capture is supplied by the surrounding
-        ;; invocation. Keep its verified address but allocate its cell in the
-        ;; root frame, so callback arguments cannot replace it.
-        address-owner #(if (contains? external %) root (owner (first %)))
+        initializers (into {} (keep (fn [[address {:keys [scope lexical-value-owner]}]]
+                                      (when lexical-value-owner [scope [address lexical-value-owner]]))) expressions)
+        ;; A captured initializer and its ordinary dependencies live with the
+        ;; declaring invocation. Each callback inside it still owns a fresh frame.
+        owner (reduce (fn [result [id path :as scope]]
+                        (let [[_ declared-at] (get initializers scope)
+                              parent (when (seq path) [id (pop path)])]
+                          (assoc result scope
+                                 (cond
+                                   (contains? callbacks scope) scope
+                                   declared-at (get result declared-at)
+                                   :else (get result parent root)))))
+                      {} (sort-by (comp count second) (keys scopes)))
+        lexical-addresses (into {} (map (fn [[_ [address declared-at]]] [address (owner declared-at)])) initializers)
+        address-owner (fn [address]
+                        (cond
+                          (contains? external address) root
+                          (contains? lexical-addresses address) (get lexical-addresses address)
+                          :else (owner (first address))))
         by-frame (group-by (comp address-owner :address) program)
         required (group-by address-owner required)]
     (doseq [[creator {:keys [scope capture-sources]}] closures
@@ -614,11 +653,12 @@
       (when-not (and (= scope (owner (first destination))) (= (owner (first creator)) (address-owner source)))
         (reject! :closure-capture-route-mismatch {:address creator})))
     (doseq [[address {:keys [op source scope]}] expressions]
-      (let [local (owner (first address))]
+      (let [local (address-owner address)]
         (when (case op
-                :read (and (not= local (owner (first source)))
+                :read (and (not= local (if (external source) (owner (first source)) (address-owner source)))
                            (or (:detachable? (get callbacks local))
                                (and (not= root (first source))
+                                    (not (and (contains? lexical-addresses source) (= (first address) (first source))))
                                     (not= source (get-in callbacks [local :capture-sources address])))))
                 :invoke (not= local (owner scope))
                 false)
@@ -696,9 +736,12 @@
    Context checking does not discover a composed function's base output.
    Public and callback-local leaves have separate frames. Unsupported
    closures and obligations fail closed."
-  [analysis {:keys [snapshot-id implementations target-names detached-closures? original-projections]}]
+  [analysis {:keys [snapshot-id implementations target-names detached-closures? original-projections scoped-references]}]
   (checked-plan! analysis snapshot-id)
   (let [analysis (assoc analysis ::dependencies (group-by :from (:dependencies analysis)))
+        analysis (assoc analysis ::scoped-references scoped-references
+                        ::callback-scopes (into #{} (comp (filter #(= :graph-callable (:mode %))) (map :to))
+                                                (:dependencies analysis)))
         root (:root-scope analysis)
         routes (group-by :from (:input-routes analysis))
         _ (doseq [[address entries] routes]

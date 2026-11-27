@@ -36,6 +36,7 @@
   (let [plan (ir/lower-checked analysis {:snapshot-id (:snapshot-id context)
                                          :target-names (update-vals (:fns context) :name)
                                          :original-projections (:source-original-projections context)
+                                         :scoped-references (:source-scoped-references context)
                                          :implementations implementations
                                          :detached-closures? detached-closures?})
         checks (merge-with into

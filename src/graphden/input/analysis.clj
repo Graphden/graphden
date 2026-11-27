@@ -48,6 +48,17 @@
     {:mode :unresolved :reason :missing-ref-target}))
 
 
+(defn- lexical-value-owner
+  [ctx [root use-path] {:keys [id origin-fn-id origin-use-path target-path ref-fn-id]}]
+  (when-let [{:keys [row address]} (get-in ctx [:source-scoped-references id])]
+    (when (and (= row (get-in ctx [:bindings id])) (= id (:id row))
+               (= "ref" (:expression-kind row)) (= ref-fn-id (:ref-fn-id row))
+               (= origin-fn-id (:fn-id row)) (vector? origin-use-path) (seq (:scope-path row))
+               (= address [[origin-fn-id (:scope-path row)] target-path])
+               (= use-path (into origin-use-path (:scope-path row))))
+      [root origin-use-path])))
+
+
 (defn- classify-entry
   [ctx scope contract row]
   (let [path (:target-path row)
@@ -64,9 +75,10 @@
                                 {:mode :unresolved :reason :missing-resolver-signature}))
                             {:mode :literal :actual-type (literal-type (:value expression))})
                    :projection {:mode :unresolved :reason :projection-analysis-required})]
-    {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
-     :expression expression
-     :dispatch-type expected :expected-type expected :reference dispatch}))
+    (let [owner (when (= :ref (:kind expression)) (lexical-value-owner ctx scope row))]
+      (cond-> {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
+               :expression expression :dispatch-type expected :expected-type expected :reference dispatch}
+        owner (assoc :lexical-value-owner owner)))))
 
 
 (defn- resolve-ambiguous-value

@@ -66,7 +66,7 @@
         old (check-at dest :any)
         current (check-at dest expected)
         projection {:binding-id projection-id :expression {:kind :projection :scope (first source) :path [field]}
-                    :expected-type :any :reference {:mode :projection}}
+                    :expected-type :any :reference {:mode :projection :source source}}
         before {:proofs {dest {:status :deferred :reason :runtime-type-obligation}}
                 :scopes {[] {:bindings {dest projection}}}}
         after (-> before
@@ -90,8 +90,23 @@
       (is (nil? (match b g certificate)))
       (is (nil? (match b g (assoc-in source-proof [:checked-open :original] 'other))))
       (is (nil? (match (assoc-in b [:scopes [] :bindings dest :expression :path] [projected-field]) g source-proof))))
+    (let [read-path [:scopes [] :bindings dest]
+          pending (-> before
+                      (assoc-in (conj read-path :expected-type) 'a)
+                      (assoc-in (into read-path [:reference :actual-type]) 'a))
+          solved (-> after
+                     (assoc :substitution {'a expected})
+                     (assoc-in [:proofs dest] {:status :checked})
+                     (assoc-in (conj read-path :expected-type) expected)
+                     (assoc-in (into read-path [:reference :actual-type]) expected))
+          prove-resolution #(reads/resolved-projection-reference pending %1 {source certificate} %2)
+          check (check-at dest 'a)]
+      (is (= [target expected] (prove-resolution solved check)))
+      (is (nil? (prove-resolution (assoc solved :substitution {}) check)))
+      (is (nil? (prove-resolution solved (assoc check :additional-types [:jsonb])))))
     (doseq [g [(assoc-in after [:scopes [row-id] :signature :return] :any)
                (assoc-in after [:scopes [] :bindings dest :expression :path] [projected-field])
+               (assoc-in after [:scopes [] :bindings dest :reference :source] dest)
                (assoc-in after [:proofs dest :status] :checked)
                (assoc-in after [:dependencies 0 :target-fn-id] (random-uuid))
                (assoc-in after [:scopes [] :bindings source :binding-id] (random-uuid))]]

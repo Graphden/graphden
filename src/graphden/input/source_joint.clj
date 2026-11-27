@@ -43,13 +43,13 @@
 
 
 (defn scope-first-view
-  "Return the original scoped arguments and prove which links their omission hides."
-  [original reduced]
+  "Return the original scoped arguments after checking the omitted source."
+  [original baseline]
   (let [{:keys [fields paths]} (groups original)
         scope-paths (set paths)
         known-links (into #{} (map #(vector [:args %] :field-projection-required)) fields)]
-    (when-not (and (migration/same-edn? (without-scoped-source original paths) (:source reduced))
-                   (every? known-links (map (juxt :source-path :code) (:blockers reduced))))
+    (when-not (and (migration/same-edn? (without-scoped-source original paths) (:source baseline))
+                   (every? known-links (map (juxt :source-path :code) (:blockers baseline))))
       (reject!))
     (-> original
         (assoc :blockers (filterv (comp scope-paths :source-path) (:blockers original)))

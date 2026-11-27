@@ -897,8 +897,8 @@
   [package owner roots]
   (let [original (plan-entry package owner)
         {:keys [fields paths]} (joint/groups original)
-        reduced (omit-arguments package owner (mapv second paths))
-        reduced-entry (plan-entry reduced owner)
+        omitted-package (omit-arguments package owner (mapv second paths))
+        reduced-entry (plan-entry omitted-package owner)
         scoped-view (joint/scope-first-view original reduced-entry)
         field-view (update original :blockers #(filterv (comp #{:field-projection-required} :code) %))
         prepared (readers/prepare (:prepared package) owner roots)
@@ -906,14 +906,19 @@
         baseline (if (= :authored-source-equivalent (:verification reduced-entry))
                    reduced-entry
                    (let [candidate (source/omit-forwarded-links reduced-entry (set (map :field-id proofs)))]
-                     (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared reduced))))))
-        package-view (assoc-in reduced [:closure-baselines owner] baseline)
+                     (first (:definitions (source/verify-module {:definitions [candidate]} (:prepared omitted-package))))))
+        package-view (assoc-in omitted-package [:closure-baselines owner] baseline)
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
         {:keys [context options]} (freeze-source-analysis package-view (into [owner] targets) roots)
         analyze #(analysis/analyze-effective-input %1 %2 options)
         certificates (scope/verify-bindings scoped-view paths context analyze)
         proofs (joint/rebase-on-scoped-references proofs certificates)
-        projections (scope/verify-forwarded-projections (context-with-scoped-rows context certificates) proofs analyze)
+        installed (context-with-scoped-rows context certificates)
+        replay (analyze installed owner)
+        bound-names (into #{} (map (comp peek :source-path)) certificates)
+        _ (when (some (comp bound-names :name) (vals (get-in replay [:public-input :routes])))
+            (reject! :additional-lexical-readers owner))
+        projections (scope/verify-forwarded-projections installed proofs analyze)
         draft (assoc-in baseline [:legacy :arguments] (get-in field-view [:legacy :arguments]))
         projected (source/with-checked-projections draft proofs projections)]
     (checked-joint-source package original projected certificates)))

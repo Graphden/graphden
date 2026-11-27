@@ -352,3 +352,25 @@
     (is (= :reference-use-drift (code #(lineage
                                          (update-in env [:inline-proofs owner :arguments] conj {:scope-certificate certificate})
                                          edge))))))
+
+
+(deftest generated-reader-specialization-requires-the-same-declared-binder-and-reader
+  (let [owner (random-uuid) builder (random-uuid) scope [owner [(random-uuid)]]
+        slot (ids/slot-id builder :item-0) path [slot] address [scope path]
+        declared '[:union :null [:map key :any]]
+        key-var (variables/type-in-scope scope 'key)
+        check {:address address :expected-type (variables/type-in-scope scope declared) :kind :value-type :trigger :field-read}
+        source {:generated-list {:operands [:item-0]} :base-fn-id builder :argument-paths {:item-0 path}}
+        binding {:binding-id (random-uuid) :origin-fn-id builder :expression {:kind :value :value nil}}
+        fields [{:id slot :name :item-0 :type declared}]
+        node {:fn-id builder :signature-source source :declared-contract {:fields fields} :bindings {address binding}}
+        before {:scopes {(second scope) node}}
+        after (assoc before :substitution {key-var :keyword})
+        replay (fn [new c] (#'scope/specialize-generated-read before new c))]
+    (is (= [:union :null [:map :keyword :any]] (:expected-type (replay after check))))
+    (is (= check (replay (assoc-in after [:scopes (second scope) :bindings address :binding-id] (random-uuid)) check)))
+    (is (= check (replay (assoc-in after [:scopes (second scope) :declared-contract :fields 0 :type] 'other) check)))
+    (let [unrelated (assoc check :expected-type (variables/type-in-scope [owner []] declared))]
+      (is (= unrelated (replay after unrelated))))
+    (let [conjunction (assoc check :additional-types [:jsonb])]
+      (is (= conjunction (replay after conjunction))))))

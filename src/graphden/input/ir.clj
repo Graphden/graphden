@@ -154,7 +154,9 @@
         (hiccup-tail? analysis address expected op) [:list hiccup-elements]
         (or (and (= [:union :null [:map [:union :keyword :text] :any]] expected)
                  (native-argument? analysis address "web.html" :hiccup :attrs))
-            (and (= :supplied op) (= [:list [:union :null [:map :any :any]]] expected)
+            (and (= :supplied op)
+                 (contains? #{[:list [:union :null [:map :any :any]]]
+                              [:list [:union :null [:map :keyword :any]]]} expected)
                  (when-let [source (generated-list-source analysis address :tail)]
                    (native-argument? analysis source "core.collections" :merge :maps)))
             (and (= :read op) (= [:union :null [:map :any :any]] expected)

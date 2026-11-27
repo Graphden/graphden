@@ -56,7 +56,7 @@
       (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
                 registry/*per-org-rich-override* (atom {})]
         (let [graph @compiler
-              row (get-in graph [:binding-by-fn-slot [owner slot]])
+              row (some #(get-in graph [:binding-by-fn-slot [% slot]]) (lookups/inheritance-chain* owner graph))
               [reader & others] (filter #(= slot (:slot-id %)) (bindings/collect-bindings owner graph))]
           (when (and (= binding-id (:id row)) (= target (:ref-fn-id row) (:ref-id reader))
                      (empty? others) (= :ref (:kind reader)) (true? (:is-fn reader)))

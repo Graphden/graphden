@@ -1864,3 +1864,33 @@
       (let [changed (mapv #(if (= :_uri-split (:name %)) (assoc-in % [:args :limit] {:as :cutoff}) %) originals)]
         (is (= :unproved-shared-input
                (rejection-code #(runtimes changed root (partial compile-certified-staged changed)))))))))
+
+
+(deftest captured-merge-defaults-preserve-the-source-compiler-parameter-slot
+  (let [name :merge-in-fills-missing-keys-and-keeps-existing-ones
+        root (ids/fn-id "core.tests" name)
+        originals (vec (concat (declarations "packages/core/refinements/fns.edn" #{:path-segment})
+                               (declarations "packages/core/logic/fns.edn" #{:assert-eq})
+                               (declarations "packages/core/collections/fns.edn" #{:merge-in :_merge-in-fn :merge :update-in})
+                               (declarations "packages/core/tests/fns.edn" #{name})))
+        compile-owner (fn [{:keys [prepared]} owner roots impls]
+                        (let [{:keys [package]} (certification/verify-plan prepared originals {} roots)
+                              entry (get-in package [:closure-baselines owner])]
+                          (is (= :authored-source-equivalent (:verification entry)))
+                          (let [compiled (execution/compile-package package owner roots impls)
+                                analysis (:analysis compiled)
+                                target (ids/fn-id "core.collections" :_merge-in-fn)
+                                {:keys [from binding-id]} (some #(when (= target (:target-fn-id %)) %) (:dependencies analysis))
+                                [[_ scope] [slot]] from
+                                caller (get-in analysis [:scopes scope :fn-id])
+                                witness (legacy-readers/callback-readers prepared caller roots)
+                                reader (ids/slot-id target :existing)
+                                proved (witness slot target binding-id)]
+                            (is (= {reader :existing} (:positional proved)))
+                            (is (= :defaults (get (:captured proved) (ids/slot-id target :defaults))))
+                            (is (nil? (witness slot target (random-uuid))))
+                            compiled)))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! originals)
+      (let [{:keys [legacy canonical]} (runtimes originals root compile-owner)]
+        (is (= {:a {:x 1 :y 2}} (legacy {}) (canonical {})))))))

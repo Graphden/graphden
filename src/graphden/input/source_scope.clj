@@ -662,11 +662,34 @@
          (= (:address shared-source) (get-in added [:reference :source])))))
 
 
+(defn- specialize-generated-read
+  [before after {:keys [address expected-type additional-types kind trigger] :as check}]
+  (let [[scope [slot :as path]] address
+        node (get-in before [:scopes (second scope)])
+        next-node (get-in after [:scopes (second scope)])
+        {:keys [generated-list argument-paths base-fn-id] :as source} (:signature-source node)
+        declaration (descriptor/find-node (:declared-contract node) path)
+        declared (:type declaration)
+        argument (:name declaration)]
+    (if (and (= [:value-type :field-read] [kind trigger]) (empty? additional-types)
+             generated-list (= base-fn-id (:fn-id node) (:fn-id next-node))
+             (= source (:signature-source next-node)) (simple-keyword? argument)
+             (= path [slot] [(ids/slot-id base-fn-id argument)] (get argument-paths argument))
+             (= declaration (descriptor/find-node (:declared-contract next-node) path))
+             (types/type-any? types/type-var? declared)
+             (= expected-type (types/resolve (:substitution before) (variables/type-in-scope scope declared)))
+             (= (select-keys (get-in node [:bindings address]) [:binding-id :origin-fn-id :expression])
+                (select-keys (get-in next-node [:bindings address]) [:binding-id :origin-fn-id :expression])))
+      (assoc check :expected-type (types/resolve (:substitution after) expected-type))
+      check)))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
         original (into #{}
-                       (remove #(and (not (current %)) (literal-lookup/proves-read? before after certificates %)))
+                       (comp (remove #(and (not (current %)) (literal-lookup/proves-read? before after certificates %)))
+                             (map #(if (current %) % (specialize-generated-read before after %))))
                        (literal-checks/replay before after certificates))
         certificates (if (= current original)
                        certificates

@@ -628,11 +628,11 @@
         by-id (into {} (map (juxt :id identity)) current)
         prior (into #{} (keep (fn [check]
                                 (cond
-                                  (current check) check
-                                  (or (seq (:additional-types check)) (seq (:additional-types (get by-id (:id check))))) check
-                                  (reads/discharged? snapshot before after certificates check) nil
-                                  (and (not (contains? by-id (:id check)))
-                                       (resolved-projected-check? snapshot analyze before after by-address check)) nil
+                                  (or (current check) (seq (:additional-types check))
+                                      (seq (:additional-types (get by-id (:id check))))) check
+                                  (or (reads/discharged? snapshot before after certificates check)
+                                      (and (not (contains? by-id (:id check)))
+                                           (resolved-projected-check? snapshot analyze before after by-address check))) nil
                                   (collections/refined-read? #(checked-graph analyze snapshot % true) before after certificates check (get by-id (:id check)))
                                   (get by-id (:id check))
                                   :else (or (projected-check snapshot analyze before after by-address by-id check) check)))) prior)]

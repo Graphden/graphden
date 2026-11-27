@@ -92,20 +92,20 @@
   (or (cond
         (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
                          :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
-            (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))) expected
-        (and (types/union-type? expected) (seq (types/union-members expected))
-             (every? #{:null :bool :text :int :float :numeric :keyword [:list :any]}
-                     (types/union-members expected))) expected
-        (hiccup-children? analysis address expected) expected
+            (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))
+            (and (types/union-type? expected) (seq (types/union-members expected))
+                 (every? #{:null :bool :text :int :float :numeric :keyword [:list :any]}
+                         (types/union-members expected)))
+            (hiccup-children? analysis address expected)) expected
         (hiccup-tail? analysis address expected op) [:list hiccup-elements]
-        (and (= [:union :null [:map [:union :keyword :text] :any]] expected)
-             (native-argument? analysis address "web.html" :hiccup :attrs)) expected
-        (and (= :supplied op) (= [:list [:union :null [:map :any :any]]] expected)
-             (when-let [source (generated-list-source analysis address :tail)]
-               (native-argument? analysis source "core.collections" :merge :maps))) expected
-        (and (= :read op) (= [:union :null [:map :any :any]] expected)
-             (when-let [source (generated-list-source analysis address :operand)]
-               (native-argument? analysis source "core.collections" :merge :maps))) expected
+        (or (and (= [:union :null [:map [:union :keyword :text] :any]] expected)
+                 (native-argument? analysis address "web.html" :hiccup :attrs))
+            (and (= :supplied op) (= [:list [:union :null [:map :any :any]]] expected)
+                 (when-let [source (generated-list-source analysis address :tail)]
+                   (native-argument? analysis source "core.collections" :merge :maps)))
+            (and (= :read op) (= [:union :null [:map :any :any]] expected)
+                 (when-let [source (generated-list-source analysis address :operand)]
+                   (native-argument? analysis source "core.collections" :merge :maps)))) expected
         (and (types/list-type? expected) (#{:invoke :read} op))
         (let [actual (get-in analysis [:scopes scope :bindings address :reference :actual-type])]
           (when (or (= [:list [:map :keyword :any]] expected actual)

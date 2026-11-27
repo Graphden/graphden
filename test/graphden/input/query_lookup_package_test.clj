@@ -36,7 +36,7 @@
 (defn- pinned-stage
   [module]
   (let [bs (String/.getBytes (pr-str module) StandardCharsets/UTF_8)]
-    {:bytes bs :sha256 (hex/encode (.digest (MessageDigest/getInstance "SHA-256") bs))}))
+    {:bytes bs :sha256 (hex/encode (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") bs))}))
 
 
 (defn- rejection
@@ -73,7 +73,7 @@
       (is (= [:request] (mapv :name (get-in analysis [:public-input :root :fields]))))
       (is (true? (get-in analysis [:public-input :routes [:request] :required])))
       (is (= [:union :null :text] (get-in analysis [:scopes [] :signature :return])))
-      (is (= 0 (run {"extra" true :query-params {"a" 0}})))
+      (is (zero? (run {"extra" true :query-params {"a" 0}})))
       (is (= {:v 5} (run {7 nil :query-params {:a {:v 5}}})))
       (is (= "c" (run {:query-string "a=c"})))
       (is (= :unknown-input-field (rejection #(executor/execute ctx owner {:request ring :param-name "old"}))))

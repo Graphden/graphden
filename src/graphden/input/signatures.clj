@@ -299,7 +299,7 @@
 (def ^:private coalesce-id (ids/fn-id "core.logic" :coalesce))
 
 
-(defn- projected-nullable-type
+(defn- projected-coalesce-type
   [node scope facts argument]
   (let [address [scope [(ids/slot-id coalesce-id argument)]]
         {:keys [expression reference expected-type]} (get-in node [:bindings address])
@@ -308,11 +308,40 @@
                (= :projection (:kind expression) (:mode reference))
                (= scope from) (= source ((juxt :scope :path) expression))
                (= expected-type (:actual-type reference)
-                  (:type (descriptor/find-node (:configured-contract node) path)))
-               (or (= :any expected-type)
-                   (and (some #{:null} (types/union-members expected-type))
-                        (every? #{:null :bool :text :keyword :int :numeric} (types/union-members expected-type)))))
+                  (:type (descriptor/find-node (:configured-contract node) path))))
       expected-type)))
+
+
+(defn- projected-nullable-type
+  [node scope facts argument]
+  (let [type (projected-coalesce-type node scope facts argument)
+        members (types/union-members type)]
+    (when (or (= :any type)
+              (and (some #{:null} members) (every? #{:null :bool :text :keyword :int :numeric} members)))
+      type)))
+
+
+(defn- projected-map-facts
+  [root-entry node scope facts]
+  (let [address [scope [(ids/slot-id coalesce-id :default)]]
+        domain [:union :null [:map :keyword :any]]
+        binder (:return root-entry)
+        args (zipmap [:value :default] (repeat [:union :null binder]))
+        operand (get-in facts [:bindings-info :value])]
+    ;; Both immutable map operands share the checked projected dictionary.
+    ;; Its literal record describes one value and cannot constrain the
+    ;; native fallback to have the same fields.
+    (if (and (= ["core.logic" :coalesce] ((juxt :namespace :name) root-entry))
+             (types/type-var? binder) (= args (:args root-entry)) (empty? (:effects root-entry))
+             (= domain (projected-coalesce-type node scope facts :value) (get-in node [:bindings address :expected-type]))
+             (= {:mode :literal :actual-type :empty-map} (get-in node [:bindings address :reference]))
+             (= {:kind :value :value {}} (get-in node [:bindings address :expression]))
+             (= {:type :empty-map :value {} :value-present true :address address} (get-in facts [:bindings-info :default]))
+             (:value-present operand) (types/record-type? (:type operand)) (not (types/contains-marker? (:type operand)))
+             (map? (:value operand))
+             (every? keyword? (keys (:value operand))))
+      (assoc-in facts [:bindings-info :value :type] [:map :keyword :any])
+      facts)))
 
 
 (defn- projected-coalesce-signature
@@ -366,9 +395,10 @@
                       (and stored-return (not (:infer-return? generated-list)))
                       (assoc :return-type (types/resolve renaming (variables/type-in-scope implementation-scope stored-return))))
         facts (binding-facts graph scope argument-paths)
+        inference-facts (if (= coalesce-id base-fn-id) (projected-map-facts root-entry node scope facts) facts)
         _ (check-rule-type! root-entry (:bindings-info facts))
         result (infer-signature
-                 (assoc facts :fn-id (:fn-id node)
+                 (assoc inference-facts :fn-id (:fn-id node)
                         :root-entry (if (= coalesce-id (:fn-id root-entry))
                                       (projected-coalesce-signature root-entry node scope implementation-scope renaming facts)
                                       (projected-lookup-signature root-entry graph node scope implementation-scope renaming facts))

@@ -3,6 +3,7 @@
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as executor]
@@ -1658,8 +1659,10 @@
 (defn- compile-certified-staged
   [originals {:keys [prepared]} owner roots impls]
   (let [graph (legacy-readers/owner-index prepared owner)
-        {:keys [package blocked]} (certification/verify-plan prepared originals {:legacy-graph graph} roots)
-        {:keys [source proposed]} (get-in package [:closure-baselines owner])
+        {:keys [package blocked plan]} (certification/verify-plan prepared originals {:legacy-graph graph} roots)
+        {:keys [source proposed]} (or (get-in package [:closure-baselines owner])
+                                      (some #(when (and (= owner (:identity %)) (= :authored-source-equivalent (:verification %))) %)
+                                            (:definitions plan)))
         legacy {:namespace (:namespace source) :fns [(dissoc source :namespace)]}
         staged (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)])]
     (when-not proposed (throw (ex-info "Source was not certified" (get blocked owner))))
@@ -1677,7 +1680,8 @@
                                (declarations "packages/core/logic/fns.edn" #{:coalesce :if :equal?})
                                (declarations "packages/web/errors/fns.edn"
                                              #{:_jer-env :_jer-status-read :_jer-status :_jer-body-map :_jer-json :_jer-429?
-                                               :_jer-headers-json :_jer-headers-retry :_jer-headers :json-envelope-response})))
+                                               :_jer-headers-json :_jer-headers-retry :_jer-headers :json-envelope-response})
+                               (declarations "packages/registry/registry/fns.edn" #{:_import-err-not-a-vector :_wd-err-pinned})))
         compile-staged (partial compile-certified-staged originals)]
     (binding [types/*type-aliases-override* (atom {})]
       (sync/register-type-aliases! originals)
@@ -1693,7 +1697,14 @@
         (let [failure (try (canonical {:envelope {:http-status 600}})
                            nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
           (is (= :execution-error/type-mismatch (:type failure)))
-          (is (= :refinement-mismatch (get-in failure [:errors 0 :code]))))))))
+          (is (= :refinement-mismatch (get-in failure [:errors 0 :code])))))
+      (doseq [[name status reason] [[:_import-err-not-a-vector 400 "body-not-a-bundle"] [:_wd-err-pinned 409 "still-installed"]]]
+        (let [{:keys [legacy canonical]} (runtimes originals (ids/fn-id "app.registry" name) compile-staged)
+              response (canonical {})]
+          (is (= (legacy {}) response))
+          (is (= status (:status response)))
+          (is (= {"Content-Type" "application/json"} (:headers response)))
+          (is (str/includes? (:body response) reason)))))))
 
 
 (deftest staged-branch-lookup-preserves-guarded-reads-and-lookup-order

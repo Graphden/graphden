@@ -326,16 +326,17 @@
 
 
 (defn- exact-reference-pin?
-  [type-ids owner contract {:keys [id fn-id scope-path target-path expression-kind ref-fn-id
-                                   value-present type-override-fn-id]}
+  [type-ids owner source contract {:keys [id fn-id scope-path target-path expression-kind ref-fn-id
+                                          value-present type-override-fn-id]}
    {:keys [type] :as config}]
   (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))]
     (and field (= target-path (:target-path config)) (= "ref" expression-kind) (= [] scope-path)
          (uuid? fn-id) (= (:id owner) fn-id) (= id (ids/binding-id fn-id (:id field)))
          (uuid? ref-fn-id) (false? value-present)
-         (= type (:type field))
-         (uuid? type-override-fn-id)
-         (= type-override-fn-id (:type-override-fn-id config) (:type-id field))
+         (= {:type type} (get-in source [:configure [(:name field)]]))
+         (= :ref (first (get-in source [:bind (:name field)])))
+         (uuid? type-override-fn-id) (= type-override-fn-id (:type-override-fn-id config))
+         (not (types/type-any? types/type-var? type))
          (descriptor/stored-source-type? type type-override-fn-id type-ids))))
 
 
@@ -358,7 +359,7 @@
   [type-ids owner source contract bindings {:keys [target-path] :as config} & [type-rows]]
   (let [binding (some #(when (= target-path (:target-path %)) %) bindings)]
     (when (and binding (or (exact-projection-pin? type-ids contract binding config type-rows)
-                           (exact-reference-pin? type-ids owner contract binding config)
+                           (exact-reference-pin? type-ids owner source contract binding config)
                            (exact-literal-pin? owner source contract binding config)))
       binding)))
 

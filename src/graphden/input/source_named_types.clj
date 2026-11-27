@@ -190,7 +190,7 @@
    (let [forms (concat rule-types
                        (mapcat (fn [{:keys [contract source configurations]}]
                                  (concat [(:return-type source)] (map :type (:fields contract))
-                                         (keep #(when (:named-refinement-pin %) (:type %)) (vals configurations))))
+                                         (keep :type (vals configurations))))
                                (vals entries)))]
      (loop [pending (into (vec (mapcat nested-type-names forms)) (vals aliases))
             seen #{}

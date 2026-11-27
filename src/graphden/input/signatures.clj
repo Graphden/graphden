@@ -89,19 +89,30 @@
       (assoc :value (get-in (:value fact) names) :value-present true))))
 
 
+(def ^:private native-list-id (ids/fn-id "core.collections" :list))
+(def ^:private native-list-argument {:items [(ids/slot-id native-list-id :items)]})
+
+
 (defn- checked-list-elements
   "Use only the ordered operands of a verified generated builder whose tail
-   is statically empty or itself a checked list. Values are never evaluated."
+   is statically empty or itself a checked list. Native list passes its
+   checked :items through unchanged. Values are never evaluated."
   [{:keys [signature signature-source]}]
-  (when-let [operands (get-in signature-source [:generated-list :operands])]
-    (let [facts (:resolved-bindings signature)
-          prefix (mapv facts operands)
-          tail (:tail facts)
-          tail-elements (if (and (:value-present tail) (= [] (:value tail)))
-                          []
-                          (:list-elements tail))]
-      (when (and (vector? tail-elements) (every? :type prefix))
-        (into (mapv #(select-keys % [:type :value-present :value]) prefix) tail-elements)))))
+  (let [facts (:resolved-bindings signature)
+        {:keys [base-fn-id argument-paths root-entry generated-list]} signature-source]
+    (if-let [operands (:operands generated-list)]
+      (let [prefix (mapv facts operands)
+            tail (:tail facts)
+            tail-elements (if (and (:value-present tail) (= [] (:value tail)))
+                            []
+                            (:list-elements tail))]
+        (when (and (vector? tail-elements) (every? :type prefix))
+          (into (mapv #(select-keys % [:type :value-present :value :list-elements]) prefix) tail-elements)))
+      (when (and (= native-list-id base-fn-id (:fn-id root-entry))
+                 (= "core.collections" (:namespace root-entry)) (= :list (:name root-entry))
+                 (= #{} (:effects root-entry))
+                 (= native-list-argument argument-paths))
+        (get-in facts [:items :list-elements])))))
 
 
 (defn- reference-fact

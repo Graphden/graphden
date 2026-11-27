@@ -177,28 +177,28 @@
 
 
 (defn- referenced-reader?
-  [defs definition field]
-  (some #(slots/resolve-slot-owner-strict % field defs #{})
+  [defs definition field-name]
+  (some #(slots/resolve-slot-owner-strict % field-name defs #{})
         (slots/ref-targets-of definition defs)))
 
 
 (defn- native-field-link
-  [{:keys [defs-by-name name->id] :as context} definition parent owned [field spec]]
+  [{:keys [defs-by-name name->id] :as context} definition parent owned [field-name spec]]
   (when (types/own-slot-declaration? spec)
-    (let [base-spec (get-in parent [:args field])
+    (let [base-spec (get-in parent [:args field-name])
           owner (ids/fn-id (:namespace definition) (:name definition))
-          local (ids/slot-id owner field)
-          native (ids/slot-id (:fn-id parent) field)
+          local (ids/slot-id owner field-name)
+          native (ids/slot-id (:fn-id parent) field-name)
           child (get owned local)
           member (get owned (ids/fn-slot-id owner local))]
       (when (and (map? base-spec) (= :slot (:kind child)) (= native (:source-slot-id child))
-                 (= (name field) (:name child)) (= local (:slot-id member))
+                 (= (name field-name) (:name child)) (= local (:slot-id member))
                  (= owner (:fn-id member)) (= :fn-slot (:kind member))
                  (= (:type-fn-id child) (types/resolve-type-ref (:type spec) name->id))
                  (not (contains? base-spec :value))
                  (= (get base-spec :required true) (get spec :required true))
                  (rename/compatible-pin? context (:type base-spec) (:type spec))
-                 (not (referenced-reader? defs-by-name definition field)))
+                 (not (referenced-reader? defs-by-name definition field-name)))
         [local native]))))
 
 
@@ -223,15 +223,15 @@
       (let [slots (into {} (map (juxt :id identity)) (mapcat #(get-in % [:records :slot]) ordered))
             members (into {} (map (juxt :slot-id identity)) (mapcat #(get-in % [:records :fn-slot]) ordered))]
         (doseq [[local native] links]
-          (let [field (keyword (:name (get slots local)))
+          (let [field-name (keyword (:name (get slots local)))
                 source (get slots native)
                 member (get members native)]
-            (when-not (and (= (name field) (:name source))
-                           (= native (ids/slot-id (:fn-id member) field))
+            (when-not (and (= (name field-name) (:name source))
+                           (= native (ids/slot-id (:fn-id member) field-name))
                            (= (:id member) (ids/fn-slot-id (:fn-id member) native))
-                           (not-any? #(referenced-reader? (:defs-by-name context) (:definition %) field) ordered)
+                           (not-any? #(referenced-reader? (:defs-by-name context) (:definition %) field-name) ordered)
                            (not-any? #(= native (:slot-id %)) (mapcat #(get-in % [:records :binding]) ordered)))
-              (reject! :ambiguous-inherited-input [:input field]))))))
+              (reject! :ambiguous-inherited-input [:input field-name]))))))
     links))
 
 

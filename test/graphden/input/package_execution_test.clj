@@ -110,6 +110,41 @@
                (rejection-code #(snapshot/freeze-declarations (snapshot/package-index prepared inputs) [fn-id]))))))))
 
 
+(deftest a-closed-list-of-known-pairs-preserves-order-and-result-type
+  (let [pair (fn [name key value]
+               {:namespace "fixture" :name name :parent :list
+                :args {:items {:append [{:value key} {:value value}] :closed true}}})
+        source (into (declarations "packages/core/collections/fns.edn" #{:list :pairs->map})
+                     (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             [(pair :earlier :name "Ada")
+                              (pair :later :name 2)
+                              (pair :flag :ready true)
+                              {:namespace "fixture" :name :result :parent :pairs->map
+                               :args {:entries {:append [:earlier :later :flag] :closed true}}}]))
+        root (ids/fn-id "fixture" :result)
+        {:keys [canonical legacy analysis]} (runtimes source root)]
+    (is (= {:name 2 :ready true} (legacy {}) (canonical {})))
+    (is (= {:name :int :ready :bool} (get-in analysis [:scopes [] :signature :return])))))
+
+
+(deftest an-original-reference-type-refines-the-binding-before-execution
+  (let [source (into (declarations "packages/core/logic/fns.edn" #{:const})
+                     (concat (declarations "packages/core/collections/fns.edn" #{:first})
+                             (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})
+                             [{:namespace "fixture" :name :texts :parent :const
+                               :args {:value {:value ["first"]}} :return-type [:list :text]}
+                              {:namespace "fixture" :name :choose :parent :first
+                               :args {:coll {:ref :texts :type [:list :text]}}}]))
+        root (ids/fn-id "fixture" :choose)
+        {:keys [canonical legacy]} (runtimes source root)]
+    (is (= "first" (legacy {}) (canonical {})))
+    (is (= :types/check-failed
+           (try
+             (runtimes (assoc-in source [(dec (count source)) :args :coll :type] [:list :int]) root)
+             nil
+             (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))
+
+
 (deftest coalesce-evaluates-references-on-both-generic-value-slots
   (let [source (into (declarations "packages/core/logic/fns.edn" #{:coalesce :const})
                      (concat (declarations "packages/core/refinements/fns.edn" #{:positive-int :non-negative-int})

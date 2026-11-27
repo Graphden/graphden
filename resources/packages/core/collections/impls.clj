@@ -701,12 +701,29 @@
     :else nil))
 
 
+(defn- checked-entry-field
+  [{:keys [value-present value list-elements]}]
+  (cond
+    (and value-present (vector? value) (= 2 (count value)))
+    (entry-static-field value)
+
+    (and (vector? list-elements) (= 2 (count list-elements)))
+    (let [[key-info item-info] list-elements]
+      (when-let [key (and (:value-present key-info) (field-keyword-from-literal (:value key-info)))]
+        [key (:type item-info)]))))
+
+
 (defn pairs->map-return-rule
   [bindings-info default-ret]
-  (let [entries-form (get-in bindings-info [:entries :value])
-        fields (when (and (vector? entries-form) (seq entries-form))
-                 (mapv entry-static-field entries-form))]
-    (if (and (seq fields) (every? some? fields))
+  (let [{:keys [address value-present value list-elements]} (:entries bindings-info)
+        fields (if address
+                 ;; A structured use carries checked operand facts. The raw
+                 ;; value, when known, is data and never a registry reference.
+                 (cond
+                   (vector? list-elements) (mapv checked-entry-field list-elements)
+                   (and value-present (vector? value)) (mapv #(checked-entry-field {:value-present true :value %}) value))
+                 (when (vector? value) (mapv entry-static-field value)))]
+    (if (and (seq fields) (every? second fields))
       (into {} fields)
       default-ret)))
 
@@ -1028,7 +1045,7 @@
           :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :vec {:impl vec-fn :taint-propagate? true}
    :pairs->map {:impl pairs->map-fn :return-type-rule pairs->map-return-rule
-                :taint-propagate? true}
+                :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :position-in {:impl position-in-fn :taint-propagate? true}
    :last {:impl last-fn :taint-propagate? true}
    :partition {:impl partition-fn :taint-propagate? true}

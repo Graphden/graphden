@@ -3,12 +3,21 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
+    [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.executor.interface :as executor]
+    [graphden.executor.registry.core :as registry]
     [graphden.input.legacy-literal-routes :as literal]
+    [graphden.input.package-execution :as execution]
+    [graphden.input.query-lookup-inline :as inline]
     [graphden.input.query-lookup-source :as query]
     [graphden.input.source-origins :as origins]
+    [graphden.input.source-snapshot :as snapshot]
+    [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.parse :as parse]))
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.sync :as sync]
+    [graphden.types.core :as types]))
 
 
 (defn- definitions
@@ -17,25 +26,37 @@
     (into [] (comp (filter #(contains? names (:name %))) (map #(assoc % :namespace module-ns))) fns)))
 
 
+(defn- query-definitions
+  [extra]
+  (into []
+        cat
+        [(definitions "core/collections" #{:get :get-in})
+         (definitions "core/logic" #{:coalesce :const :equal?})
+         (definitions "core/strings" #{:str-to-keyword})
+         (definitions "core/refinements" #{:path-segment :nullable-text :nullable-keyword :text-map})
+         (definitions "web/ring-adapter" #{:ring-request-shape})
+         (definitions "web/crud-delete" #{:_query-param-raw :_query-param-string-key :_query-param-keyword-key
+                                          :_query-param-fallback :query-param})
+         extra]))
+
+
+(defn- legacy-rows
+  [prepared]
+  (let [rows (group-by :kind (parse/parse-prepared-module prepared))]
+    {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
+     :bindings (:binding rows) :list-items (:binding-list-item rows)}))
+
+
 (deftest lexical-writer-shadows-only-the-string-query-reader
   (let [query-body {:parent :query-param :args {:request {:as :request} :param-name {:value "id"}}}
         route (assoc query-body :name :route :namespace "fixture")
         wrapper {:name :wrapper :namespace "fixture" :parent :const :args {:value query-body}}
-        source (concat (definitions "core/collections" #{:get :get-in})
-                       (definitions "core/logic" #{:coalesce :const})
-                       (definitions "core/strings" #{:str-to-keyword})
-                       (definitions "core/refinements" #{:path-segment :nullable-text :nullable-keyword :text-map})
-                       (definitions "web/ring-adapter" #{:ring-request-shape})
-                       (definitions "web/crud-delete" #{:_query-param-raw :_query-param-string-key :_query-param-keyword-key
-                                                        :_query-param-fallback :query-param})
-                       [route wrapper])
-        prepared (parse/prepare-module (vec source) {} {})
-        rows (group-by :kind (parse/parse-prepared-module prepared))
-        graph (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
-                                      :bindings (:binding rows) :list-items (:binding-list-item rows)})
+        source (query-definitions [route wrapper])
+        prepared (parse/prepare-module source {} {})
+        graph (lookups/build-lookups (legacy-rows prepared))
         owner (ids/fn-id "fixture" :route)
         child (:fn-id (origins/child-at (origins/index prepared [wrapper])
-                                       (ids/fn-id "fixture" :wrapper) [:args :value]))
+                                        (ids/fn-id "fixture" :wrapper) [:args :value]))
         proof (literal/descriptor graph owner :param-name)
         inline-proof (literal/descriptor graph child :param-name)
         written (ids/slot-id (ids/fn-id "web.crud" :_query-param-string-key) :param-name)
@@ -64,3 +85,36 @@
                          [:type-override-fn-id (ids/primitive-fn-id :text)] [:required false]]]
       (is (nil? (literal/descriptor (assoc-in graph [:binding-by-fn-slot [owner selector-id] key] value)
                                     owner :param-name))))))
+
+
+(deftest expanded-inline-query-retains-the-original-bound-reference
+  (let [body {:parent :query-param :args {:request {:as :request} :param-name {:value "id"}}}
+        wrapper {:name :has-id? :namespace "fixture" :parent :equal? :args {:a body :b {:value "match"}}}
+        source (query-definitions [wrapper])
+        owner (ids/fn-id "fixture" :has-id?)
+        prepared (parse/prepare-module source {} {})
+        rows (legacy-rows prepared)
+        graph (lookups/build-lookups rows)
+        package (assoc (snapshot/package-index prepared source) :legacy-graph graph)
+        child (origins/child-at @(:inline-origins package) owner [:args :a])]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              types/*type-aliases-override* (atom {})]
+      (let [{:keys [base-fn-defs]} (loader/load-packages ["web"])
+            _ (sync/register-type-aliases! source)
+            _ (doseq [[name {module-ns :namespace :as base}] base-fn-defs]
+                (registry/record-rich-types! (ids/fn-id module-ns name) name base))
+            signatures (:by-id @registry/*rich-types-override*)
+            old (eager/compile-all (assoc graph :base-fns (registry/compute-base-fns-map base-fn-defs)))
+            old-context {:compiled-registry (atom old) :graph-cache (atom rows) :base-fns {}}
+            {:keys [adapt roots views entry] :as migrated} (inline/prepare package owner signatures)
+            implementations (into {} (map (fn [[name {module-ns :namespace impl :impl}]]
+                                            [(ids/fn-id module-ns name) impl])) base-fn-defs)
+            implementations (reduce (fn [result {:keys [id original]}] (assoc result id (get result original)))
+                                    implementations views)
+            runtime (execution/compile-package (:package migrated) owner roots implementations)]
+        (is (= [(:fn-id child)] (vec (keep :ref-fn-id (get-in entry [:v2 :bindings])))))
+        (doseq [[args expected] [[{} false]
+                                 [{:request {:query-params {"id" 17}}} false]
+                                 [{:request {:query-params {:id "match"}}} true]
+                                 [{:request {:query-string "id=match"}} true]]]
+          (is (= expected (executor/execute old-context owner args) ((:invoke runtime) (adapt args) {}))))))))

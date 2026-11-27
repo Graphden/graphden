@@ -17,7 +17,7 @@
    (ids/fn-id "core.logic" :coalesce)])
 
 
-(defn- original
+(defn- original-source
   [package id]
   (let [[form & others] (get-in package [:originals id])]
     (when-not (seq others) form)))
@@ -28,11 +28,11 @@
    checker. Compare its native result declaration and recover the exact
    five input paths. No result or callback is admitted from staged EDN."
   [{:keys [declarations legacy-graph] :as package} owner roots]
-  (let [source (original package owner)]
+  (let [source (original-source package owner)]
     (when (contains? #{:query-param :web.crud/query-param} (:parent source))
       (when-let [{expanded :source :keys [chooser views proof]}
                  (query/expansion legacy-graph owner source roots (set (keys declarations)))]
-        (let [support (mapv #(original package %) dependencies)]
+        (let [support (mapv #(original-source package %) dependencies)]
           (when (every? some? support)
             (let [forms (into (conj support chooser expanded) (map :form) views)
                   native (into roots (map (juxt :id :signature)) views)

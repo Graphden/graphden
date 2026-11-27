@@ -6,6 +6,7 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.list-builder :as list-builder]
     [graphden.input.list-signature :as list-signature]
+    [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.migration :as migration]
     [graphden.input.rows :as rows]
     [graphden.input.source-external :as external]
@@ -475,7 +476,9 @@
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
-        original (literal-checks/replay before after certificates)
+        original (into #{}
+                       (remove #(and (not (current %)) (literal-lookup/proves-read? before after certificates %)))
+                       (literal-checks/replay before after certificates))
         certificates (if (= current original)
                        certificates
                        (mapv (partial reference-certificate snapshot analyze before after) certificates))

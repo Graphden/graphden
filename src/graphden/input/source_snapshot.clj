@@ -24,6 +24,7 @@
     [graphden.input.source-scope :as scope]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
+    [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
 
@@ -311,11 +312,27 @@
          (descriptor/stored-source-type? type type-override-fn-id type-ids))))
 
 
+(defn- exact-literal-pin?
+  [owner source contract binding {:keys [target-path type type-override-fn-id]}]
+  (let [field (some #(when (= [(:id %)] target-path) %) (:fields contract))
+        name (:name field)
+        value (:value binding)]
+    (and field (= "value" (:expression-kind binding)) (true? (:value-present binding))
+         (nil? (:resolver-fn-id binding)) (= [] (:scope-path binding))
+         (= (:id owner) (:fn-id binding)) (= (:id binding) (ids/binding-id (:id owner) (:id field)))
+         (contains? #{:null :bool :int :float :text :keyword :uuid} type)
+         (= type (literals/classify-literal value))
+         (= (ids/primitive-fn-id type) type-override-fn-id (:type-override-fn-id binding))
+         (= {:type type} (get-in source [:configure [name]]))
+         (migration/same-edn? [:value value] (get-in source [:bind name])))))
+
+
 (defn- original-type-pin
-  [type-ids owner contract bindings {:keys [target-path] :as config} & [type-rows]]
+  [type-ids owner source contract bindings {:keys [target-path] :as config} & [type-rows]]
   (let [binding (some #(when (= target-path (:target-path %)) %) bindings)]
     (when (and binding (or (exact-projection-pin? type-ids contract binding config type-rows)
-                           (exact-reference-pin? type-ids owner contract binding config)))
+                           (exact-reference-pin? type-ids owner contract binding config)
+                           (exact-literal-pin? owner source contract binding config)))
       binding)))
 
 
@@ -371,12 +388,12 @@
              :source-field-types (merge (:source-field-types named) (source-field-types entries))
              :source-binding-types
              (into {}
-                   (for [{:keys [owner contract configurations bindings]} (vals entries)
+                   (for [{:keys [owner source contract configurations bindings]} (vals entries)
                          {:keys [row type type-override-fn-id] :as config} (vals configurations)
                          :when type-override-fn-id
                          :let [binding (if row
                                          (when (exact-annotation? owner contract config) row)
-                                         (original-type-pin (:alias-ids named) owner contract bindings config))]
+                                         (original-type-pin (:alias-ids named) owner source contract bindings config))]
                          :when binding]
                      [[(:id binding) type-override-fn-id] type]))
              :markers markers))))
@@ -404,7 +421,7 @@
                             (and (some #{row} bindings)
                                  (or (exact-annotation? owner contract config)
                                      (rich/exact-self-pin? owner field config type-rows))))
-                          (original-type-pin type-ids owner contract bindings config type-rows)))
+                          (original-type-pin type-ids owner source contract bindings config type-rows)))
                       (vals configurations))
       (reject! :configuration-evidence-required (:id owner)))
     (when-not (and (or (and (seq (:parent-ids owner)) (nil? return))

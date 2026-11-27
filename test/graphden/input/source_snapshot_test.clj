@@ -501,6 +501,25 @@
            (:code (failure #(snapshot/freeze-closure (update package :originals dissoc base) [host-id] @roots)))))))
 
 
+(deftest inherited-literal-pin-requires-both-the-source-value-and-its-type
+  (let [host {:name :variant-tag :namespace "fixture" :parent :get :args {:key {:value :tag :type :keyword}}}
+        declarations (conj (filterv #(= :get (:name %)) (sources "collections")) host)
+        prepared (parse/prepare-module declarations {} {})
+        id (ids/fn-id "fixture" :variant-tag)
+        field (ids/slot-id (ids/fn-id "core.collections" :get) :key)
+        binding (ids/binding-id id field)
+        type-id (ids/primitive-fn-id :keyword)
+        package (snapshot/package-index prepared declarations)
+        entry (-> (source/plan-module [host] prepared) (source/verify-module prepared) :definitions first)
+        freeze #(snapshot/freeze-declarations (assoc-in package [:closure-baselines id] %) [id])]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= :keyword (get-in (freeze entry) [:context :source-binding-types [binding type-id]])))
+    (doseq [tampered [(assoc-in entry [:v2 :source :bind :key] [:value :other])
+                      (assoc-in entry [:v2 :source :configure [:key] :type] :text)
+                      (update-in entry [:v2 :bindings] #(mapv (fn [row] (assoc row :value "tag")) %))]]
+      (is (= :configuration-evidence-required (:code (failure #(freeze tampered))))))))
+
+
 (deftest inline-projection-pin-preserves-the-stored-binding-and-type
   (let [host {:name :keyword-wrapper :namespace "fixture" :parent :const
               :args {:value {:parent :str-to-keyword :args {:string {:as :param-name :type :text}}}}}

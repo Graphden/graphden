@@ -3,6 +3,7 @@
    an internal execution IR, not authoring syntax or a production entry point."
   (:require
     [graphden.input.descriptor :as descriptor]
+    [graphden.input.literal-lookup :as literal-lookup]
     [graphden.types.core :as types]))
 
 
@@ -37,8 +38,8 @@
                     (= :null actual-type) :null
                     (= [:map :keyword :any] actual-type) actual-type
                     (types/list-type? actual-type) [:list :any])]
-          (when (some #{arm} (types/union-members expected))
-            arm))))))
+          (or (when (some #{arm} (types/union-members expected)) arm)
+              (literal-lookup/keyword-map-read-type analysis address expected actual-type)))))))
 
 
 (defn- compiled-closure-origin

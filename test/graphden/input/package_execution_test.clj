@@ -10,6 +10,7 @@
     [graphden.executor.runtime :as runtime]
     [graphden.input.analysis :as analysis]
     [graphden.input.compile :as input]
+    [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.package-execution :as execution]
     [graphden.input.source :as source]
     [graphden.input.source-certification :as certification]
@@ -107,6 +108,52 @@
     (doseq [value [nil false "field"]]
       (is (= (pr-str value) (legacy {:sample value})
              (canonical {:left {:deep {:inner {:sample value}}}}))))))
+
+
+(deftest read-of-a-constant-record-retains-a-checked-keyword-result
+  (let [root (ids/fn-id "fixture" :tagged?)
+        source (into [{:namespace "fixture" :name :tagged :parent :const
+                       :args {:value {:value {:tag :ok :value "text"}}}}
+                      {:namespace "fixture" :name :tagged? :parent :variant-is?
+                       :args {:coll :tagged :tag {:value :ok}}}]
+                     cat [(declarations "packages/core/logic/fns.edn" #{:const :equal?})
+                          (declarations "packages/core/collections/fns.edn" #{:get})
+                          (declarations "packages/core/variants/fns.edn" #{:variant-tag :variant-is?})])
+        evidence (atom nil)
+        prove literal-lookup/proves-read?
+        compile-source (fn [package owner roots native]
+                         (let [verified (snapshot/with-certified-owner package owner roots)]
+                           (execution/compile-package verified owner roots native)))
+        {:keys [legacy canonical]} (with-redefs [literal-lookup/proves-read?
+                                                 (fn [before after certs check]
+                                                   (when (prove before after certs check)
+                                                     (reset! evidence [before after certs check])
+                                                     true))]
+                                     (runtimes source root compile-source @loaded))]
+    (is (= true (legacy {}) (canonical {})))
+    (is (some? @evidence))
+    (when-let [[before after certs check] @evidence]
+      (let [address (:address check)
+            map-address (:address (first certs))
+            lookup-path (second (first map-address))
+            key-address [[root lookup-path] (get-in after [:scopes lookup-path :signature-source :argument-paths :key])]
+            constant-path (conj lookup-path (get-in (first certs) [:row :id]))
+            record-address [[root constant-path] (get-in after [:scopes constant-path :signature-source :argument-paths :value])]
+            at (fn [path addr] [:scopes path :bindings addr :expression :value])
+            binding (get-in after [:scopes lookup-path :bindings map-address])
+            expected (:expected-type binding)
+            actual (get-in binding [:reference :actual-type])]
+        (is (= [:map :keyword :any] (literal-lookup/keyword-map-read-type after map-address expected actual)))
+        (is (nil? (literal-lookup/keyword-map-read-type
+                    (assoc-in after (at constant-path record-address) {:tag :ok "extra" 0})
+                    map-address expected actual)))
+        (is (nil? (literal-lookup/keyword-map-read-type after map-address [:union :null [:map :text :any]] actual)))
+        (is (false? (boolean (prove before after [] check))))
+        (doseq [graph [(assoc-in after (at lookup-path key-address) :missing)
+                       (assoc-in after (at constant-path record-address) {:tag "wrong"})
+                       (assoc-in after [:proofs address :status] :deferred)
+                       (assoc-in after [:scopes constant-path :signature-source :base-fn-id] (random-uuid))]]
+          (is (false? (boolean (prove before graph certs check)))))))))
 
 
 (deftest forwarded-input-reaches-two-distinct-uses-of-one-legacy-slot

@@ -3,6 +3,7 @@
   (:require
     [graphden.input.format :as format]
     [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -39,6 +40,36 @@
           {:parent-id parent-id :alias-id slot-id :source-id (:field-id origin) :variable variable})))))
 
 
+(defn- named-callable-override?
+  "A child of a verified callable self-pin can preserve an authored named
+   callable on the same storage slot. This proves the declaration only."
+  [{:keys [defs-by-name name->id] :as context} definition declaring field slot type type-id]
+  (let [parent (get defs-by-name (:parent definition))
+        named (get defs-by-name type)
+        form (:fn-type named)]
+    (when (and (= #{field} (set (keys (:args definition)))) (nil? (:parents definition))
+               (keyword? (:parent definition)) (keyword? (:parent parent)) (empty? (:parents parent))
+               (string? (:namespace named)) (simple-keyword? (:name named))
+               (= (get name->id declaring) (get name->id (:parent parent)))
+               (keyword? type) (uuid? type-id) (not (types/primitive? type))
+               (= type-id (get name->id type) (:fn-id named) (ids/fn-id (:namespace named) (:name named)))
+               (not (contains? (::rename/ambiguous-type-ids context) type-id))
+               (not (next (filter #(= type-id (:fn-id %)) (:fn-defs context))))
+               (vector? form) (= 2 (count form)) (map? (first form))
+               (rich/self-pin-source parent))
+      (let [rows (parse/parse-prepared-module (assoc context :fn-defs [parent]))
+            [binding & others] (filter #(= :binding (:kind %)) rows)
+            named-rows (parse/parse-prepared-module (assoc context :fn-defs [named]))
+            [named-row & extra] (filter #(= type-id (:id %)) named-rows)
+            body (into [:fn] form)]
+        (and (empty? others) (= slot (:slot-id binding))
+             (rich/self-pin parent field rows binding :any)
+             (empty? extra) (= :fn (:kind named-row)) (= [] (:parent-ids named-row))
+             (= (:namespace named) (:namespace-id named-row)) (= (name (:name named)) (:name named-row))
+             (= (pop (records/fn-type-declaration form)) (:constraint named-row))
+             (rich/authored-callable-field? (group-by :id named-rows) (records/resolve-type-ref body name->id) body))))))
+
+
 (defn- annotation-origin
   [{:keys [name->id defs-by-name] :as context} definition rows field]
   (let [spec (get-in definition [:args field])]
@@ -65,7 +96,9 @@
         (when (and (uuid? slot-id) (= field key) (= 1 (count matches))
                    (or (not (contains? spec :type))
                        (and (uuid? type-id)
-                            (or generic (= authored-type (:type value) declared-type))))
+                            (or generic (= authored-type (:type value) declared-type)
+                                (and (= :any declared-type) (= authored-type (:type value))
+                                     (named-callable-override? context prepared declaring key slot-id authored-type type-id)))))
                    (= expected (into {} (remove (comp nil? val)) (first matches))))
           (cond-> {:declaring-id declaring-id
                    :inherited? (boolean (some #{declaring} (rest (slots/chain-of own-ref defs-by-name))))

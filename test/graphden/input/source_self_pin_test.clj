@@ -6,6 +6,7 @@
     [graphden.input.compile :as compile]
     [graphden.input.rows :as rows]
     [graphden.input.source :as source]
+    [graphden.input.source-annotations :as annotations]
     [graphden.input.source-package-fixtures :as fixtures]
     [graphden.input.source-rich-types :as rich]
     [graphden.input.source-snapshot :as snapshot]
@@ -104,3 +105,43 @@
            (try (validator/build scheme)
                 nil
                 (catch clojure.lang.ExceptionInfo error (:type (ex-data error))))))))
+
+
+(deftest named-callable-reasserts-the-inherited-free-field
+  (let [base (fixtures/declarations "packages/core/collections/fns.edn" #{:assoc :assoc-fn})
+        named {:namespace "example" :name :callback :fn-type [{} :text]}
+        child {:namespace "example" :name :install :parent :assoc-fn
+               :args {:value {:as :value :type :callback}}}
+        entries (fn [originals]
+                  (let [prepared (parse/prepare-module originals {} {})]
+                    (:definitions (source/verify-module (source/plan-module originals prepared) prepared))))
+        check-child (fn [originals] (some #(when (= :install (get-in % [:source :name])) %) (entries originals)))
+        originals (into base [named child])
+        entry (check-child originals)
+        owner (ids/fn-id "example" :install)
+        slot (ids/slot-id (ids/fn-id "core.collections" :assoc) :value)
+        row (first (get-in entry [:v2 :bindings]))]
+    (is (= :authored-source-equivalent (:verification entry)))
+    (is (= {[:value] {:type :callback}} (get-in entry [:proposed :configure])))
+    (is (= (ids/binding-id owner slot) (:id row)))
+    (is (= [[] [slot] false nil (ids/fn-id "example" :callback)]
+           ((juxt :scope-path :target-path :value-present :expression-kind :type-override-fn-id) row)))
+    (is (empty? (rows/state [row])))
+    (doseq [unexpected [(into base [(assoc (dissoc named :fn-type) :type {:value :text}) child])
+                        (into base [named (assoc child :parent :assoc)])]]
+      (is (not= :authored-source-equivalent (:verification (check-child unexpected)))))
+    (is (= [:project [:other]]
+           (get-in (check-child (into base [named (assoc-in child [:args :value :as] :other)]))
+                   [:proposed :bind :value])))
+    (let [prepared (parse/prepare-module originals {} {})
+          package (snapshot/package-index prepared originals)
+          rows (parse/parse-prepared-module (assoc prepared :fn-defs [(get-in prepared [:defs-by-name :install])]))
+          named-definition (get-in prepared [:defs-by-name :callback])
+          freeze-code (try (snapshot/freeze-closure package [owner] {}) nil
+                           (catch clojure.lang.ExceptionInfo error (:code (ex-data error))))
+          modified (assoc-in entry [:proposed :configure [:value] :type] :text)]
+      (is (#{:configuration-evidence-required :callable-self-pin-obligation-required} freeze-code))
+      (is (nil? (annotations/annotation (update prepared :fn-defs conj named-definition) child rows :value)))
+      (is (nil? (annotations/annotation prepared child
+                                        (mapv #(cond-> % (= :binding (:kind %)) (assoc :type-override-fn-id owner)) rows) :value)))
+      (is (nil? (:verification (first (:definitions (source/verify-module {:definitions [(dissoc modified :verification)]} prepared)))))))))

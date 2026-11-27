@@ -977,3 +977,15 @@
                                                        id roots implementations))
         {:keys [legacy canonical]} (runtimes source root compile-certified)]
     (is (= "first second" (legacy {}) (canonical {})))))
+
+
+(deftest a-scoped-literal-preserves-its-sibling-list-builder
+  (let [source (into (declarations "packages/core/strings/fns.edn" #{:str :str-trim})
+                     [{:namespace "forwarded-list" :name :scope-and-list :parent :str
+                       :args {:parts [:str-trim {:value "!"}] :string "   attached   "}}])
+        root (ids/fn-id "forwarded-list" :scope-and-list)
+        compile-certified (fn [package id roots implementations]
+                            (execution/compile-package (snapshot/with-certified-owner package id roots)
+                                                       id roots implementations))
+        {:keys [legacy canonical]} (runtimes source root compile-certified)]
+    (is (= "attached!" (legacy {}) (canonical {})))))

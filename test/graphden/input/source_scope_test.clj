@@ -340,5 +340,5 @@
                      (assoc edge :binding-id (random-uuid))]]
       (is (= :reference-use-drift (code #(lineage env changed)))))
     (is (= :reference-use-drift (code #(lineage
-                                        (update-in env [:inline-proofs owner :arguments] conj {:scope-certificate certificate})
-                                        edge))))))
+                                         (update-in env [:inline-proofs owner :arguments] conj {:scope-certificate certificate})
+                                         edge))))))

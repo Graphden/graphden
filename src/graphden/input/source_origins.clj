@@ -125,8 +125,8 @@
   (when (and (vector? source-path) (< 2 (count source-path)))
     (case code
       (:ref-scope-required :list-projection-required) (let [sites (argument-sites source-path)
-                                [field-end end] (peek sites)]
-                            (when (and (next sites) (= field-end end)) sites))
+                                                            [field-end end] (peek sites)]
+                                                        (when (and (next sites) (= field-end end)) sites))
       :inherited-projection-required (when (= :args (peek source-path))
                                        (seq (argument-sites (pop source-path))))
       nil)))

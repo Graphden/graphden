@@ -5,6 +5,7 @@
     [graphden.input.context :as context]
     [graphden.input.descriptor :as descriptor]
     [graphden.input.list-builder :as list-builder]
+    [graphden.input.list-records :as list-records]
     [graphden.input.list-signature :as list-signature]
     [graphden.input.literal-lookup :as literal-lookup]
     [graphden.input.migration :as migration]
@@ -66,6 +67,35 @@
     [arg binding]))
 
 
+(defn- unchanged-list-binding!
+  [snapshot original-bindings records {:keys [origin expression list-builder list-ref-names list-inline-items]}]
+  (let [{:keys [binding-id slot-id fn-id]} origin
+        fragment (peek (:fragments list-builder))
+        builder-id (:builder-id fragment)
+        installed (get-in snapshot [:source-list-fragments builder-id])
+        actual (get-in snapshot [:bindings binding-id])
+        expected (some #(when (= binding-id (:id %)) %) (:bindings list-builder))
+        original (get original-bindings binding-id)
+        generated (filter #(= :input-binding (:kind %)) (list-records/authored-records list-builder))
+        items (sort-by :position (filter #(and (= :binding-list-item (:kind %)) (= binding-id (:binding-id %))) records))]
+    (when-not (and (uuid? binding-id) (= binding-id (:binding-id fragment)) (= fn-id (:owner-id fragment))
+                   (= slot-id (:target-id fragment))
+                   (every? #{:ref :value} (map :kind (:items fragment)))
+                   (= (select-keys installed (keys fragment)) fragment)
+                   (= [:binding fn-id slot-id] ((juxt :kind :fn-id :slot-id) original))
+                   (true? (:list-append original)) (false? (:value-present original)) (nil? (:value original))
+                   (= (= :closed (:tail fragment)) (true? (:list-closed original)))
+                   (every? nil? (map original [:type-override-fn-id :resolver-fn-id :ref-fn-id :required :terminal :description]))
+                   (migration/same-edn? (vec items) (list-builder/compiler-items fragment))
+                   (= expected actual) (= "ref" (:expression-kind actual)) (= builder-id (:ref-fn-id actual))
+                   (= {:kind :ref :fn-id builder-id}
+                      (list-builder/reference-expression list-builder expression list-ref-names list-inline-items))
+                   (every? (set (map :id generated)) (into [binding-id] (map :id) (:items fragment)))
+                   (every? #(= % (get-in snapshot [:bindings (:id %)])) generated))
+      (reject! :source-snapshot-mismatch))
+    [binding-id original]))
+
+
 (defn- legacy-omissions
   [{owner-id :identity :keys [legacy blockers kind status]} paths snapshot projections]
   (when-not (and (= :composed kind) (= :blocked status) (uuid? owner-id)
@@ -74,7 +104,10 @@
                     (set (map (juxt :source-path :code) blockers)))
                  (every? #(and (= :binding (:kind %))
                                (or (empty? (:policy %)) (:annotation %) (:scoped-annotation %)
-                                   (and (not-any? #{(:source-path %)} paths) (rename/preserved-pin? snapshot owner-id %))))
+                                   (and (not-any? #{(:source-path %)} paths)
+                                        (or (rename/preserved-pin? snapshot owner-id %)
+                                            (and (= :list-builder (first (:expression %)))
+                                                 (get-in % [:list-builder :records]))))))
                          (:arguments legacy)))
     (reject! :unsupported-scope-source))
   (let [records (:records legacy)
@@ -84,12 +117,19 @@
         omitted (mapv #(legacy-origin owner-id (:arguments legacy) bindings %) paths)
         omitted-ids (into #{} (map (comp :id second)) omitted)
         projected-ids (set (map (comp :id :row) projections))
+        original-bindings (into {} (map (juxt :id identity)) bindings)
+        lists (into {} (comp (filter #(= :list-builder (first (:expression %))))
+                             (map (partial unchanged-list-binding! snapshot original-bindings records)))
+                    (:arguments legacy))
         current (filter #(and (= owner-id (:fn-id %)) (not (projected-ids (:id %)))) (vals (:bindings snapshot)))]
     (when-not (and (= (count omitted) (count omitted-ids))
                    (= (:parent-ids owner) (get-in snapshot [:fns owner-id :parent-ids]))
                    (not-any? (:bindings snapshot) omitted-ids)
                    (migration/same-edn? (into {} (map (juxt :id meaning)) (remove #(contains? omitted-ids (:id %)) bindings))
-                                        (into {} (map (fn [row] [(:id row) (meaning (rename/legacy-binding (vals (:fields snapshot)) row))]))
+                                        (into {}
+                                              (map (fn [{:keys [id] :as row}]
+                                                     [id (meaning (or (get lists id)
+                                                                      (rename/legacy-binding (vals (:fields snapshot)) row)))]))
                                               current)))
       (reject! :source-snapshot-mismatch))
     omitted))

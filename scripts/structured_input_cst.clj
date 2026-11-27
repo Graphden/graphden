@@ -375,7 +375,8 @@
         parts (into {} chunks)
         configuration (remove #(= :as (first %)) chunks)]
     (when-not (and (contains? parts :as) (every? #{:as :type :description} (keys parts)) (simple-keyword? (:as form))
-                   (or (not (contains? form :type)) (format/configuration-type? (:type form)))
+                   (or (not (contains? form :type)) (format/configuration-type? (:type form))
+                       (rich/closed-callable-shape? (:type form)))
                    (or (not (contains? form :description)) (string? (:description form))))
       (refuse :unsupported-projection {}))
     (cond-> (assoc raw :after (str "[" (:as parts) "]"))

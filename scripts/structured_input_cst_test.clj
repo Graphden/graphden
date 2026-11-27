@@ -934,6 +934,20 @@
       (is (str/includes? target original-bytes)))))
 
 
+(deftest closed-callable-projection-retains-named-argument-and-return-types
+  (let [type [:fn {:request :ring-request-shape} :ring-response-shape]
+        original "{:namespace \"demo.main\" :fns [{:name :child :parent :call :args {:func {:as :handler :type ; keep callable\n [:fn {:request :ring-request-shape} :ring-response-shape]}}}]}"
+        operations [{:op :declare-projection-input :definition :child :path [:args]
+                     :fields [[:func :handler]] :input {:handler {:type type :required false}}}
+                    {:op :local-projection :definition :child :path [:args :func]}]
+        target (:target-text (cst/plan original (apply request operations)))
+        migrated (first (:fns (edn/read-string target)))]
+    (is (= {:handler {:type type :required false}} (:input migrated)))
+    (is (= {[:func] {:type type}} (:configure migrated)))
+    (is (= {:func [:project [:handler]]} (:bind migrated)))
+    (is (str/includes? target "; keep callable"))))
+
+
 (deftest inline-description-remains-part-of-the-inline-declaration
   (let [text "{:namespace \"demo.main\" :fns [{:name :base :args {:value :any} :return-type :any} {:name :child :parent :base :args {:value {:parent :base :description \"Function documentation\"}}}]}"
         target (migrate-child text)

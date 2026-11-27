@@ -89,26 +89,47 @@
                args))))
 
 
+(defn- projected-identity-record
+  [analysis expressions scopes [scope path :as address] expected]
+  (let [node (get-in analysis [:scopes (second scope)])
+        native (get scopes scope)
+        source (lookup-abi/identity-record-source node address expected)]
+    (when (and source (= path (get-in native [:argument-paths :value]))
+               (= (select-keys native [:base-fn-id :root-entry :argument-paths])
+                  (select-keys (:signature-source node) [:base-fn-id :root-entry :argument-paths]))
+               (= {:op :read :source source} (select-keys (get expressions address) [:op :source])))
+      source)))
+
+
 (defn- container-validator
   [analysis expressions scopes {:keys [address trigger expected-type additional-types]}]
-  (let [source (loop [at address]
+  (let [[scope path] address
+        native (get scopes scope)
+        binding (get-in analysis [:scopes (second scope) :bindings address])
+        expression (get expressions address)
+        {collection :argument original-path :path} (lookup-abi/collection-argument (:root-entry native) 'a)
+        lookup? (and collection (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
+                     (= path original-path (get-in native [:argument-paths collection])))
+        identity-input (projected-identity-record analysis expressions scopes address expected-type)
+        holder (when (and lookup? (= :invoke (:op expression)) (= :value (get-in binding [:reference :mode]))
+                          (= (:binding-id expression) (:binding-id binding))
+                          (= (:target-id expression) (get-in binding [:expression :fn-id])))
+                 (let [child (:scope expression)]
+                   (projected-identity-record analysis expressions scopes
+                                              [child (get-in scopes [child :argument-paths :value])] expected-type)))
+        source (loop [at (or holder address)]
                  (let [expression (get expressions at)]
                    (if (= :read (:op expression)) (recur (:source expression)) at)))
         origin (get expressions source)
         fields (:fields origin)
-        [scope path] address
-        native (get scopes scope)
-        binding (get-in analysis [:scopes (second scope) :bindings address])
-        {collection :argument original-path :path} (lookup-abi/collection-argument (:root-entry native) 'a)
         dictionary (cond
                      (and (= 1 (count additional-types))
                           (obligations/materialized-dictionary? expected-type (first additional-types))) :keyword
                      (and (empty? additional-types)
-                          (or (and collection (= (:base-fn-id native) (get-in native [:root-entry :fn-id]))
-                                   (= path original-path (get-in native [:argument-paths collection])))
-                              (native-record-argument? native path expected-type))
-                          (= :read (get-in expressions [address :op]))
-                          (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))
+                          (or holder
+                              (and (or lookup? identity-input (native-record-argument? native path expected-type))
+                                   (= :read (:op expression))
+                                   (= :projection (get-in binding [:reference :mode]) (get-in binding [:expression :kind]))))
                           (= expected-type (:expected-type binding) (get-in binding [:reference :actual-type]))
                           (obligations/portable-record? expected-type)) :any)]
     ;; Only the precise constructed record is known to keep field validators

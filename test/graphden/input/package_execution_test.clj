@@ -1403,3 +1403,38 @@
                                              [false "other" "other"] [nil false false] [nil nil nil]]
             :let [args {:first-option first-value :next-option fallback}]]
       (is (= expected (legacy args) (canonical args))))))
+
+
+(deftest native-lookup-reads-a-record-through-the-identity
+  (let [source (into (declarations "packages/core/collections/fns.edn" #{:get})
+                     (concat (declarations "packages/core/logic/fns.edn" #{:const})
+                             [{:namespace "fixture" :name :request-shape :type {:uri :text :method :keyword}}
+                              {:namespace "fixture" :name :request-holder :parent :const
+                               :args {:value {:as :request :type :request-shape}}}
+                              {:namespace "fixture" :name :request-field :parent :get
+                               :args {:coll {:ref :request-holder :type :request-shape}}}]))
+        root (ids/fn-id "fixture" :request-field)
+        holder (ids/fn-id "fixture" :request-holder)
+        compile-owner (fn [package owner roots impls]
+                        (let [certified (:package (certification/verify-plan (:prepared package) source {} roots))
+                              compiled (execution/compile-package certified owner roots impls)
+                              frozen (snapshot/freeze-source-analysis certified [owner] roots)
+                              native (update-vals (get-in frozen [:options :implementations])
+                                                  #(assoc % :impl (get impls (:base-fn-id %))))]
+                          (is (= :runtime-obligations-required
+                                 (rejection-code #(input/compile-named
+                                                    (:analysis compiled)
+                                                    {:context (:context compiled)
+                                                     :implementations (assoc-in native [holder :root-entry :effects] #{:io})}))))
+                          compiled))
+        record {:uri "/orders" :method :get "uri" "extra" 17 false}]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! source)
+      (let [{:keys [legacy canonical]} (runtimes source root compile-owner)]
+        (doseq [[key expected] [[:uri "/orders"] ["uri" "extra"] [17 false] [:missing nil]]]
+          (is (= expected (legacy {:request record :key key}) (canonical {:coll {:request record} :key key}))))
+        (is (= :missing-required-input
+               (rejection-code #(canonical {:coll {:request (dissoc record :method)} :key "uri"}))))
+        (let [invalid (assoc record :method 42)]
+          (is (= "/orders" (canonical {:coll {:request invalid} :key :uri})))
+          (is (thrown? clojure.lang.ExceptionInfo (canonical {:coll {:request invalid} :key :method}))))))))

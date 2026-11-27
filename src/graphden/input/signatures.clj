@@ -330,12 +330,15 @@
 (defn- projected-lookup-signature
   "The private map-key binder of get and get-in occurs only in their collection.
    A projected open record admits arbitrary keys, including middleware extras."
-  [root-entry node scope implementation-scope renaming facts]
+  [root-entry graph node scope implementation-scope renaming facts]
   (let [variable (variables/type-in-scope implementation-scope 'a)
         {:keys [argument path]} (lookup-abi/collection-argument root-entry variable)
         {:keys [address] :as fact} (get-in facts [:bindings-info argument])]
     (if-let [key-type (when (and argument (= [scope path] address) (not (contains? renaming variable)))
-                        (projected-key-type (get-in node [:bindings address]) fact))]
+                        (let [bound (get-in node [:bindings address])]
+                          (or (projected-key-type bound fact)
+                              (when (and (= (:type fact) (:expected-type bound))
+                                         (lookup-abi/referenced-record-source graph address bound)) :any))))]
       (update-in root-entry [:args argument] (partial types/resolve {variable key-type}))
       root-entry)))
 
@@ -366,7 +369,7 @@
                  (assoc facts :fn-id (:fn-id node)
                         :root-entry (if (= coalesce-id (:fn-id root-entry))
                                       (projected-coalesce-signature root-entry node scope implementation-scope renaming facts)
-                                      (projected-lookup-signature root-entry node scope implementation-scope renaming facts))
+                                      (projected-lookup-signature root-entry graph node scope implementation-scope renaming facts))
                         :signature-view (frozen-view ctx graph base-fn-id root-entry)
                         :declaration declaration))
         signature (-> result

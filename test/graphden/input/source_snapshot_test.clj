@@ -771,6 +771,19 @@
                               [:closure-baselines outer-id])
           [outer-child] (vals (get-in outer-proof [:v2 :inline-definitions]))
           [outer-child-row] (:bindings outer-child)]
+      (let [analyze analysis/analyze-effective-input
+            certify (fn [change]
+                      (with-redefs [analysis/analyze-effective-input
+                                    (fn [ctx root opts]
+                                      (let [g (analyze ctx root opts)
+                                            address [[root []] []]
+                                            obligation {:id [address :container-type :container-materialization] :address address
+                                                        :scope (first address) :path [] :kind :container-type :trigger :container-materialization
+                                                        :expected-type (get-in g [:scopes [] :configured-contract :type])}]
+                                        (update g :obligations conj (change obligation))))]
+                        (snapshot/migrate-legacy-leaf package lookup id signatures)))]
+        (is (= :authored-source-equivalent (:verification (certify identity))))
+        (is (= :unverified-legacy-leaf (:code (failure #(certify (fn [check] (assoc check :expected-type :uuid))))))))
       (is (= :authored-source-equivalent (:verification migrated)))
       (is (= [:ref :fixture/items] (get-in migrated [:proposed :bind :coll])))
       (is (= [(ids/binding-id id old-slot) [reader]] ((juxt :id :target-path) row)))

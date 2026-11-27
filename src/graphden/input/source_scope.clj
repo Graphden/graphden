@@ -135,7 +135,8 @@
     omitted))
 
 
-(defn- container-check?
+(defn container-check?
+  "Corroborate a scheduled container check with its immutable configured descriptor."
   [graph {:keys [id address scope path kind trigger expected-type]}]
   (and (= [:container-type :container-materialization] [kind trigger])
        (vector? scope) (= 2 (count scope)) (= (:fn-id graph) (first scope)) (vector? path)

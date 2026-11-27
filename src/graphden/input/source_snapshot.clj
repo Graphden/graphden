@@ -609,7 +609,8 @@
           field (some #(when (= path [(:id %)]) (:name %)) fields)
           proposed (:proposed (plan-entry baseline owner))]
       (when-not (and (= :checked (:status graph)) (empty? (:diagnostics graph))
-                     (every? #(= [:value-type :field-read] ((juxt :kind :trigger) %)) (:obligations graph))
+                     (every? #(or (= [:value-type :field-read] ((juxt :kind :trigger) %))
+                                  (scope/container-check? graph %)) (:obligations graph))
                      (simple-keyword? field) proposed (not (contains? (:bind proposed) field))
                      (or (nil? (:inline-fn-id argument))
                          (and (= old-name field) (= (:inline-fn-id argument) (:ref-fn-id binding)))))

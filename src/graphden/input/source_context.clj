@@ -6,7 +6,7 @@
     [graphden.input.list-signature :as list-signature]
     [graphden.input.migration :as migration]
     [graphden.input.source-annotations :as annotations]
-    [graphden.input.source-legacy-readers :as legacy-readers]
+    [graphden.input.source-legacy-readers :as-alias legacy-readers]
     [graphden.input.source-positional-type :as positional-type]
     [graphden.input.source-rename :as rename]
     [graphden.input.source-rich-types :as rich]
@@ -66,7 +66,10 @@
      :names-by-id (or (indexed-values name->id (::alias-index context)) (group-names-by-id name->id))
      :definition-by-id (into (or indexed {}) (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d]))
                              definitions)
-     :legacy-reader (memoize (fn [owner] (legacy-readers/selected-binding (legacy-readers/owner-index context owner) (::legacy-readers/frozen-roots context) owner)))
+     :legacy-reader (when-let [roots (not-empty (::legacy-readers/frozen-roots context))]
+                      (let [owner-index (requiring-resolve 'graphden.input.source-legacy-readers/owner-index)
+                            select-binding (requiring-resolve 'graphden.input.source-legacy-readers/selected-binding)]
+                        (memoize (fn [owner] (select-binding (owner-index context owner) roots owner)))))
      :records-of (memoize (fn [definition]
                             (parse/parse-prepared-module (assoc context :fn-defs [definition]))))}))
 
@@ -406,7 +409,7 @@
 (defn- legacy-reader-link?
   [{:keys [legacy-reader]} {:keys [origin-fn-id from binding-id target-fn-id source-legacy-slot]} link]
   (when (and (uuid? source-legacy-slot) (= source-legacy-slot (:slot-id link)) (= origin-fn-id (:fn-id link)))
-    (let [{:keys [binding stored-slot]} (legacy-reader origin-fn-id)]
+    (let [{:keys [binding stored-slot]} (when legacy-reader (legacy-reader origin-fn-id))]
       (and (= source-legacy-slot stored-slot) (= binding-id (:id binding) (ids/binding-id origin-fn-id stored-slot))
            (= (second from) (:target-path binding)) (= target-fn-id (:ref-fn-id binding))))))
 

@@ -94,6 +94,21 @@ const namedMap = scopedFn('entry', 'entry', 'map', {
 const mapped = runCallback(namedMap, {items: [true, false, true]});
 assert.deepEqual([...mapped], [true, false, true]);
 assert.throws(() => runCallback(namedMap, {items: [7]}), /does not match/);
+const repeatedSlots = {...structuredCallback, slots: ['item', 'second'], required: ['item', 'second'],
+  presence: [...structuredCallback.presence, {id: 'second', kind: 'supplied', sources: []}]};
+const repeatedCallback = scopedFn('callback', 'callback', 'equal?', {
+  a: {kind: 'supplied', slot: 'item', type: 'any'},
+  b: {kind: 'supplied', slot: 'second', type: 'any'},
+});
+const repeatedMap = scopedFn('entry', 'entry', 'map', {
+  coll: namedMap.args.find((arg) => arg.name === 'coll').expr,
+  func: repeatedSlots,
+});
+assert.deepEqual([...runCallback(repeatedMap, {items: [false, null]}, repeatedCallback)], [true, true]);
+const repeatedAddress = {...repeatedSlots, slots: ['item', 'item']};
+const invalidMap = {...repeatedMap, args: repeatedMap.args.map((arg) =>
+  arg.name === 'func' ? {...arg, expr: repeatedAddress} : arg)};
+assert.throws(() => [...runCallback(invalidMap, {items: [false]}, repeatedCallback)], /Invalid checked browser callback/);
 const suppliedDefault = (fallback) => scopedFn('entry', 'entry', 'const', {
   value: {kind: 'supplied-default', slot: 'items', fallback, type: {anyOf: ['null', 'text']}},
 });

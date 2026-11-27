@@ -248,29 +248,34 @@
     [{:target address :value-path path}]))
 
 
-(defn- nested-parameter!
-  [analysis [root scope-path :as scope] expressions param call-sites]
-  (let [[{[target-scope path] :target value-path :value-path} & more]
-        (filter #(= param (:parameter %)) call-sites)
-        [target-root target-path] target-scope
-        end (count scope-path)
-        contract (get-in analysis [:scopes target-path :configured-contract])
-        field (when contract (descriptor/find-node contract path))]
-    (when-not (and (empty? more) (= [] value-path) (= root target-root)
-                   (vector? target-path) (> (count target-path) end)
-                   (= scope-path (subvec target-path 0 end))
-                   (= 1 (count path)) field (= param (:name field)) (not (contains? field :fields)))
+(defn- nested-parameter-nodes!
+  [analysis [root scope-path :as scope] expressions param call-sites single-parameter?]
+  (let [sites (filterv #(= param (:parameter %)) call-sites)
+        end (count scope-path)]
+    (when-not (and (seq sites) (or (= 1 (count sites)) single-parameter?)
+                   (= (count sites) (count (set (map :target sites)))))
       (reject! :callback-parameter-shape-required {:scope scope}))
-    (parameter-node! target-scope expressions field path)))
+    (mapv (fn [{[target-scope path] :target value-path :value-path}]
+            (let [[target-root target-path] target-scope
+                  contract (get-in analysis [:scopes target-path :configured-contract])
+                  field (when contract (descriptor/find-node contract path))]
+              (when-not (and (= [] value-path) (= root target-root)
+                             (vector? target-path) (> (count target-path) end)
+                             (= scope-path (subvec target-path 0 end))
+                             (= 1 (count path)) field (= param (:name field)) (not (contains? field :fields)))
+                (reject! :callback-parameter-shape-required {:scope scope}))
+              (parameter-node! target-scope expressions field path)))
+          sites)))
 
 
 (defn- callback-parameters!
   [analysis contract scope expressions parameters call-sites callable-type]
   (let [by-name (into {} (map (juxt :name identity)) (:fields contract))
-        nodes (mapv (fn [name]
-                      (if-let [field (get by-name name)]
-                        (parameter-node! scope expressions field [(:id field)])
-                        (nested-parameter! analysis scope expressions name call-sites)))
+        nodes (into [] (mapcat (fn [name]
+                                 (if-let [field (get by-name name)]
+                                   [(parameter-node! scope expressions field [(:id field)])]
+                                   (nested-parameter-nodes! analysis scope expressions name call-sites
+                                                            (= 1 (count parameters))))))
                     parameters)
         routes (mapcat (fn [node]
                          (map #(assoc % :parameter (:name node))
@@ -280,7 +285,8 @@
         record-addresses (into #{} (comp (filter :fields) (map :address)) tree)]
     (when-not (= (frequencies call-sites) (frequencies routes))
       (reject! :callback-parameter-shape-required {:scope scope}))
-    (when-not (= (types/fn-args callable-type) (into {} (map (juxt :name :type)) nodes))
+    (when-not (and (= (set (keys (types/fn-args callable-type))) (set (map :name nodes)))
+                   (every? #(= (:type %) (get (types/fn-args callable-type) (:name %))) nodes))
       (reject! :callback-parameter-type-mismatch {:scope scope}))
     {:call-sites (into [] (comp (remove :fields) (map #(select-keys % [:name :address :required?]))) tree)
      :required-parameters (into #{} (comp (filter :required?) (map :address)) nodes)

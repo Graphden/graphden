@@ -73,13 +73,18 @@
                                                      (mapcat #(tree-seq (fn [f] (= :reference-inputs (:kind f))) :fields %))
                                                      (filter #(= :input-field (:kind %))))
                                             fields)))]
-    (mapv (fn [param]
-            (or (get direct param)
-                (let [[field & other] (get @nested param)]
-                  (when-not (and field (empty? other) (:whole-bindable? field)
-                                 (not (contains? field :fields)) (= 1 (count (second (:address field)))))
-                    (context/reject! :invalid-lambda-params {:fn-id target}))
-                  field)))
+    (into []
+          (mapcat (fn [param]
+                    (if-let [field (get direct param)]
+                      [field]
+                      (let [matches (get @nested param)]
+                        (when-not (and (seq matches)
+                                       (or (= 1 (count matches)) (= 1 (count params)))
+                                       (apply = (map :type matches))
+                                       (every? #(and (:whole-bindable? %) (not (contains? % :fields))
+                                                     (= 1 (count (second (:address %))))) matches))
+                          (context/reject! :invalid-lambda-params {:fn-id target}))
+                        matches))))
           params)))
 
 

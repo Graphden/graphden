@@ -566,7 +566,12 @@
           if (value.record) {
             routeStructured(value.record.fields, item, slots, tick, null, false);
             slots.set(value.record.slot, null);
-          } else if (value.slots.length === 1) slots.set(value.slots[0], item);
+          } else {
+            for (const slot of value.slots) {
+              tick();
+              slots.set(slot, item);
+            }
+          }
           const frame = {slots, names: new Map(), parent, frame: value.fn,
             present: structuredPresence(value, slots, tick, parent.present)};
           return call(value.fn, frame);
@@ -645,7 +650,10 @@
           }
           case 'closure': return closure(value, frame);
           case 'checked-closure':
-            if (!structured || frame.parent || !Array.isArray(value.slots) || value.slots.length > 1) {
+            if (!structured || frame.parent || !Array.isArray(value.slots)
+                || value.slots.length > operationLimit
+                || new Set(value.slots).size !== value.slots.length
+                || value.slots.some(slot => typeof slot !== 'string')) {
               throw new Error('Invalid checked browser callback');
             }
             if (value.record && (value.slots.length || typeof value.record.slot !== 'string'

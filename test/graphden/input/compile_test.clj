@@ -110,13 +110,30 @@
         address (fixture/address :root [] :root [:callback])
         item (fixture/address :root [:callback-use :read-item] :reader [:item])
         competing (-> definitions
-                      (assoc :other {:input {:item :text} :return :text})
+                      (assoc :other {:input {:item :int} :return :text})
                       (assoc-in [:child :input :other] :text)
                       (assoc-in [:child :bindings [:other]] {:ref :other}))]
     (is (= "through the reference" (invoke closure)))
     (is (= [{:parameter :item :target item :value-path []}]
            (get-in analysis [:closures address :call-sites])))
     (is (= :invalid-lambda-params (rejection-code #(fixture/model competing :root))))))
+
+
+(deftest authored-callable-parameter-can-feed-two-nested-readers
+  (let [definitions {:root {:input {:callback [:fn {:item :text} :any #{}]} :return :any
+                            :bindings {[:callback] {:ref :child :id :callback-use}}}
+                     :child {:input {:left :text :right :text} :return :any :lambda-params [:item]
+                             :bindings {[:left] {:ref :reader :id :read-left}
+                                        [:right] {:ref :reader :id :read-right}}}
+                     :reader {:input {:item :text} :return :text}}
+        functions {:root (fn [args _]
+                           (let [callback (runtime/resolve-arg args :callback)]
+                             [(callback "first") (callback "second")]))
+                   :child (fn [args _] [(runtime/resolve-arg args :left)
+                                        (runtime/resolve-arg args :right)])
+                   :reader (fn [args _] (runtime/resolve-arg args :item))}
+        {:keys [closure]} (compiled definitions functions)]
+    (is (= [["first" "first"] ["second" "second"]] (invoke closure)))))
 
 
 (deftest graph-callable-reuses-captured-cells-and-freshens-equal-call-inputs

@@ -85,6 +85,7 @@
         :bindings (filterv #(and (= builder-id (:fn-id %)) (= :input-binding (:kind %))) contribution)
         :owner-bindings (filterv #(and (= owner-id (:fn-id %)) (= "projection" (:expression-kind %))) contribution)
         :list-implementation {:base-fn-id builder-id :root-entry root-entry
+                              :argument-declarations (into {} (map (juxt :name identity)) fields)
                               :generated-list {:owner-id owner-id :operands (mapv :name (pop fields))
                                                :infer-return? polymorphic?}
                               :argument-paths (into {} (map (fn [{:keys [name id]}] [name [id]])) fields)}}))))

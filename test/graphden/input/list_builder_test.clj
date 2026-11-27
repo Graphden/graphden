@@ -83,6 +83,8 @@
         generated (signature/entry (:identity entry) (:name->id context) trace)
         fields (get-in generated [:contract :fields])]
     (is (= [[:list :text] [:list :text] [:list [:list :text]]] (mapv :type fields)))
+    (is (= (into {} (map (juxt :name identity)) fields)
+           (get-in generated [:list-implementation :argument-declarations])))
     (is (= [:list [:list :text]] (get-in generated [:list-implementation :root-entry :return])))
     (is (= ["literal" "data"] (get-in trace [:fragments 0 :items 1 :value])))
     (is (= 2 (count (get-in generated [:list-implementation :generated-list :operands]))))))

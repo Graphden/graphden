@@ -122,10 +122,9 @@
        :image-id (command "docker" "image" "inspect" image "--format" "{{.Id}}")})))
 
 
-(defn scan-repo!
-  [repo common]
-  (let [start (inputs repo common)
-        path (str common "/" cache-file)
+(defn- scan-attempt!
+  [repo common start]
+  (let [path (str common "/" cache-file)
         decision (plan (read-cache path) start)
         mode (:mode decision)]
     (when-not (and start (:config start) (:image-id start)
@@ -137,11 +136,28 @@
       (run-gitleaks! repo common
                      (when (= mode :incremental)
                        (str "--all HEAD --not " (str/join " " (:base-tips decision))))))
-    (when-not (= start (inputs repo common))
-      (throw (ex-info "Gitleaks inputs changed during scan" {})))
-    (when-not (= mode :reuse)
-      (write-cache! path (assoc start :schema schema :result :passed)))
-    (println "✓ gitleaks history" (name mode) "verified at" (:head start))))
+    (let [after (inputs repo common)]
+      (cond
+        (= start after)
+        (do
+          (when-not (= mode :reuse)
+            (write-cache! path (assoc start :schema schema :result :passed)))
+          (println "✓ gitleaks history" (name mode) "verified at" (:head start))
+          nil)
+
+        (= (dissoc start :tips) (dissoc after :tips))
+        after
+
+        :else
+        (throw (ex-info "Gitleaks inputs changed during scan" {}))))))
+
+
+(defn scan-repo!
+  [repo common]
+  (when-let [updated (scan-attempt! repo common (inputs repo common))]
+    (println "↻ gitleaks history: Git refs changed; rechecking the current history")
+    (when (scan-attempt! repo common updated)
+      (throw (ex-info "Gitleaks refs changed again during scan" {})))))
 
 
 (defn scan!

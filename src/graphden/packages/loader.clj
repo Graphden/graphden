@@ -49,7 +49,11 @@
     [clojure.tools.logging :as log]
     [clojure.tools.reader :as treader]
     [clojure.tools.reader.reader-types :as treader-types]
+    [graphden.input.format :as input-format]
+    [graphden.packages.arithmetic-input :as arithmetic]
+    [graphden.packages.implementation :as impl]
     [graphden.packages.loaded :as loaded]
+    [graphden.packages.primitive-input :as primitive]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]))
@@ -223,10 +227,12 @@
   [package-name module-name]
   (let [path (str "packages/" package-name "/" module-name "/fns.edn")]
     (if-let [raw (read-resource-edn-with-meta path)]
-      {:ns-path (:namespace raw)
-       :ns-description (:description raw)
-       :fns (do (validate-fn-def-keys! (:fns raw) path)
-                (attach-source-meta (vec (:fns raw)) path))}
+      (do
+        (input-format/require-legacy! raw path)
+        {:ns-path (:namespace raw)
+         :ns-description (:description raw)
+         :fns (do (validate-fn-def-keys! (:fns raw) path)
+                  (attach-source-meta (vec (:fns raw)) path))})
       (throw (ex-info (str "Module fns not found: " package-name "/" module-name)
                       {:type :package-error/module-not-found
                        :package package-name
@@ -237,20 +243,6 @@
 ;; =============================================================================
 ;; Implementation Loading
 ;; =============================================================================
-
-;; Compiling a module = `read-string` then `eval`, both of which mutate
-;; JVM-GLOBAL state: the reader's `*ns*`/data-reader tables, the namespace
-;; registry, and the shared DynamicClassLoader `eval` defines classes into.
-;; Two threads compiling different modules concurrently corrupt that shared
-;; state — the observed symptom is a bogus reader error ("Map literal must
-;; contain an even number of forms") thrown while another thread is mid-eval.
-;; Production loads packages serially so it never trips; only the parallel
-;; test harness (many registry builds at once) does, where it surfaced as a
-;; gate flake. Serialize the compile step behind one lock. This is a
-;; boot/registry-build path, run a bounded number of times, NOT a hot path —
-;; the lock adds no steady-state cost.
-(defonce ^:private eval-load-lock (Object.))
-
 
 (defn- reuse-loaded-impls?
   "COVERAGE MODE — `-Dgraphden.impls.reuse-loaded=true` (the `:coverage`
@@ -268,37 +260,9 @@
 
 
 (defn- load-impls-via-eval
-  "Loads implementations by evaluating the impls.clj file as Clojure code.
-   Returns the impls map from the namespace."
   [package-name module-name]
-  (let [path (str "packages/" package-name "/" module-name "/impls.clj")]
-    (when-let [resource (io/resource path)]
-      (let [content (slurp resource)]
-        (locking eval-load-lock
-          ;; Parse the ns form to extract the namespace name
-          (let [forms (read-string (str "[" content "]"))
-                ns-form (first forms)
-                ns-sym (when (and (seq? ns-form) (= 'ns (first ns-form)))
-                         (second ns-form))
-                loaded-impls (when (and ns-sym (reuse-loaded-impls?))
-                               (some-> (find-ns ns-sym) (ns-resolve 'impls)))]
-            (cond
-              ;; Coverage mode: the instrumented namespace is already here.
-              loaded-impls @loaded-impls
-
-              ns-sym
-              (do
-                ;; Create the namespace if it doesn't exist
-                (create-ns ns-sym)
-
-                ;; Evaluate all forms in the namespace context
-                (binding [*ns* (the-ns ns-sym)]
-                  (doseq [form forms]
-                    (eval form)))
-
-                ;; Return the impls var value
-                (when-let [impls-var (ns-resolve ns-sym 'impls)]
-                  @impls-var)))))))))
+  (when-let [resource (io/resource (str "packages/" package-name "/" module-name "/impls.clj"))]
+    (impl/evaluate (slurp resource) (reuse-loaded-impls?))))
 
 
 (defn- load-module-impls
@@ -404,10 +368,10 @@
    `defbase`). The executor always calls them with both args, so the
    loader simply hands impl-fn through."
   [fn-def impl-entry]
-  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule
+  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule local-type-rules local-type-rule-aliases
                 taint-propagate? lazy-seq-args compile-time-value?]}
         (impl-entry->parts impl-entry)]
-    (cond-> {:args (normalize-args (:args fn-def))
+    (cond-> {:args (normalize-args (or (:input fn-def) (:args fn-def)))
              :return-type (:return-type fn-def)
              :impl impl}
       (:description fn-def) (assoc :description (:description fn-def))
@@ -423,6 +387,9 @@
       return-type-rule      (assoc :return-type-rule return-type-rule)
       slot-types-rule       (assoc :slot-types-rule slot-types-rule)
       nav-types-rule        (assoc :nav-types-rule nav-types-rule)
+      (seq local-type-rules) (assoc :local-type-rules local-type-rules)
+      (and (seq local-type-rules) (seq local-type-rule-aliases))
+      (assoc :local-type-rule-aliases local-type-rule-aliases)
       ;; `:taint-propagate?` — marker-taint (`:secret` &c.) flows from
       ;; any tainted input into the return. Applied CENTRALLY by the
       ;; checker on top of the structural rule/signature result —
@@ -474,10 +441,11 @@
    Type-rows (`:type` / `:refine` / `:list` / `:union` / `:variant`)
    ride along in the `fn-defs` slot — `composition/sync-fns-to-storage!`
    routes them to slot / fn-slot / binding rows by role marker."
-  [package-name module-name]
+  [package-name module-name module-source]
   (let [{ns-path :ns-path ns-description :ns-description fns :fns}
-        (load-module-fns package-name module-name)
-        impls (load-module-impls package-name module-name)
+        module-source
+        registration (some-> (:in-place module-source) arithmetic/register-module)
+        impls (if registration (:impls registration) (load-module-impls package-name module-name))
 
         ;; Separate base functions from fn-defs
         {base-fns true fn-defs false} (group-by base-fn? fns)
@@ -495,11 +463,15 @@
                                        base-def (when impl-entry
                                                   (fn-def->base-fn-def fn-def impl-entry))]]
                              (if (:impl base-def)
-                               [fn-name (assoc base-def :namespace ns-path)]
-                               (do
-                                 (log/warn "No impl found for base fn:" fn-name
-                                           "in" package-name "/" module-name)
-                                 nil))))
+                               [fn-name (cond-> (assoc base-def :namespace ns-path)
+                                          (:primitive module-source) (vary-meta assoc ::primitive/source (:primitive module-source))
+                                          registration ((:attest registration) fn-name))]
+                               (if (or registration (:primitive module-source))
+                                 (throw (ex-info "Package primitive implementation missing" {:type :package-error/primitive-admission}))
+                                 (do
+                                   (log/warn "No impl found for base fn:" fn-name
+                                             "in" package-name "/" module-name)
+                                   nil)))))
 
         ;; Attach namespace to fn-defs
         fn-defs-with-ns (mapv #(if ns-path
@@ -525,6 +497,22 @@
 ;; Package Loading
 ;; =============================================================================
 
+(defn- snapshot-package-source
+  "Read and validate every module before any implementation is evaluated.
+   The snapshot is local to one load call and is also the source consumed by
+   processing, so a later resource change cannot bypass this format check."
+  [package-name pkg-meta admissions]
+  {:package-name package-name
+   :meta pkg-meta
+   :modules (mapv (fn [module-name]
+                    [module-name (if-let [admission (get admissions [package-name module-name])]
+                                   (if (contains? admission :in-place-abi)
+                                     (arithmetic/read-module package-name module-name admission)
+                                     (primitive/read-module package-name module-name admission))
+                                   (load-module-fns package-name module-name))])
+                  (:modules pkg-meta))})
+
+
 (defn- load-single-package
   "Loads a single package and returns its functions.
 
@@ -532,18 +520,16 @@
    inherits its description from `package.edn`'s `:description`. Module
    namespaces (`core.arithmetic`, …) get theirs from each module's
    `fns.edn` `:description`."
-  [package-name]
+  [{:keys [package-name modules] pkg-meta :meta}]
   (log/info "Loading package:" package-name)
-  (let [pkg-meta (load-package-meta package-name)
-        modules (:modules pkg-meta)
-        seed-ns-descriptions (cond-> {}
+  (let [seed-ns-descriptions (cond-> {}
                                (:description pkg-meta)
                                (assoc package-name (:description pkg-meta)))]
 
     (reduce
-      (fn [acc module-name]
+      (fn [acc [module-name module-source]]
         (let [{:keys [base-fn-defs fn-defs base-fn-pairs ns-descriptions]}
-              (process-module package-name module-name)]
+              (process-module package-name module-name module-source)]
           (-> acc
               (update :base-fn-defs merge base-fn-defs)
               (update :fn-defs into fn-defs)
@@ -607,6 +593,30 @@
                        :present present})))))
 
 
+(defn- resolve-package-set
+  "Resolve the closure and retain its metadata for this load call."
+  [package-names]
+  (let [metas (atom {})
+        load-meta! (fn [pkg]
+                     (or (@metas pkg)
+                         (let [m (load-package-meta pkg)]
+                           (swap! metas assoc pkg m)
+                           m)))
+        sorted (atom [])
+        visited (atom #{})
+        visit (fn visit
+                [pkg]
+                (when-not (@visited pkg)
+                  (swap! visited conj pkg)
+                  (doseq [dep (normalize-deps (get (load-meta! pkg) :dependencies []))]
+                    (visit (:name dep)))
+                  (swap! sorted conj pkg)))]
+    (doseq [pkg package-names]
+      (visit pkg))
+    (validate-dep-constraints! @metas)
+    {:ordered @sorted :metas @metas}))
+
+
 (defn resolve-dependencies
   "Returns packages in dependency order (topological sort).
 
@@ -629,49 +639,38 @@
    dep graph would loop here; package.edn dep graphs are tiny and
    reviewed)."
   [package-names]
-  (let [metas (atom {})
-        load-meta! (fn [pkg]
-                     (or (@metas pkg)
-                         (let [m (load-package-meta pkg)]
-                           (swap! metas assoc pkg m)
-                           m)))
-        sorted (atom [])
-        visited (atom #{})
-        visit (fn visit
-                [pkg]
-                (when-not (@visited pkg)
-                  (swap! visited conj pkg)
-                  (doseq [dep (normalize-deps (get (load-meta! pkg) :dependencies []))]
-                    (visit (:name dep)))
-                  (swap! sorted conj pkg)))]
-    (doseq [pkg package-names]
-      (visit pkg))
-    (validate-dep-constraints! @metas)
-    @sorted))
+  (:ordered (resolve-package-set package-names)))
 
 
-(defn load-packages
-  "Loads multiple packages in dependency order.
+(defn- primitive-admissions
+  [{:keys [primitive-input primitive-inputs]}]
+  (when (or (and (some? primitive-input) (some? primitive-inputs))
+            (and (some? primitive-inputs) (not (vector? primitive-inputs))))
+    (throw (ex-info "Invalid native primitive module selection" {:type :package-error/primitive-admission})))
+  (reduce (fn [admissions {:keys [module] :as admission}]
+            (when-not (and (map? admission) (vector? module) (= 2 (count module))
+                           (every? string? module) (not (contains? admissions module)))
+              (throw (ex-info "Invalid native primitive module selection" {:type :package-error/primitive-admission})))
+            (assoc admissions module admission))
+          {}
+          (if (some? primitive-input) [primitive-input] primitive-inputs)))
 
-   Arguments:
-   - package-names: seq of package names to load (e.g., [\"core\" \"web\" \"app\"])
 
-   Returns:
-   {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
-    :fn-defs [{:name :foo :parent :bar :args {...}} ...]
-    :packages [{:name \"core\" :version \"1.0.0\" ...} ...]
-    :base-fn-counts {\"core\" 120 ...}
-    :seeded-services [{:package-name \"app\"
-                       :service-name :default
-                       :fn-name :web-server
-                       :enabled? true
-                       :restart-policy :always
-                       :cardinality :per-pod
-                       :description \"…\"} …]}"
-  [package-names]
-  (let [ordered (resolve-dependencies package-names)
+(defn- load-packages*
+  [package-names admissions]
+  (let [{:keys [ordered metas]} (resolve-package-set package-names)
         _ (log/info "Loading packages in order:" ordered)
-        results (mapv load-single-package ordered)
+        ;; Eager preflight of the complete resolved closure. In particular a
+        ;; late v2/unknown-format module cannot follow an earlier impl effect.
+        sources (mapv #(snapshot-package-source % (get metas %) admissions) ordered)
+        _ (when (seq admissions)
+            (let [admitted-modules (set (for [{:keys [package-name modules]} sources
+                                              [module source] modules
+                                              :when (or (:primitive source) (:in-place source))]
+                                          [package-name module]))]
+              (when-not (= (set (keys admissions)) admitted-modules)
+                (throw (ex-info "Admitted primitive module missing" {:type :package-error/primitive-admission})))))
+        results (mapv load-single-package sources)
         ;; Single pass over results to build all aggregations
         combined (reduce (fn [acc result]
                            (let [pkg-name (get-in result [:meta :name])
@@ -715,14 +714,49 @@
                                         (range (count segments)))]
                          (set paths)))
         all-namespaces (reduce into #{} (map expand-ns (into all-ns-paths fn-def-ns)))
-        combined (assoc combined :namespaces all-namespaces)]
+        in-place (for [package sources [_ source] (:modules package) :when (:in-place source)] (:in-place source))
+        combined (cond-> (assoc combined :namespaces all-namespaces)
+                   (seq in-place) (vary-meta assoc ::arithmetic/modules (vec in-place)))]
     ;; the loaded-package roster (packages.loaded) — recorded HERE, not in
     ;; the init-key, so every loader use (boot, the test golden bootstrap)
     ;; leaves the same read model behind
+    (arithmetic/assert-ledgers! combined)
+    (when (seq admissions)
+      (let [definitions (:base-fn-defs combined)]
+        (primitive/check-implementations! (primitive/declarations definitions) definitions {})))
     (loaded/install! combined)
     (log/info "Loaded" (count (:base-fn-defs combined)) "base functions,"
               (count (:fn-defs combined)) "fn-defs")
     combined))
+
+
+(defn load-packages
+  "Loads multiple packages in dependency order.
+
+   Arguments:
+   - package-names: seq of package names to load (e.g., [\"core\" \"web\" \"app\"])
+
+   The optional internal :primitive-input selects one [package module], or
+   :primitive-inputs selects a vector of distinct modules. Each admission has
+   a pinned :sha256, :fn-id and independent :abi-fn-id, or the exact
+   :in-place-abi :core.arithmetic registration. The complete package
+   closure is preflighted before evaluating any implementation.
+
+   Returns:
+   {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
+    :fn-defs [{:name :foo :parent :bar :args {...}} ...]
+    :packages [{:name \"core\" :version \"1.0.0\" ...} ...]
+    :base-fn-counts {\"core\" 120 ...}
+    :seeded-services [{:package-name \"app\"
+                       :service-name :default
+                       :fn-name :web-server
+                       :enabled? true
+                       :restart-policy :always
+                       :cardinality :per-pod
+                       :description \"…\"} …]}"
+  ([package-names] (load-packages* package-names {}))
+  ([package-names opts]
+   (load-packages* package-names (primitive-admissions opts))))
 
 
 ;; =============================================================================

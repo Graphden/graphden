@@ -1,0 +1,380 @@
+(ns ^:serial structured-input-dry-run-test
+  "Run: bb --classpath src:scripts scripts/structured_input_dry_run_test.clj."
+  (:require
+    [babashka.fs :as fs]
+    [babashka.process :as process]
+    [clojure.edn :as edn]
+    [clojure.string :as str]
+    [clojure.test :refer [deftest is run-tests]]
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core.shapes :as shapes]
+    [structured-input-cst :as cst]
+    [structured-input-dry-run :as dry]
+    [structured-input-inventory :as inventory]
+    [structured-input-stage :as stage]))
+
+
+(defn- git!
+  [root & args]
+  (process/check @(process/process (into ["git"] args) {:dir (str root) :out :string :err :string})))
+
+
+(defn- write!
+  [root path value]
+  (let [file (fs/path root path)]
+    (fs/create-dirs (fs/parent file))
+    (spit (str file) (pr-str value))))
+
+
+(defn- package!
+  [root name dependencies modules]
+  (write! root (str "resources/packages/" name "/package.edn")
+          {:name name :dependencies dependencies :modules (mapv first modules)})
+  (doseq [[module ns definitions] modules]
+    (write! root (str "resources/packages/" name "/" module "/fns.edn")
+            {:namespace ns :fns definitions})))
+
+
+(defn- with-repository
+  [f]
+  (let [root (fs/create-temp-dir {:prefix "structured-source-dryrun-"})]
+    (try
+      (git! root "init" "--quiet")
+      (git! root "-c" "user.name=Dry Run Test" "-c" "user.email=dryrun@example.invalid"
+            "-c" "commit.gpgsign=false" "commit" "--allow-empty" "-m" "fixture")
+      (f root [{:label "fixture" :root root}])
+      (finally (fs/delete-tree root)))))
+
+
+(deftest corpus-legacy-graph-retains-the-native-callable-slot-and-its-parameter
+  (with-repository
+    (fn [root repos]
+      (let [callback-type [:fn {:item :text} :bool #{}]
+            owner (ids/fn-id "fixture" :invoke)
+            callback (ids/fn-id "fixture" :check-item)
+            field (ids/slot-id (ids/fn-id "fixture" :call) :pred)]
+        (package! root "core" []
+                  [["hof" "fixture" [{:name :call :args {:pred {:type callback-type}} :return-type :bool}
+                                     {:name :check-item :args {:item {:type :text}} :return-type :bool
+                                      :lambda-params [:item]}
+                                     {:name :invoke :parent :call :args {:pred :check-item}}
+                                     {:name :unresolved :parents [:call :missing-parent]}]]])
+        (let [graph (#'dry/corpus-legacy-graph (#'dry/read-packages repos (inventory/inventory repos)))
+              row (get-in graph [:binding-by-fn-slot [owner field]])
+              type-id (get-in graph [:slot-map field :type-fn-id])]
+          (is (= callback-type (get-in graph [:fn-map type-id :constraint])))
+          (is (contains? (:fn-typed-fn-ids graph) type-id))
+          (is (= callback (:ref-fn-id row)))
+          (is (= [:item] (mapv keyword (get-in graph [:fn-map callback :lambda-params]))))
+          (is (contains? (get-in graph [:children-by-fn (ids/fn-id "fixture" :call)]) (ids/fn-id "fixture" :unresolved))))))))
+
+
+(defn- package-result
+  [report name]
+  (first (filter #(= name (:name %)) (:packages report))))
+
+
+(defn- codes
+  [report]
+  (set (map :code (:blockers report))))
+
+
+(def identity-fn
+  {:name :id :args {:x :any} :return-type :any})
+
+
+(deftest imports-freeze-reference-context-before-sibling-collisions
+  (with-repository
+    (fn [root roots]
+      (package! root "base" [] [["main" "base" [identity-fn {:name :same :args {} :return-type :any}]]])
+      (package! root "a" ["base"] [["main" "a" [{:name :reader :parent :id :args {:x :same}}]]])
+      (package! root "b" ["base"] [["main" "b" [{:name :same :args {} :return-type :any}]]])
+      (package! root "client" ["a" "b"] [["main" "client" [{:name :call :parent :base/id
+                                                            :args {:x :a/reader}}]]])
+      (let [report (dry/dry-run roots)]
+        (is (= :prepared (:status (package-result report "client"))))
+        (is (= {:supported 5 :blocked 0} (:counts report)))
+        (is (= 5 (get-in report [:verification :authored-source-equivalence :verified-definitions])))
+        (is (empty? (:blockers report)))))))
+
+
+(deftest all-modules-of-package-share-forward-reference-context
+  (with-repository
+    (fn [root roots]
+      (package! root "forward" [] [["first" "fwd" [{:name :child :parent :id :args {:x 1}}]]
+                                   ["later" "fwd" [identity-fn]]])
+      (let [report (dry/dry-run roots)]
+        (is (= {:supported 2 :blocked 0} (:counts report)))
+        (is (true? (:coverage-complete? report)))))))
+
+
+(deftest unrelated-package-cannot-satisfy-undeclared-reference
+  (with-repository
+    (fn [root roots]
+      (package! root "provider" [] [["main" "provider" [identity-fn]]])
+      (package! root "consumer" [] [["main" "consumer" [{:name :bad :parent :provider/id}]]])
+      (package! root "missing" ["absent"] [["main" "missing" [{:name :pending :parent :provider/id}]]])
+      (let [report (dry/dry-run roots)]
+        (is (= :blocked (:status (package-result report "consumer"))))
+        (is (contains? (codes report) :definition-preparation-failed))
+        (is (contains? (codes report) :missing-package-dependency))
+        (is (= {:supported 1 :blocked 2} (:counts report)))))))
+
+
+(deftest independent-preparation-errors-and-cycles-are-all-reported
+  (with-repository
+    (fn [root roots]
+      (package! root "bad" [] [["main" "bad" [{:name :one :parent :missing/one}
+                                              {:name :two :parent :missing/two}]]])
+      (package! root "cycle-a" ["cycle-b"] [["main" "a" [identity-fn]]])
+      (package! root "cycle-b" ["cycle-a"] [["main" "b" [identity-fn]]])
+      (let [report (dry/dry-run roots)]
+        (is (= 2 (count (:blockers (package-result report "bad")))))
+        (is (= 2 (count (filter #(= :cyclic-package-dependency (:code %)) (:blockers report)))))
+        (is (= {:supported 0 :blocked 4} (:counts report)))))))
+
+
+(deftest report-is-deterministic-payload-free-and-cli-readable
+  (with-repository
+    (fn [root roots]
+      (package! root "demo" [] [["main" "demo" [identity-fn
+                                                {:name :child :parent :id :args {:x {:value "PRIVATE-PAYLOAD"}}}]]])
+      (let [manifest (inventory/inventory roots)
+            report (dry/dry-run roots manifest)
+            serialized (inventory/report-text report)
+            cli (process/check @(process/process ["bb" "--classpath" "src:scripts"
+                                                  "scripts/structured_input_dry_run.clj"
+                                                  "--repo" "fixture" (str root)]
+                                                 {:out :string :err :string}))]
+        (is (= serialized (inventory/report-text (dry/dry-run roots))))
+        (is (= report (edn/read-string (:out cli))))
+        (is (= 2 (get-in report [:verification :authored-source-equivalence :verified-definitions])))
+        (is (false? (get-in report [:verification :new-loader-equivalence])))
+        (is (not (str/includes? serialized "PRIVATE-PAYLOAD")))
+        (is (not (str/includes? serialized (str root))))
+        (is (= 64 (count (:report-sha256 report))))))))
+
+
+(deftest checksum-and-inventory-drift-invalidate-results
+  (with-repository
+    (fn [root roots]
+      (package! root "demo" [] [["main" "demo" [identity-fn]]])
+      (let [manifest (inventory/inventory roots)
+            path "resources/packages/demo/main/fns.edn"
+            read-source dry/checked-source
+            changed? (atom false)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Source differs"
+              (dry/checked-source root path "incorrect-sha")))
+        (with-redefs [dry/checked-source
+                      (fn [r p checksum]
+                        (let [value (read-source r p checksum)]
+                          (when (and (= path p) (compare-and-set! changed? false true))
+                            (write! root path {:namespace "demo" :fns []}))
+                          value))]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Inventory changed"
+                (dry/dry-run roots))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"pinned manifest"
+              (dry/dry-run roots manifest)))))))
+
+
+(deftest marker-registries-are-isolated-from-process-and-unrelated-packages
+  (with-repository
+    (fn [root roots]
+      (let [before (shapes/markers-snapshot)]
+        (package! root "marker" [] [["main" "marker" [{:name :custom-label :marker {:hide-result? true}}]]])
+        (package! root "consumer" ["marker"] [["main" "consumer" [{:name :typed
+                                                                   :args {:x [:custom-label :text]}
+                                                                   :return-type :text}]]])
+        (package! root "unrelated" [] [["main" "unrelated" [{:name :typed
+                                                             :args {:x [:custom-label :text]}
+                                                             :return-type :text}]]])
+        (let [report (dry/dry-run roots)]
+          (is (= {:supported 1 :blocked 0} (:counts (package-result report "consumer"))))
+          (is (= {:supported 0 :blocked 1} (:counts (package-result report "unrelated"))))
+          (is (= before (shapes/markers-snapshot))))))))
+
+
+(deftest explicit-roots-support-imports-and-namespace-less-modules
+  (with-repository
+    (fn [provider _]
+      (with-repository
+        (fn [consumer _]
+          (package! provider "provider" [] [["main" nil [identity-fn]]])
+          (package! consumer "consumer" ["provider"] [["main" "consumer"
+                                                       [{:name :child :parent :id :args {:x false}}]]])
+          (let [roots [{:label "provider" :root provider} {:label "consumer" :root consumer}]
+                report (dry/dry-run roots)]
+            (is (= {:supported 2 :blocked 0} (:counts report)))
+            (is (= report (dry/dry-run (reverse roots))))))))))
+
+
+(deftest duplicate-packages-and-orphans-retain-source-coverage
+  (with-repository
+    (fn [one _]
+      (with-repository
+        (fn [two _]
+          (package! one "duplicate" [] [["main" "one" [identity-fn]]])
+          (package! two "duplicate" [] [["main" "two" [identity-fn (assoc identity-fn :name :second)]]])
+          (write! one "resources/packages/orphan/main/fns.edn" {:namespace "orphan" :fns [identity-fn]})
+          (let [report (dry/dry-run [{:label "one" :root one} {:label "two" :root two}])]
+            (is (= {:supported 0 :blocked 4} (:counts report)))
+            (is (true? (:coverage-complete? report)))
+            (is (= #{:duplicate-package-name :module-without-package} (codes report)))))))))
+
+
+(deftest duplicate-root-identities-do-not-collapse-by-import-order
+  (with-repository
+    (fn [root roots]
+      (package! root "a" [] [["main" nil [identity-fn]]])
+      (package! root "b" [] [["main" "" [identity-fn]]])
+      (package! root "consumer" ["a" "b"] [["main" "consumer" [{:name :child :parent :id}]]])
+      (let [report (dry/dry-run roots)]
+        (is (= :blocked (:status (package-result report "consumer"))))
+        (is (contains? (codes report) :duplicate-visible-definition))))))
+
+
+(deftest malformed-dependency-specifications-are-safe-blockers
+  (with-repository
+    (fn [root roots]
+      (package! root "number" 7 [["main" "number" [identity-fn]]])
+      (package! root "map" {"private" "PRIVATE-DEPENDENCY-DATA"} [["main" "map" [identity-fn]]])
+      (let [report (dry/dry-run roots)]
+        (is (= #{:unsupported-package-dependencies} (codes report)))
+        (is (= {:supported 0 :blocked 2} (:counts report)))
+        (is (not (str/includes? (inventory/report-text report) "PRIVATE-DEPENDENCY-DATA")))))))
+
+
+(deftest dry-run-replays-direct-and-inherited-list-definitions
+  (with-repository
+    (fn [root roots]
+      (package! root "lists" [] [["main" "demo"
+                                  [{:name :consume :args {:xs {:type [:list :int]}} :return-type :int}
+                                   {:name :head :parent :consume :args {:xs [1]}}
+                                   {:name :tail :parent :head :args {:xs {:append [2] :closed true}}}]]])
+      (let [report (dry/dry-run roots)
+            stats (get-in report [:verification :list-builders])]
+        (is (= {:linked-fields 2 :reparsed-fields 2 :reconstructed-fields 2 :reparsed-definitions 2} stats))
+        (is (= {:supported 3 :blocked 0} (:counts report)))
+        (is (empty? (codes report)))))))
+
+
+(deftest batch-replay-keeps-inline-and-ordinary-list-identities-in-one-file
+  (with-repository
+    (fn [root roots]
+      (package! root "lists" [] [["main" "demo"
+                                  [{:name :consume :args {:xs {:type [:list :int]}} :return-type :int}
+                                   {:name :number :args {:n {:type :int}} :return-type :int}
+                                   {:name :head :parent :consume :args {:xs [1]}}
+                                   {:name :tail :parent :head
+                                    :args {:xs {:append [{:parent :number :args {:n 2}}]}}}]]])
+      (let [report (dry/dry-run roots)]
+        (is (= {:supported 4 :blocked 0} (:counts report)))
+        (is (= 2 (get-in report [:verification :list-builders :reparsed-definitions])))
+        (is (empty? (codes report)))))))
+
+
+(deftest migration-artifact-emits-only-complete-module-replacements
+  (with-repository
+    (fn [root roots]
+      (let [supported "resources/packages/example/main/fns.edn"
+            blocked "resources/packages/example/review/fns.edn"]
+        (package! root "example" []
+                  [["main" "example" [identity-fn
+                                      {:name :reader :args {:deep :any} :return-type :any}
+                                      {:name :bound :parent :id :args {:x "staged private literal"}}]]
+                   ["review" "example"
+                    [{:name :ref-scoped :parent :id :args {:x :reader :deep "private literal"}}]]])
+        (let [manifest (inventory/inventory roots)
+              run (dry/migration-artifact roots manifest)
+              by-path (into {} (map (juxt :path identity)) (:modules run))
+              original (slurp (str (fs/path root supported)))
+              patch (get-in by-path [supported :patch])
+              result (cst/apply-text patch original)]
+          (is (= 1 (:artifact-format run)))
+          (is (= :verified (get-in by-path [supported :status])))
+          (is (= 2 (:input-format (edn/read-string (:text result)))))
+          (is (= :whole-module-proof-required (get-in by-path [blocked :reason])))
+          (is (nil? (get-in by-path [blocked :patch])))
+          (is (str/includes? (:text result) "staged private literal"))
+          (is (not (str/includes? (pr-str (:report run)) "private literal")))
+          (is (= manifest (inventory/inventory roots))))))))
+
+
+(deftest artifact-cli-publishes-a-new-file-without-overwriting-an-existing-one
+  (with-repository
+    (fn [root roots]
+      (package! root "example" [] [["main" "example" [(assoc identity-fn :description "Проверка UTF-8")]]])
+      (fs/with-temp-dir [destination {:prefix "structured-source-artifact-"}]
+                        (let [file (fs/path destination "migration.edn")
+                              run #(process/shell {:out :string :err :string :continue true}
+                                                  "bb" "--classpath" "src:scripts"
+                                                  "scripts/structured_input_dry_run.clj" "--repo" "fixture" (str root)
+                                                  "--artifact" (str file))
+                              {:keys [exit out]} (run)
+                              payload (slurp (str file))]
+                          (is (zero? exit))
+                          (is (= (dry/migration-artifact roots nil) (edn/read-string payload)))
+                          (is (= {:supported 1 :blocked 0} (:counts (edn/read-string out))))
+                          (is (= 2 (:exit (run))))
+                          (is (= payload (slurp (str file))))
+                          (is (= [file] (fs/list-dir destination))))))))
+
+
+(deftest inline-writer-replays-mixed-fields-and-isolates-a-refused-definition
+  (with-repository
+    (fn [root roots]
+      (package! root "example" []
+                [["main" "example"
+                  [{:name :make :args {:items {:type [:list :any]}} :return-type [:list :any]}
+                   {:name :pair :args {:x :any :y :any} :return-type :any}
+                   {:name :good :parent :make :args {:items [{:value :literal} {:value false}]}}
+                   {:name :mixed :parent :make
+                    :args {:items [{:parent :pair :args {:x {:as :x} :y {:value 1}}}]}}]]])
+      (let [report (dry/dry-run roots)]
+        (is (= {:supported 4 :blocked 0} (:counts report)))
+        (is (true? (some #(when (= ["example" :mixed] (:definition %)) (:reparsed-list-definition %))
+                         (get-in report [:packages 0 :definitions])))))
+      (let [entry-operations cst/entry-operations
+            report (with-redefs [cst/entry-operations (fn [entry]
+                                                        (if (= :mixed (get-in entry [:source :name]))
+                                                          (throw (ex-info "Fixture writer refusal"
+                                                                          {:definition :mixed :reason :fixture-cst-refusal}))
+                                                          (entry-operations entry)))]
+                     (dry/dry-run roots))
+            entries (into {} (map (juxt (comp second :definition) identity)) (get-in report [:packages 0 :definitions]))]
+        (is (= {:supported 3 :blocked 1} (:counts report)))
+        (is (true? (get-in entries [:good :reparsed-list-definition])))
+        (is (= :blocked (get-in entries [:mixed :status])))
+        (is (some #(= [:list-cst-verification-failed :fixture-cst-refusal ["example" :mixed]]
+                      ((juxt :code :cause :definition) %))
+                  (:blockers report)))))))
+
+
+(deftest verified-artifact-is-staged-without-touching-source
+  (with-repository
+    (fn [root roots]
+      (package! root "example" [] [["main" "example" [identity-fn]]])
+      (fs/with-temp-dir [destination {:prefix "structured-stage-test-"}]
+                        (let [module-path "resources/packages/example/main/fns.edn"
+                              artifact (dry/migration-artifact roots nil)
+                              source (fs/path root module-path)
+                              original (slurp (str source))
+                              output (fs/path destination "verified")
+                              rejected (fs/path destination "rejected")
+                              receipt (stage/stage! artifact "fixture" root output)
+                              staged (edn/read-string (slurp (str (fs/path output module-path))))]
+                          (is (= 2 (:input-format staged)))
+                          (is (= [{:name :id :input {:x :any} :return-type :any}] (:fns staged)))
+                          (is (= [module-path] (mapv :path (:staged receipt))))
+                          (is (= original (slurp (str source))))
+                          (is (thrown? clojure.lang.ExceptionInfo (stage/stage! artifact "fixture" root output)))
+                          (is (thrown? clojure.lang.ExceptionInfo
+                                (stage/stage! (assoc-in artifact [:modules 0 :path] "../fixture/fns.edn")
+                                              "fixture" root rejected)))
+                          (spit (str source) (str original " ;; drift"))
+                          (is (thrown? clojure.lang.ExceptionInfo (stage/stage! artifact "fixture" root rejected)))
+                          (is (not (fs/exists? rejected))))))))
+
+
+(let [{:keys [fail error]} (run-tests 'structured-input-dry-run-test)]
+  (when (pos? (+ fail error)) (System/exit 1)))

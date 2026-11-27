@@ -172,11 +172,8 @@ function expectedSlotType(arg) {
     }
   }
 
-  const refFnId = binding?.['ref-fn-id'];
-  const refFn = refFnId ? lookups.fnMap.get(refFnId) : null;
-  const tfnId = binding?.['type-override-fn-id']
-                || refFn?.['return-type-fn-id']
-                || slot['type-fn-id'];
+  const bindingTypeId = bindingTypeFnId(binding);
+  const tfnId = bindingTypeId || slot['type-fn-id'];
   const tfn = lookups.fnMap.get(tfnId);
   const slotType = computeSlotType(tfn);
   // Priority 4 — slot's declared type. `[:list T]` / `[:map K V]` /
@@ -185,8 +182,7 @@ function expectedSlotType(arg) {
   // rich-types registry. Prefer it — but ONLY when this resolution
   // actually fell through to the slot declaration (no binding
   // type-override, no ref return-type pinning the type).
-  const usingSlotDecl = !binding?.['type-override-fn-id']
-                        && !refFn?.['return-type-fn-id'];
+  const usingSlotDecl = !bindingTypeId;
   const declRich = usingSlotDecl ? slotRichType(arg) : null;
   // Only let the rich-types form override when `slotType` came back
   // DEGRADED — a bare `:sequence` / `:jsonb` / `:any` primitive that
@@ -211,6 +207,20 @@ function expectedSlotType(arg) {
     if (elemType !== null) return elemType;
   }
   return effective;
+}
+
+function bindingTypeFnId(binding) {
+  return binding?.['type-override-fn-id']
+    || lookups?.fnMap?.get(binding?.['ref-fn-id'])?.['return-type-fn-id'];
+}
+
+// Native declaration identity for an argument's type popover. The display
+// still uses expectedSlotType, including inferred shape and list items.
+function argRecordTypeId(arg) {
+  if (!arg || arg['item-id']) return null;
+  const binding = lookups?.bindingMap?.get(arg['binding-id']);
+  const slot = lookups?.slotMap?.get(arg['slot-id']);
+  return bindingTypeFnId(binding) || slot?.['type-fn-id'];
 }
 
 

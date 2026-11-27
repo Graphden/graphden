@@ -1,0 +1,207 @@
+(ns graphden.input.source-annotations
+  "Exact metadata-only assertions on an existing inherited source field."
+  (:require
+    [graphden.input.format :as format]
+    [graphden.input.source-positional-type :as positional-type]
+    [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
+    [graphden.packages.rebase :as rebase]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.slot-resolution :as slots]
+    [graphden.packages.records.types :as records]
+    [graphden.types.core :as types]))
+
+
+(def ^:private primitive-ids (ids/primitive-fn-ids))
+
+
+(defn source-form?
+  [field spec]
+  (and (simple-keyword? field) (map? spec) (= field (:as spec))
+       (every? #{:as :type :description} (keys spec))
+       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)))
+       (or (not (contains? spec :description)) (string? (:description spec)))))
+
+
+(defn- generic-parent-alias
+  [context definition declaring field slot-id type]
+  (let [defs (:defs-by-name context)
+        parent (get defs declaring)
+        parent-id (:fn-id parent)
+        leaf (get primitive-ids type)]
+    (when (and leaf (uuid? parent-id) (= parent-id (get-in context [:name->id (:parent definition)]))
+               (types/type-var? (slots/rename-source-type declaring field defs)))
+      (let [[source & more] (keep (fn [[name spec]] (when (= field (:as spec)) name)) (:args parent))
+            records (group-by :kind (parse/parse-prepared-module (assoc context :fn-defs [parent])))
+            owner (some #(when (= parent-id (:id %)) %) (:fn records))
+            origin (when (and source (empty? more)) (rename/origin context parent owner records source (get-in parent [:args source])))
+            variable (get-in origin [:declaration :type])]
+        (when (and (= slot-id (:alias-id origin)) (types/type-var? variable))
+          {:parent-id parent-id :alias-id slot-id :source-id (:field-id origin) :variable variable})))))
+
+
+(defn- named-callable-override?
+  "A child of a verified callable self-pin can preserve an authored named
+   callable on the same storage slot. This proves the declaration only."
+  [{:keys [defs-by-name name->id] :as context} definition declaring field slot type type-id]
+  (let [parent (get defs-by-name (:parent definition))
+        named (get defs-by-name type)
+        form (:fn-type named)]
+    (when (and (= #{field} (set (keys (:args definition)))) (nil? (:parents definition))
+               (keyword? (:parent definition)) (keyword? (:parent parent)) (empty? (:parents parent))
+               (string? (:namespace named)) (simple-keyword? (:name named))
+               (= (get name->id declaring) (get name->id (:parent parent)))
+               (keyword? type) (uuid? type-id) (not (types/primitive? type))
+               (= type-id (get name->id type) (:fn-id named) (ids/fn-id (:namespace named) (:name named)))
+               (not (contains? (::rename/ambiguous-type-ids context) type-id))
+               (not (next (filter #(= type-id (:fn-id %)) (:fn-defs context))))
+               (vector? form) (= 2 (count form)) (map? (first form))
+               (rich/self-pin-source parent))
+      (let [rows (parse/parse-prepared-module (assoc context :fn-defs [parent]))
+            [binding & others] (filter #(= :binding (:kind %)) rows)
+            named-rows (parse/parse-prepared-module (assoc context :fn-defs [named]))
+            [named-row & extra] (filter #(= type-id (:id %)) named-rows)
+            body (into [:fn] form)]
+        (and (empty? others) (= slot (:slot-id binding))
+             (rich/self-pin parent field rows binding :any)
+             (empty? extra) (= :fn (:kind named-row)) (= [] (:parent-ids named-row))
+             (= (:namespace named) (:namespace-id named-row)) (= (name (:name named)) (:name named-row))
+             (= (pop (records/fn-type-declaration form)) (:constraint named-row))
+             (rich/authored-callable-field? (group-by :id named-rows) (records/resolve-type-ref body name->id) body))))))
+
+
+(defn- named-refinement-pin
+  [{:keys [defs-by-name] :as context} declared type type-id]
+  (when (and (contains? primitive-ids declared) (keyword? type)
+             (= declared (get-in defs-by-name [type :refine :base]))
+             (= type-id ((::rename/named-type-id context) type))
+             (rename/compatible-pin? context declared type))
+    {:base declared :type-id type-id}))
+
+
+(defn- annotation-origin
+  [{:keys [name->id defs-by-name] :as context} definition rows field]
+  (let [spec (get-in definition [:args field])]
+    (when (source-form? field spec)
+      (let [own-ref (slots/own-ref definition defs-by-name)
+            prepared (get defs-by-name own-ref)
+            value (get-in prepared [:args field])
+            [declaring key] (slots/resolve-slot-owner own-ref field defs-by-name value)
+            declaring-id (get name->id declaring)
+            inherited? (boolean (some #{declaring} (rest (slots/chain-of own-ref defs-by-name))))
+            owner-id (ids/fn-id (:namespace definition) (:name definition))
+            slot-id (when (uuid? declaring-id) (ids/slot-id declaring-id key))
+            type-id (when (contains? spec :type) (records/resolve-type-ref (:type value) name->id))
+            authored-type (when type-id
+                            (rebase/rewrite-type-references
+                              (:type spec) #(parse/normalize-ref % name->id (:namespace definition))))
+            declared-type (when type-id (slots/slot-type-of declaring key defs-by-name))
+            positional (when (and inherited? (nil? declared-type) (contains? primitive-ids authored-type)
+                                  (= authored-type (:type value)))
+                         (positional-type/declared-origin context (get defs-by-name declaring) key))
+            generic (when (and slot-id authored-type (nil? declared-type) (= authored-type (:type value)))
+                      (generic-parent-alias context prepared declaring key slot-id authored-type))
+            refinement (when (and inherited? (uuid? type-id) (= authored-type (:type value)))
+                         (named-refinement-pin context declared-type authored-type type-id))
+            id (when slot-id (ids/binding-id owner-id slot-id))
+            matches (filter #(and (= :binding (:kind %)) (= id (:id %))) rows)
+            expected (cond-> {:kind :binding :id id :fn-id owner-id :slot-id slot-id :value-present false}
+                       type-id (assoc :type-override-fn-id type-id)
+                       (contains? spec :description) (assoc :description (:description spec)))]
+        (when (and (uuid? slot-id) (= field key) (= 1 (count matches))
+                   (or (not (contains? spec :type))
+                       (and (uuid? type-id)
+                            (or positional generic refinement (= authored-type (:type value) declared-type)
+                                (and (= :any declared-type) (= authored-type (:type value))
+                                     (named-callable-override? context prepared declaring key slot-id authored-type type-id)))))
+                   (= expected (into {} (remove (comp nil? val)) (first matches))))
+          (cond-> {:declaring-id declaring-id
+                   :inherited? inherited?
+                   :target-path [slot-id]
+                   :row (-> expected (dissoc :slot-id) (assoc :kind :input-binding
+                                                              :scope-path [] :target-path [slot-id]
+                                                              :expression-kind nil))}
+            positional (assoc :positional-pin positional)
+            generic (assoc :generic-parent-alias generic)
+            refinement (assoc :named-refinement-pin refinement)
+            type-id (assoc :type (:type spec) :type-override-fn-id type-id)
+            (contains? spec :description) (assoc :description (:description spec))))))))
+
+
+(defn annotation
+  "Keep the exact empty binding and its proved type on an inherited field."
+  [context definition rows field]
+  (when-let [{:keys [inherited?] :as evidence} (annotation-origin context definition rows field)]
+    (when inherited? (dissoc evidence :declaring-id :inherited?))))
+
+
+(defn reference-annotation
+  "Identify the exact metadata row of a same-name binding on a referenced
+   field. This origin does not certify the route or its unoccupied state."
+  [context definition rows field]
+  (when-let [{:keys [inherited?] :as evidence} (annotation-origin context definition rows field)]
+    (when (and (not inherited?) (not= (:declaring-id evidence) (get-in evidence [:row :fn-id])))
+      (dissoc evidence :inherited?))))
+
+
+(defn configuration
+  [evidence]
+  (select-keys evidence [:type :description]))
+
+
+(defn exact?
+  "Check the original metadata row and its declared or specialized field type.
+   Specializations need the checked parent rename or named refinement."
+  [owner field {:keys [row type target-path type-override-fn-id] :as evidence}]
+  (let [id (:id field)
+        {:keys [parent-id alias-id source-id variable] :as generic} (:generic-parent-alias evidence)
+        specialized? (and generic (uuid? parent-id) (simple-keyword? (:name field))
+                          (= [parent-id] (:parent-ids owner)) (uuid? source-id)
+                          (= (ids/slot-id parent-id (:name field)) alias-id id) (not= source-id id)
+                          (types/type-var? variable) (= variable (:type field))
+                          (= (ids/primitive-fn-id :any) (:type-id field))
+                          (some? (get primitive-ids type))
+                          (= (get primitive-ids type) type-override-fn-id))
+        anchor (:positional-pin evidence)
+        positional? (and anchor (= 1 (:version anchor)) (= id (:slot-id anchor)) (= (:name field) (:field anchor))
+                         (= id (ids/slot-id (:owner-id anchor) (:name field))) (= :any (:type field))
+                         (= (ids/primitive-fn-id :any) (:type-id field) (:type-fn-id anchor))
+                         (= (get primitive-ids type) type-override-fn-id) (uuid? type-override-fn-id))
+        refinement (:named-refinement-pin evidence)
+        refined? (and refinement (= (:base refinement) (:type field))
+                      (= (get primitive-ids (:base refinement)) (:type-id field))
+                      (keyword? type) (uuid? type-override-fn-id) (= type-override-fn-id (:type-id refinement)))
+        field-type-id (if (or positional? specialized? refined?) type-override-fn-id (:type-id field))
+        expected (when (and (uuid? (:id owner)) (uuid? id))
+                   (cond-> {:kind :input-binding :id (ids/binding-id (:id owner) id)
+                            :fn-id (:id owner) :scope-path [] :target-path [id]
+                            :expression-kind nil :value-present false}
+                     (contains? evidence :type) (assoc :type-override-fn-id field-type-id)
+                     (contains? evidence :description) (assoc :description (:description evidence))))]
+    (and (uuid? (:id owner)) (uuid? id)
+         (or positional? specialized? refined? (not (contains? evidence :type)) (= type (:type field)))
+         (= [id] target-path)
+         (= (when (contains? evidence :type) field-type-id) type-override-fn-id)
+         (= expected row))))
+
+
+(defn exact-scope?
+  "Check the shape of a previously proved scoped metadata row."
+  [owner {:keys [address row legacy-path target-path field-owner type-override-fn-id] :as evidence}]
+  (let [owner-id (:id owner)
+        [name] legacy-path
+        [slot] target-path
+        uses (:scope-path row)]
+    (and (every? uuid? [owner-id field-owner slot])
+         (= [name] legacy-path) (simple-keyword? name)
+         (= [slot] target-path) (= slot (ids/slot-id field-owner name))
+         (vector? uses) (seq uses) (every? uuid? uses)
+         (= [[owner-id uses] target-path] address)
+         (= (cond-> {:kind :input-binding :id (ids/binding-id owner-id slot) :fn-id owner-id
+                     :scope-path uses :target-path target-path :expression-kind nil :value-present false}
+              (:org-id row) (assoc :org-id (:org-id row))
+              (contains? evidence :type) (assoc :type-override-fn-id type-override-fn-id)
+              (contains? evidence :description) (assoc :description (:description evidence)))
+            row)
+         (or (not (contains? evidence :type)) (uuid? type-override-fn-id)))))

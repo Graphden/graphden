@@ -3,9 +3,20 @@
     [babashka.fs :as fs]
     [babashka.process :as p]
     [ci-priority-core :as priority]
+    [ci-priority-handoff :as handoff]
     [clojure.edn :as edn]
     [clojure.string :as str]
-    [clojure.test :refer [deftest is run-tests]]))
+    [clojure.test :refer [deftest is run-tests use-fixtures]]))
+
+
+(use-fixtures :once
+  (fn [run]
+    ;; These tests inspect one immutable checkout. Temporary repository fixtures
+    ;; execute in separate BB processes and build their own uncached graphs.
+    ;; Keep the snapshot local to this suite; later load-file suites see fresh files.
+    (let [build-graph @#'priority/namespace-graph
+          snapshot (delay (build-graph))]
+      (with-redefs-fn {#'priority/namespace-graph #(deref snapshot)} run))))
 
 
 (deftest exact-frontend-hints-never-filter-browser-suite
@@ -82,12 +93,97 @@
                             "bb" "-cp" scripts "-e"
                             (str "(require '[ci-priority-core :as p]) "
                                  "(prn (mapv (fn [[changed manual]] "
-                                 "{:plan (p/plan changed (p/manual-hints manual)) "
-                                 ":all (p/integration-first changed)}) "
+                                 "(let [calls (atom 0) build @#'p/namespace-graph] "
+                                 "(with-redefs-fn {#'p/namespace-graph "
+                                 "(fn [] (swap! calls inc) (build))} "
+                                 "#(let [plan (p/plan changed (p/manual-hints manual))] "
+                                 "{:plan plan :plan-graph-scans @calls "
+                                 ":all (p/integration-first changed)})))) "
                                  (pr-str requests) "))"))]
         (when-not (zero? (:exit result))
           (throw (ex-info "Priority fixture process failed" result)))
         (edn/read-string (:out result)))
+      (finally (fs/delete-tree dir)))))
+
+
+(deftest one-plan-shares-a-source-snapshot-across-unit-and-integration
+  (let [[{:keys [plan plan-graph-scans]}]
+        (fixture-priority-plans
+          [[#{"src/demo/source.clj"} nil]]
+          {"test/demo/unit_test.clj"
+           "(ns demo.unit-test (:require [demo.source])) (deftest unit (is true))"})]
+    (is (= 1 plan-graph-scans))
+    (is (seq (:unit plan)))
+    (is (seq (:integration plan)))))
+
+
+(deftest gate-plan-files-preserve-existing-cli-projections
+  (let [dir (fs/create-temp-dir {:prefix "priority-cli-"})
+        scripts (str (fs/absolutize "scripts"))
+        cli (str (fs/path scripts "ci_priority.clj"))
+        shell (fn [& args] (apply p/shell {:dir (str dir) :out :string :err :string} args))
+        files {"src/demo/base.clj" "(ns demo.base)"
+               ".gitignore" "target/\n"
+               "test/demo/unit_test.clj" "(ns demo.unit-test (:require [demo.base])) (deftest unit (is true))"
+               "test/demo/pg_test.clj" "(ns ^:integration demo.pg-test (:require [demo.base])) (deftest pg (is true))"
+               "tools/browser-test/edit-demo.test.js" "void 0;"}]
+    (try
+      (doseq [[path body] files]
+        (let [file (fs/path dir path)]
+          (fs/create-dirs (fs/parent file))
+          (spit (str file) body)))
+      (shell "git" "init" "-q")
+      (shell "git" "add" ".")
+      (shell "git" "-c" "user.name=Fixture" "-c" "user.email=fixture@example.invalid"
+             "commit" "-qm" "base")
+      (let [base (str/trim (:out (shell "git" "rev-parse" "HEAD")))
+            _ (spit (str (fs/path dir "src/demo/base.clj")) "(ns demo.base) (def changed true)")
+            _ (shell "git" "-c" "user.name=Fixture" "-c" "user.email=fixture@example.invalid"
+                     "commit" "-qam" "changed")
+            sha (str/trim (:out (shell "git" "rev-parse" "HEAD")))
+            _ (fs/create-dirs (fs/path dir "target"))
+            prefix (str (fs/path dir "target/gate plan"))
+            expected (str prefix ".expected.edn")
+            path (str prefix ".edn")
+            scope {:since base :selected ["unit"] :out-of-scope ["docs"] :manual-skip []}
+            candidate {:sha sha :worktree-status ""}
+            manual-env "unit:demo.unit-test,integration:demo.pg-test,browser:edit-demo.test.js"
+            manual (priority/manual-hints manual-env)
+            invoke (fn [& args]
+                     (apply p/shell {:dir (str dir) :out :string :err :string
+                                     :extra-env {"GRAPHDEN_CI_FIRST_TESTS" manual-env}}
+                            (into ["bb" "-cp" scripts cli] args)))
+            integration (:out (invoke "integration" base))
+            browser (:out (invoke "browser" base))
+            hints (edn/read-string (:out (invoke "kaocha-hints" base)))]
+        (spit expected (pr-str {:schema 1 :sha sha :scope scope}))
+        (let [digest (str/trim (:out (invoke "gate-plan" base prefix sha expected)))
+              context {:candidate candidate :scope scope :manual manual :path path :digest digest}
+              saved (edn/read-string (slurp path))]
+          (is (re-matches #"[0-9a-f]{64}" digest))
+          (is (= (str/trim integration) (slurp (str prefix ".integration"))))
+          (is (= (str/trim browser) (slurp (str prefix ".browser"))))
+          (is (= hints (edn/read-string (slurp (str prefix ".kaocha.edn")))))
+          (is (= {:schema 2 :sha sha :base base :scope scope :manual manual} (dissoc saved :plan)))
+          (is (= "edit-demo.test.js" (str/trim browser)))
+          (with-redefs [priority/changed-paths (constantly #{})
+                        priority/plan (constantly {:unit ["computed.test"]})]
+            (binding [*err* (java.io.StringWriter.)]
+              (is (= hints (handoff/ci-hints context)))
+              (doseq [[description candidate-context]
+                      [["standalone invocation" (dissoc context :path :digest)]
+                       ["wrong candidate" (assoc-in context [:candidate :sha] base)]
+                       ["dirty tree" (assoc-in context [:candidate :worktree-status] " M bb.edn")]
+                       ["wrong base" (assoc-in context [:scope :since] sha)]
+                       ["wrong roster" (assoc-in context [:scope :selected] ["docs"])]
+                       ["wrong manual priority" (assoc context :manual {})]
+                       ["missing snapshot" (assoc context :path (str path ".missing"))]]]
+                (is (= {:unit ["computed.test"]} (handoff/ci-hints candidate-context)) description))
+              (spit path (pr-str (assoc-in saved [:plan :unit] ["altered.test"])))
+              (is (= {:unit ["computed.test"]} (handoff/ci-hints context)) "changed bytes")))
+          (is (thrown? Exception (invoke "gate-plan" base prefix base expected)))
+          (spit (str (fs/path dir "src/demo/base.clj")) "(ns demo.base)")
+          (is (thrown? Exception (invoke "gate-plan" base prefix sha expected)))))
       (finally (fs/delete-tree dir)))))
 
 

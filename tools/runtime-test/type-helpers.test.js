@@ -96,6 +96,25 @@ test('refinementChain walks refine links, then one primitive super', () => {
          ':bool is single-step — no super, no refine');
 });
 
+test('record expansion uses only a complete declaration for field metadata', () => {
+  const shape = {email: 'text', address: 'postal-address'};
+  const address = {'id': 'slot-address', name: 'address', required: false};
+  const email = {'id': 'slot-email', name: 'email', required: true};
+  ctx.lookups.fnMap.set('recipient', {name: 'recipient', role: 'record'});
+  ctx.lookups.slotMap = new Map([['slot-address', address], ['slot-email', email]]);
+  ctx.lookups.fnSlotsByFn = new Map([['recipient', [{'slot-id': 'slot-address'}, {'slot-id': 'slot-email'}]]]);
+  const declared = ctx.recordExpansionFields('recipient', shape, 'recipient');
+  assert(declared[0].name === 'address' && declared[0].type === 'postal-address'
+         && declared[0].declaration === address, 'declaration orders and annotates resolved fields');
+  assert(declared[1].name === 'email' && declared[1].declaration === email, 'required sibling keeps its own declaration');
+  assert(!ctx.recordExpansionFields('another-alias', shape, 'recipient')[0].declaration,
+         'a different resolved alias gains no declaration metadata');
+  ctx.lookups.slotMap.delete('slot-email');
+  const inferred = ctx.recordExpansionFields('recipient', shape, 'recipient');
+  assert(inferred.map(field => field.name).join(',') === 'email,address'
+         && inferred.every(field => !field.declaration), 'partial declaration retains resolved fields and no flags');
+});
+
 
 test('refinementChain terminates on a circular alias', () => {
   // A registry can be wrong; a walk that loops locks the editor's

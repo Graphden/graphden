@@ -1,6 +1,6 @@
 (ns graphden.packages.app.tour.impls
-  "Impls for the interactive tutorial's progress counters — two thin
-   boundaries over `graphden.util.counters`.
+  "The structured lesson eligibility read and interactive tutorial progress
+   counters.
 
    The tutorial runs to dozens of lessons and nobody knows where readers
    stop.
@@ -29,9 +29,77 @@
    what makes the key space finite no matter who calls — the one case
    where a base-fn legitimately holds policy."
   (:require
+    [graphden.crud.request :as request]
+    [graphden.crud.structured-input :as input]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.util.counters :as counters]))
+    [graphden.input.authoring-principal :as principal]
+    [graphden.packages.owned :as owned]
+    [graphden.packages.records.ids :as ids]
+    [graphden.storage.graph-writer :as writer]
+    [graphden.util.counters :as counters]
+    [graphden.versioning.storage.core :as vs]))
+
+
+(def ^:private structured-lesson-templates
+  {"43" (ids/fn-id "lessons.structured-input" :lesson-profile)
+   "44" (ids/fn-id "lesson-contact.structured-input" :lesson-contact-route)
+   "45" (ids/fn-id "optionalinput.structured" :optional-label)
+   "46" (ids/fn-id "lessons.structured-input" :lesson-profile)
+   "47" (ids/fn-id "lesson-compute.structured" :lesson-computed-greeting)})
+
+
+(def ^:private computed-greeting-refs
+  {:builder (ids/fn-id "lesson-compute.builder" :build-greeting-profile)
+   :callback (ids/fn-id "lesson-compute.callback" :decorate-greeting-input)})
+
+
+(defn- structured-lesson-ready?
+  [ctx storage lesson-id {:keys [run-available]}]
+  (if (= "47" lesson-id)
+    ;; Raw callable arguments cannot run over HTTP. Each known function the
+    ;; lesson binds must itself compile from visible, trusted package source.
+    (every? #(and (owned/owned-fn-id? %) (true? (:run-available (input/read-input storage % false ctx))))
+            (vals computed-greeting-refs))
+    (true? run-available)))
+
+
+(defbase structured-lesson-available?
+  "Check the current viewer's branch creation, template Extend and Run offers."
+  [lesson-id]
+  (boolean
+    (when-let [template (get structured-lesson-templates lesson-id)]
+      (when (and (:authenticated? (principal/current))
+                 (get (:graphden.packages.owned/primitive-input-types (meta (:base-fns ctx))) template))
+        (cr/record-effect! :db)
+        (let [storage (request/require-storage ctx)]
+          (try
+            (writer/assert-write-authorized! (vs/unwrap storage) :branch
+                                             {:base-branch-id (vs/current-branch-id storage)} nil)
+            (let [{:keys [status extend-available] :as view}
+                  (input/read-input storage template true ctx)]
+              (and (= :available status) (true? extend-available)
+                   (contains? view :extend-namespace-id) (nil? (:extend-namespace-id view))
+                   (structured-lesson-ready? ctx storage lesson-id view)))
+            (catch clojure.lang.ExceptionInfo error
+              (case (:type (ex-data error))
+                (:authz/forbidden :authz/branch-protected :branch/merge-required) false
+                (throw error)))))))))
+
+
+(defbase attach-structured-lesson-templates
+  "Publish identities for offered lessons matching the registered templates."
+  [payload]
+  (let [templates (into {}
+                        (keep (fn [{:keys [id template-id]}]
+                                (when-some [expected (get structured-lesson-templates id)]
+                                  (when (= template-id (str expected))
+                                    [id template-id]))))
+                        (:lessons payload))]
+    (cond-> payload
+      (seq templates) (assoc :structured-templates templates)
+      (contains? templates "47") (assoc :structured-template-refs
+                                        {"47" (update-vals computed-greeting-refs str)}))))
 
 
 (def ^:private events
@@ -86,5 +154,7 @@
 
 
 (def impls
-  {:count-tour-event! {:impl count-tour-event! :taint-propagate? true}
+  {:_structured-lesson-available? {:impl structured-lesson-available? :taint-propagate? true}
+   :_attach-structured-lesson-templates {:impl attach-structured-lesson-templates :taint-propagate? true}
+   :count-tour-event! {:impl count-tour-event! :taint-propagate? true}
    :count-tour-step! {:impl count-tour-step! :taint-propagate? true}})

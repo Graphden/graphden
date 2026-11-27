@@ -1,0 +1,5 @@
+{:input-format 2
+ :namespace "inputfixture.numeric"
+ :fns [{:name :fixture-floor :input {:number :numeric} :return-type :int}
+       {:name :fixture-floor-negative :parent :fixture-floor
+        :bind {:number [:value -7.6]}}]}

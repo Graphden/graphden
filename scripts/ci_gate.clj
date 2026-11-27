@@ -11,15 +11,12 @@
   (let [args (cond-> ["--since" base] (seq skip) (into ["--skip" skip]))
         registry (ci-select/validate-registry!
                    (ci-select/read-registry "scripts/checks.edn"))
-        {:keys [run scoped manual]} (ci-select/select-checks registry args)
+        {:keys [run scoped manual] :as selection} (ci-select/select-checks registry args)
         all-checks (concat run scoped manual)]
     {:schema 1
      :sha sha
      :command (into ["bb" "ci"] args)
-     :scope {:since base
-             :selected (mapv :name run)
-             :out-of-scope (mapv :name scoped)
-             :manual-skip (mapv :name manual)}
+     :scope (ci-select/scope selection)
      :groups (into {} (map (juxt :name :group)) all-checks)}))
 
 

@@ -61,16 +61,28 @@ bb() {
     scripts/ci_priority.clj)
       [ "${FAIL_HINTS:-0}" != 1 ] || return 1
       case "$2" in
-        integration) printf '%s\n' "${TEST_PRIORITY_INTEGRATION:-}" ;;
-        browser) printf '%s\n' "${TEST_PRIORITY_BROWSER:-}" ;;
-        *) printf '%s\n' '{:unit [] :integration []}' ;;
+        gate-plan)
+          echo gate-plan >> "$TEST_DIR/priority.calls"
+          [ "$5" = "$(git rev-parse HEAD)" ] || return 1
+          [ "$6" = "$LOG_DIR/_train-$WTQ_REPORT_TS.ci-expected.edn" ] || return 1
+          printf '%s\n' "${TEST_PRIORITY_INTEGRATION:-}" > "$4.integration"
+          printf '%s\n' "${TEST_PRIORITY_BROWSER:-}" > "$4.browser"
+          printf '%s\n' '{:unit [] :integration []}' > "$4.kaocha.edn"
+          printf '%064x\n' 1 ;;
+        *) echo "unexpected priority selector $2" >&2; return 1 ;;
       esac ;;
     scripts/ci_fast_cli.clj) echo 'gate bypassed admitted preflight' >&2; return 1 ;;
     scripts/ci_gate.clj)
       echo "$2" >> "$TEST_LOG"
       if [ "$2" = verify ]; then [ "${FAIL_VERIFY:-0}" != 1 ]; fi ;;
-    ci) echo ci >> "$TEST_LOG"; [ "${FAIL_CI:-0}" != 1 ] ;;
+    ci)
+      [ "$GRAPHDEN_CI_PRIORITY_DIGEST" = "$(printf '%064x' 1)" ] || return 1
+      echo ci >> "$TEST_LOG"
+      [ "${FAIL_CI:-0}" != 1 ] ;;
     test-e2e)
+      if [ -n "${BROWSER_ROSTER_LOG:-}" ]; then
+        printf 'only=%s followup=%s\n' "${GRAPHDEN_E2E_ONLY_FILES:-}" "${GRAPHDEN_E2E_FOLLOWUP_FILES:-}" >> "$BROWSER_ROSTER_LOG"
+      fi
       if [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ]; then echo e2e-early >> "$TEST_LOG"
       elif [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then echo e2e-rest >> "$TEST_LOG"
       else echo e2e >> "$TEST_LOG"; fi
@@ -119,9 +131,11 @@ assert_events() {
 }
 run_case() {
   : > "$TEST_LOG"
+  : > "$TEST_DIR/priority.calls"
   built_candidate=0
   VISUAL_BROWSER_CALLS=0
   gate_suites "$TEST_DIR" 0 0 0 >/dev/null
+  [ "$(cat "$TEST_DIR/priority.calls")" = gate-plan ]
 }
 
 CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=1
@@ -197,8 +211,11 @@ assert_events 'expect,ci,verify,uber,build,image,e2e-early'
 unset FAIL_E2E
 WTQ_FIRST_TESTS=integration:graphden.editor.root-migration-integration-test,browser:edit-ui-components-selective.test.js
 WTQ_REPORT_TS=forced-cross-suite-integration-first
+BROWSER_ROSTER_LOG="$TEST_DIR/adjacent-browser-roster"
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,headroom,e2e-early,integration-early,integration-rest,headroom,e2e-rest'
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,integration-early,integration-rest,headroom,e2e-rest'
+grep -Fxq 'only=edit-ui-components-selective.test.js followup=edit-other.test.js' "$BROWSER_ROSTER_LOG"
+unset BROWSER_ROSTER_LOG
 unset WTQ_FIRST_TESTS
 unset TEST_PRIORITY_INTEGRATION TEST_PRIORITY_BROWSER
 
@@ -506,6 +523,45 @@ CASE_BUILD=1 CASE_E2E=1 CASE_VISUAL=1 CASE_INTEGRATION=1 CASE_FLEET=1
 run_case
 assert_events 'expect,verify,e2e,integration,fleet'
 [ "$built_candidate" = 1 ]
+# A completed landing checkpoint remains usable when only the final action
+# changes to validation: exact pass/image checks still run before credit.
+cp "$RESUME_SOURCE.stages.edn" "$RESUME_SOURCE.interrupted.edn"
+WTQ_GATE_MODE=validate
+WTQ_REPORT_TS=resume-validation
+printf '%s\n' '{:schema 1 :kind "stages" :sha "0000000000000000000000000000000000000001" :roster ["ci" "build" "visual" "e2e" "integration" "fleet"] :status {"ci" :passed "build" :passed "visual" :passed "e2e" :passed "integration" :passed "fleet" :passed} :sources {"ci" :local "build" :local "visual" :local "e2e" :local "integration" :local "fleet" :local}}' > "$RESUME_SOURCE.stages.edn"
+run_case
+assert_events 'expect,verify'
+# Completed validation is also reusable by the landing mode, which must still
+# independently verify CI and restore the exact image before crediting consumers.
+WTQ_GATE_MODE=land
+WTQ_REPORT_TS=validated-to-land
+run_case
+assert_events 'expect,verify'
+# A missing CI receipt reruns CI without discarding independent suite proofs.
+mv "$RESUME_SOURCE.ci.edn" "$RESUME_SOURCE.saved-ci.edn"
+WTQ_REPORT_TS=validated-missing-ci
+run_case
+assert_events 'expect,ci,verify'
+mv "$RESUME_SOURCE.saved-ci.edn" "$RESUME_SOURCE.ci.edn"
+# A missing image proof reruns build and every image consumer, while exact CI
+# and integration remain reusable. No artifact cache substitutes for the check.
+mv "$RESUME_SOURCE.image.tsv" "$RESUME_SOURCE.saved-image.tsv"
+WTQ_REPORT_TS=validated-missing-image
+run_case
+for event in uber build image visual e2e fleet; do grep -qx "$event" "$TEST_LOG"; done
+if grep -Eq '^(ci|integration)$' "$TEST_LOG"; then exit 1; fi
+mv "$RESUME_SOURCE.saved-image.tsv" "$RESUME_SOURCE.image.tsv"
+# Even an all-passed successful validation cannot reuse a different stage roster.
+cp "$RESUME_SOURCE.stages.edn" "$RESUME_SOURCE.all-passed.edn"
+sed 's/ "fleet"\]/]/; s/ "fleet" :passed//; s/ "fleet" :local//' "$RESUME_SOURCE.stages.edn" > "$RESUME_SOURCE.changed.edn"
+mv "$RESUME_SOURCE.changed.edn" "$RESUME_SOURCE.stages.edn"
+WTQ_REPORT_TS=validated-roster-changed
+run_case
+assert_events 'expect,ci,verify,uber,build,image,fleet,headroom,visual,e2e,integration'
+mv "$RESUME_SOURCE.all-passed.edn" "$RESUME_SOURCE.stages.edn"
+unset WTQ_GATE_MODE
+# Restore the interrupted roster for the missing-image case.
+mv "$RESUME_SOURCE.interrupted.edn" "$RESUME_SOURCE.stages.edn"
 FAIL_RESTORE_IMAGE=1
 WTQ_REPORT_TS=resume-image-missing
 run_case

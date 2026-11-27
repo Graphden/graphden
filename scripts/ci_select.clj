@@ -190,3 +190,12 @@
     (-> parts
         (update :run (fn [run] (mapv #(assoc % :cmd ["bb" (:bb %)]) run)))
         (assoc :since since))))
+
+
+(defn scope
+  "The ordered check rosters for a selection. Callers select their own checks."
+  [{:keys [since run scoped manual]}]
+  {:since since
+   :selected (mapv :name run)
+   :out-of-scope (mapv :name scoped)
+   :manual-skip (mapv :name manual)})

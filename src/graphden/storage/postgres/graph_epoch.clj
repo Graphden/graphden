@@ -45,7 +45,7 @@
    Superset of crud's `fn-graph-entity-types`: `:ns` (names/paths feed
    compilation), `:branch` (delete must invalidate the cached ctx) and
    `:branch-merge` (merge changes every resolved read on the target)."
-  #{:fn :slot :fn-slot :binding :binding-list-item
+  #{:fn :slot :fn-slot :binding :binding-list-item :input-binding
     :ns :branch :branch-merge})
 
 

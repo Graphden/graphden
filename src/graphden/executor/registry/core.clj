@@ -485,6 +485,7 @@
                        args)
          raw-effects (set (:effects fn-def))
          desc (:description fn-def)
+         local-rules (select-keys fn-def (:local-type-rules fn-def))
          build (fn [final-effects]
                  (cond-> {:return (or ret :any)
                           :args   per-arg
@@ -506,6 +507,9 @@
                                                      (:slot-types-rule fn-def))
                    (:nav-types-rule fn-def)   (assoc :nav-types-rule
                                                      (:nav-types-rule fn-def))
+                   (seq local-rules)         (assoc :local-type-rule-evidence local-rules)
+                   (:local-type-rule-aliases fn-def)
+                   (assoc :local-type-rule-aliases (:local-type-rule-aliases fn-def))
                    ;; `:taint-propagate?` — checker applies marker-taint
                    ;; propagation centrally on this base-fn's results.
                    (:taint-propagate? fn-def)  (assoc :taint-propagate? true)
@@ -1120,13 +1124,22 @@
   ([storage defs ns-id-map]
    (sync-defs-to-storage! storage defs ns-id-map {}))
   ([storage defs ns-id-map extra-name->id]
+   (sync-defs-to-storage! storage defs ns-id-map extra-name->id nil))
+  ([storage defs ns-id-map extra-name->id checked-declarations]
    (validate-all-defs! defs)
-   (doseq [[fn-name fn-def] defs]
-     (record-rich-types! fn-name (assoc fn-def :fn-id (records/fn-id (:namespace fn-def) fn-name))))
-   (let [fn-def-records (mapv def-pair->fn-def-record defs)
-         records-list (records/parse-module fn-def-records extra-name->id)
+   (let [signatures (into {}
+                          (map (fn [[fn-name definition]]
+                                 (let [id (records/fn-id (:namespace definition) fn-name)
+                                       registered (record-rich-types! id fn-name definition)]
+                                   [id (get-in registered [:by-id id])])))
+                          defs)
+         native (when checked-declarations (checked-declarations signatures))
+         fn-def-records (mapv def-pair->fn-def-record (apply dissoc defs (keys native)))
+         records-list (into (records/parse-module fn-def-records extra-name->id) (mapcat val native))
          name->id (composition/write-records! storage records-list ns-id-map)]
-     name->id)))
+     ;; A package boot can retain the exact signature from its registration
+     ;; even if another branch publishes a rich type while storage sync runs.
+     (vary-meta name->id assoc ::registered-signatures signatures))))
 
 
 (defn sync-primitives!

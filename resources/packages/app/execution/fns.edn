@@ -613,6 +613,11 @@
                     :_execute-timeout-bad-rej?      :_execute-timeout-bad-err
                     :_execute-args-too-large-rej?   :_execute-args-too-large-err
                     :_execute-running-as-svc-rej?   :_execute-running-as-svc-err
+                    ;; The structured compiler checks the named residual surface.
+                    ;; A nested JSON object may itself have a field named ref.
+                    {:parent :some? :args {:value {:parent :get :args {:coll :_execute-fn-row
+                                                                       :key {:value :input-type-fn-id}
+                                                                       :default nil}}}} {:value nil}
                     :_execute-unknown-arg-rej?      :_execute-unknown-arg-err
                     :_execute-malformed-ref-rej?    :_execute-malformed-ref-err
                     {:value true}                   {:value nil}]}

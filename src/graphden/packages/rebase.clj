@@ -108,6 +108,12 @@
   (map-definition-refs ref-fn definition))
 
 
+(defn rewrite-type-references
+  "Rewrite reference positions in an authored type without changing its shape."
+  [type ref-fn]
+  (map-type-refs ref-fn type))
+
+
 (defn definition-closure
   "Select local authored dependencies by reference positions, never literals.
    External references stay external; this grants no source authority."

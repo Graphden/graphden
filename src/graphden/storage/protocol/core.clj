@@ -60,6 +60,7 @@
    `storage.protocol.config/*query-timeout-ms*` (default: 30s);
    `get-query-timeout-seconds` converts it for JDBC."
   (:require
+    [graphden.input.access :as input-access]
     [graphden.schema.fields.types :as ft]
     [graphden.storage.protocol.codec :as codec]
     [graphden.storage.protocol.config :as config]
@@ -169,7 +170,7 @@
 (defprotocol StorageBoundedQuery
   "Complete owner-bounded reads with an identity-candidate resource budget.
    Overflow is refused before payload/version reads; this is not pagination.
-   Supports exact function namespace/name, fn-slot/binding fn-id and
+   Supports exact function namespace/name, fn-slot/binding/input-binding fn-id and
    list-item binding-id predicates. Versioned mutable predicates use all
    matching version rows. Unknown decorators must explicitly opt in and preserve ACLs."
 
@@ -551,6 +552,7 @@
      the slot. Centralised here so every storage backend picks it up
      without each call-site having to remember."
   [entity-name data]
+  (input-access/assert-write! entity-name data)
   (cond-> data
     (and (= entity-name :binding)
          (contains? data :value)

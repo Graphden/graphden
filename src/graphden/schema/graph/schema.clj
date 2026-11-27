@@ -36,6 +36,7 @@
    chain and subtracting the slots it binds. Sequences live as
    list-typed slots with `binding-list-item` rows."
   (:require
+    [graphden.schema.input.schema :as input]
     [graphden.schema.protocol.protocol :as ds]))
 
 
@@ -415,7 +416,8 @@
   "Base `:fn` field specs. Identity-level (never versioned):
    `:namespace-id` / `:parent-ids` (structural identity), `:org-id`
    (tenant owner), `:branch-local?` (monotonic identity flag)."
-  {:name {:uuid fn-name-field-uuid
+  {:input-type-fn-id input/input-type-field
+   :name {:uuid fn-name-field-uuid
           :type :text
           :nullable? true
           ;; Indexed: name lookups (`query-fn-by-name`, ref-by-name,
@@ -485,6 +487,8 @@
    :slot-id {:uuid fn-slot-slot-id-field-uuid
              :type :ref
              :ref-entity :slot}
+   :input-default {:uuid #uuid "b42bcb3c-22b3-49f3-b329-2f38c931ff47"
+                   :type :jsonb :nullable? true}
    :position {:uuid fn-slot-position-field-uuid
               :type :int}
    ;; Tenant owner (§3.0 B2). NULL ≡ public.
@@ -642,6 +646,7 @@
   "Extends a builder with graph schema entities."
   [builder]
   (-> builder
+      (input/extend-builder)
       ;; Enums
       ;; :value-kind — the PG enum TYPE is currently referenced by no
       ;; column (the columns that once used it are retired); the

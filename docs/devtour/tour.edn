@@ -292,8 +292,8 @@
            cancellation and any configured execution-permission guard, then binds the [allowed
            effects](#term/effect) for the call. The [compiled registry](#term/compiled-registry) maps
            function IDs to [closures](#term/closure): callable Clojure functions retaining their
-           prepared dependencies. `execute` looks up the [closure](#term/closure), translates named
-           input into slot-ID and name keys, and calls `(closure translated ctx)`."
+           prepared dependencies. `execute` uses the selected closure's input ABI. Legacy closures
+           receive name and slot-ID keys. A structured closure routes the original named input."
      :see [[:executor "registry"]]}
 
     {:ns graphden.executor.context :defn create-context
@@ -464,7 +464,32 @@
    :paths ["src/graphden/storage/" "src/graphden/schema/"]
    :after [:executor]
    :steps
-   [{:ns graphden.storage.protocol.core :defn Storage
+   [{:ns graphden.schema.input.schema :defn extend-builder
+     :say "Adds the inactive structured-input storage: stable UUID field paths and a separate
+           input-binding entity. Functions point to existing record-type descriptors through a
+           versioned input-type field. Production continues using v1; generic public access to
+           these entities remains denied. See the [offline storage contract](../../docs/STRUCTURED_INPUT_STORAGE.md)."}
+    {:ns graphden.input.offline :defn apply!
+     :say "Rehearses an additive migration on a stopped database copy. The artifact preserves raw
+           history, shared binding origins and exact timestamps. Apply verifies its plan and source
+           fingerprint under the graph writer lock, checks every branch, and commits atomically.
+           Unsupported semantic forms block the complete artifact; this does not enable a new
+           production writer. Restore refuses to erase changes made after the rehearsal."
+     :see [[:storage "validate-view!"]]}
+    {:ns graphden.input.migration-renames :defn evidence
+     :say "Matches the scalar rename to its parent field, alias membership and original binding ID.
+           With matching primitive types, the planner can preserve paired versions or a single
+           root-transaction creation followed by position edits on the root or a direct fork.
+           The membership keeps its position history and the projection keeps its binding history.
+           Histories that need a merge cutoff or a second binding policy return a diagnostic."
+     :see [[:storage "apply!"]]}
+    {:ns graphden.versioning.storage.input :defn validate-view!
+     :say "Checks scoped field paths and occupied-prefix conflicts among supplied rows, including
+           inherited origins. The offline writer and merge transaction call this validator under
+           locks. It deliberately leaves recursive reference availability, type/HOF classification
+           and execution to later transition stages; it is not the effective remaining-input calculation."
+     :see [[:types "remaining-input"]]}
+    {:ns graphden.storage.protocol.core :defn Storage
      :say "Defines the storage lifecycle [protocol](#term/protocol): initialize a backend with a data
            schema, then close its resources when finished. Row operations and reachable-graph queries
            are separate [protocols](#term/protocol) shown next."}
@@ -709,10 +734,143 @@
    :title "Types — validation and inference"
    :status :toured
    :summary "Type expressions, compatibility, inference, and secret markings."
-   :paths ["src/graphden/types/"]
+   :paths ["src/graphden/types/" "src/graphden/input/"]
    :after [:executor]
    :steps
-   [{:ns graphden.types.core.shapes :defn primitives
+   [{:ns graphden.input.core :defn bind-input
+     :say "The structured-input transition begins with a pure binding algebra, not yet used by
+           production execution. A partial record binds declared child fields; a whole value or
+           reference occupies its subtree. Stable field paths reject overlapping bindings without
+           executing references. Expected types remain available for later value/HOF classification."
+     :see [[:types "remaining-input"]]}
+    {:ns graphden.input.core :defn remaining-input
+     :say "Describes locally missing fields and occupancy while retaining original rich types and
+           constraints. Optional fields remain bindable without preventing invocation; partially
+           filling an optional record activates its required children. Reference dependencies are
+           returned separately: no local missing fields does not prove the whole graph is ready."}
+    {:ns graphden.input.syntax :defn parse-expression
+     :say "Normalizes partial record maps and explicit value/ref expressions against a supplied
+           resolved descriptor. Literal payloads stay opaque and references remain unevaluated.
+           The caller supplies stable binding identities and namespace-resolved reference names;
+           this offline API is not yet connected to the production package loader."}
+    {:ns graphden.input.source :defn plan-module
+     :say "Compares original source forms with a prepared legacy module to plan supported rewrites.
+           It retains rich declarations and binding origins, while reporting unsupported list,
+           rename, ref-scope and policy forms as explicit blockers. A completed report does not
+           prove runtime equivalence or authorize dropping an unsupported definition."}
+    {:ns graphden.input.source :defn verify-module
+     :say "Derives declared input contexts for supported rewrites using the frozen package index
+           and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich
+           declarations and authored bindings with the legacy plan. The report records
+           verification per definition. Runtime and residual interface checks follow later."}
+    {:ns graphden.input.source-certification :defn verify-plan
+     :say "Certifies scoped bindings and forwarded fields with trusted implementation signatures.
+           A blocked source owner retries when its exact dependency is certified. The planner
+           then rebuilds the requested package plan with the updated inherited field evidence."
+     :see [[:types "verify-bindings"] [:types "migrate-forwarded-field"]]}
+    {:ns graphden.input.source-origins :defn index
+     :say "Matches each original owner's complete normalized inline expansion with preparation.
+           Generated UUIDs retain their enclosing owner and exact nested or sequence path.
+           These private source bodies are provenance, not checked runtime declarations."}
+    {:ns graphden.input.source-snapshot :defn with-certified-owner
+     :say "Proves one owner and its dependencies as an immutable transaction. Verified parent
+           forwarding is available before replanning inherited inputs; scoped bindings still
+           pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package."
+     :see [[:types "verify-plan"] [:types "verify-bindings"]]}
+    {:ns graphden.input.source-scope :defn verify-bindings
+     :say "Finds all omitted bindings in the original ledger and resolves each route against one
+           frozen baseline. Replays the bindings together against the stock checker and verifies
+           that the other occupied fields and all original binding identities survive."
+     :see [[:types "analyze-effective-input"]]}
+    {:ns graphden.input.source-joint :defn scope-view
+     :say "Checks the exact boundary between one owner's two proof groups. The projected baseline
+           must preserve all original rows except the scoped bindings and certified field links.
+           Its declarations, memberships, contract and projection rows must match the frozen graph."
+     :see [[:types "with-certified-owner"] [:types "verify-bindings-after-forwarding"]]}
+    {:ns graphden.input.source-scope :defn verify-bindings-after-forwarding
+     :say "Replays the remaining scoped group with the verified projections still in the graph.
+           Their occupied addresses and unique destinations must survive, and the runtime checks
+           must remain exactly equal. The complete source round trip precedes publication."
+     :see [[:types "scope-view"] [:types "verify-module"]]}
+    {:ns graphden.input.source-rich-types :defn authored-callable-field?
+     :say "Checks the anonymous callable row against its literal authored form and stored FK.
+           Named argument and result leaves need a separate frozen declaration closure; alias
+           expansion must not mint a replacement identity. Source evidence does not discharge
+           callable field-read obligations or admit unsupported nested callback parameters."
+     :see [[:types "migrate-forwarded-field"]]}
+    {:ns graphden.input.source-snapshot :defn migrate-forwarded-field
+     :say "Freezes both endpoints of an authored field passed to a value-producing reference.
+           The checker replays the exact projection and verifies that the original local
+           field remains available. A successful replay supplies a source proposal with
+           the scoped path and its original field identity."
+     :see [[:types "verify-module"] [:types "analyze-effective-input"]]}
+    {:file "scripts/structured_input_cst.clj" :defn plan-verified-module
+     :say "Builds replacement text only when every definition in a module has a verified source
+           plan. Edits retain comments and literal payloads, and repeat verification on the
+           patched text. The artifact records the original and replacement byte digests."
+     :see [[:types "stage!"]]}
+    {:file "scripts/structured_input_stage.clj" :defn stage!
+     :say "Checks a repository's module digests against the migration artifact, validates the
+           replacement EDN, then publishes it with a receipt in a new staging directory.
+           The source checkout is read-only and the artifact alone cannot enable format 2."}
+    {:ns graphden.input.module :defn parse-module-v2
+     :say "Reads an explicitly versioned source module with caller-resolved declarations and
+           namespace contexts. It retains authored input metadata and origin ledgers, returning
+           validated input-binding rows without registry or storage writes. Partial required
+           fields are legal; structural validation does not prove types or graph readiness."}
+    {:ns graphden.input.module :defn emit-module-v2
+     :say "Exports offline definitions using the same declared descriptors and identity callbacks.
+           Re-parsing detects changed binding origins or declaration context. Rich declarations
+           remain intact; source formatting and comments belong to the separate CST writer."}
+    {:ns graphden.input.format :defn require-legacy!
+     :say "Keeps format 2 outside the production loader. Unsupported headers and mixed structured
+           definition keys fail during the entire package closure's preflight, before any impl
+           executes. Absent/version-1 headers still use legacy semantics; same-named argument
+           fields and literal map keys remain ordinary data."}
+    {:ns graphden.input.descriptor :defn resolve-contract
+     :say "Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs
+           come from memberships; aliases retain those identities, marker/refinement obligations
+           survive, and ambiguous union roots are rejected. This descriptor never stores generated
+           reference dependencies or the remaining input back into the declaration."}
+    {:ns graphden.input.analysis :defn analyze-effective-input
+     :say "Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope;
+           scoped overlays must fit its target's unoccupied fields. Identity refs do not import
+           target inputs, and callable producers expose constructor inputs. Required addresses and
+           typed projections expose their source inputs. Metadata narrows contracts; value cycles
+           reject. Callable plans separate invocation parameters and captures by origin. Deferred
+           field/container obligations remain explicit. Stored-value resolvers consume their own
+           literal argument without capturing ambient caller fields; execution remains inactive."}
+    {:ns graphden.input.browser :defn export-closed
+     :say "Lowers the checked input IR to browser format 2 for closed pure graphs. A field
+           address keeps one lazy result per invocation, shared by every projection. A checked
+           callback runs in a fresh local frame with its enclosing cells still visible.
+           Source authorization precedes export."
+     :see [[:types "export-named"]]}
+    {:ns graphden.input.browser :defn export-named
+     :say "Includes checked named residual routes and the wire type for each supported supplied
+           field. Browser and JVM both defer validation until the field is read. Lists validate
+           their elements and opaque dictionaries validate keys and values as a whole field.
+           Absent fields stay outside the record, including when an explicit nil is allowed.
+           A supplied empty record is present. Supplying an optional record also activates
+           its required fields."}
+    {:ns graphden.input.signatures :defn infer-use
+     :say "Feeds canonical scoped input facts through the existing type-rule engine using explicit
+           implementation argument paths. Frozen registry views preserve rule lookup isolation;
+           implementation functions never run here. Returned substitutions and proofs must join
+           graph checking before the inferred signature can be treated as checked."}
+    {:ns graphden.input.stored-implementations :defn resolve-closure
+     :say "Matches a frozen stored declaration to the host's native implementation by UUID.
+           It checks the declared argument and return types and maps each implementation
+           argument name to the original field ID. Only audited rules belonging to that
+           frozen signature participate in checking the closure."
+     :see [[:types "infer-use"]]}
+    {:ns graphden.input.compile :defn compile-stored
+     :say "Runs the structured-input checker on an authorized stored snapshot and prepares
+           a named invocation closure for the ordinary executor. The caller supplies the
+           trusted implementations alongside their frozen signatures and owns the execution
+           authorization boundary."
+     :see [[:types "resolve-closure"] [:types "analyze-effective-input"]]}
+    {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on
            this vocabulary."}
@@ -844,6 +1002,27 @@
      :say "Resolves the requested branch by UUID or name before writing. The resulting branch
            determines which versioned-storage view receives the change."
      :see [[:versioning "wrap-with-versioning"]]}
+    {:ns graphden.crud.structured-input :defn read-input
+     :say "Reads the selected v2 declaration and its reachable owners under one decorated
+           branch snapshot and source policy. Bounded owner batches feed the existing analyzer.
+           The graph subtree attaches only a viewer-safe projection to its root row."
+     :see [[:types "analyze-effective-input"] [:editor "appendStructuredInputStrip"]]}
+    {:ns graphden.crud.structured-input-bind :defn with-plan
+     :say "Preview and bind use the same decorated branch writer. It locks structured bindings
+           before capturing a fresh authorized closure. The apply command compares the winning
+           version basis, checks the proposed literal with the analyzer and inserts one row."
+     :see [[:crud "read-input"] [:types "analyze-effective-input"]]}
+    {:ns graphden.input.storage :defn with-current-binding!
+     :say "Opens the semantic graph writer transaction before acquiring the structured binding
+           lock. Resolves the winner for this branch with fresh memos and checks the expected
+           version. A failure rolls back the entire callback and leaves that basis reusable."
+     :see [[:crud "with-plan"]]}
+    {:ns graphden.crud.structured-input-http :defn dispatch
+     :say "The graph route fixes the phase and supplies the authenticated request context.
+           A direct child of a boot-certified package input inherits its immutable fields.
+           Each named write requires fresh source and branch authorization. Bind, edit and remove have separate
+           preview bases, and stale or unavailable commands receive value-free errors."
+     :see [[:crud "with-current-binding!"] [:crud "with-plan"]]}
     {:ns graphden.crud.entities :defn create-entity
      :say "Creates one row through the generic write API. It checks the caller's
            [capability](#term/auth), validates the proposed change with `write-rej`, writes through
@@ -1568,6 +1747,28 @@
            completed generation enters the cache; retained bodies refresh without replacing controls."
      :see [[:editor "mountCanvasBody"] [:editor "createRuntime"]]}
 
+    {:file "resources/packages/app/editor/editor-type-expand-render.js" :defn recordExpansionFields
+     :say "The argument type popover reads names and field types from the resolved record shape.
+           When the authorized graph subtree carries the complete declaration, its slot order and
+           optional flags supply the row labels. An inferred shape can still expand without this
+           metadata. Field chips reuse the graph's passive labels and identify their nested panels
+           for keyboard users. The structured descriptor is the source of field identity for writes."
+     :see [[:editor "format"] [:types "resolve-contract"]]}
+
+    {:file "resources/packages/app/editor/editor-overlay-strips.js" :defn appendStructuredInputStrip
+     :say "The current root card opens the server's remaining input projection in the existing
+           type popover. A captured projection is usable only while its root is current. Nested
+           reference inputs have their own group. A writable offline fixture supplies named
+           paths for free leaves and checked path and version facts for occupied literals."
+     :see [[:editor "recordExpansionFields"] [:crud "read-input"]]}
+
+    {:file "resources/packages/app/editor/editor-edit-structured-input.js" :defn openStructuredInputPopover
+     :say "Uses the shared inline edit popover to bind, edit or remove a literal leaf confirmed
+           by the current subtree. Edit and removal compare the displayed version with the
+           preview. The editor repeats the exact command with its preview basis, then reloads
+           the graph. A refused proposal keeps the draft in the popover."
+     :see [[:editor "appendStructuredInputStrip"] [:crud "with-plan"]]}
+
     {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection
      :say "Projects authorized source labels, finite seal facts and flag-form copy into a passive
            graph view. The pure initial role supplies checked and disabled flag-form state, validated
@@ -1620,6 +1821,18 @@
            rejects late comparison replies after a context change; authentication
            change clears the mode. The comparison menu provides review and merge actions."
      :see [[:editor "mountDiffItem"] [:editor "selectDiffLens"]]}
+
+    {:file "resources/packages/app/editor/editor-execute-inputs.js" :defn mountStructuredRunInputs
+     :say "The Run pane builds named record inputs from the authorized residual descriptor for the
+           selected root when its Run capability is true. Required fields surface a focused error
+           before submission. Optional fields preserve the distinction between omission and explicit
+           values such as false, null and empty text. A bound callback can expose remaining named
+           fields while its caller supplies the invocation value. The computed greeting lesson uses
+           this distinction to change the callback mark between runs. Both structured and legacy
+           forms submit through the same execution handler. Structured Repeat
+           matches the saved run's identity and branch source fingerprint with a fresh authorized
+           subtree before restoring any fields."
+     :see [[:editor "submitExecution"] [:crud "apply-execute"]]}
 
     {:file "resources/packages/app/editor/editor-execute.js" :defn submitExecution
      :say "The selected card's Run button delegates to the existing Inspector Run owner; it does

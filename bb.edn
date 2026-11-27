@@ -394,6 +394,23 @@
   {:doc "Regression tests for native inventory registration, lexical resolution and bounded helper paths."
    :task (shell "bb" "scripts/native_inventory_test.clj")}
 
+  structured-input-inventory-test
+  {:doc "Source-only structured input inventory regression tests; no JVM or package evaluation."
+   :task (shell "bb" "scripts/structured_input_inventory_test.clj")}
+
+  structured-input-cst-test
+  {:doc "Source-preserving structured input patch tests; no JVM or filesystem writes."
+   :task (shell "bb" "scripts/structured_input_cst_test.clj")}
+
+  structured-input-dry-run-test
+  {:doc "Dependency-scoped semantic migration report tests; read-only, no JVM."
+   :task (shell "bb" "--classpath" "src:scripts" "scripts/structured_input_dry_run_test.clj")}
+
+  structured-input-module-test
+  {:doc "Pure offline v2 reader/export checks; no JVM, loader or registry writes."
+   :task (shell "bb" "--classpath" "src:test" "-e"
+                "(require 'graphden.input.module-test) (let [r (clojure.test/run-tests 'graphden.input.module-test)] (System/exit (+ (:fail r) (:error r))))")}
+
   type-sweep
   {:doc "Type-check sweep over the first-party package corpus (no DB, ~1 min) — the SAME sweep production runs at boot, with the same allowlist gate (`graphden.types.check/allowed-type-check-failures`, empty: the corpus stays at zero). Every test fixture passes `:skip-type-check? true`, so until this check existed a corpus type regression surfaced only when a real instance booted — `bb wt up`, or the gate's e2e stack, minutes in. Runs in `bb ci`'s POST-TEST wave (not `bb lint`): the lint wave launches every check at once, and one more whole-corpus JVM there was what tipped a 12 GB dev host into killing children mid-run. Run it by hand (`bb type-sweep`, ~1 min) after touching fns.edn if you do not want to wait for `bb ci`."
    ;; -Xmx700m: the sweep peaks at ~695 MB RSS (measured 2026-09-11); an
@@ -427,6 +444,10 @@
   devtour-check
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}
+
+  builtin-runtime-check
+  {:doc "Detect stale builtin browser runtime fingerprints before JVM checks."
+   :task (p/shell "node" "tools/ui_preview/check_builtin_runtime.cjs")}
 
   builtin-plans-check
   {:doc "Verify checked-in browser plans against package graphs and the browser-plan exporter before broad tests."
@@ -905,7 +926,17 @@
              ;; documentation reporter: newline-terminated output. The
              ;; default dots reporter emits one giant unbroken line that
              ;; makes gate logs un-greppable (audit-6 log-hygiene).
-             (clojure "-M:dev:test -m kaocha.runner :integration --fail-fast --reporter kaocha.report/documentation"))}
+             (let [receipt (System/getenv "GRAPHDEN_RESUME_OUT")
+                   args ["-M:dev:test" "-m" "kaocha.runner" ":integration" "--fail-fast"
+                         "--reporter" "kaocha.report/documentation"]]
+               (if (and (System/getenv "GRAPHDEN_WTQ_RUN") (seq receipt))
+                 (apply clojure {:extra-env {"KAOCHA_PARALLELISM"
+                                             (or (not-empty (System/getenv "KAOCHA_PARALLELISM")) "2")}}
+                        (into ["-J-Xmx4g" "-J-XshowSettings:vm"
+                               (str "-J-Xlog:gc+heap=info:file=" receipt
+                                    ".integration-gc-%p.log:time,uptime,level,tags:filecount=3,filesize=2m")]
+                              args))
+                 (apply clojure args))))}
 
   test-e2e
   {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~11 min end to end, measured 656/663/672 s across three landing gates: ~2 min for the stack to come healthy + ~9 min for the suite itself (533-550 s over 56 files). The old ~15-25 min figure for the suite was measured against the DEMO on :9002, where SWEEP_DELAY defaults to 2 s and the container bounces mid-sweep; this stack does neither. See `graphden.dev.e2e-stack`."
@@ -1088,6 +1119,8 @@
    :task (do (p/shell "bash" "dev/wtq/test/image_test.sh")
              (p/shell "bash" "dev/wtq/test/gate_order_test.sh")
              (p/shell "bash" "dev/wtq/test/disk_headroom_test.sh")
+             (p/shell "bash" "dev/wtq/test/reap_test_containers_test.sh")
+             (p/shell "bash" "dev/wtq/test/root_npm_cache_test.sh")
              (p/shell "bash" "dev/wtq/test/train_test.sh"))}
 
   ci-test

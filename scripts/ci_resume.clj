@@ -239,6 +239,12 @@
   (str/trim (:out (apply p/shell {:out :string} "git" args))))
 
 
+(defn checkout-candidate
+  []
+  {:sha (git-output "rev-parse" "HEAD")
+   :worktree-status (git-output "status" "--porcelain" "--untracked-files=normal")})
+
+
 (defn invocation!
   "wtq supplies a lineage-validated source prefix. Standalone runners reuse
    only receipts whose SHA is an ancestor of this checkout, in this worktree."

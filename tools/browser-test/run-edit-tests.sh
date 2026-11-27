@@ -51,6 +51,21 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 
+# Use separate runner invocations for exact phase ordering, retry and leak
+# verdicts, while the surrounding e2e-stack keeps its executor and databases.
+if [ -n "${GRAPHDEN_E2E_FOLLOWUP_FILES:-}" ]; then
+  if [ -z "${GRAPHDEN_E2E_ONLY_FILES:-}" ] || [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then
+    echo "adjacent browser waves require a selected first wave" >&2
+    exit 2
+  fi
+  FOLLOWUP_FILES="$GRAPHDEN_E2E_FOLLOWUP_FILES"
+  unset GRAPHDEN_E2E_FOLLOWUP_FILES
+  started=$SECONDS
+  bash ./run-edit-tests.sh || exit "$?"
+  printf '\n>>> automatic related browser files (same stack, manual wave took %ss)\n' "$((SECONDS - started))"
+  GRAPHDEN_E2E_ONLY_FILES="$FOLLOWUP_FILES" exec bash ./run-edit-tests.sh
+fi
+
 # Resolve the test list once so adding new files only takes a glob.
 #
 # EVERY *.test.js in this directory is `edit-`-prefixed and runs here. That is
@@ -79,11 +94,18 @@ if [ -z "$FILES" ]; then
   echo "no edit-*.test.js files found" >&2
   exit 2
 fi
-if [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
+if [ "${GRAPHDEN_E2E_PREPARED_ORDER+x}" = x ] || [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
   # The planner returns a permutation of this exact glob, with explicitly
   # related files first. A planner error must fail the run, not omit tests.
   ORIGINAL_FILES="$FILES"
-  FILES="$(cd ../.. && bb scripts/ci_priority.clj browser-order "$GRAPHDEN_E2E_PRIORITY_BASE")" || exit 2
+  if [ "${GRAPHDEN_E2E_PREPARED_ORDER+x}" = x ]; then
+    # The immutable gate already planned related files, including its manual
+    # choices. Append the local roster in the browser planner's lexical order.
+    FILES="$(awk 'NF && !seen[$0]++' <(printf '%s\n' "$GRAPHDEN_E2E_PREPARED_ORDER") \
+      <(printf '%s\n' "$ORIGINAL_FILES" | LC_ALL=C sort))" || exit 2
+  else
+    FILES="$(cd ../.. && bb scripts/ci_priority.clj browser-order "$GRAPHDEN_E2E_PRIORITY_BASE")" || exit 2
+  fi
   [ -n "$FILES" ] || { echo "empty prioritized browser list" >&2; exit 2; }
   if [ "$(printf '%s\n' "$FILES" | sort)" != "$(printf '%s\n' "$ORIGINAL_FILES" | sort)" ]; then
     echo "prioritized browser list is not the complete suite" >&2

@@ -34,6 +34,8 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
+    [graphden.crud.structured-run :as structured]
+    [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
@@ -137,6 +139,44 @@
           (throw error))))))
 
 
+(defn resolve-request-fn
+  "Pass the storage-read target to the apply stage in this invocation.
+   A direct graph call can supply an arbitrary row and must resolve it again."
+  [ctx parsed]
+  (let [storage (request/require-storage ctx)
+        row (lookup/resolve-fn storage parsed)]
+    (when-let [cache (::eager/call-cache ctx)]
+      (java.util.HashMap/.put cache ::resolved-row
+                              [row storage (tc/current-org) tc/*current-principal*]))
+    row))
+
+
+(defn- stored-target
+  [ctx row]
+  (let [storage (request/require-storage ctx)
+        [resolved origin org principal] (when-let [cache (::eager/call-cache ctx)]
+                                          (java.util.HashMap/.remove cache ::resolved-row))]
+    (when-let [id (:id row)]
+      (if (and (identical? row resolved) (identical? storage origin)
+               (= org (tc/current-org)) (= principal tc/*current-principal*))
+        resolved
+        (sp/read-entity storage :fn id)))))
+
+
+(defn- submit-stored-target
+  [ctx parsed stored-row]
+  (if stored-row
+    (or (type-error-rejection (request/require-storage ctx) stored-row)
+        (if (:input-type-fn-id stored-row)
+          (let [plan (try (structured/plan ctx (:id stored-row) (:args parsed))
+                          (catch clojure.lang.ExceptionInfo error (structured/rejection error)))]
+            (if (= :rejected (:status plan)) plan
+                (apply-execute* ctx parsed stored-row plan)))
+          (apply-execute* ctx parsed stored-row nil)))
+    {:ok false :status :rejected :http-status 404 :error "Function not found"
+     :error-data {:reason :fn-not-found}}))
+
+
 (defn apply-execute
   "Stage 3 — submit the future, deref with timeout. Returns one of:
      {:status :succeeded :result … :execution-id? :declared-effects …}
@@ -153,28 +193,25 @@
    - For pure fast fns with `:persist? false`, finalise without ever
      writing a row."
   ([ctx parsed]
-   ;; Non-graph callers (tests, BYO) — resolve the row here; the graph
-   ;; path passes the validation stage's already-resolved `:_execute-fn-row`
-   ;; through the 3-arity, so the request does ONE resolve, not two.
-   (apply-execute ctx parsed (lookup/resolve-fn (request/require-storage ctx) parsed)))
+   (let [row (lookup/resolve-fn (request/require-storage ctx) parsed)]
+     (or (authorization-rejection ctx row) (submit-stored-target ctx parsed row))))
   ([ctx parsed fn-row]
    (or (authorization-rejection ctx fn-row)
-       (type-error-rejection (request/require-storage ctx) fn-row)
-       (apply-execute* ctx parsed fn-row))))
+       (submit-stored-target ctx parsed (stored-target ctx fn-row)))))
 
 
 (defn- execution-plan*
   "The body of `execution-plan`, under its graph-load scope."
-  [ctx parsed fn-row]
+  [ctx parsed fn-row structured]
   (let [fn-id (:id fn-row)
         ;; Cached: this call was ~1.3–1.9 s uncached and runs once per
         ;; request. Safe here because /api/execute runs after CRUD writes
         ;; (which invalidate), never during one. See lookup ns.
-        free-slots (lookup/free-arg-slot-map-cached ctx fn-id)
-        declared-eff (persist/declared-effects-of fn-id)
+        free-slots (if structured (:free-slots structured) (lookup/free-arg-slot-map-cached ctx fn-id))
+        declared-eff (when-not structured (persist/declared-effects-of fn-id))
         org (tc/current-org)
         storage (request/require-storage ctx)]
-    {:storage storage
+    {:storage storage :literal-args? (some? structured)
      ;; Which branch's view submitted the run — stamped on the persisted
      ;; row so the Errors panel can scope failures per branch-chain.
      :branch-id (vs/current-branch-id storage)
@@ -198,13 +235,14 @@
                         (let [plan (set (cr/cloud-allowed-effects-for org))]
                           (if-some [caller (:allowed-effects ctx)]
                             (set/intersection (set caller) plan)
-                            plan))))
+                            plan)))
+                 structured (assoc ::cr/named-root [fn-id (:invoke structured)] :allowed-effects #{}))
      :fn-id fn-id
-     :fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
+     :fn-version-id (if structured (:fn-version-id structured) (lookup/resolve-fn-version-id ctx fn-id))
      ;; The run's content anchor — the hash of everything it can reach,
      ;; stamped on the row beside the root's version id. Cached per
      ;; graph epoch like `free-slots`.
-     :graph-hash (lookup/graph-hash-cached ctx fn-id)
+     :graph-hash (if structured (:graph-hash structured) (lookup/graph-hash-cached ctx fn-id))
      :free-slots free-slots
      :declared-eff declared-eff
      :org org
@@ -212,14 +250,15 @@
      ;; effects — an effectful run must leave a row even if it outlives the
      ;; inline window.
      :persist? (or (:persist? parsed) (seq declared-eff))
-     :executor-args (into {}
-                          (keep (fn [[k v]]
-                                  (when (contains? free-slots (keyword k))
-                                    [(keyword k)
-                                     (if (persist/ref-arg? v)
-                                       (persist/parse-ref-fn-id v)
-                                       v)])))
-                          (:args parsed))
+     :executor-args (if structured (:args parsed)
+                        (into {}
+                              (keep (fn [[k v]]
+                                      (when (contains? free-slots (keyword k))
+                                        [(keyword k)
+                                         (if (persist/ref-arg? v)
+                                           (persist/parse-ref-fn-id v)
+                                           v)])))
+                              (:args parsed)))
      :cancel-flag (atom false)
      ;; Rollup context (Phase C1): raw pool + org + submit time — threaded
      ;; to every terminal transition so `usage-stat` counts each run once,
@@ -234,10 +273,10 @@
   "Everything the run needs, derived once from the request. Pure apart
    from the two graph lookups; nothing here takes a slot or writes a
    row, so a rejection after this point costs nothing to unwind."
-  [ctx parsed fn-row]
+  [ctx parsed fn-row structured]
   ;; The two graph lookups both resolve the root's closure, and each
   ;; resolve loads the whole branch: share ONE load between them.
-  (res/call-with-graph-load-memo #(execution-plan* ctx parsed fn-row)))
+  (res/call-with-graph-load-memo #(execution-plan* ctx parsed fn-row structured)))
 
 
 (def ^:private over-capacity-rejection
@@ -263,14 +302,14 @@
    `release` is idempotent, so the task's own release when the work ends
    (`persist/release-on-done-task`) re-calling it is a no-op."
   [{:keys [storage exec-ctx fn-id fn-version-id free-slots declared-eff
-           executor-args cancel-flag persist? branch-id graph-hash]}
+           executor-args cancel-flag persist? branch-id graph-hash literal-args?]}
    parsed release]
   (try
     (let [row (when persist?
                 (persist/create-pending-with-args!
                   storage fn-version-id declared-eff
                   (:user-id parsed) (:args parsed) free-slots branch-id
-                  {:graph-hash graph-hash}))]
+                  {:graph-hash graph-hash ::persist/literal-args? literal-args?}))]
       (try
         (let [[fut trace path-trace]
               (persist/run-future exec-ctx fn-id executor-args cancel-flag release
@@ -312,7 +351,7 @@
    terminal state SYNCHRONOUSLY so a GET by id right after is already
    consistent."
   [{:keys [storage fn-id declared-eff stats-ctx fn-version-id free-slots
-           persist? cancel-flag branch-id graph-hash]}
+           persist? cancel-flag branch-id graph-hash literal-args?]}
    parsed {:keys [row fut trace path-trace]}]
   (let [result (try (java.util.concurrent.Future/.get
                       fut (long (:timeout-ms parsed))
@@ -344,7 +383,7 @@
       (let [r (persist/create-pending-with-args!
                 storage fn-version-id declared-eff
                 (:user-id parsed) (:args parsed) free-slots branch-id
-                {:graph-hash graph-hash})]
+                {:graph-hash graph-hash ::persist/literal-args? literal-args?})]
         (persist/register-future! (:id r) fut cancel-flag)
         (persist/record-completion! storage (:id r) fn-id fut trace declared-eff stats-ctx path-trace)
         {:status :pending :execution-id (str (:id r))})
@@ -383,8 +422,8 @@
   "The post-admission body of `apply-execute` — see its docstring.
    Derive the plan, take a concurrency slot, submit, await the inline
    window. Each stage can reject, and each rejection is an envelope."
-  [ctx parsed fn-row]
-  (let [{:keys [storage org] :as plan} (execution-plan ctx parsed fn-row)
+  [ctx parsed fn-row structured]
+  (let [{:keys [storage org] :as plan} (execution-plan ctx parsed fn-row structured)
         ;; A tenant's per-org cap is enforced FLEET-WIDE (counting pending
         ;; rows in shared storage); the public/platform org keeps the per-pod
         ;; atom. `storage` is the org-scoped request storage, so the fleet

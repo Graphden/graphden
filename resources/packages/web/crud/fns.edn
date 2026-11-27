@@ -264,6 +264,12 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
+  {:name :structured-input-contract
+   :description "Remaining named fields and requiredness for a visible structured input."
+   :args {:fn-id {:type :nullable-uuid :description "Function whose input to read."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
   {:name :with-graph-load-memo
    :description "Run one graph body with an epoch-aware branch-load memo. Repeated closure lookups share the branch read; an enclosing memo is reused, otherwise the new memo ends with this call."
    :args {:body {:type [:fn {} a]}}
@@ -548,7 +554,7 @@
    :return-type {:fns [:list :keyword-map] :namespaces [:list :keyword-map]}}
 
   {:name :graph-subtree
-   :description "The fn-view slice: the fns transitively reachable from `root-id` via parent-ids + binding refs + type overrides + list-item refs + own-slot type-fn-ids, plus the rows they own (~98% smaller than the full dump). Empty rows for a nil / unknown root."
+   :description "The fn-view slice: the fns transitively reachable from `root-id` via parent-ids + binding refs + type overrides + list-item refs + own-slot type-fn-ids, plus the rows they own (~98% smaller than the full dump). An authorized structured root row may include `:structured-input` with its remaining fields. Empty rows for a nil / unknown root."
    :args {:root-id {:type :nullable-uuid :description "Anchor of the closure."}}
    :return-type {:fns [:list :keyword-map] :slots [:list :keyword-map] :fn-slots [:list :keyword-map]
                  :bindings [:list :keyword-map] :list-items [:list :keyword-map]

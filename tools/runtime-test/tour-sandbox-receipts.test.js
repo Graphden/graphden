@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const editor = path.join(__dirname, '../../resources/packages/app/editor');
-function boot(outcome) {
+function boot(outcome, lessonId = '32') {
   const saves = [], calls = [];
   let created = null;
   const ctx = vm.createContext({console, crypto, API: {api_branches: '/api/branches'},
@@ -13,13 +13,14 @@ function boot(outcome) {
     getCurrentBranchName: () => 'main',
     // This receipt fixture excludes the tour engine that owns intent tickets.
     _tourStartTicket: () => ({}), _tourStartCurrent: () => true,
-    _tourFetchLessons: async () => ({lessons: [{id: '32', steps: [{check: {kind: 'manual'}}]}]}),
+    _tourFetchLessons: async () => ({lessons: [{id: lessonId, steps: [{check: {kind: 'manual'}}]}]}),
     _tourStep: () => null,
     _tourSaveState: () => {saves.push(JSON.parse(JSON.stringify(ctx._tourState)));},
     startTutorial: id => {calls.push('in-place ' + id); return true;},
     switchToBranch: branch => {calls.push('switch ' + branch);},
     gdToast: message => {calls.push('toast ' + message);},
     _tourEnd: async () => {calls.push('cleanup');},
+    _tourTeardown: () => {ctx._tourState = null;},
     location: {search: '', hash: ''},
     authFetch: async (url, options) => {
       if (!options?.method) return {ok: true, json: async () => ({branches: [{id: 'main-id', name: 'main'}]})};
@@ -62,5 +63,9 @@ function boot(outcome) {
   assert.equal(rejected.created(), null);
   assert.equal(rejected.ctx._tourState.created.length, 0, 'rejected identity conveys no ownership');
   assert.ok(rejected.calls.includes('in-place 32'), 'definite rejection preserves the old fallback');
+  const strict = boot('reject', '43');
+  assert.equal(await strict.ctx.startTutorialIsolated('43'), false);
+  assert.equal(strict.ctx._tourState, null);
+  assert.ok(!strict.calls.some(call => call.startsWith('in-place ')), '43 requires an owned branch even after a definitive rejection');
   console.log('✓ tour-sandbox-receipts: create-only UUID, lost commit and principal recovery');
 })().catch(error => {console.error(error); process.exitCode = 1;});

@@ -75,6 +75,19 @@
   (get @fixed-contracts id))
 
 
+(def ^:private primitive-names-by-id
+  (into {} (map (fn [[name id]] [id (clojure.core/name name)])) (ids/primitive-fn-ids)))
+
+
+(defn bare-primitive-owner?
+  "A primitive interface allowance never authorizes custom graph structure."
+  [{:keys [id name parent-ids] :as row}]
+  (and (contains? primitive-names-by-id id)
+       (= (get primitive-names-by-id id) name)
+       (empty? parent-ids)
+       (not-any? row [:base-fn-id :element-fn-id :return-type-fn-id :constraint :input-type-fn-id :lambda-params])))
+
+
 (defn- same-shape?
   [expected actual]
   (cond

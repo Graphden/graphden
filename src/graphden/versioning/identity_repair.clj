@@ -38,6 +38,11 @@
 
 (def ^:private ref-fields
   {:binding [:ref-fn-id :type-override-fn-id :resolver-fn-id]
+   ;; Conservative retention during the offline transition: even owned v2
+   ;; rows pin their owner until explicitly removed. No legacy cascade may
+   ;; silently drop a structured contract or a reference-use scope.
+   :input-binding [:fn-id :ref-fn-id :type-override-fn-id :resolver-fn-id]
+   :input-binding-version [:fn-id :ref-fn-id :type-override-fn-id :resolver-fn-id]
    :binding-list-item [:ref-fn-id]
    :binding-version [:ref-fn-id :type-override-fn-id :resolver-fn-id]
    :binding-list-item-version [:ref-fn-id]
@@ -45,7 +50,7 @@
    ;; diverge from the identity row on a branch — without this row a
    ;; branch-divergent return/element/base ref was invisible to every
    ;; scanner here (audit hole).
-   :fn-version [:base-fn-id :element-fn-id :return-type-fn-id]
+   :fn-version [:base-fn-id :element-fn-id :return-type-fn-id :input-type-fn-id]
    :slot [:type-fn-id]})
 
 
@@ -75,7 +80,7 @@
              field fields]
        (fill! entity row field))
      (doseq [f (sp/query-entities base :fn {})]
-       (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]]
+       (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id :input-type-fn-id]]
          (fill! :fn f field))
        (let [pids (:parent-ids f)]
          (when (some old->new pids)
@@ -125,7 +130,7 @@
       (vswap! hits conj {:entity entity :id (:id row) :field field}))
     (doseq [f (sp/query-entities base :fn {})
             :when (not= (:id f) fn-id)]
-      (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]
+      (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id :input-type-fn-id]
               :when (= fn-id (get f field))]
         (vswap! hits conj {:entity :fn :id (:id f) :field field}))
       (when (some #{fn-id} (:parent-ids f))
@@ -220,7 +225,7 @@
                       (:binding :binding-version :fn-version) (:fn-id row)
                       (:binding-list-item :binding-list-item-version)
                       (get binding-owner (:binding-id row))
-                      :slot nil))]
+                      (:slot :input-binding :input-binding-version) nil))]
      (doseq [[entity fields] ref-fields
              row (sp/query-entities base entity {})
              :when (or (nil? live) (live-row? live entity row))
@@ -235,7 +240,7 @@
                      :owner-fn-id owner}))
      (doseq [f (sp/query-entities base :fn {})]
        (when (or (nil? live) (live-row? live :fn f))
-         (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id]
+         (doseq [field [:base-fn-id :element-fn-id :return-type-fn-id :input-type-fn-id]
                  :let [target (get f field)]
                  :when (and (contains? targets target) (not= (:id f) target))]
            (hit! target {:entity :fn :id (:id f) :field field

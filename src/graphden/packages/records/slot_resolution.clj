@@ -323,7 +323,8 @@
           (:args fn-def))))
 
 
-(declare ^:private resolve-slot-owner-strict-inheritance)
+(declare ^:private resolve-slot-owner-strict-inheritance
+         ^:private reference-search)
 
 
 (def binding-spec-keys
@@ -396,7 +397,7 @@
   [ancestor ancestor-name arg-name defs-by-name seen]
   (when-let [src (scalar-rename-source ancestor arg-name)]
     (when-let [hit (resolve-slot-owner-strict-inheritance
-                     ancestor-name src defs-by-name seen)]
+                     ancestor-name src defs-by-name seen (reference-search defs-by-name))]
       (when (positional-rename-anchor? (get defs-by-name (first hit))
                                        (second hit))
         hit))))
@@ -415,7 +416,7 @@
 
    Separate from the ref pass because `resolve-slot-owner` needs the
    two sets of candidates independently for type-based disambiguation."
-  [composed-fn-name arg-name defs-by-name seen]
+  [composed-fn-name arg-name defs-by-name seen resolve-reference]
   (when (and (not (contains? seen [composed-fn-name arg-name]))
              (get defs-by-name composed-fn-name))
     (let [seen' (conj seen [composed-fn-name arg-name])
@@ -427,31 +428,19 @@
                   [name-in-chain arg-name]
 
                   (rename-passthrough-ref ancestor arg-name)
-                  (resolve-slot-owner-strict
-                    (rename-passthrough-ref ancestor arg-name)
-                    arg-name defs-by-name seen')
+                  (resolve-reference (rename-passthrough-ref ancestor arg-name) arg-name seen')
 
                   ;; Scalar rename over a POSITIONAL anchor — normalize
                   ;; to the anchor (see `scalar-over-positional-hit`).
                   ;; Top-level pass only (`seen` empty): inside
                   ;; ref-pass recursion the rename slot stays the
                   ;; anchor for cross-fn ref-rename translation.
-                  (and (empty? seen)
-                       (scalar-over-positional-hit
-                         ancestor name-in-chain arg-name
-                         defs-by-name seen'))
-                  (scalar-over-positional-hit
-                    ancestor name-in-chain arg-name
-                    defs-by-name seen')
-
-                  ;; Any other rename view (positional, scalar over a
-                  ;; root slot, scalar with a ref-tree source, or
-                  ;; reached through recursion) — the rename-view slot
-                  ;; is the binding anchor.
-                  (rename-target ancestor arg-name)
-                  [name-in-chain arg-name]
-
-                  :else nil)))
+                  :else
+                  (or (when (empty? seen)
+                        (scalar-over-positional-hit ancestor name-in-chain arg-name defs-by-name seen'))
+                      ;; Other rename views are their own binding anchors.
+                      (when (rename-target ancestor arg-name)
+                        [name-in-chain arg-name])))))
             chain))))
 
 
@@ -466,7 +455,7 @@
    `:router-ring-response` (an ANCESTOR) refs through `:router-result`.
    Walking own ref-targets first would dive into the routes tree and hit
    some unrelated `:map` / `:reduce` fn-row's `:func` slot."
-  [composed-fn-name arg-name defs-by-name seen]
+  [composed-fn-name arg-name defs-by-name seen resolve-reference]
   (when (and (not (contains? seen [composed-fn-name arg-name]))
              (get defs-by-name composed-fn-name))
     (let [seen' (conj seen [composed-fn-name arg-name])
@@ -474,10 +463,25 @@
       (some (fn [name-in-chain]
               (let [ancestor (get defs-by-name name-in-chain)]
                 (some (fn [ref-name]
-                        (resolve-slot-owner-strict ref-name arg-name
-                                                   defs-by-name seen'))
+                        (resolve-reference ref-name arg-name seen'))
                       (ref-targets-of ancestor defs-by-name))))
             (reverse chain)))))
+
+
+(defn- reference-search
+  "The ordered depth-first lookup can encounter a shared reference from
+   many branches. Recursive lookups have the same precedence at each
+   vertex, so expand it once within one search. Each of the two public
+   candidate passes starts its own search."
+  [defs-by-name]
+  (let [expanded (volatile! #{})]
+    (fn resolve-reference
+      [fn-name arg-name seen]
+      (let [vertex [fn-name arg-name]]
+        (when-not (or (contains? seen vertex) (contains? @expanded vertex))
+          (vswap! expanded conj vertex)
+          (or (resolve-slot-owner-strict-inheritance fn-name arg-name defs-by-name seen resolve-reference)
+              (resolve-slot-owner-strict-refs fn-name arg-name defs-by-name seen resolve-reference)))))))
 
 
 (defn resolve-slot-owner-strict
@@ -488,10 +492,7 @@
 
    Inheritance wins over the data-flow tree — see each pass for why."
   [composed-fn-name arg-name defs-by-name seen]
-  (or (resolve-slot-owner-strict-inheritance composed-fn-name arg-name
-                                             defs-by-name seen)
-      (resolve-slot-owner-strict-refs composed-fn-name arg-name
-                                      defs-by-name seen)))
+  ((reference-search defs-by-name) composed-fn-name arg-name seen))
 
 
 (defn- value-return-type
@@ -588,9 +589,9 @@
          primary-parent (or (when fd (or (:parent fd) (first (:parents fd))))
                             composed-fn-name)
          inh-hit (resolve-slot-owner-strict-inheritance
-                   composed-fn-name arg-name defs-by-name #{})
+                   composed-fn-name arg-name defs-by-name #{} (reference-search defs-by-name))
          ref-hit (resolve-slot-owner-strict-refs
-                   composed-fn-name arg-name defs-by-name #{})
+                   composed-fn-name arg-name defs-by-name #{} (reference-search defs-by-name))
          strict-hit
          (cond
            ;; Both passes hit, differently, and the inherited slot is

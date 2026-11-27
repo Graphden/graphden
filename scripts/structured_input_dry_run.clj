@@ -1,0 +1,446 @@
+(ns structured-input-dry-run
+  "Read-only semantic source planning. Run with bb --classpath src:scripts
+   scripts/structured_input_dry_run.clj --repo LABEL PATH [...]. Optional
+   --manifest PATH pins a previously saved inventory. No implementations load.
+   Exit zero means analysis completed, not that the corpus is migratable."
+  (:require
+    [babashka.fs :as fs]
+    [clojure.java.io :as io]
+    [clojure.string :as str]
+    [graphden.executor.compile.lookups :as lookups]
+    [graphden.input.source :as source]
+    [graphden.packages.rebase :as rebase]
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.slot-resolution :as slots]
+    [graphden.types.core :as types]
+    [graphden.types.core.shapes :as shapes]
+    [structured-input-cst :as cst]
+    [structured-input-inventory :as inventory]
+    [structured-input-list-probe :as list-probe])
+  (:import
+    (java.io
+      StringWriter)
+    (java.nio.file
+      Files)
+    (java.security
+      MessageDigest)))
+
+
+(defn- sha256
+  [source-bytes]
+  (let [digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
+    (str/join (map #(format "%02x" (bit-and % 255)) digest))))
+
+
+(defn- checked-text
+  [root path checksum]
+  (let [source-bytes (Files/readAllBytes (fs/path root path))]
+    (when-not (= checksum (sha256 source-bytes))
+      (throw (ex-info "Source differs from inventory" {:code :source-checksum-mismatch :file path})))
+    (String. ^bytes source-bytes "UTF-8")))
+
+
+(defn checked-source
+  "Read source bytes once and verify their inventory checksum BEFORE parsing.
+   Returns private source data; callers must not log this value or reader errors."
+  [root path checksum]
+  (inventory/read-edn path (checked-text root path checksum)))
+
+
+(defn- problem
+  [package code]
+  {:code code :repository (:repository package) :package (:name package) :file (:path package)})
+
+
+(defn- read-package
+  [repository root package]
+  (let [checksums (get-in repository [:source-identity :file-checksums])
+        metadata (checked-source root (:path package) (get checksums (:path package)))
+        directory (fs/parent (:path package))
+        listed (mapv #(str (fs/path directory % "fns.edn")) (:modules metadata))
+        paths (vec (distinct (concat (filter #(contains? checksums %) listed) (:unlisted package))))
+        modules (mapv (fn [path]
+                        (let [module (checked-source root path (get checksums path))]
+                          {:path path
+                           :definitions (mapv #(assoc % :namespace (:namespace module) :source-file path)
+                                              (:fns module))})) paths)
+        package (assoc package :repository (:label repository)
+                       :read-source #(checked-text root % (get checksums %))
+                       :source-modules modules :dependencies (or (:dependencies metadata) []))
+        blockers (cond-> []
+                   (or (seq (:missing package)) (seq (:unlisted package)) (seq (:duplicate-modules package)))
+                   (conj (problem package :package-module-coverage))
+                   (not (and (vector? (:dependencies package)) (every? string? (:dependencies package))))
+                   (conj (problem package :unsupported-package-dependencies)))]
+    (assoc package :source-definitions (vec (mapcat :definitions modules)) :blockers blockers)))
+
+
+(defn- read-packages
+  [repositories manifest]
+  (let [roots (into {} (map (juxt :label :root)) repositories)]
+    (vec (mapcat (fn [repository]
+                   (map #(read-package repository (get roots (:label repository)) %) (:packages repository)))
+                 (:repositories manifest)))))
+
+
+(defn- qualify-definitions
+  "Freeze reference meaning under THIS successful package context before any
+   importing package introduces additional bare-name collisions."
+  [context]
+  (let [names (:name->id context)
+        qualified (into {} (keep (fn [[ref id]] (when (qualified-keyword? ref) [id ref]))) names)]
+    (mapv (fn [definition]
+            (rebase/rewrite-references
+              definition (fn [ref]
+                           (let [resolved (parse/normalize-ref ref names (:namespace definition))]
+                             (get qualified (get names resolved) resolved)))))
+          (:fn-defs context))))
+
+
+(defn- visible-definitions
+  [package states]
+  (->> (:dependencies package)
+       (mapcat #(get-in states [% :exports]))
+       distinct
+       vec))
+
+
+(defn- visible-source-proofs
+  [package states]
+  (let [proofs (keep #(get-in states [% :source-proof]) (:dependencies package))]
+    {:definitions (vec (distinct (mapcat :definitions proofs)))
+     :baselines (reduce into {} (map :baselines proofs))}))
+
+
+(defn- duplicate-definition?
+  [definitions]
+  (some #(> % 1)
+        (vals (frequencies (map (juxt #(or (:namespace %) "") #(some-> % :name name)) definitions)))))
+
+
+(defn- preparation-errors
+  "A failed whole-package prepare must not hide independent source failures.
+   Reference normalization is pure; this diagnostic does not invent a context."
+  [package names error]
+  (let [diagnostics
+        (into []
+              (keep (fn [definition]
+                      (try
+                        (rebase/rewrite-references
+                          definition #(parse/normalize-ref % names (:namespace definition)))
+                        (when (:marker definition)
+                          (shapes/register-marker! (:name definition) (:marker definition)))
+                        nil
+                        (catch Exception failure
+                          (assoc (problem package :definition-preparation-failed)
+                                 :file (:source-file definition)
+                                 :definition [(:namespace definition) (:name definition)]
+                                 :cause-type (:type (ex-data failure)))))))
+              (:source-definitions package))]
+    (if (seq diagnostics) diagnostics
+        [(assoc (problem package :package-preparation-failed) :cause-type (:type (ex-data error)))])))
+
+
+(defn- summarize-definition
+  [package verification definition]
+  (let [original (:source definition)
+        eligible? (seq (get-in definition [:v2 :list-builders]))
+        migrated? (contains? (:migrated verification) (:identity definition))
+        definition (if (and eligible? (not migrated?))
+                     (-> definition (assoc :status :blocked :blockers [{:definition [(:namespace original) (:name original)]
+                                                                        :file (:source-file original) :code :list-definition-cst-replay-required}])
+                         (dissoc :verification))
+                     definition)
+        verified (get-in verification [:verified (:source-file original) (:name original)])
+        reconstructed (count (keep #(get-in % [:list-builder :records]) (get-in definition [:legacy :arguments])))
+        linked (count (keep #(get-in % [:list-builder :bindings]) (get-in definition [:legacy :arguments])))]
+    (-> (select-keys definition [:identity :kind :status :origins :verification])
+        (assoc :definition [(:namespace original) (:name original)]
+               :file (:source-file original)
+               :blockers (mapv #(assoc % :repository (:repository package) :package (:name package))
+                               (:blockers definition)))
+        (cond-> migrated? (assoc :reparsed-list-definition true)
+                (pos? linked) (assoc :linked-list-fields linked)
+                (pos? reconstructed) (assoc :reconstructed-list-fields reconstructed)
+                verified (assoc :reparsed-list-fields verified)))))
+
+
+(defn- blocked-state
+  [package blockers]
+  {:status :blocked :blockers blockers
+   :counts {:supported 0 :blocked (count (:source-definitions package))}
+   :definitions (mapv (fn [definition]
+                        {:definition [(:namespace definition) (:name definition)]
+                         :file (:source-file definition) :status :blocked})
+                      (:source-definitions package))})
+
+
+(defn- module-patches
+  [{:keys [repository read-source source-modules]} entries context]
+  (let [by-file (group-by #(get-in % [:source :source-file]) entries)]
+    (mapv (fn [{:keys [path]}]
+            (let [location {:repository repository :path path}]
+              (try
+                (let [verify #(:definitions (source/verify-module {:definitions %} context))
+                      patch (cst/plan-verified-module (read-source path) (get by-file path) verify)]
+                  (assoc location :status :verified :patch patch))
+                (catch clojure.lang.ExceptionInfo error
+                  (assoc location :status :blocked
+                         :reason (or (:reason (ex-data error)) (:code (ex-data error)) :unverified-module))))))
+          source-modules)))
+
+
+(defn- capture-legacy
+  [{:keys [fn-defs name->id] :as prepared} exports]
+  (let [parse-definition (fn [definition]
+                           (try
+                             ;; Include the module parser's anonymous callable rows.
+                             ;; Isolate a broken parent to its original declaration.
+                             (parse/parse-prepared-module (assoc prepared :fn-defs [definition]))
+                             (catch clojure.lang.ExceptionInfo error
+                               (when-not (= :records/unknown-parent (:type (ex-data error)))
+                                 (throw error)))))
+        edges (for [{module-ns :namespace :keys [parent parents fn-id]} fn-defs
+                    ref (or parents (when parent [parent]))
+                    :let [id (get name->id (parse/normalize-ref ref name->id module-ns))]
+                    :when id]
+                [id fn-id])]
+    {:status :prepared :exports exports
+     :legacy-rows (into #{} (mapcat parse-definition) fn-defs)
+     :legacy-edges (vec edges)}))
+
+
+(defn- prepared-state
+  [package dependencies prepared {:keys [emit? verify-scopes legacy-graph]} proofs]
+  (let [original (:source-definitions package)
+        proofs (cond-> proofs legacy-graph (assoc :legacy-graph legacy-graph))
+        {:keys [context plan certified blocked source-proof]} (if verify-scopes
+                                                                (verify-scopes prepared original proofs)
+                                                                {:context prepared
+                                                                 :plan (source/verify-module (source/plan-module original prepared) prepared)})
+        verification (list-probe/verify-package (:read-source package) (:definitions plan) context)
+        summaries (mapv (fn [{id :identity :as entry}]
+                          (let [diagnostic (get blocked id)]
+                            (cond-> (summarize-definition package verification entry)
+                              (contains? certified id) (assoc :scope-certification :verified)
+                              diagnostic (assoc :scope-certification diagnostic))))
+                        (:definitions plan))]
+    (cond-> {:status :prepared
+             :exports (vec (distinct (concat dependencies (qualify-definitions context))))
+             :definitions summaries :counts (merge {:supported 0 :blocked 0} (frequencies (map :status summaries)))
+             :blockers (into (vec (mapcat :blockers summaries))
+                             (map #(assoc % :repository (:repository package) :package (:name package)))
+                             (:blockers verification))}
+      emit? (assoc :module-patches (module-patches package (:definitions plan) context))
+      source-proof (assoc :source-proof source-proof))))
+
+
+(defn- prepare-package
+  [package states {:keys [capture-legacy?] :as options}]
+  (let [dependencies (visible-definitions package states)
+        original (:source-definitions package)
+        names (parse/name->id-index {} dependencies)
+        definitions (slots/build-defs-by-name dependencies)
+        all-names (parse/name->id-index names original)]
+    (binding [types/*type-aliases-override* (atom {})
+              shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
+              ;; Legacy parser warnings may include authored type payloads.
+              ;; Only the sanitized structured report leaves this CLI.
+              *out* (StringWriter.)
+              *err* (StringWriter.)]
+      (try
+        (doseq [definition dependencies :when (:marker definition)]
+          (shapes/register-marker! (:name definition) (:marker definition)))
+        (if (duplicate-definition? (concat dependencies original))
+          (blocked-state package [(problem package :duplicate-visible-definition)])
+          (let [prepared (parse/prepare-module original names definitions)]
+            (if capture-legacy?
+              (capture-legacy prepared (vec (distinct (concat dependencies (qualify-definitions prepared)))))
+              (prepared-state package dependencies prepared options (visible-source-proofs package states)))))
+        (catch Exception error
+          (blocked-state package (preparation-errors package all-names error)))))))
+
+
+(defn- initial-blockers
+  [package by-name]
+  (into (:blockers package)
+        (concat
+          (when (> (count (get by-name (:name package))) 1)
+            [(problem package :duplicate-package-name)])
+          (for [dependency (if (vector? (:dependencies package)) (:dependencies package) [])
+                :when (and (string? dependency) (not (contains? by-name dependency)))]
+            (assoc (problem package :missing-package-dependency) :dependency dependency)))))
+
+
+(defn- package-state
+  [package states options]
+  (let [failed (filter #(not= :prepared (get-in states [% :status])) (:dependencies package))]
+    (if (seq failed)
+      (blocked-state package [(assoc (problem package :blocked-package-dependency) :dependencies (vec failed))])
+      (prepare-package package states options))))
+
+
+(defn- plan-packages
+  [packages options]
+  (let [by-name (group-by :name packages)
+        indexed (into (sorted-map) (map (juxt :name identity)) packages)
+        initial (into {} (keep (fn [[name package]]
+                                 (let [blockers (initial-blockers package by-name)]
+                                   (when (seq blockers) [name (blocked-state package blockers)])))) indexed)]
+    (loop [remaining (apply dissoc indexed (keys initial)) states initial]
+      (if (empty? remaining)
+        states
+        (let [ready (filter (fn [[_ package]] (every? #(contains? states %) (:dependencies package))) remaining)]
+          (if (seq ready)
+            (recur (apply dissoc remaining (map first ready))
+                   (reduce (fn [acc [name package]] (assoc acc name (package-state package acc options))) states ready))
+            (merge states
+                   (into {} (map (fn [[name package]]
+                                   [name (blocked-state package
+                                                        [(assoc (problem package :cyclic-package-dependency)
+                                                                :dependencies (:dependencies package))])]))
+                         remaining))))))))
+
+
+(defn- summary
+  [manifest packages states]
+  (let [by-name (group-by :name packages)
+        summaries (mapv (fn [package]
+                          (let [state (if (> (count (get by-name (:name package))) 1)
+                                        (blocked-state package [(problem package :duplicate-package-name)])
+                                        (get states (:name package)))]
+                            (merge (select-keys package [:name :repository :path])
+                                   {:dependencies (if (and (vector? (:dependencies package))
+                                                           (every? string? (:dependencies package)))
+                                                    (:dependencies package) :unsupported)}
+                                   (dissoc state :exports :source-proof :module-patches)))) packages)
+        orphan-blockers (vec (for [repository (:repositories manifest)
+                                   file (:modules-without-package repository)]
+                               {:code :module-without-package :repository (:label repository) :file file}))
+        orphan-count (reduce + 0 (for [repository (:repositories manifest)
+                                       module (:modules repository)
+                                       :when (contains? (set (:modules-without-package repository)) (:path module))]
+                                   (:definitions module)))
+        counts (reduce #(merge-with + %1 (:counts %2)) {:supported 0 :blocked orphan-count} summaries)
+        complete? (= (get-in manifest [:totals :definitions]) (+ (:supported counts) (:blocked counts)))
+        verified (count (filter #(= :authored-source-equivalent (:verification %))
+                                (mapcat :definitions summaries)))
+        report {:schema-version 1
+                :mode :read-only-source-plan
+                :verification {:authored-source-equivalence {:verified-definitions verified}
+                               :list-builders {:reparsed-definitions (count (filter :reparsed-list-definition (mapcat :definitions summaries)))
+                                               :reconstructed-fields (transduce (keep :reconstructed-list-fields) + (mapcat :definitions summaries))
+                                               :linked-fields (transduce (keep :linked-list-fields) + (mapcat :definitions summaries))
+                                               :reparsed-fields (transduce (keep :reparsed-list-fields) + (mapcat :definitions summaries))}
+                               :new-loader-equivalence false :runtime-equivalence false :history false}
+                :source-identities (mapv #(select-keys % [:label :source-identity]) (:repositories manifest))
+                :inventory-totals (:totals manifest)
+                :counts counts :coverage-complete? complete?
+                :packages summaries
+                :blockers (cond-> (into orphan-blockers (mapcat :blockers summaries))
+                            (not complete?) (conj {:code :definition-coverage-mismatch}))}]
+    (assoc report :report-sha256 (sha256 (String/.getBytes (inventory/report-text report) "UTF-8")))))
+
+
+(defn- corpus-legacy-graph
+  [packages]
+  (let [states (vals (plan-packages packages {:capture-legacy? true}))]
+    (when (every? #(= :prepared (:status %)) states)
+      (let [rows (group-by :kind (into #{} (mapcat :legacy-rows) states))
+            graph (lookups/build-lookups {:fns (:fn rows) :slots (:slot rows) :fn-slots (:fn-slot rows)
+                                          :bindings (:binding rows) :list-items (:binding-list-item rows)})]
+        ;; Known parents of an unresolved legacy declaration still count
+        ;; as inheritance edges and prevent a parent from being called a leaf.
+        (reduce (fn [result [parent child]]
+                  (update-in result [:children-by-fn parent] (fnil conj #{}) child))
+                graph (mapcat :legacy-edges states))))))
+
+
+(defn- replay-corpus
+  [repositories expected-manifest options]
+  (let [manifest (inventory/inventory repositories)]
+    (when (and expected-manifest (not= expected-manifest manifest))
+      (throw (ex-info "Inventory differs from pinned manifest" {:code :manifest-mismatch})))
+    (let [packages (read-packages repositories manifest)
+          options (cond-> options (:legacy-leaves? options) (assoc :legacy-graph (corpus-legacy-graph packages)))
+          states (plan-packages packages options)
+          after (inventory/inventory repositories)]
+      (when-not (= manifest after)
+        (throw (ex-info "Inventory changed during planning" {:code :source-drift})))
+      {:report (summary manifest packages states)
+       :modules (into [] (mapcat :module-patches) (vals states))})))
+
+
+(defn dry-run
+  "Inventory explicit roots, verify retained source bytes, plan only within
+   declared package dependency closures, then re-inventory before returning.
+   Optional expected-manifest must match the initial inventory exactly.
+   The returned report contains no source forms, literals or proposed bodies."
+  ([repositories] (dry-run repositories nil))
+  ([repositories expected-manifest]
+   (dry-run repositories expected-manifest {}))
+  ([repositories expected-manifest options]
+   (:report (replay-corpus repositories expected-manifest options))))
+
+
+(defn migration-artifact
+  "Produce privately held rewritten source text and sanitized evidence.
+   Only fully verified modules carry replacement text; source files stay intact.
+   Partial artifacts are for review until the whole corpus and loader pass."
+  ([repositories expected-manifest] (migration-artifact repositories expected-manifest {}))
+  ([repositories expected-manifest options]
+   (assoc (replay-corpus repositories expected-manifest (assoc options :emit? true))
+          :artifact-format 1)))
+
+
+(defn write-artifact!
+  "Publish the private migration artifact as EDN at the requested path."
+  [file artifact]
+  (let [destination (fs/absolutize file)
+        temp (fs/create-temp-file {:dir (fs/parent destination) :prefix ".input-migration-"})]
+    (try
+      (with-open [writer (io/writer (str temp) :encoding "UTF-8")]
+        (binding [*out* writer *print-readably* true *print-length* nil *print-level* nil]
+          (prn artifact)))
+      (Files/move temp destination (make-array java.nio.file.CopyOption 0))
+      (finally
+        (fs/delete-if-exists temp)))))
+
+
+(defn cli-options
+  "Explicit repository roots, an optional inventory and a new artifact path."
+  [arguments]
+  (loop [args arguments repositories [] manifest nil artifact nil]
+    (if (empty? args)
+      (cond-> {:repositories (inventory/cli-repositories repositories) :manifest manifest}
+        artifact (assoc :artifact artifact))
+      (case (first args)
+        "--repo" (let [[_ label root & more] args]
+                   (when-not (and label root)
+                     (throw (ex-info "Expected --repo LABEL PATH" {:code :invalid-arguments})))
+                   (recur more (into repositories ["--repo" label root]) manifest artifact))
+        "--manifest" (let [[_ path & more] args]
+                       (when (or manifest (nil? path) (str/starts-with? path "--"))
+                         (throw (ex-info "Expected one --manifest PATH" {:code :invalid-arguments})))
+                       (recur more repositories path artifact))
+        "--artifact" (let [[_ path & more] args]
+                       (when (or artifact (nil? path) (str/starts-with? path "--"))
+                         (throw (ex-info "Expected one --artifact PATH" {:code :invalid-arguments})))
+                       (recur more repositories manifest path))
+        (throw (ex-info "Unknown argument" {:code :invalid-arguments}))))))
+
+
+(when (= *file* (System/getProperty "babashka.file"))
+  (try
+    (let [{:keys [repositories manifest artifact]} (cli-options *command-line-args*)
+          pinned (when manifest (inventory/read-edn manifest (slurp manifest)))]
+      (if artifact
+        (let [result (migration-artifact repositories pinned)]
+          (write-artifact! artifact result)
+          (print (inventory/report-text (:report result))))
+        (print (inventory/report-text (dry-run repositories pinned)))))
+    (catch Exception error
+      (binding [*out* *err*]
+        (prn {:code (or (:code (ex-data error)) :dry-run-failed)
+              :file (or (:file (ex-data error)) (:source-file (ex-data error)))}))
+      (System/exit 2))))

@@ -114,6 +114,8 @@
 ;;     (`REQUIRE_SIGNALS` in editor-tour-picker.js): `services` = the dedicated
 ;;     plan (or a platform / self-host instance), `org` = organizations exist
 ;;     here, `assets` = a single-tenant instance.
+;; `structured-input-run` is omitted before serialization unless the current
+;; viewer has the branch and certified template offers.
 ;;
 ;; ONE ACTION PER RING (from a reader walking lesson 18): the
 ;; spotlight can only sit on one thing, so a step whose text passes through
@@ -3201,6 +3203,354 @@
               {:title "Continue with your client"
                :body "You created a token with a short expiry, proved its scope ceiling and revoked it. The written lesson explains connecting an external MCP client and using a branch. Click [[Finish]]; cleanup removes only token UUIDs created by this lesson, including an ambiguous creation reply."
                :target nil
+               :check {:kind "manual"}}]}
+            {:id "43"
+             :slug "structured-input"
+             :chapter "Structured input"
+             :version 2
+             :requires "structured-input-run"
+             :template-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"
+             :title "Bind part of a record and run with the rest"
+             :reads "explains how the declared record, the binding and the values supplied for one run fit together."
+             :steps
+             [{:title "Select the template"
+               :body "Find `lesson-profile` in the Explorer and select [[lessons.structured-input/lesson-profile]]. The template accepts a profile and returns all three fields."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-profile" :fn-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"}}
+              {:title "Create your editable sample"
+               :body "Click [[⋯]] on lesson-profile and choose [[Extend]]. Name the function `tutorial-structured-profile`, keep the root namespace selected and click [[Save]]. The editor opens the new function on this lesson’s branch."
+               :target ".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-structured-profile"
+                         :parent-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :run? true :path ["profile" "name"] :state "remaining"}}
+              {:title "Find the name field"
+               :body "Open [[Remaining inputs]], expand [[profile]] and choose [[Bind]] beside name."
+               :target ".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"profile — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind profile.name\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"}}
+              {:title "Bind the name"
+               :body "Enter `Ada` and click [[Bind]]. The lesson checks the saved binding at profile.name."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "occupied"}}
+              {:title "Open Run"
+               :body "Click [[▶ Run]] on the sample. In the Run form, profile asks for id and email."
+               :target ".node-overlay[data-fn-name=\"tutorial-structured-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "structured-input-path" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "occupied"
+                       :selector ".execute-popover.visible .execute-run-btn"}}
+              {:title "Supply the rest and run"
+               :body "Enter `42` for id and `ada@example.test` for email. Click [[Run]]. The returned profile must contain all three values, including the saved name."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-structured-profile" :owned? true :lesson-branch? true
+                       :value {:id "42" :name "Ada" :email "ada@example.test"}}}
+              {:title "Finish the lesson"
+               :body "The name stays bound on your lesson branch. The id and email were supplied for this run. Click [[Finish]] to close the lesson and clean up its branch."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "44"
+             :slug "independent-contact-records"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "b67af3a3-67c3-5237-89cf-62a815d5dfa1"
+             :title "Bind two independent contact records"
+             :reads "shows why two records with the same shape keep independent field paths."
+             :steps
+             [{:title "Select the contact route template"
+               :body "Find `lesson-contact-route` in the Explorer and select [[lesson-contact.structured-input/lesson-contact-route]]. Both sender and recipient have a name and an address with a city."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-contact-route" :fn-id "b67af3a3-67c3-5237-89cf-62a815d5dfa1"}}
+              {:title "Create your contact route"
+               :body "Click [[⋯]] on the template and choose [[Extend]]. Name the function `tutorial-contact-route`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"lesson-contact-route\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-contact-route\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-contact-route"
+                         :parent-id "b67af3a3-67c3-5237-89cf-62a815d5dfa1" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :run? true :path ["sender" "address" "city"] :state "remaining"}}
+              {:title "Find the sender city"
+               :body "Open [[Remaining inputs]], expand [[sender]] and [[address]], then choose [[Bind]] beside city."
+               :target ".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"sender — Type:\"]"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"address — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind sender.address.city\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["sender" "address" "city"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind sender.address.city\"]"}}
+              {:title "Bind the sender city"
+               :body "Enter `London` and click [[Bind]]. The lesson checks the saved binding at sender.address.city."
+               :target ".arg-value-edit-popover[aria-label=\"Bind sender.address.city\"]"
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["sender" "address" "city"] :state "occupied"}}
+              {:title "Find the recipient city"
+               :body "Open [[Structured inputs]] if it is closed, expand [[recipient]] and [[address]], then choose [[Bind]] beside city."
+               :target ".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-contact-route\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"recipient — Type:\"]"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"address — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind recipient.address.city\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["recipient" "address" "city"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind recipient.address.city\"]"}}
+              {:title "Bind the recipient city"
+               :body "Enter `Paris` and click [[Bind]]. The lesson checks the saved binding at recipient.address.city."
+               :target ".arg-value-edit-popover[aria-label=\"Bind recipient.address.city\"]"
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["recipient" "address" "city"] :state "occupied"}}
+              {:title "Open Run"
+               :body "Click [[▶ Run]] on the sample. The form asks for two names, one inside sender and one inside recipient."
+               :target ".node-overlay[data-fn-name=\"tutorial-contact-route\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "structured-input-path" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :path ["recipient" "address" "city"] :state "occupied"
+                       :selector ".execute-popover.visible .execute-run-btn"}}
+              {:title "Run with two names"
+               :body "Enter `Ada` under sender and `Bea` under recipient. Click [[Run]]. The result pairs Ada with London and Bea with Paris."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-contact-route" :owned? true :lesson-branch? true
+                       :value "Ada in London → Bea in Paris"}}
+              {:title "Finish the lesson"
+               :body "Each city belongs to its own path, even though the records share a type. Click [[Finish]] to clean up the lesson branch."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "45"
+             :slug "optional-input-default"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "439a518d-2a0e-50ef-8abf-d8c5e96c9f7e"
+             :title "Run with a default or supply nil"
+             :reads "shows how omission, a value for one run and a saved binding affect an optional input."
+             :steps
+             [{:title "Select the optional label template"
+               :body "Find `optional-label` in the Explorer and select [[optionalinput.structured/optional-label]]. Its optional label accepts text or nil."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "optional-label" :fn-id "439a518d-2a0e-50ef-8abf-d8c5e96c9f7e"}}
+              {:title "Create your optional label"
+               :body "Choose [[Extend]] from the template’s [[⋯]] menu. Name it `tutorial-optional-label`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"optional-label\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"optional-label\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-optional-label"
+                         :parent-id "439a518d-2a0e-50ef-8abf-d8c5e96c9f7e" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :run? true :path ["label"] :state "remaining"}}
+              {:title "Open Run with label still optional"
+               :body "Click [[▶ Run]]. You can run even though label is still free."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "remaining"
+                       :selector ".execute-popover.visible .execute-run-btn"}}
+              {:title "Run without a label"
+               :body "Leave label blank and click [[Run]]. The result `text: automatic` uses the declared default."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "text: automatic"}}
+              {:title "Supply nil for one run"
+               :body "Type `null` in the label box and click [[Run]] again. JSON uses `null` for nil. The result is `explicit nil`."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "explicit nil"}}
+              {:title "Find the free label"
+               :body "On the function card, open [[Remaining inputs]] and choose [[Bind]] beside label. Running with nil left the field free."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Bind label\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind label\"]"}}
+              {:title "Bind nil to label"
+               :body "Enter `null` and click [[Bind]]. This time the nil value is saved as a binding."
+               :target ".arg-value-edit-popover[aria-label=\"Bind label\"]"
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "occupied"}}
+              {:title "Run with the saved nil"
+               :body "Open [[▶ Run]] and click [[Run]]. There is no label box because the binding already supplies nil."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "explicit nil"}}
+              {:title "Remove the saved nil"
+               :body "On the function card, open [[Structured inputs]], choose [[Remove]] beside label in Bound inputs and confirm."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Remove label\"]"
+                         ".arg-value-edit-popover[aria-label=\"Remove label\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :path ["label"] :state "remaining"}}
+              {:title "Run with the default again"
+               :body "Open [[▶ Run]], leave label blank and click [[Run]]. The result returns to `text: automatic`."
+               :target ".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-optional-label\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-optional-label" :owned? true :lesson-branch? true
+                       :value "text: automatic"}}
+              {:title "Finish the lesson"
+               :body "Omitting label uses the default. Supplying nil gives a value for one run. Binding nil saves it for later runs. Click [[Finish]] to clean up the lesson branch."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "46"
+             :slug "whole-record-binding"
+             :chapter "Structured input"
+             :version 1
+             :requires "structured-input-run"
+             :template-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"
+             :title "Bind a whole record or one field"
+             :reads "explains when a saved record covers its fields and how to make them available again."
+             :steps
+             [{:title "Select the profile template"
+               :body "Find `lesson-profile` in the Explorer and select [[lessons.structured-input/lesson-profile]]."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-profile" :fn-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78"}}
+              {:title "Create your whole-profile sample"
+               :body "Choose [[Extend]] from the template’s [[⋯]] menu. Name it `tutorial-whole-profile`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-profile\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-whole-profile"
+                         :parent-id "abd1ff8f-3ae3-57c4-ad64-412ef0689f78" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :run? true :path ["profile"] :state "remaining" :record? true}}
+              {:title "Find the whole record"
+               :body "Open [[Remaining inputs]] and choose [[Bind]] beside profile itself."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Bind profile\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "remaining" :record? true
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile\"]"}}
+              {:title "Bind all three profile fields"
+               :body "Enter `{\"id\":\"42\",\"name\":\"Ada\",\"email\":\"ada@example.test\"}` and click [[Bind]]. This saves one binding for the whole record."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile\"]"
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "occupied"}}
+              {:title "Inspect the occupied record"
+               :body "Open [[Structured inputs]] if needed. Under Bound inputs, find the single profile binding. Profile and its fields have no Bind action while this binding is in place."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "occupied"
+                       :selector ".type-inline-host [aria-label=\"Remove profile\"]"}}
+              {:title "Run the whole profile"
+               :body "Open [[▶ Run]] and click [[Run]]. There are no remaining inputs, and the result contains all three saved values."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :value {:id "42" :name "Ada" :email "ada@example.test"}}}
+              {:title "Remove the whole profile binding"
+               :body "Open [[Structured inputs]] if needed. Choose [[Remove]] beside profile and confirm. The three fields are available again."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Remove profile\"]"
+                         ".arg-value-edit-popover[aria-label=\"Remove profile\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "remaining"}}
+              {:title "Find the name inside profile"
+               :body "Open [[Remaining inputs]], expand [[profile]], then choose [[Bind]] beside name."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"profile — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind profile.name\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"}}
+              {:title "Bind only the name"
+               :body "Enter `Bea` and click [[Bind]]. The name is saved while id and email remain free."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile.name\"]"
+               :check {:kind "structured-input-path" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :path ["profile" "name"] :state "occupied"}}
+              {:title "Run with the remaining fields"
+               :body "Open [[▶ Run]], enter `77` for id and `bea@example.test` for email, then click [[Run]]. The result includes the saved name, Bea."
+               :target ".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-whole-profile\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-whole-profile" :owned? true :lesson-branch? true
+                       :value {:id "77" :name "Bea" :email "bea@example.test"}}}
+              {:title "Finish the lesson"
+               :body "Binding a whole record covers every field. Binding the name alone leaves id and email free. Click [[Finish]] to clean up the lesson branch."
+               :target nil
+               :check {:kind "manual"}}]}
+            {:id "47"
+             :slug "computed-record-and-callback"
+             :chapter "Structured input"
+             :version 2
+             :requires "structured-input-run"
+             :template-id "5d81665d-2de6-54e5-af98-95cece5cd938"
+             :title "Build a record and supply a callback"
+             :reads "shows which inputs come from a builder and which values the callback receives from its caller."
+             :steps
+             [{:title "Select the greeting template"
+               :body "Select [[lesson-compute.structured/lesson-computed-greeting]]. It takes a profile and a style. You will attach the functions it needs before running it."
+               :target "#fn-filter"
+               :check {:kind "selected" :name "lesson-computed-greeting" :fn-id "5d81665d-2de6-54e5-af98-95cece5cd938"}}
+              {:title "Create your greeting sample"
+               :body "Choose [[Extend]] from the template’s [[⋯]] menu. Name it `tutorial-computed-greeting`, keep the root namespace and click [[Save]]."
+               :target ".node-overlay[data-fn-name=\"lesson-computed-greeting\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"lesson-computed-greeting\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                         ".row-actions-popover [data-action=\"extend-fn\"]"
+                         ".arg-value-edit-popover[aria-label=\"Extend (create child fn)\"]"]
+               :creates {:type "fn" :name "tutorial-computed-greeting"
+                         :parent-id "5d81665d-2de6-54e5-af98-95cece5cd938" :namespace-id nil}
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "remaining" :record? true}}
+              {:title "Find the callback field"
+               :body "Open [[Remaining inputs]], expand [[style]] and click [[Bind]] for callback. This field expects a callable."
+               :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+                         ".type-inline-host [role=\"button\"][aria-label^=\"style — Type:\"]"
+                         ".type-inline-host [aria-label=\"Bind style.callback\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["style" "callback"] :state "remaining"
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind style.callback\"]"}}
+              {:title "Bind the callback"
+               :body "Click [[Choose function]], select [[lesson-compute.callback/decorate-greeting-input]] and click [[Bind]]. The renderer supplies the callback’s string. Its mark remains a separate input."
+               :target ".arg-value-edit-popover[aria-label=\"Bind style.callback\"]"
+               :targets [".arg-value-edit-popover[aria-label=\"Bind style.callback\"]" ".fn-picker-popover"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["style" "callback"] :state "occupied" :reference-inputs? true :run? true}}
+              {:title "Find the builder destination"
+               :body "Open [[Structured inputs]] and click [[Bind]] beside profile. This field can take a complete record."
+               :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+               :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .structured-input-strip"
+                         ".type-inline-host [aria-label=\"Bind profile\"]"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "remaining" :record? true
+                       :selector ".arg-value-edit-popover[aria-label=\"Bind profile\"]"}}
+              {:title "Bind the profile builder"
+               :body "Click [[Choose function]], select [[lesson-compute.builder/build-greeting-profile]] and click [[Bind]]. The builder adds `Hello ` to the name when producing its record."
+               :target ".arg-value-edit-popover[aria-label=\"Bind profile\"]"
+               :targets [".arg-value-edit-popover[aria-label=\"Bind profile\"]" ".fn-picker-popover"]
+               :check {:kind "structured-input-path" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :path ["profile"] :state "occupied" :reference-inputs? true}}
+              {:title "Run from three named inputs"
+               :body "Open [[▶ Run]]. In the builder’s profile group, enter `Ada` for name. Enter `team` for style’s suffix, then `!` for the callback’s mark and click [[Run]]. The renderer passes the profile’s greeting as the callback string."
+               :target ".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-computed-greeting\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+                         ".execute-popover.visible .execute-run-btn"]
+               :check {:kind "result-value" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :value "Hello Ada! · team"}}
+              {:title "Run again with a different mark"
+               :body "Keep the name and suffix. Change the callback’s mark to `?` and click [[Run]] again."
+               :target ".execute-popover.visible .execute-run-btn"
+               :check {:kind "result-value" :name "tutorial-computed-greeting" :owned? true :lesson-branch? true
+                       :value "Hello Ada? · team"}}
+              {:title "Finish the lesson"
+               :body "The builder takes a name. The renderer takes a suffix and passes the greeting to the callback. The mark is an input for each Run. Click [[Finish]] to clean up the lesson branch."
+               :target nil
                :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
@@ -3219,18 +3569,87 @@
   {:name :_tour-text-base
    :parent :coalesce
    :args {:value :_tour-text-base-env :default :_tour-text-base-default}}
-  {:name :_tour-payload
+  {:name :_tour-resolved-text
    :parent :assoc-in
    :args {:m :_tour-lessons :path {:value [:text :base]} :v :_tour-text-base}}
 
+  {:name :_structured-lesson-available?
+   :description "Read the current viewer's branch creation, template Extend and structured Run eligibility for a known lesson."
+   :args {:lesson-id {:type :text}}
+   :return-type :bool
+   :effects #{:db}}
+  {:name :_tour-all-lessons
+   :parent :get-in
+   :args {:map :_tour-lessons :path {:value [:lessons]} :default {:value []}}}
+  {:name :_tour-not-profile?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "43"}}}}}
+  {:name :_tour-with-profile-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "43"}}}
+          :then :_tour-all-lessons
+          :else {:parent :filter :args {:pred :_tour-not-profile? :coll :_tour-all-lessons}}}}
+  {:name :_tour-not-contact?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "44"}}}}}
+  {:name :_tour-with-contact-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "44"}}}
+          :then :_tour-with-profile-offer
+          :else {:parent :filter :args {:pred :_tour-not-contact? :coll :_tour-with-profile-offer}}}}
+  {:name :_tour-not-optional-label?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "45"}}}}}
+  {:name :_tour-with-optional-label-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "45"}}}
+          :then :_tour-with-contact-offer
+          :else {:parent :filter :args {:pred :_tour-not-optional-label? :coll :_tour-with-contact-offer}}}}
+  {:name :_tour-not-whole-profile?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "46"}}}}}
+  {:name :_tour-with-whole-profile-offer
+   :parent :if
+   :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "46"}}}
+          :then :_tour-with-optional-label-offer
+          :else {:parent :filter
+                 :args {:pred :_tour-not-whole-profile? :coll :_tour-with-optional-label-offer}}}}
+  {:name :_tour-not-computed-greeting?
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                         :b {:value "47"}}}}}
+  {:name :_tour-payload
+   :parent :assoc-in
+   :args {:m :_tour-resolved-text
+          :path {:value [:lessons]}
+          :v {:parent :if
+              :args {:test {:parent :_structured-lesson-available? :args {:lesson-id {:value "47"}}}
+                     :then :_tour-with-whole-profile-offer
+                     :else {:parent :filter
+                            :args {:pred :_tour-not-computed-greeting? :coll :_tour-with-whole-profile-offer}}}}}}
+
+  {:name :_attach-structured-lesson-templates
+   :description "Attach the certified template identities of the offered structured lessons."
+   :args {:payload {:type :keyword-map}}
+   :return-type :keyword-map}
   {:name :_tour-json
    :parent :to-json-string
-   :args {:data :_tour-payload}}
+   :args {:data {:parent :_attach-structured-lesson-templates :args {:payload :_tour-payload}}}}
 
   {:name :tour-lessons-handler
-   :description "GET /api/tour handler — the interactive-tutorial lesson scripts as JSON. Static teaching content, no data reads; open route (the demo's anonymous session must reach it)."
-   :parent :json-ok-response
-   :args {:body :_tour-json}}
+   :description "GET /api/tour handler — graph-authored lessons with viewer-scoped availability. Anonymous sessions receive the general lessons."
+   :parent :ok-response
+   :args {:body :_tour-json
+          :headers {"Content-Type" "application/json" "Cache-Control" "private, no-store"}}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/tour/progress — the funnel.

@@ -349,8 +349,13 @@
   ([storage fn-version-id declared-effects user-id args free-slots branch-id extra]
    ;; `extra` — up-front row fields (`:graph-hash`, the run's content
    ;; anchor), same contract as `create-pending-row!`'s 6-arity.
-   (let [r (create-pending-row! storage fn-version-id declared-effects user-id branch-id extra)]
-     (persist-args! storage (:id r) args free-slots)
+   (let [r (create-pending-row! storage fn-version-id declared-effects user-id branch-id (dissoc extra ::literal-args?))]
+     (if (::literal-args? extra)
+       (create-all! storage :fn-execution-arg
+                    (mapv (fn [[k v]]
+                            {:id (random-uuid) :execution-id (:id r)
+                             :slot-id (get free-slots k) :value v}) args))
+       (persist-args! storage (:id r) args free-slots))
      r)))
 
 

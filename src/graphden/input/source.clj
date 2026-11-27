@@ -1,0 +1,1074 @@
+(ns graphden.input.source
+  "Read-only source transition planning over a caller-prepared legacy module.
+   Source forms and raw ledgers are private artifacts, not log messages. A
+   supported rewrite is not proof of runtime or whole-corpus equivalence."
+  (:require
+    [clojure.edn :as edn]
+    [graphden.input.format :as format]
+    [graphden.input.list-positions :as positions]
+    [graphden.input.migration :as migration]
+    [graphden.input.module :as module]
+    [graphden.input.source-annotations :as annotations]
+    [graphden.input.source-context :as source-context]
+    [graphden.input.source-forward :as forward]
+    [graphden.input.source-list :as source-list]
+    [graphden.input.source-positional-type :as positional-type]
+    [graphden.input.source-rename :as rename]
+    [graphden.input.source-rich-types :as rich]
+    [graphden.packages.rebase :as rebase]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.slot-resolution :as slots]
+    [graphden.packages.records.types :as types]
+    [graphden.packages.records.wire :as wire]))
+
+
+(def ^:private type-keys
+  [:type :refine :list :union :map :tuple :variant :marker :fn-type])
+
+
+(defn- definition-key
+  [definition]
+  [(or (:namespace definition) "") (:name definition)])
+
+
+(defn- definition-kind
+  [definition]
+  (cond
+    (or (:parent definition) (:parents definition)) :composed
+    (some #(contains? definition %) type-keys) :type
+    :else :base))
+
+
+(defn- blocker
+  [source code path]
+  (cond-> {:code code :definition (definition-key source) :source-path path}
+    (:source-file source) (assoc :file (:source-file source))
+    (:source-line source) (assoc :line (:source-line source))))
+
+
+(defn- normalize-source
+  [source context]
+  (rebase/rewrite-references
+    source #(parse/normalize-ref % (:name->id context) (:namespace source))))
+
+
+(defn- prepared-inline-ref
+  [value]
+  (if (map? value) (:ref value) value))
+
+
+(defn- expected-inline-argument
+  [source field form body]
+  (let [name (:name (parse/inline-declaration body [(:name source) field] (:namespace source)))]
+    (if (contains? form :type) {:ref name :type (:type form)} name)))
+
+
+(defn- alignment-blockers
+  "Preparation adds an empty args map and fn-id, and may extract anonymous
+   computations. Only that extraction is a recognized semantic difference."
+  [source prepared normalized]
+  (let [args (or (:args normalized) {})
+        prepared-args (:args prepared)
+        fields (distinct (concat (keys args) (keys prepared-args)))
+        composed? (= :composed (definition-kind source))
+        expanded (delay (:args (first (parse/expand-inline-anons-in-module [normalized]))))
+        blockers (keep (fn [field]
+                         (let [form (get args field)
+                               body (when composed? (format/inline-binding-body form))
+                               expected (cond
+                                          body (expected-inline-argument source field form body)
+                                          (and composed? (source-list/has-inline-items? form)) (get @expanded field)
+                                          :else form)]
+                           (when-not (and (contains? args field) (contains? prepared-args field)
+                                          (= expected (get prepared-args field)))
+                             (blocker source :inline-identity-or-source-mapping-required [:args field]))))
+                       fields)]
+    (cond-> (vec blockers)
+      (not= (ids/fn-id (:namespace source) (:name source)) (:fn-id prepared))
+      (conj (blocker source :prepared-identity-mismatch []))
+      (not= (dissoc normalized :args) (dissoc prepared :args :fn-id))
+      (conj (blocker source :prepared-source-mismatch [])))))
+
+
+(defn- parse-one
+  [context definition]
+  (parse/parse-prepared-module (assoc context :fn-defs [definition])))
+
+
+(defn- ref-index
+  [context]
+  (into {} (keep (fn [[ref id]] (when (qualified-keyword? ref) [id ref])))
+        (:name->id context)))
+
+
+(defn with-reference-index
+  "Keep the reverse reference index for repeated plans of the same package."
+  [context]
+  (vary-meta context assoc ::reference-index
+             {:names (:name->id context) :refs (ref-index context)}))
+
+
+(defn- reference-index
+  [context]
+  (let [{:keys [names refs]} (::reference-index (meta context))]
+    (if (and refs (identical? names (:name->id context)))
+      refs
+      (ref-index context))))
+
+
+(defn with-local-reference
+  "Use an EDN-readable name for one generated declaration in its checked module."
+  [context id local]
+  (let [names (:name->id context)]
+    (when-not (and (uuid? id) (simple-keyword? local)
+                   (= id (get names local) (get names (keyword "" (name local)))))
+      (throw (ex-info "Generated local reference does not resolve to its original UUID"
+                      {:type :input/source-verification :code :unproved-local-reference :fn-id id})))
+    (vary-meta context assoc ::reference-index
+               {:names names :refs (assoc (reference-index context) id local)})))
+
+
+(defn- binding-expression
+  [binding names]
+  (cond
+    (:ref-fn-id binding) [:ref (get names (:ref-fn-id binding))]
+    (:value-present binding) [:value (:value binding)]
+    :else nil))
+
+
+(def ^:private binding-bookkeeping
+  #{:kind :id :fn-id :slot-id :org-id :value :value-present :ref-fn-id})
+
+
+(def ^:private binding-policy-columns
+  #{:type-override-fn-id :required :terminal :description :resolver-fn-id
+    :list-append :list-closed :override-kind})
+
+
+(defn- binding-policy
+  "Retain every non-bookkeeping column. Known absent policies are omitted;
+   unknown columns survive even when nil so new semantics cannot go unnoticed."
+  [binding]
+  (into {}
+        (remove (fn [[column value]]
+                  (or (contains? binding-bookkeeping column)
+                      (and (contains? binding-policy-columns column) (nil? value)))))
+        binding))
+
+
+(declare ^:private inline-list-item)
+
+
+(defn- argument-ledger
+  "Resolve through the legacy slot walker, including rename and ref scopes.
+   Keep the resulting address even when lowering that address is unsupported."
+  [context source definition rows]
+  (let [{:keys [name->id defs-by-name]} context
+        own-ref (slots/own-ref definition defs-by-name)
+        by-slot (into {} (map (juxt :slot-id identity))
+                      (filter #(= :binding (:kind %)) rows))
+        own-sources (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
+                                      [(:id %) (:source-slot-id %)])) rows)
+        grouped (group-by :kind rows)
+        native-links (source-context/native-field-links context definition grouped)
+        own (some #(when (= (:fn-id definition) (:id %)) %) (:fn grouped))
+        names (::ref-index context)]
+    (mapv (fn [[arg value]]
+            (if (types/own-slot-declaration? value)
+              (let [source-slot-id (get own-sources (ids/slot-id (:fn-id definition) arg))]
+                (cond-> {:source-path [:args arg] :kind :declaration :spec (get-in source [:args arg])}
+                  source-slot-id (assoc :source-slot-id source-slot-id)
+                  (and source-slot-id (contains? native-links (ids/slot-id (:fn-id definition) arg))) (assoc :native-reader? true)))
+              (let [[owner field] (slots/resolve-slot-owner own-ref arg defs-by-name value)
+                    owner-id (get name->id owner)
+                    slot-id (ids/slot-id owner-id field)
+                    binding (get by-slot slot-id)
+                    body (get-in source [:args arg])
+                    target-type (or (slots/slot-type-of owner field defs-by-name)
+                                    (slots/rename-source-type owner field defs-by-name))
+                    declaring (get defs-by-name owner)
+                    positional-origin (when (and (nil? target-type) declaring)
+                                        (positional-type/origin context (or ((::original-of context) declaring) declaring)
+                                                                declaring ((::records-of context) declaring) field))
+                    builder (when (or (:list-append binding) (:list-closed binding))
+                              (source-list/trace (assoc context :inline-list-item inline-list-item)
+                                                 (::records-of context) (::original-of context)
+                                                 definition arg slot-id (:id binding)))
+                    rename (rename/origin context definition own grouped arg body)
+                    ;; Separate a primitive inherited field from an erased rich
+                    ;; declaration or another same-named field in the ref tree.
+                    rename (when (and rename (= arg field) (= slot-id (:field-id rename))
+                                      (= (:id binding) (ids/binding-id (:id own) slot-id))
+                                      (= (cond-> {} (:pin-id rename) (assoc :type-override-fn-id (:pin-id rename))
+                                                 (contains? rename :description) (assoc :description (:description rename)))
+                                         (binding-policy binding)))
+                             rename)
+                    pin (when (and (= arg field) (= #{:type-override-fn-id} (set (keys (binding-policy binding)))))
+                          (rich/self-pin definition arg rows binding target-type))
+                    annotation (annotations/annotation context source rows arg)
+                    scoped-annotation (when-not annotation (annotations/reference-annotation context source rows arg))
+                    inline-body (format/inline-binding-body body)
+                    inline-ref (prepared-inline-ref value)
+                    inline-id (when (and inline-body (keyword? inline-ref))
+                                (ids/fn-id (:namespace source) inline-ref))]
+                (cond-> {:source-path [:args arg]
+                         :kind :binding
+                         :origin {:fn-id (:fn-id definition)
+                                  :slot-id slot-id :binding-id (:id binding)}
+                         :target {:owner owner :field field
+                                  :type target-type}
+                         :expression (if (and inline-id (= inline-id (:ref-fn-id binding)))
+                                       [:ref inline-body]
+                                       (binding-expression binding names))
+                         :policy (binding-policy binding)}
+                  (some :source-id (:items (peek (:fragments builder))))
+                  (assoc :list-inputs (positions/authored-inputs (:id own) grouped name->id body))
+                  builder (merge {:list-builder (dissoc builder :inline-items)}
+                                 (source-list/contribution-expression builder body (:namespace source) name->id))
+                  positional-origin (assoc :target-type-origin positional-origin)
+                  pin (assoc :self-pin pin)
+                  annotation (assoc :annotation annotation)
+                  scoped-annotation (assoc :scoped-annotation scoped-annotation)
+                  rename (assoc :rename rename :expression [:project [(:alias rename)]])))))
+          (:args definition))))
+
+
+(defn- typed-binding?
+  [value]
+  (and (map? value) (format/configuration-type? (:type value))
+       (or (contains? #{#{:type :ref} #{:type :value}} (set (keys value)))
+           (format/inline-binding-body value))))
+
+
+(defn- field-assertions
+  [definition arguments]
+  (into {} (keep (fn [{:keys [rename self-pin annotation scoped-annotation source-path]}]
+                   (let [spec (get-in definition source-path)
+                         annotation (or annotation scoped-annotation)]
+                     (when (or self-pin annotation (:pin-id rename) (contains? rename :description) (typed-binding? spec))
+                       [[(second source-path)] (if annotation (annotations/configuration annotation)
+                                                   (select-keys spec (if rename [:type :description] [:type])))])))) arguments))
+
+
+(defn- authored-own-field?
+  [value]
+  (and (types/own-slot-declaration? value) (not (format/inline-binding-body value))))
+
+
+(defn- source-argument-blockers
+  [source renames]
+  (into []
+        (mapcat (fn [[arg value]]
+                  (when (map? value)
+                    (cond-> []
+                      (contains? value :secret-path)
+                      (conj (blocker source :secret-path-binding-required [:args arg]))
+                      (and (contains? value :as) (not (contains? renames arg)))
+                      (conj (blocker source :rename-projection-required [:args arg]))
+                      (and (authored-own-field? value) (not (source-context/own-field-declaration? value)))
+                      (conj (blocker source :own-field-declaration-required [:args arg]))
+                      (and (not (typed-binding? value)) (not (format/legacy-literal-marker? value))
+                           (some #(contains? value %) [:value :ref])
+                           (seq (dissoc value :value :ref)))
+                      (conj (blocker source :binding-annotations-required [:args arg]))))))
+        (:args source)))
+
+
+(defn- ancestor-definitions
+  [definition context]
+  (let [defs (:defs-by-name context)]
+    (keep #(get defs %) (rest (slots/chain-of (slots/own-ref definition defs) defs)))))
+
+
+(defn- argument-blockers
+  [source entry ancestor-ids]
+  (let [{:keys [source-path origin expression policy target annotation scoped-annotation]} entry
+        problem #(blocker source % source-path)
+        raw (get-in source source-path)
+        typed? (or (:self-pin entry) (contains? annotation :type) (contains? scoped-annotation :type)
+                   (get-in entry [:rename :pin-id]) (typed-binding? raw))
+        inline-body (format/inline-binding-body raw)
+        unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
+    ;; The owner identity is checked separately from the binding's own fn-id:
+    ;; binding rows can address free inputs in an arbitrary referenced graph.
+    (cond-> (vec (get-in entry [:list-builder :inline-blockers]))
+      (and (source-list/has-inline-items? raw) (not (:list-builder entry)))
+      (conj (problem :inline-list-item-origin-required))
+      (and inline-body (not= [:ref inline-body] expression))
+      (conj (problem :inline-reference-mismatch))
+      (and (:source-slot-id entry) (not (:native-reader? entry)))
+      (conj (problem :field-projection-required))
+      (and (= :binding (:kind entry)) (nil? (:binding-id origin)))
+      (conj (problem :missing-binding-origin))
+      (and (= :binding (:kind entry)) (not (contains? ancestor-ids (:owner target))))
+      (conj (problem :ref-scope-required))
+      (and (or (:list-append policy) (:list-closed policy)) (not= :list-builder (first expression)))
+      (conj (problem :list-builder-required))
+      (get-in entry [:list-builder :record-blocker])
+      (conj (problem (get-in entry [:list-builder :record-blocker])))
+      (and (get-in entry [:list-builder :blocker]) (not (seq (get-in entry [:list-builder :inline-blockers]))))
+      (conj (problem (get-in entry [:list-builder :blocker])))
+      (:resolver-fn-id policy)
+      (conj (problem :resolver-binding-required))
+      (contains? policy :override-kind)
+      (conj (problem :legacy-override-kind-required))
+      (seq unknown-columns)
+      (conj (assoc (problem :unsupported-binding-columns) :columns unknown-columns))
+      (and typed? (not (uuid? (:type-override-fn-id policy))))
+      (conj (problem :unresolved-binding-type))
+      (or (and (contains? policy :type-override-fn-id) (not typed?))
+          (and (not annotation) (not scoped-annotation) (not (:rename entry))
+               (some #(contains? policy %) [:required :terminal :description])))
+      (conj (problem :binding-metadata-required))
+      (and (= :binding (:kind entry)) (nil? (:self-pin entry)) (nil? annotation) (nil? scoped-annotation) (nil? expression)
+           (not (or (:list-append policy) (:list-closed policy))))
+      (conj (problem :non-value-binding-required))
+      (and (= :ref (first expression)) (nil? (second expression)))
+      (conj (problem :missing-reference-identity)))))
+
+
+(defn- local-arguments
+  [source definition context rows]
+  (let [arguments (argument-ledger context source definition rows)
+        defs (:defs-by-name context)
+        chain (set (slots/chain-of (slots/own-ref definition defs) defs))
+        aliases (keep :rename arguments)
+        names (into [] (keep (fn [[arg spec]]
+                               (let [exposed (:as spec)]
+                                 (when (and (simple-keyword? exposed) (not= arg exposed)) exposed))))
+                    (:args source))
+        collision? (when (seq names)
+                     (or (not= (count names) (count (set names)))
+                         (some (fn [ancestor] (some #(contains? (:args ancestor) %) names))
+                               (cons definition (ancestor-definitions definition context)))))
+        ;; The legacy parser emits own fields before renames. Source replay
+        ;; compares both memberships and separately verifies any forwarded field.
+        rename-fields (when-not collision?
+                        (into #{} (keep #(when (:rename %) (second (:source-path %)))) arguments))
+        explained-fields (into (set rename-fields)
+                               (keep #(when (or (:self-pin %) (:annotation %) (:scoped-annotation %))
+                                        (peek (:source-path %))))
+                               arguments)
+        blockers (concat (when collision? [(blocker source :rename-field-collision [:args])])
+                         (source-argument-blockers source explained-fields)
+                         (mapcat #(argument-blockers source % chain) arguments))]
+    {:arguments arguments :aliases aliases :blockers blockers}))
+
+
+(defn- inherited-links-proved?
+  [owner links aliases certified blockers]
+  (let [local (into #{} (map (juxt :alias-id :field-id)) aliases)]
+    (or (= links certified)
+        ;; Local renames and certified forwarded declarations can coexist.
+        ;; Each stored FK must match exactly, including overlapping pairs.
+        (and (= (set links) (into local certified))
+             (every? (fn [{:keys [code source-path]}]
+                       (and (= :field-projection-required code) (= 2 (count source-path))
+                            (= :args (first source-path))
+                            (contains? certified (ids/slot-id owner (peek source-path)))))
+                     blockers)))))
+
+
+(defn- inherited-fields
+  "A scalar projection occupies its destination and exposes its own stable
+   alias slot. Prove each stored link against the declaring definition's
+   local source lowering before a descendant can use the alias."
+  [context ancestor]
+  (let [witness (source-context/occupied-reference-alias context ancestor)
+        original (or ((::original-of context) ancestor) ancestor)
+        ancestor (source-context/compact-reference ancestor witness)
+        rows ((::records-of context) ancestor)
+        owner-id (ids/fn-id (:namespace ancestor) (:name ancestor))
+        owner (some #(when (and (= :fn (:kind %)) (= owner-id (:id %))) %) rows)
+        bindings (filter #(= :binding (:kind %)) rows)
+        empty-annotations (into #{}
+                                (keep (fn [[field spec]]
+                                        (when (= {:as field} spec)
+                                          (get-in (annotations/annotation context original rows field) [:row :id]))))
+                                (:args original))
+        links (into {} (keep #(when (and (= :slot (:kind %)) (:source-slot-id %))
+                                [(:id %) (:source-slot-id %)])) rows)
+        occupied (into (set (vals links))
+                       (comp (filter #(or (:value-present %) (:ref-fn-id %) (:terminal %))) (map :slot-id)) bindings)]
+    (cond-> {:owner (:id owner) :parents (:parent-ids owner) :occupied occupied :addresses (into [] (comp (remove #(empty-annotations (:id %))) (map :slot-id)) bindings)}
+      (seq links)
+      (assoc :proven? (let [original (source-context/compact-reference original witness)
+                            {:keys [aliases blockers]} (local-arguments original ancestor context rows)
+                            certified (merge (get-in context [::source-context/forwarded-parent-links (:id owner)])
+                                             (source-context/native-field-links context ancestor (group-by :kind rows)))]
+                        (inherited-links-proved? (:id owner) links aliases certified blockers))))))
+
+
+(defn- prepare-inherited-fields
+  [context]
+  (let [states (volatile! {})]
+    (letfn [(check
+              [ancestor]
+              (if-let [entry (find @states ancestor)]
+                (let [state (val entry)]
+                  (when (= ::checking state)
+                    (throw (ex-info "Cyclic inherited field proof"
+                                    {:type :input/inherited-field-proof-cycle})))
+                  state)
+                (do
+                  (vswap! states assoc ancestor ::checking)
+                  (try
+                    (let [state (inherited-fields (assoc context ::inherited-fields check) ancestor)]
+                      (vswap! states assoc ancestor state)
+                      state)
+                    (finally
+                      (when (= ::checking (get @states ancestor))
+                        (vswap! states dissoc ancestor)))))))]
+      (assoc context ::inherited-fields check))))
+
+
+(defn- shared-implementation?
+  [lineage parent-ids]
+  (let [owners (set (map :owner lineage))
+        roots (filter #(empty? (:parents %)) lineage)
+        addresses (mapcat :addresses lineage)]
+    (and (= 1 (count roots)) (every? uuid? owners)
+         (every? owners parent-ids) (every? owners (mapcat :parents lineage))
+         (= (count addresses) (count (set addresses))))))
+
+
+(defn- inherited-blockers
+  [source definition context arguments rows]
+  (let [parents (some #(when (= (:id %) (:fn-id definition)) (:parent-ids %)) rows)
+        lineage (ancestor-definitions definition context)
+        states (mapv (::inherited-fields context) lineage)
+        occupied (into #{} (mapcat :occupied) states)
+        transformed (filter #(contains? % :proven?) states)
+        unproven? (and (seq transformed) (or (not-every? :proven? transformed)
+                                             (not (shared-implementation? states parents))))]
+    (cond-> (into []
+                  (keep (fn [{:keys [origin source-path]}]
+                          (when (contains? occupied (:slot-id origin))
+                            (blocker source :inherited-occupancy-required source-path))))
+                  arguments)
+      unproven? (conj (blocker source :inherited-projection-required [:args])))))
+
+
+(defn- composed-source
+  [source arguments aliases]
+  (let [declarations (into (array-map) (filter (comp authored-own-field? val)) (:args source))
+        declarations (into (into declarations (map (juxt :alias :declaration)) aliases) (positions/declarations arguments))
+        binds (filter #(and (= :binding (:kind %)) (not (:self-pin %)) (not (:annotation %))) arguments)
+        configuration (field-assertions source arguments)
+        bindings (into (array-map)
+                       (map (fn [{:keys [source-path expression]}]
+                              [(second source-path) expression])) binds)]
+    (cond-> (dissoc source :args)
+      (seq declarations) (assoc :input declarations)
+      (or (seq bindings) (and (contains? source :args) (empty? declarations) (empty? configuration)))
+      (assoc :bind bindings)
+      (seq configuration) (assoc :configure configuration))))
+
+
+(defn- composed-plan
+  [source definition context rows]
+  (let [{:keys [arguments aliases blockers]} (local-arguments source definition context rows)
+        blockers (vec (distinct (concat blockers (inherited-blockers source definition context arguments rows))))]
+    {:arguments arguments :blockers blockers
+     :proposed (when (empty? blockers) (composed-source source arguments aliases))}))
+
+
+(declare ^:private lower-inlines)
+
+
+(defn with-certified-inline
+  "Use a verified child proposal when its exact enclosing body is replanned."
+  [context {child-id :identity :keys [verification] :as child}]
+  (when-not (and (uuid? child-id) (= :authored-source-equivalent verification))
+    (throw (ex-info "Unverified inline source certificate"
+                    {:type :input/source-verification :code :unverified-inline-certificate :fn-id child-id})))
+  (assoc-in context [::certified-inlines child-id] child))
+
+
+(defn- certified-inline-plan
+  [source child context]
+  (when-let [{:keys [proposed legacy legacy-leaf] :as certificate} (get-in context [::certified-inlines (:fn-id child)])]
+    (let [original (assoc source :description (or (:description source) (:description child)))
+          arguments (:arguments legacy)
+          names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
+                                 (when scope-certificate [(:public-path scope-certificate) (second source-path)]))) arguments)
+          copies (into {} (mapcat (fn [{:keys [scope-certificate scoped-literal-copies]}]
+                                    (for [copy scoped-literal-copies]
+                                      [(:public-path copy) (:public-path scope-certificate)]))) arguments)]
+      (when (and (or (seq names) legacy-leaf)
+                 (migration/same-edn? (normalize-source original context)
+                                      (normalize-source (:source certificate) context)))
+        (cond-> {:proposed (cond-> proposed
+                             (seq names) (assoc :legacy-scope-names names)
+                             (seq copies) (assoc :legacy-scope-copies copies))
+                 :arguments arguments :blockers []}
+          legacy-leaf (assoc :legacy-leaf legacy-leaf))))))
+
+
+(defn- inline-child-plan
+  [body child context]
+  (let [source (assoc body :name (:name child) :namespace (:namespace child))
+        original-for (::original-of context)
+        context (assoc context ::original-of (fn [definition]
+                                               (if (= (:fn-id child) (:fn-id definition))
+                                                 source
+                                                 (original-for definition))))
+        certified (certified-inline-plan source child context)]
+    (or certified
+        (lower-inlines source child context
+                       (composed-plan source child context ((::records-of context) child))))))
+
+
+(defn- prepared-inline-child
+  [context ns-id name]
+  (let [[child & duplicates] (or (get (::prepared context) [(or ns-id "") name])
+                                 (when (keyword? name)
+                                   (when-let [visible (get (:defs-by-name context)
+                                                           (keyword (or ns-id "") (clojure.core/name name)))]
+                                     [visible])))]
+    (when-not (seq duplicates) child)))
+
+
+(defn- inline-list-item
+  [context source [field position] raw prepared-item]
+  (let [body (format/legacy-inline? raw)
+        ref (prepared-inline-ref prepared-item)
+        ns-id (:namespace source)
+        path (cond-> [:args field] (map? (get-in source [:args field])) (conj :append) true (conj position))
+        err (fn [code problems]
+              (throw (ex-info "Unverified inline list item"
+                              {:type :input/list-builder :code code
+                               :inline-blockers (or problems [(blocker source code path)])})))]
+    (when-not (and body (keyword? ref)) (err :inline-list-item-origin-required nil))
+    (let [normalized (dissoc (normalize-source (assoc raw :namespace ns-id) context) :namespace)
+          expected (parse/inline-declaration normalized [(:name source) field position] ns-id)
+          child (prepared-inline-child context ns-id ref)]
+      (when-not (and (= (:name expected) ref) child) (err :inline-list-item-origin-mismatch nil))
+      (let [{:keys [proposed arguments blockers legacy-leaf]} (when (contains? raw :args) (inline-child-plan raw child context))
+            v2 (if (contains? raw :args) (when proposed (format/migrate-inline raw proposed)) raw)]
+        (when (seq blockers)
+          (err :inline-list-item-declaration-required
+               (mapv #(merge % (blocker source (:code %) (into path (:source-path %)))) blockers)))
+        (when-not (and v2 (migration/same-edn? raw (format/inline-origin v2))) (err :inline-binding-origin-required nil))
+        (cond-> {:ref ref :fn-id (:fn-id child) :inline-body v2 :body raw :arguments arguments}
+          legacy-leaf (assoc :legacy-leaf legacy-leaf))))))
+
+
+(defn- lower-inline-argument
+  [source prepared context {:keys [source-path expression] :as argument}]
+  (let [body (format/inline-binding-body (get-in source source-path))]
+    (if-not (and body (contains? body :args) (= [:ref body] expression))
+      argument
+      (let [name (prepared-inline-ref (get-in prepared source-path))
+            ns-id (:namespace source)
+            child (prepared-inline-child context ns-id name)
+            problem #(assoc argument :blockers [(blocker source % source-path)])]
+        (if (nil? child)
+          (problem :missing-inline-declaration)
+          (let [{:keys [proposed arguments blockers legacy-leaf]} (inline-child-plan body child context)
+                v2 (when proposed (format/migrate-inline body proposed))]
+            (cond
+              (seq blockers)
+              (assoc argument :blockers
+                     (mapv #(merge % (blocker source (:code %) (into source-path (:source-path %)))) blockers))
+              (not (and v2 (migration/same-edn? body (format/inline-origin v2))))
+              (problem :inline-binding-origin-required)
+              :else (cond-> (assoc argument :expression [:ref v2] :inline-arguments arguments :inline-fn-id (:fn-id child))
+                      legacy-leaf (assoc :inline-legacy-leaf legacy-leaf)))))))))
+
+
+(defn- lower-inlines
+  [source definition context plan]
+  (if-not (some #(contains? (format/inline-binding-body %) :args) (vals (:args source)))
+    plan
+    (let [args (mapv #(lower-inline-argument source definition context %) (:arguments plan))
+          blockers (into (:blockers plan) (mapcat :blockers) args)]
+      (assoc plan :arguments args :blockers blockers
+             :proposed (when (empty? blockers)
+                         (reduce (fn [proposal {:keys [source-path expression]}]
+                                   (if expression (assoc-in proposal [:bind (second source-path)] expression) proposal))
+                                 (:proposed plan) args))))))
+
+
+(defn- classify
+  [source definition context rows]
+  (case (definition-kind source)
+    :base {:blockers []
+           :proposed (cond-> (dissoc source :args)
+                       (contains? source :args) (assoc :input (:args source)))}
+    :type {:blockers [] :proposed source}
+    :composed (lower-inlines source definition context (composed-plan source definition context rows))))
+
+
+(defn- record-origins
+  [rows]
+  (mapv #(select-keys % [:kind :id :fn-id :slot-id :source-slot-id :binding-id :position]) rows))
+
+
+(defn- plan-definition
+  [source prepared context]
+  (try
+    (let [normalized (normalize-source source context)
+          alignment (alignment-blockers source prepared normalized)
+          rows ((::records-of context) prepared)
+          witness (when (empty? alignment) (source-context/occupied-reference-alias context prepared))
+          compact (source-context/compact-reference prepared witness)
+          classified (when (empty? alignment)
+                       (classify (source-context/compact-reference source witness) compact context
+                                 (if witness ((::records-of context) compact) rows)))
+          blockers (into alignment (:blockers classified))]
+      (cond-> {:source source :identity (:fn-id prepared)
+               :kind (definition-kind source)
+               :status (if (seq blockers) :blocked :supported)
+               :blockers blockers
+               :legacy {:records rows :rich-input (:args source)
+                        :arguments (:arguments classified)}
+               :origins (record-origins rows)}
+        witness (assoc-in [:legacy :occupied-reference-alias] witness)
+        (empty? blockers) (assoc :proposed (:proposed classified))))
+    (catch Exception e
+      {:source source :status :blocked
+       :blockers [(assoc (blocker source :legacy-analysis-failed [])
+                         :cause-type (:type (ex-data e)))]})))
+
+
+(defn plan-module
+  "Plan source-only rewrites from ORIGINAL forms and parse/prepare-module's
+   complete context (:fn-defs, :name->id, :defs-by-name). The caller performs
+   preparation: it registers marker types and is not a pure operation.
+
+   Every original namespace/name must match exactly one prepared definition.
+   Unsupported definitions have blockers and no :proposed form. :legacy and
+   :source deliberately retain literal data and rich declarations for offline
+   verification; log only top-level :blockers/:counts, never the whole result.
+
+   This checks legacy interpretation, not new-loader/runtime equivalence.
+   No files, storage, registries or runtime graph are changed. Preparation
+   failures before this call remain the caller's responsibility."
+  [sources context]
+  (let [originals (group-by definition-key sources)
+        prepared (group-by definition-key (:fn-defs context))
+        planning-context (assoc (rename/prepare-context context)
+                                ::records-of (memoize (partial parse-one context))
+                                ::original-of (fn [definition]
+                                                (let [[original & more] (or (get originals (definition-key definition))
+                                                                            (get (::originals-by-id context) (:fn-id definition)))]
+                                                  (when-not more original)))
+                                ::ref-index (reference-index context)
+                                ::prepared prepared)
+        planning-context (prepare-inherited-fields planning-context)
+        definitions
+        (mapv (fn [source]
+                (let [key (definition-key source)
+                      matches (get prepared key)
+                      code (cond
+                             (not (keyword? (:name source))) :invalid-definition-identity
+                             (some #(contains? source %) [:input :bind :configure]) :already-structured-source
+                             (> (count (get originals key)) 1) :duplicate-source-definition
+                             (empty? matches) :missing-prepared-definition
+                             (> (count matches) 1) :duplicate-prepared-definition)]
+                  (if code
+                    {:source source :status :blocked :blockers [(blocker source code [])]}
+                    (plan-definition source (first matches) planning-context)))) sources)]
+    {:format :graphden/structured-input-source-plan-v1
+     :definitions definitions
+     :blockers (vec (mapcat :blockers definitions))
+     :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions)))}))
+
+
+(defn- binding-meaning
+  [record]
+  (cond-> (select-keys record [:id :fn-id :slot-id :value-present])
+    (:type-override-fn-id record) (assoc :type-override-fn-id (:type-override-fn-id record))
+    (some? (:description record)) (assoc :description (:description record))
+    (:value-present record) (assoc :value (:value record))
+    (:ref-fn-id record) (assoc :ref-fn-id (:ref-fn-id record))))
+
+
+(defn- authored-meaning
+  [declaration context bindings]
+  {:declaration (dissoc declaration :args :fn-id :namespace)
+   :base-args (when (= :base (definition-kind declaration)) (or (:args declaration) {}))
+   :context (select-keys context [:fn-id :contract :declaration-records :origin-ledger])
+   :bindings (mapv binding-meaning (sort-by :id bindings))})
+
+
+(defn- ordinary-bindings
+  [bindings traces]
+  (let [list-ids (set (map (comp :binding-id peek :fragments) (vals traces)))]
+    (remove #(contains? list-ids (:id %)) bindings)))
+
+
+(defn- legacy-authored-meaning
+  [definition context bindings arguments]
+  (let [traces (source-list/verified-traces arguments)]
+    (assoc (authored-meaning definition context (ordinary-bindings bindings traces))
+           :list-builders traces
+           :asserted-types (update-vals (field-assertions definition arguments) :type))))
+
+
+(defn- v2-authored-meaning
+  [definition parsed {:keys [row slot-id]}]
+  (let [traces (or (:list-builders parsed) {})
+        certified (into (set (map :row (vals (:scoped-inputs parsed))))
+                        (comp (filter :address) (map :row)) (vals (:configurations parsed)))
+        derived (into #{} (comp (filter #(or (:source-names %) (:copy-of %))) (map :row)) (vals (:scoped-inputs parsed)))
+        bindings (mapv (fn [binding]
+                         (cond
+                           (and row (= (:id row) (:id binding)))
+                           (do (when-not (migration/same-edn? row binding)
+                                 (throw (ex-info "Legacy initializer differs from replay" {:code :legacy-leaf-binding-mismatch})))
+                               (assoc (migration/legacy-binding binding) :slot-id slot-id))
+                           (contains? certified binding)
+                           (migration/legacy-binding (assoc binding :scope-path []))
+                           :else (rename/legacy-binding (:declaration-records parsed) binding)))
+                       (remove derived (ordinary-bindings (:bindings parsed) traces)))]
+    (assoc (authored-meaning definition parsed bindings)
+           :list-builders traces
+           :asserted-types (into {} (map (fn [[path assertion]] [(get assertion :legacy-path path) (:type assertion)]))
+                                 (:configurations parsed)))))
+
+
+(defn- read-emitted
+  [form]
+  (edn/read-string {:readers wire/wire-readers}
+                   (migration/stable-edn (wire/encode-unreadable-kws form))))
+
+
+(declare ^:private legacy-inline-meanings)
+
+
+(defn- legacy-inline-meaning
+  [environment ns-id id body arguments]
+  (let [child (get-in environment [:definition-by-id id])]
+    (when-not child
+      (throw (ex-info "Missing legacy inline declaration"
+                      {:code :missing-inline-declaration})))
+    (let [records ((:records-of environment) child)
+          bindings (filterv #(= :binding (:kind %)) records)
+          ctx (source-context/declaration-context environment child records bindings)]
+      {:origin body
+       :meaning (legacy-authored-meaning child ctx bindings arguments)
+       :children (legacy-inline-meanings environment (assoc body :namespace ns-id) child arguments)})))
+
+
+(defn- legacy-inline-argument
+  [environment source prepared {:keys [source-path origin inline-arguments list-inline-items]}]
+  (let [ns-id (:namespace source)
+        slot-id (:slot-id origin)]
+    (if-let [body (format/inline-binding-body (get-in source source-path))]
+      (let [id (ids/fn-id ns-id (prepared-inline-ref (get-in prepared source-path)))]
+        [[[slot-id] (legacy-inline-meaning environment ns-id id body inline-arguments)]])
+      (map (fn [[position {:keys [fn-id body arguments]}]]
+             [[slot-id position] (legacy-inline-meaning environment ns-id fn-id body arguments)])
+           list-inline-items))))
+
+
+(defn- legacy-inline-meanings
+  [environment source prepared arguments]
+  (into {} (mapcat (partial legacy-inline-argument environment source prepared)) arguments))
+
+
+(defn- lexical-inline-origin
+  [{:keys [row slot-id]} [path child :as entry]]
+  (if (and row (= path (:target-path row)) (= (:fn-id child) (:ref-fn-id row)))
+    [[slot-id] child]
+    entry))
+
+
+(declare ^:private v2-inline-meanings)
+
+
+(defn- v2-inline-meaning
+  [proofs [path child]]
+  (let [proof (get-in proofs [(:fn-id child) :legacy-leaf])]
+    [path {:origin (format/inline-origin (:inline-body child))
+           :meaning (v2-authored-meaning (dissoc (:source child) :bind :input :configure) child proof)
+           :children (v2-inline-meanings proofs (:fn-id child) (:inline-definitions child))}]))
+
+
+(defn- v2-inline-meanings
+  [proofs owner inlines]
+  (let [proof (get-in proofs [owner :legacy-leaf])
+        actual (into {} (comp (map (partial lexical-inline-origin proof)) (map (partial v2-inline-meaning proofs))) inlines)]
+    (when-not (= (count inlines) (count actual))
+      (throw (ex-info "Inline source sites overlap" {:code :inline-declaration-mismatch})))
+    actual))
+
+
+(defn- verify-inline-children!
+  [environment {:keys [source legacy]} prepared v2 proofs]
+  (let [expected (legacy-inline-meanings environment source prepared (:arguments legacy))
+        actual (v2-inline-meanings proofs (:fn-id v2) (:inline-definitions v2))]
+    (when-not (migration/same-edn? expected actual)
+      (throw (ex-info "Inline source identities or declarations changed"
+                      {:type :input/source-verification :code :inline-declaration-mismatch})))))
+
+
+(defn- inline-binding-origins
+  [environment definition]
+  (let [id (ids/fn-id (:namespace definition) (:name definition))]
+    (when-let [child (get-in environment [:definition-by-id id])]
+      (filterv #(= :binding (:kind %)) ((:records-of environment) child)))))
+
+
+(defn- child-arguments
+  [[_ arguments]]
+  (mapcat (fn [{:keys [inline-fn-id inline-arguments inline-legacy-leaf list-inline-items]}]
+            (cond-> (mapv (juxt :fn-id :arguments :legacy-leaf) (vals list-inline-items))
+              inline-fn-id (conj [inline-fn-id inline-arguments inline-legacy-leaf])))
+          arguments))
+
+
+(defn- inline-proof-index
+  [owner arguments legacy-leaf]
+  (into {} (map (fn [[id args proof]] [id {:arguments args :legacy-leaf proof}]))
+        (tree-seq (comp seq second) child-arguments [owner arguments legacy-leaf])))
+
+
+(defn- legacy-leaf-context
+  [{:keys [binding-id scope fn-id] :as context} {:keys [row slot-id]} original-bindings]
+  (if (and row (= fn-id (:fn-id row)))
+    (let [[original & more] (filter #(= (:id row) (:id %)) original-bindings)
+          target (:target-path row)]
+      (when-not (and original (empty? more) (= slot-id (:slot-id original))
+                     (= (:id row) (ids/binding-id fn-id slot-id))
+                     (migration/same-edn? (binding-meaning original)
+                                          (binding-meaning (assoc (migration/legacy-binding row) :slot-id slot-id))))
+        (throw (ex-info "Legacy initializer origin changed" {:code :legacy-leaf-origin-mismatch})))
+      (assoc context :binding-id (fn [requested-scope path]
+                                   (if (= [scope target] [requested-scope path])
+                                     (:id row)
+                                     (binding-id requested-scope path)))))
+    context))
+
+
+(defn- verification-context
+  [environment owner-id proofs bindings]
+  (let [type-names (get-in environment [:context :name->id])]
+    (fn [v2]
+      (let [[lowered rows] (source-context/lower-declarations environment v2)
+            id (ids/fn-id (:namespace lowered) (:name lowered))
+            {args :arguments legacy-leaf :legacy-leaf} (get proofs id)
+            origins (if (= owner-id id) bindings (inline-binding-origins environment lowered))]
+        (-> (source-list/replay-context (source-context/declaration-context environment lowered rows origins)
+                                        (source-list/verified-traces args) args type-names)
+            (merge (source-context/scoped-reference-context (assoc environment :inline-proofs proofs) lowered rows args))
+            (legacy-leaf-context legacy-leaf origins))))))
+
+
+(defn- verify-compact-definition
+  [environment definition]
+  (let [{definition-id :identity :keys [source proposed legacy legacy-leaf]} definition
+        prepared (get-in environment [:definition-by-id definition-id])
+        records (:records legacy)
+        bindings (filterv #(= :binding (:kind %)) records)
+        legacy-context (source-context/declaration-context environment prepared records bindings)
+        proofs (inline-proof-index definition-id (:arguments legacy) legacy-leaf)
+        options {:context-for (verification-context environment definition-id proofs bindings)
+                 :normalize-inline-parent
+                 (fn [ns-id parent]
+                   (let [names (get-in environment [:context :name->id])
+                         ref (parse/normalize-ref parent names ns-id)]
+                     (when (uuid? (get names ref)) ref)))}
+        proposed-module {:input-format 2 :namespace (:namespace source) :fns [proposed]}
+        parsed (module/parse-module-v2 proposed-module options)
+        emitted (module/emit-module-v2 parsed options)
+        reread (module/parse-module-v2 (read-emitted emitted) options)
+        v2 (first (:definitions reread))
+        [lowered] (source-context/lower-declarations environment (assoc (:source v2) :namespace (:namespace v2)))
+        legacy-meaning (legacy-authored-meaning prepared legacy-context bindings (:arguments legacy))
+        v2-meaning (v2-authored-meaning lowered v2 legacy-leaf)]
+    (verify-inline-children! environment definition prepared v2 proofs)
+    (when-not (migration/same-edn? (dissoc parsed :definitions) (dissoc reread :definitions))
+      (throw (ex-info "Structured source records changed on round trip"
+                      {:type :input/source-verification :code :v2-round-trip-mismatch})))
+    (when-not (migration/same-edn? legacy-meaning v2-meaning)
+      (throw (ex-info "Structured source changed authored meaning"
+                      {:type :input/source-verification :code :legacy-v2-meaning-mismatch})))
+    (assoc definition :verification :authored-source-equivalent :v2 v2)))
+
+
+(defn- verify-standard-definition
+  [environment {definition-id :identity :keys [source legacy] :as definition}]
+  (let [prepared (get-in environment [:definition-by-id definition-id])
+        witness (source-context/occupied-reference-alias (:context environment) prepared)]
+    (when-not (= witness (:occupied-reference-alias legacy))
+      (throw (ex-info "Reference alias source changed" {:code :reference-alias-origin-mismatch})))
+    (if-not witness
+      (verify-compact-definition environment definition)
+      (let [compact (source-context/compact-reference prepared witness)
+            rows-of (:records-of environment)
+            records (rows-of compact)]
+        (when-not (and (= (:records legacy) (rows-of prepared))
+                       (= (get-in prepared [:args (:field witness) :as]) (get-in source [:args (:field witness) :as]))
+                       (empty? (alignment-blockers source prepared (normalize-source source (:context environment)))))
+          (throw (ex-info "Reference alias declaration changed" {:code :reference-alias-origin-mismatch})))
+        (let [result (verify-compact-definition
+                       (-> environment (assoc-in [:definition-by-id definition-id] compact)
+                           (assoc-in [::source-context/occupied-reference-aliases definition-id] witness))
+                       (-> definition (update :source source-context/compact-reference witness)
+                           (assoc-in [:legacy :records] records)))]
+          (assoc result :source source :legacy legacy))))))
+
+
+(defn- verify-definition
+  [environment {id :identity :as definition}]
+  (if-let [verify (get-in environment [:context ::normalized-verifiers id])]
+    (or (when (fn? verify) (verify definition))
+        (throw (ex-info "Normalized source changed on staged replay"
+                        {:type :input/source-verification :code :normalized-source-mismatch})))
+    (verify-standard-definition environment definition)))
+
+
+(defn verify-module
+  "Verify each supported plan entry with a source-derived v2 resolver.
+   Compares declared field contracts, row identities, authored metadata and
+   whole-value/ref binding meaning after v2 parse, emit, EDN read and reparse.
+   Ancestor declarations come from the frozen prepared context. Ref execution,
+   residual interfaces, whole-corpus and database proofs are separate stages.
+
+   Keep the returned v2 rows and contracts private like the source plan.
+   Use :counts, :blockers and per-definition :verification for reports."
+  [plan context]
+  (let [environment (delay (source-context/environment context))
+        definitions
+        (mapv (fn [{:keys [source status] :as definition}]
+                (if (= :supported status)
+                  (try
+                    (verify-definition @environment definition)
+                    (catch Exception failure
+                      (let [{:keys [type code path]} (ex-data failure)]
+                        (-> definition
+                            (dissoc :proposed :verification :v2)
+                            (assoc :status :blocked
+                                   :blockers [(assoc (blocker source (or code :v2-verification-failed) (or path []))
+                                                     :cause-type type)])))))
+                  definition))
+              (:definitions plan))]
+    (assoc plan :definitions definitions
+           :blockers (vec (mapcat :blockers definitions))
+           :counts (merge {:supported 0 :blocked 0} (frequencies (map :status definitions))))))
+
+
+(defn omit-forwarded-links
+  "Build the declaration with its local fields and original membership intact."
+  [{:keys [source legacy] :as entry} field-ids]
+  (let [arguments (:arguments legacy)]
+    (-> entry
+        (assoc :status :supported :blockers [] :proposed (composed-source source arguments (keep :rename arguments)))
+        (update-in [:legacy :records]
+                   (fn [records]
+                     (mapv #(cond-> % (and (= :slot (:kind %)) (contains? field-ids (:id %)))
+                                    (dissoc :source-slot-id)) records))))))
+
+
+(defn forwarded-proofs
+  "Locate all authored forwarding origins in a forwarding-only plan view."
+  [context entry fields]
+  (when-not (and (vector? fields) (seq fields) (= (count fields) (count (set fields)))
+                 (= (set (for [field-name fields] [[:args field-name] :field-projection-required]))
+                    (set (map (juxt :source-path :code) (:blockers entry))))
+                 (= (count fields) (count (:blockers entry))))
+    (throw (ex-info "Every implicit local forwarding must be proved together"
+                    {:type :input/source-verification :code :incomplete-forwarded-fields})))
+  (into [] (mapcat #(forward/verify-forwarded-uses context entry %)) fields))
+
+
+(defn forwarded-fields-baseline
+  "Omit the complete group of structural links, keeping both addresses free.
+   Each link must have its own exact legacy field and reference origin."
+  [context entry fields]
+  (let [proofs (forwarded-proofs context entry fields)
+        candidate (omit-forwarded-links entry (set (map :field-id proofs)))]
+    {:proofs proofs :entry (first (:definitions (verify-module {:definitions [candidate]} context)))}))
+
+
+(defn forwarded-field-baseline
+  "Build the offline owner declaration with both addresses still free.
+   The structural proof identifies the only implicit link omitted from these rows."
+  [context entry field]
+  (let [{:keys [proofs entry]} (forwarded-fields-baseline context entry [field])]
+    (when-not (= 1 (count proofs))
+      (throw (ex-info "Expected one forwarded field occurrence"
+                      {:type :input/source-verification :code :nonunique-reference-use})))
+    {:proof (first proofs) :entry entry}))
+
+
+(defn- checked-forwarded-certificate!
+  [{:keys [owner-id field-id target-address target-field-id root-use-id projection-id target-fn-id generic-reference list-operand named-leaf?]}
+   field {:keys [source-names public-path row address edges] :as certificate}]
+  (when-not (and (= [field] source-names) (vector? public-path) (= (inc (count edges)) (count public-path))
+                 (= field (peek public-path)) (= (or target-address address) address)
+                 (= owner-id (ffirst address)) (= target-field-id (first (second address)))
+                 (= root-use-id (first (second (first address))))
+                 (= "projection" (:expression-kind row)) (= projection-id (:id row))
+                 (= owner-id (:fn-id row)) (= [field-id] (:projection-path row))
+                 (= target-fn-id (:target-fn-id (first edges)))
+                 (or (nil? list-operand) (= list-operand (:source-list-operand (second edges))))
+                 (= named-leaf? (:named-leaf? certificate))
+                 (= generic-reference (:generic-reference certificate)))
+    (throw (ex-info "Forwarded field differs from its checked projection"
+                    {:type :input/source-verification :code :forwarded-certificate-mismatch}))))
+
+
+(defn with-checked-projections
+  "Add one explicit projection for each checked occurrence to the candidate."
+  [candidate proofs certificates]
+  (when-not (= (count proofs) (count certificates))
+    (throw (ex-info "Every forwarded field needs its checked projection"
+                    {:type :input/source-verification :code :forwarded-certificate-mismatch})))
+  (run! (fn [[proof certificate]] (checked-forwarded-certificate! proof (peek (:source-path proof)) certificate))
+        (map vector proofs certificates))
+  (let [by-path (reduce (fn [acc [proof certificate]]
+                          (update acc (:source-path proof) (fnil conj []) certificate))
+                        {} (map vector proofs certificates))]
+    (-> candidate
+        (update-in [:proposed :bind] (fnil into {}) (map (fn [{:keys [public-path source-names]}]
+                                                           [public-path [:project source-names]]) certificates))
+        (update-in [:legacy :arguments]
+                   (fn [arguments]
+                     (mapv (fn [argument]
+                             (let [[one & more :as reads] (get by-path (:source-path argument))]
+                               (cond
+                                 (seq more) (assoc argument :forwarded-certificates reads)
+                                 one (assoc argument :scope-certificate one)
+                                 :else argument))) arguments))))))
+
+
+(defn rewrite-forwarded-fields
+  "Replace the legacy FK with a checked projection row, preserving local IDs."
+  [context entry fields certificates]
+  (let [proofs (forwarded-proofs context entry fields)
+        baseline (omit-forwarded-links entry (set (map :field-id proofs)))
+        candidate (with-checked-projections baseline proofs certificates)]
+    (first (:definitions (verify-module {:definitions [candidate]} context)))))
+
+
+(defn rewrite-forwarded-field
+  "Single-field convenience form of the atomic forwarding replay."
+  [context entry field certificate]
+  (rewrite-forwarded-fields context entry [field] [certificate]))
+
+
+(defn with-forwarded-parent
+  "Allow descendants to read the legacy declaration under an already verified
+   forwarding proof. Bind only the exact original local and destination IDs."
+  [context {owner-id :identity :keys [verification v2]}]
+  (let [projections (filter :source-names (vals (:scoped-inputs v2)))
+        rows (set (:bindings v2))
+        terminal? (some :named-leaf? projections)
+        pairs (into #{} (map (fn [{:keys [row]}] [(first (:projection-path row)) (first (:target-path row))]))
+                    projections)
+        links (into {} pairs)]
+    (when-not (and (= :authored-source-equivalent verification) (uuid? owner-id) (seq links)
+                   (or terminal? (= (count links) (count pairs)))
+                   (every? (fn [{:keys [row]}]
+                             (and (contains? rows row) (= "projection" (:expression-kind row))
+                                  (= owner-id (:fn-id row)) (empty? (:projection-scope-path row))
+                                  (= 1 (count (:projection-path row)) (count (:target-path row)))))
+                           projections))
+      (throw (ex-info "Cannot reuse an unchecked parent forwarding"
+                      {:type :input/source-verification :code :forwarded-parent-required})))
+    (if terminal? context (assoc-in context [::source-context/forwarded-parent-links owner-id] links))))

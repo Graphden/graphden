@@ -581,7 +581,8 @@
    :read-resource-bytes read-resource-bytes
    :shipped-asset shipped-asset
    :build-hashes-raw build-hashes-raw
-   :invoke {:impl invoke-fn :return-type-rule invoke-return-rule :taint-propagate? true}
+   :invoke {:impl invoke-fn :return-type-rule invoke-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :server-call {:impl invoke-fn :taint-propagate? true}
    :call {:impl invoke-fn :taint-propagate? true}
    :call-with {:impl call-with-fn :taint-propagate? true}

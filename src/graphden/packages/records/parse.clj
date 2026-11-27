@@ -103,7 +103,7 @@
         (map-indexed vector entries)))))
 
 
-(defn- inline-record-rows-for-return-type
+(defn inline-record-rows-for-return-type
   "When a fn-def's `:return-type` is an inline composite map
    (`{:status :int :body :text …}`, no `:type` discriminator),
    `resolve-type-ref` returns an anonymous-fn-id keyed by shape-hash
@@ -118,10 +118,9 @@
 
 
 (defn- parse-base-fn
-  "A fn-def with `:args` declaration and an impl is a base-fn. The
-   args become slot/fn-slot rows."
-  [{:keys [args return-type description]
-    fn-name :name ns-id :namespace} name->id]
+  "Emit a base function and the storage identities of its declared fields."
+  [{:keys [return-type description]
+    fn-name :name ns-id :namespace} fields name->id]
   (let [own-id (ids/fn-id ns-id fn-name)
         ;; A base-fn ALWAYS carries a return-type-fn-id — it is THE
         ;; structural discriminator vs a record-type (which has none).
@@ -138,7 +137,7 @@
                 :anonymous-hash nil
                 :constraint nil
                 :description description}
-        slots-records (emit-composite-records own-id (or args {}) name->id)
+        slots-records (emit-composite-records own-id (or fields {}) name->id)
         return-rows (inline-record-rows-for-return-type return-type name->id)]
     (into [own-fn] (concat slots-records return-rows))))
 
@@ -838,6 +837,20 @@
         (update 0 assoc :branch-local? (boolean (:branch-local? fn-def))))))
 
 
+(defn base-declaration-records
+  "Emit exact base declaration rows from a prepared identity and its fields."
+  [definition fields name->id]
+  (attach-fn-meta (parse-base-fn definition fields name->id) definition))
+
+
+(defn composed-declaration-record
+  "Emit a composed owner row from resolved parent identities."
+  [{fn-name :name ns-id :namespace :keys [description] :as definition} parent-ids return-type-id]
+  (first (attach-fn-meta [(composed-own-fn (ids/fn-id ns-id fn-name) fn-name ns-id
+                                           parent-ids description return-type-id)]
+                         definition)))
+
+
 (defn parse-fn-def
   "Dispatches on EDN entry shape; returns vector of records.
 
@@ -906,7 +919,7 @@
              :constraint (let [canonical (types/fn-type-declaration ft)]
                            (if (= 2 (count ft)) (pop canonical) canonical))
              :description description}])
-         :else             (parse-base-fn fn-def name->id))
+         :else             (parse-base-fn fn-def (:args fn-def) name->id))
        (attach-fn-meta fn-def))))
 
 
@@ -959,6 +972,14 @@
     (keyword (str "_anon-" (subs (ids/shape-hash shape-with-host) 0 16)))))
 
 
+(defn inline-declaration
+  "Internal declaration of a normalized anonymous body at its legacy use-site.
+   The body excludes binding-side annotations. The name stays out of source."
+  [body host ns-id]
+  (assoc body :name (anon-fn-name body host ns-id) :namespace ns-id
+         :description (or (:description body) "Synthetic — extracted from an inline anon fn-def.")))
+
+
 (declare expand-anons-in-fn-def)
 
 
@@ -984,14 +1005,8 @@
           ;; synthetic name based on per-call-site overrides.
           binding-type (:type v)
           v* (dissoc v :type)
-          synthetic-name (anon-fn-name v* host ns-id)
-          ;; Anon inherits the outer fn-def's namespace so its fn-id
-          ;; lands in the same module's namespace tree.
-          named (-> v*
-                    (assoc :name synthetic-name
-                           :namespace ns-id
-                           :description (or (:description v*)
-                                            "Synthetic — extracted from an inline anon fn-def.")))
+          named (inline-declaration v* host ns-id)
+          synthetic-name (:name named)
           [expanded extras] (expand-anons-in-fn-def named)
           new-arg-value (if binding-type
                           {:ref synthetic-name :type binding-type}
@@ -1044,13 +1059,8 @@
    (originals with refs in place + the new synthetics) for the
    regular parser to consume.
 
-   Dedup: identical inline anon shapes within a module collapse to
-   one synthetic name via `ids/shape-hash`. Multiple identical
-   inline anons (in one fn-def OR across fn-defs in the module)
-   produce the SAME synthetic name → keep only one copy. Without
-   dedup, sync would fail `validate-no-duplicate-ids!` on the
-   resulting storage batch. Cross-module identical shapes still
-   produce separate fn-ids (different `:namespace`)."
+   Synthetic names include namespace, host, argument and any sequence indices.
+   Repeated occurrences of the same synthetic name produce a single row."
   [module-fn-defs]
   (let [results (mapv expand-anons-in-fn-def module-fn-defs)
         expanded-defs (map first results)

@@ -1,0 +1,5 @@
+{:name "closedinputfixture"
+ :version "1.0.0"
+ :description "Exercise a checksum-verified native callback contract."
+ :dependencies ["core"]
+ :modules ["native" "structured"]}

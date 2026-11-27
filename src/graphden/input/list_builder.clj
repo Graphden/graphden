@@ -1,0 +1,219 @@
+(ns graphden.input.list-builder
+  "Ordered list fragments for the offline source migration. Item references
+   retain their own occurrences and the consumer's existing delivery policy."
+  (:require
+    [graphden.input.format :as format]
+    [graphden.input.list-positions :as positions]
+    [graphden.input.migration :as migration]
+    [graphden.input.rows :as rows]
+    [graphden.packages.records.ids :as ids]))
+
+
+(defn- reject!
+  [code]
+  (throw (ex-info "Cannot lower list construction" {:type :input/list-builder :code code})))
+
+
+(defn- fragment-id
+  [binding-id]
+  (ids/uuid-v5 binding-id "list-builder"))
+
+
+(defn origin
+  "Derive a generated construction's identities from its old field binding."
+  [owner-id target-id]
+  (when-not (and (uuid? owner-id) (uuid? target-id)) (reject! :invalid-list-chain))
+  (let [binding-id (ids/binding-id owner-id target-id)
+        builder-id (fragment-id binding-id)]
+    {:owner-id owner-id :target-id target-id :binding-id binding-id
+     :builder-id builder-id :tail-id (ids/slot-id builder-id :tail)}))
+
+
+(defn- parse-item
+  [binding-id name->id owner inline-at position form]
+  (when-not (and (vector? form)
+                 (or (= 2 (count form)) (format/typed-list-reference? form)
+                     (and (= 3 (count form)) (= :project (first form))
+                          (positions/valid-policy? (peek form)) (seq (peek form)))))
+    (reject! :invalid-list-item))
+  (let [[op payload] form
+        id (ids/binding-list-item-id binding-id position)]
+    (case op
+      :value {:id id :position position :kind :value :value payload}
+      :project (if (and (uuid? owner) (vector? payload) (= 1 (count payload)) (simple-keyword? (first payload)))
+                 (merge {:id id :position position :kind :projection :source-id (ids/slot-id owner (first payload))} (get form 2))
+                 (reject! :positional-list-field-mismatch))
+      :ref (let [child (get inline-at position)
+                 ref-id (cond
+                          (keyword? payload) (get name->id payload)
+                          (and (map? payload) (= payload (:inline-body child))) (:fn-id child))]
+             (when-not (uuid? ref-id) (reject! :unresolved-list-item-ref))
+             (cond-> {:id id :position position :kind :ref :fn-id ref-id}
+               (= 3 (count form)) (assoc :type (:type (peek form)))))
+      (reject! :invalid-list-item))))
+
+
+(defn parse-fragment
+  "Parse an explicit builder at a particular binding occurrence. A fragment's
+   continuation belongs only to this occurrence, even for identical contents."
+  ([binding-id form name->id] (parse-fragment binding-id form name->id nil))
+  ([binding-id form name->id owner] (parse-fragment binding-id form name->id owner {}))
+  ([binding-id form name->id owner inline-at]
+   (when-not (and (uuid? binding-id) (vector? form) (= 2 (count form)) (= :list-builder (first form)))
+     (reject! :invalid-list-builder))
+   (let [{:keys [items tail] :as spec} (second form)
+         builder-id (fragment-id binding-id)]
+     (when-not (and (map? spec) (= #{:items :tail} (set (keys spec)))
+                    (vector? items) (contains? #{:open :closed} tail))
+       (reject! :invalid-list-builder))
+     {:binding-id binding-id :builder-id builder-id :tail tail
+      :tail-id (ids/slot-id builder-id :tail)
+      :items (into [] (map-indexed (partial parse-item binding-id name->id owner inline-at)) items)})))
+
+
+(defn reference-expression
+  "Verify a previously lowered occurrence before using its callable as the
+   field expression. The caller may have supplied a different expression."
+  ([trace form name->id] (reference-expression trace form name->id {}))
+  ([trace form name->id inline-at]
+   (let [fragment (peek (:fragments trace))]
+     (when-not (and fragment
+                    (migration/same-edn? (dissoc fragment :owner-id :target-id)
+                                         (parse-fragment (:binding-id fragment) form name->id (:owner-id fragment) inline-at)))
+       (reject! :list-fragment-mismatch))
+     {:kind :ref :fn-id (:builder-id fragment)})))
+
+
+(defn emit-fragment
+  "Emit structured source. Every reference must resolve in the frozen index."
+  ([fragment id->name] (emit-fragment fragment id->name {}))
+  ([fragment id->name field-names] (emit-fragment fragment id->name field-names {}))
+  ([{:keys [tail items]} id->name field-names inline-at]
+   [:list-builder
+    {:tail tail
+     :items (mapv (fn [{:keys [kind value fn-id source-id position] :as item}]
+                    (case kind
+                      :ref (let [target (if-let [child (get inline-at position)]
+                                          (if (= fn-id (:fn-id child)) (:inline-body child) (reject! :list-item-origin-mismatch))
+                                          (or (get id->name fn-id) (reject! :unresolved-list-item-ref)))]
+                             (cond-> [:ref target] (contains? item :type) (conj {:type (:type item)})))
+                      :projection (positions/expression (or (get field-names source-id) (reject! :positional-list-field-mismatch)) item)
+                      :value [:value value]
+                      (reject! :invalid-list-item)))
+                  items)}]))
+
+
+(defn- source-item
+  [name->id value]
+  (cond
+    (and (keyword? value) (contains? name->id value)) [:ref value]
+    (not (map? value)) [:value value]
+    (or (= #{:value} (set (keys value))) (format/legacy-literal-marker? value)) [:value (:value value)]
+    (= #{:ref} (set (keys value))) [:ref (:ref value)]
+    (and (= #{:ref :type} (set (keys value))) (format/list-reference-types (:type value)) (keyword? (:ref value)))
+    [:ref (:ref value) {:type (:type value)}]
+    (positions/marker? value) (positions/expression (:as value) value)
+    (:as value) (reject! :positional-list-annotation-required)
+    (or (:parent value) (:parents value)) (reject! :inline-list-item-origin-required)
+    (some #(contains? value %) [:as :parent :parents :ref :value]) (reject! :unsupported-list-item-origin)
+    :else [:value value]))
+
+
+(defn compiler-items
+  "Build the ordered item descriptors accepted by the existing JVM sequence
+   compiler. It owns demand, delay delivery, and the call cache for refs.
+   An authored literal map containing :as stays data on that compiler path."
+  [{:keys [binding-id items owner-id]}]
+  (when-not (and (uuid? binding-id) (vector? items)) (reject! :invalid-list-builder))
+  (into []
+        (map-indexed
+          (fn [position {:keys [id kind value fn-id source-id] :as item}]
+            (when-not (and (= position (:position item)) (= id (ids/binding-list-item-id binding-id position))
+                           (or (not (contains? item :type)) (and (= :ref kind) (format/list-reference-types (:type item))))
+                           (case kind
+                             :projection (and (positions/valid-policy? (positions/occurrence-policy item)) (uuid? owner-id) (uuid? source-id) (nil? fn-id) (not (contains? item :value)))
+                             :ref (and (uuid? fn-id) (not (contains? item :value)))
+                             :value (and (contains? item :value) (nil? fn-id))
+                             false))
+              (reject! :list-item-origin-mismatch))
+            (cond-> {:kind :binding-list-item :id id :binding-id binding-id :position position
+                     :value value :ref-fn-id fn-id :literal (when (and (map? value) (:as value)) true)}
+              (= :projection kind) (assoc :projection-slot-id source-id :projection-owner-id owner-id))))
+        items))
+
+
+(defn- check-item!
+  [actual expected raw]
+  (when (and (not (:projection-slot-id expected)) (map? (:value actual)) (:as (:value actual)) (not (:literal actual)))
+    (reject! :positional-list-input-required))
+  (when-not (migration/same-edn? (if (:projection-slot-id expected) (assoc (dissoc expected :projection-slot-id :projection-owner-id) :value raw) expected) actual)
+    (reject! :list-item-origin-mismatch)))
+
+
+(defn source-form
+  "Convert a legacy append's authored items to explicit expressions. The
+   caller must establish that a bare vector was parsed as a list binding."
+  [source name->id]
+  (let [bare? (vector? source)
+        items (if bare? source (:append source))]
+    (when-not (and (vector? items)
+                   (or bare? (and (map? source) (every? #{:append :closed} (keys source))
+                                  (or (not (contains? source :closed)) (boolean? (:closed source))))))
+      (reject! :unsupported-list-binding))
+    [:list-builder {:items (mapv (partial source-item name->id) items)
+                    :tail (if (:closed source) :closed :open)}]))
+
+
+(defn source-fragment
+  "Compare an original source append with its actual prepared binding and
+   item rows. The caller resolves references in the definition's namespace.
+   Bare vectors must have been classified as appends by the legacy parser."
+  [{:keys [id fn-id slot-id list-append list-closed] :as binding} item-rows source name->id]
+  (let [form (source-form source name->id)]
+    (when-not (and (every? #{:kind :id :fn-id :slot-id :list-append :list-closed :value-present :value :ref-fn-id
+                             :resolver-fn-id :type-override-fn-id :override-kind :required :terminal :description} (keys binding))
+                   (= :binding (:kind binding)) (uuid? fn-id) (uuid? slot-id)
+                   (= id (ids/binding-id fn-id slot-id)) (true? list-append)
+                   (not-any? some? (map binding [:value :ref-fn-id :resolver-fn-id :type-override-fn-id
+                                                 :override-kind :required :terminal :description]))
+                   (false? (:value-present binding))
+                   (= list-closed (when (map? source) (= :closed (get-in form [1 :tail])))))
+      (reject! :unsupported-list-binding))
+    (let [fragment (assoc (parse-fragment id form name->id fn-id) :owner-id fn-id :target-id slot-id)
+          ordered (sort-by :position item-rows)]
+      (when-not (= (count (:items fragment)) (count ordered)) (reject! :list-item-count-mismatch))
+      (doseq [[actual expected raw] (map vector ordered (compiler-items fragment) (if (vector? source) source (:append source)))]
+        (check-item! actual expected raw))
+      fragment)))
+
+
+(defn empty-tail-binding
+  "The empty continuation row of a verified list fragment."
+  [{:keys [builder-id tail-id]}]
+  (rows/normalize {:kind :input-binding :id (ids/binding-id builder-id tail-id)
+                   :fn-id builder-id :scope-path [] :target-path [tail-id]
+                   :expression-kind "value" :value [] :value-present true}))
+
+
+(defn link-fragments
+  "Lower a verified, single-parent chain in ancestor-first inheritance order.
+   Descendants bind the previous builder's optional continuation at its use
+   scope. A closed tail binds an explicit empty list in the generated builder.
+   Item occurrences stay ordered inside their own builder."
+  [fragments]
+  (loop [remaining (seq fragments) path [] prior nil bindings []]
+    (if-let [{:keys [owner-id target-id binding-id builder-id tail] :as current} (first remaining)]
+      (do
+        (when-not (and (= (origin owner-id target-id) (select-keys current [:owner-id :target-id :binding-id :builder-id :tail-id]))
+                       (contains? #{:open :closed} tail) (not-any? #{binding-id} path)
+                       (or (nil? prior) (= target-id (:target-id prior))))
+          (reject! :invalid-list-chain))
+        (when (= :closed (:tail prior)) (reject! :closed-list-continuation))
+        (let [edge (rows/normalize {:kind :input-binding :id binding-id :fn-id owner-id
+                                    :scope-path path :target-path [(or (:tail-id prior) target-id)]
+                                    :expression-kind "ref" :ref-fn-id builder-id :value-present false})
+              bindings (cond-> (conj bindings edge)
+                         (= :closed tail)
+                         (conj (empty-tail-binding current)))]
+          (recur (next remaining) (conj path binding-id) current bindings)))
+      {:bindings bindings :open-continuation (when (= :open (:tail prior)) [path [(:tail-id prior)]])})))

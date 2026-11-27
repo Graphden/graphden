@@ -52,24 +52,25 @@
 
 (deftest affected-wave-fails-before-broad-checks-start
   (let [registry @(ns-resolve 'ci 'registry)
-        wanted #{"syntax" "biome-affected" "tests-js-affected" "clj-kondo" "tests-unit"}
+        wanted #{"syntax" "biome-affected" "markdownlint" "tests-js-affected" "clj-kondo" "tests-unit"}
         checks (filterv #(wanted (:name %)) registry)
-        calls (atom []) status (atom {}) failed (atom false)
         progress @(ns-resolve 'ci 'progress)]
-    (reset! progress {:prior nil})
-    (try
-      (with-redefs-fn {(ns-resolve 'ci 'run-check)
-                       (fn [check state _ red]
-                         (swap! calls conj (:name check))
-                         (let [bad? (= "tests-js-affected" (:name check))]
-                           (swap! state assoc (:name check) (if bad? :failed :passed))
-                           (when bad? (reset! red true))))}
-        #((ns-resolve 'ci 'run-waves!) checks status (atom {}) failed false))
-      (is @failed)
-      (is (= #{"syntax" "biome-affected" "tests-js-affected"} (set @calls)))
-      (is (= :skipped (get @status "clj-kondo")))
-      (is (= :skipped (get @status "tests-unit")))
-      (finally (reset! progress nil)))))
+    (doseq [failure ["markdownlint" "tests-js-affected"]]
+      (let [calls (atom []) status (atom {}) failed (atom false)]
+        (reset! progress {:prior nil})
+        (try
+          (with-redefs-fn {(ns-resolve 'ci 'run-check)
+                           (fn [check state _ red]
+                             (swap! calls conj (:name check))
+                             (let [bad? (= failure (:name check))]
+                               (swap! state assoc (:name check) (if bad? :failed :passed))
+                               (when bad? (reset! red true))))}
+            #((ns-resolve 'ci 'run-waves!) checks status (atom {}) failed false))
+          (is @failed)
+          (is (= #{"syntax" "biome-affected" "markdownlint" "tests-js-affected"} (set @calls)))
+          (is (= :skipped (get @status "clj-kondo")))
+          (is (= :skipped (get @status "tests-unit")))
+          (finally (reset! progress nil)))))))
 
 
 (deftest blocking-warning-is-a-failed-resume-hint

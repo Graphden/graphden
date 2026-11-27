@@ -1,0 +1,204 @@
+# Structured input storage: offline rehearsal
+
+This is the additive storage stage of the structured input transition. The
+production loader, checker, executor and editor still use v1 slots and bindings.
+There is no dual writer and no automatic live-data conversion. New input binding
+entities are excluded from generic public reads and writes. Activating a function's
+input contract requires the internal offline capability; no request parameter
+grants that capability. The tenancy adapter must also deny these entities before
+this schema reaches a tenant-facing deployment.
+
+## Identity and history
+
+`fn.input-type-fn-id` is nullable and versioned. Its target is a record type using
+the existing `fn`, immutable `slot`, and ordered `fn-slot` identities. Descriptor
+memberships use the existing membership version mechanism. A missing input type
+means v1 authority; it does not mean a new empty input type.
+
+`input-binding` and `input-binding-version` are separate additive entities. The
+identity carries `org-id`; its mirrored data carries the owner `fn-id`,
+`scope-path`, `target-path`, expression and field metadata. Both paths are JSONB
+vectors of UUIDs, normalized to UUID values after reading. Names are presentation
+labels and never identify fields or reference uses.
+
+- `target-path` contains declared slot IDs; `[]` addresses the whole input.
+- `scope-path` contains reference binding IDs and distinguishes separate uses of
+  one shared definition. It never clones the target definition or its bindings.
+- `expression-kind` is `value`, `ref`, `projection`, or null for metadata only.
+  A value uses `value-present=true`, including an explicit null literal. Refs
+  carry `ref-fn-id`; projections carry source scope and field paths.
+- `required`, `terminal`, `description`, and `type-override-fn-id` retain field
+  metadata independently of whether the binding occupies the field.
+
+A value, ref or projection occupies its entire addressed subtree. Ancestor and
+descendant writes conflict; sibling writes compose. Reusing one shared binding
+origin deduplicates; another binding ID at the same path conflicts, even when its
+value is equal. Metadata alone does not occupy a field. Terminal inherited
+metadata prevents descendant overrides.
+
+Offline singular and bulk writes validate the resulting branch view under one
+conservative advisory lock for all structured bindings. Merge validation occurs
+inside the merge transaction and rolls back conflicting merges. Replacement and
+removal through `graphden.input.storage` require the current version ID under the
+same lock. Tombstones, branch resolution, merge cutoffs and branch deletion reuse
+the versioning machinery. JSONB path references retain slot and binding identities
+during reclamation. Legacy function cleanup conservatively retains owners and
+targets referenced by v2 rows until those rows are explicitly removed.
+
+This validator checks structural scope/path validity and occupancy among the
+resolved supplied rows. It does **not** recursively instantiate a referenced
+function's occupied or missing inputs into every use scope. It also does not
+perform expected-type/HOF classification, evaluate refs, or compute the effective
+remaining input. Field traversal uses declared record memberships; aliases that
+need expansion must be materialized by the type layer before this validator.
+Those responsibilities belong to the following checker and
+executor stages; public v2 writers remain disabled until they exist.
+
+## Artifact workflow
+
+Use a stopped, isolated PostgreSQL copy. Initialize it through the ordinary schema
+migration mechanism first; the stable schema UUIDs support both fresh creation
+and additive upgrade. Keep its raw storage handle rather than a versioning or
+tenancy wrapper. This API performs the conversion without starting the executor:
+
+```clojure
+(require '[graphden.input.offline :as offline])
+
+;; raw-storage is the initialized storage of the isolated copy.
+(def rehearsal (offline/artifact (offline/snapshot raw-storage)))
+(get-in rehearsal [:plan :exceptions])
+(spit "/private/rehearsal.edn" (offline/encode rehearsal))
+
+(def checked (offline/decode (slurp "/private/rehearsal.edn")))
+(offline/apply! raw-storage checked)   ; {:status :applied}
+(offline/apply! raw-storage checked)   ; {:status :already-applied}
+(offline/restore! raw-storage checked) ; {:status :restored}
+```
+
+Artifacts contain literal graph data and raw history; store them as private
+database backups. No repository fixture should contain an operator's snapshot.
+The EDN reader accepts exactly one form, rejects unknown tags and reader
+evaluation, and preserves nanosecond timestamps with explicit tags.
+
+The plan contains `:changes`, `:additions`, and `:mapping`, with source and target
+fingerprints. It preserves raw branches, merge rows, tombstones, change stamps and
+binding version IDs. Descriptor and membership IDs are deterministic; inherited
+memberships retain their source versions. Binding identities stay shared.
+`migration/binding-origin` accepts `[owner-fn-id use-path]` and a field path so
+source adapters can reuse the same origins without global name lookup.
+For a scalar rename with matching primitive slot types, the plan verifies the
+original parent membership, the alias field, and the legacy binding. When
+their branch histories have matching timestamps and change stamps, it writes
+a projection at each original binding version and preserves every version
+ID. The ordinary writer can also create the alias and binding at different
+instants in one root-branch transaction. The migration requires matching change
+ID, revision and authorship. Later membership-only position edits on that root
+or a direct fork retain their own version rows, timestamps and revisions. The
+binding retains its original version. This case refuses tombstones, changes to
+binding policy, ambiguous ordering and merge cutoffs involving a touched branch.
+A binding that also supplies a value or reference requires further evidence.
+
+Apply regenerates the plan, verifies its source and target checksums, and compares
+the current raw graph snapshot under the ordinary semantic writer lock. Every
+branch's resulting structural view is checked before commit. Any failure rolls
+back the transaction. Exact target retries are no-ops. Restore requires the exact
+target fingerprint and refuses to erase later edits; it restores the captured
+v1 rows and removes only the added rows. Additive SQL columns and tables remain.
+Snapshot capture itself assumes the database copy is stopped; apply detects a
+different snapshot rather than treating it as approval to continue.
+
+## Explicitly unsupported conversions
+
+Any exception blocks the entire artifact. The inventory remains readable and
+deterministic so a subsequent semantic adapter can resolve it. Current reports
+cover list append/closed/item state requiring builders, unproved rename projections,
+cross-reference inputs, multiple membership origins for one slot, historical
+membership moves, historical executable/type role changes, binding trait policy,
+owner mismatch, inconsistent legacy expressions, and already structured data. Invalid branch structure also fails
+the transactional validation; it is never silently discarded.
+
+Parent sets are unversioned in the v1 storage model. The conversion preserves that
+model's raw identity and version information, including historical membership
+tombstones; it does not invent historical parent sets that v1 never stored.
+
+`migration/legacy-binding` is a read projection for representable top-level v2
+rows only. Nested scopes/paths and projection expressions fail explicitly. It is
+not a second writer or a complete v2 runtime reader. The legacy history UI and
+interactive editor tutorials remain on v1 until their later transition stages.
+
+## Editor input snapshot
+
+The standard graph subtree response may attach `structured-input` to the
+selected function row when that function has a persisted v2 input declaration.
+The server reads the branch and source grants in one read-only snapshot and
+batches both membership and binding reads by reachable owner. The projection
+contains the remaining visible fields, their types and requiredness. The
+server retains bound data, hidden fields and the route ledger. The editor
+keeps the projection with the installed subtree and displays it in the root
+card's **Remaining inputs** popover. A public primitive supplies only its
+verified shipped type identity. Incomplete analysis or unresolved runtime
+type obligations produce an unavailable status.
+
+An authorized offline fixture adds `bind-path` only to selectable own leaves.
+The **Bind** action sends that path and the literal through preview and apply,
+then reloads the subtree so the new binding disappears from the remaining
+fields. The editor retains the proposed value when the server refuses it.
+
+The same fixture can list its own occupied literal leaves in **Structured
+inputs**. Each entry carries the checked path, type, binding ID and current
+branch version. Concealed types and hidden address prefixes suppress the
+entire entry. Stored literals stay on the server. **Edit** accepts a new
+value and **Remove** opens a confirmation. Both compare the displayed
+version with their own preview before applying.
+
+## Preview and bind one leaf
+
+An offline fixture can call `graphden.crud.structured-input-bind/preview`
+with a function ID, an ordered path of field names and an explicit literal.
+`bind!` accepts the same proposal and the preview's `expected-state`. The
+proposal creates one binding at a free field in the root declaration.
+Preview and bind both reauthorize the current branch and rederive the field
+address under the semantic writer and structured binding locks. The basis
+covers the caller, branch, live closure versions, structural identities and
+the proposed literal. Existing binding values stay outside the basis.
+
+The command checks the graph with the proposed binding before insertion.
+A fresh authorization failure, stale preview or incompatible binding
+refuses the write. Explicit `nil` and `false` survive the storage round trip.
+The offline capability still gates this command and the generic API remains
+closed for structured binding rows.
+
+## Versioned edit and removal
+
+The offline edit and removal primitives compare the supplied version with
+the live winner on the request's branch. The semantic graph writer opens
+the transaction before the structured binding lock, winner read and write.
+Raw structured binding writes enter the same semantic writer before taking
+their binding and row locks.
+The transaction rolls back a failed edit, so its basis can be retried. Two
+edits on one branch cannot consume the same winner. Separate branches can
+each edit an inherited winner when both still resolve it.
+
+## Fixture transport
+
+The authenticated `POST /api/structured-input/preview` and
+`POST /api/structured-input/apply` routes exercise the offline commands.
+The request selects `bind`, `edit` or `remove`. Bind takes a function ID,
+field path and literal. Edit takes the function and binding IDs and a new
+literal. Remove takes the two IDs. Apply repeats the proposal and includes
+the action's `expected-state`. Edit and removal also require the version
+from their preview. A stale version or a preview for a different action
+returns `409`.
+
+Both routes require the trusted offline capability even after HTTP
+authentication. The request cannot enable that capability.
+
+## Verification
+
+`graphden.input.storage-test` uses PostgreSQL and the ordinary schema/versioning
+decorators. It covers fresh and repeated upgrade, inherited and concurrent prefix
+conflicts, atomic merges, tombstones and branch-only identity cleanup, shared use
+scopes, current-version edits, history-preserving artifact apply/restore, and
+stale snapshot rejection. Pure tests cover schema mirrors, offline admission,
+origin stability, safe EDN, unsupported reports and fingerprint fidelity. The
+developer tour links directly to these implementation boundaries.

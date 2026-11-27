@@ -11,7 +11,7 @@
 
 
 (def ^:private required-identities
-  #{:fn :slot :fn-slot :binding :binding-list-item :ns :branch :branch-merge})
+  #{:fn :slot :fn-slot :binding :binding-list-item :input-binding :ns :branch :branch-merge})
 
 
 (defn tables

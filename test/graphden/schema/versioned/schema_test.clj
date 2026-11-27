@@ -63,6 +63,8 @@
       (is (= :timestamptz (:type (:source-timestamp fields))))
       (is (= :ref (:type (:target-branch-id fields))))
       (is (= :branch (:ref-entity (:target-branch-id fields))))
+      (is (= {:type :bool :nullable? true}
+             (select-keys (:input-versions-materialized? fields) [:type :nullable?])))
       (is (= :timestamptz (:type (:target-timestamp fields))))
       (is (= :timestamptz (:type (:created-at fields)))))))
 
@@ -121,7 +123,7 @@
 
 (deftest versioned-entities-constant-test
   (testing "versioned-entities lists every versioned entity name"
-    (is (= #{:branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
+    (is (= #{:input-binding-version :branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
              :binding-version :binding-list-item-version}
            vds/versioned-entities))))
 
@@ -151,11 +153,13 @@
 (deftest version-data-fields-derived-test
   (testing "version-data-fields derive from the SAME source as the mirror
             entities — pinned snapshots guard the identity/versioned split"
-    (is (= #{:name :description :constraint :base-fn-id :element-fn-id
+    (is (= #{:input-type-fn-id :name :description :constraint :base-fn-id :element-fn-id
              :return-type-fn-id :anonymous-hash :expects-effects
              :lambda-params}
            (vds/version-data-fields :fn)))
-    (is (= #{:fn-id :slot-id :position} (vds/version-data-fields :fn-slot)))
+    (is (= #{:fn-id :slot-id :position :input-default} (vds/version-data-fields :fn-slot)))
+    (is (not-any? (vds/version-data-fields :input-binding)
+                  [:merge-edge-id :merge-source-version-id :merge-selected-version-id]))
     (is (= #{:fn-id :slot-id :value :value-present :ref-fn-id
              :type-override-fn-id :description :list-append :list-closed
              :terminal :required :resolver-fn-id}

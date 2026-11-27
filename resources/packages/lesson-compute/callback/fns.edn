@@ -1,0 +1,8 @@
+{:input-format 2
+ :namespace "lesson-compute.callback"
+ :fns [{:name :decorate-greeting-input
+        :input {:string :text :mark :text}
+        :return-type :text}
+       {:name :mark-greeting
+        :parent :decorate-greeting-input
+        :bind {:mark [:value "!"]}}]}

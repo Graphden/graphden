@@ -6,6 +6,7 @@
     [graphden.executor.checked-source-memo :as memo]
     [graphden.executor.checked-source-runtime :as runtime]
     [graphden.executor.compile-runtime :as compile]
+    [graphden.packages.loader :as loader]
     [graphden.storage.remote.core :as remote]
     [graphden.system.init.exec]
     [graphden.tenancy.context :as tenancy]
@@ -15,6 +16,22 @@
       CountDownLatch
       ExecutorService
       TimeUnit)))
+
+
+(deftest shipped-local-rule-keeps-the-approved-cache-callback
+  (let [definitions (:base-fn-defs (loader/load-packages ["core"]))
+        cache (runtime/create-cache)]
+    (try
+      (doseq [name [:assoc :if]
+              :let [definition (get definitions name)
+                    callback (:return-type-rule definition)]]
+        (is (= #{:return-type-rule} (:local-type-rules definition)))
+        (is (memo/admitted? cache {:rule callback}))
+        (is (not (memo/admitted? cache {:rule (with-meta callback {:audit true})}))))
+      (is (= {:positive-int :core.refinements/positive-int
+              :non-negative-int :core.refinements/non-negative-int}
+             (get-in definitions [:if :local-type-rule-aliases])))
+      (finally (memo/retire! cache)))))
 
 
 (deftest runtime-cache-is-explicit-owned-and-raw-replay-stays-off

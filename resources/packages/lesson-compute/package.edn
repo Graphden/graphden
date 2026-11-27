@@ -1,0 +1,5 @@
+{:name "lesson-compute"
+ :version "1.0.0"
+ :description "Optional lesson for computed records and callable inputs."
+ :dependencies ["core"]
+ :modules ["native" "builder" "callback" "structured"]}

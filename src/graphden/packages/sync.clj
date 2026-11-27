@@ -29,12 +29,15 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
+    [graphden.input.access :as input-access]
+    [graphden.packages.arithmetic-input :as arithmetic]
     [graphden.packages.loader :as pkg]
     [graphden.packages.owned :as owned]
+    [graphden.packages.primitive-input :as primitive]
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
-    [graphden.packages.records.types :as record-types]
+    [graphden.packages.type-declaration :as type-declaration]
     [graphden.packages.type-seed :as type-seed]
     [graphden.services.port-check :as port-check]
     [graphden.storage.graph-writer :as writer]
@@ -98,50 +101,9 @@
 
 
 (defn type-row-alias-body
-  "The type expression a type-row fn-def declares — `:refine` / record
-   `:type` / `:list` / `:union` / `:map` / `:variant` / `:fn-type` — or nil
-   for a fn-def that is not a type-row. Pure: the alias registration
-   below and the data-only package audits (the `:any`-slot taint guard)
-   read the same desugaring, so an alias body cannot mean one thing to
-   the checker and another to a guard."
+  "Canonical alias body shared with offline source verification."
   [fd]
-  (cond
-    (:refine fd)
-    (let [{:keys [base constraint]} (:refine fd)]
-      (when base [:refine base (or constraint [:any])]))
-
-    (and (:type fd) (map? (:type fd)))
-    (:type fd)
-
-    (:list fd)
-    [:list (:list fd)]
-
-    (:union fd)
-    (into [:union] (:union fd))
-
-    ;; Homogeneous map alias — `:map {:key K :value V}` is sugar
-    ;; for the structural `[:map K V]`. Without this branch the
-    ;; alias-body fn ignored the declaration and downstream slot
-    ;; references (`:list-entities :where :_storage-where-map`)
-    ;; saw a bare keyword the alias registry didn't know about,
-    ;; so the type-checker treated it as opaque and a literal
-    ;; `{:value {}}` failed against it.
-    (and (:map fd) (map? (:map fd)))
-    (let [{:keys [key value]} (:map fd)]
-      (when (and key value) [:map key value]))
-
-    ;; `:variant [:tag1 T1 :tag2 T2 …]` desugars to a union of
-    ;; tag-pinned records (see types/desugar-variant). Without
-    ;; this branch the EDN-declared `:result-text`,
-    ;; `:result-int`, `:validation` aliases never reached
-    ;; `register-type-alias!` and the type-checker treated
-    ;; them as unknown keywords — defeating the whole point
-    ;; of a variant declaration.
-    (:variant fd)
-    (types/desugar-variant (:variant fd))
-
-    (:fn-type fd)
-    (record-types/fn-type-declaration (:fn-type fd))))
+  (type-declaration/type-row-alias-body fd))
 
 
 (defn register-type-aliases!
@@ -321,6 +283,60 @@
                        :offenders (vec offenders)})))))
 
 
+(defn- primitive-input-types
+  [primitives]
+  (into {} (map (comp (juxt :fn-id :input-type-id) :parsed val)) primitives))
+
+
+(defn- reconcile-literal-children!
+  "A new pin can free a previously bound field. Retire only the deterministic
+   literal rows of a current package child, retaining their branch history."
+  [storage primitives]
+  (let [children (mapcat :children (remove :list-module (vals primitives)))
+        fields (into {} (map (fn [{:keys [fn-id contract]}]
+                               [fn-id (into {} (map (fn [{slot :id}] [(records/binding-id fn-id slot) [(str slot)]]))
+                                            (:fields contract))])) children)
+        retained (into #{} (mapcat #(map :id (:bindings %))) children)]
+    (when (seq fields)
+      (doseq [{:keys [id fn-id target-path scope-path expression-kind value-present] :as row}
+              (sp/query-entities storage :input-binding {:fn-id (vec (keys fields))})
+              :when (not (contains? retained id))]
+        (when-not (and (contains? (get fields fn-id) id) (= target-path (get-in fields [fn-id id]))
+                       (= [] scope-path) (= "value" expression-kind) (true? value-present) (not (coll? (:value row)))
+                       (not-any? #(some? (get row %)) [:ref-fn-id :resolver-fn-id :projection-path :projection-scope-path
+                                                       :type-override-fn-id :required :terminal :description]))
+          (throw (ex-info "Cannot retire an unrecognized package binding" {:type :package-error/primitive-admission})))
+        (input-access/with-binding-write fn-id id
+                                         #(binding [vs/*tombstone-delete?* true]
+                                            (when-not (sp/delete-entity storage :input-binding id)
+                                              (throw (ex-info "Package binding removal failed" {:type :package-error/primitive-admission})))))))))
+
+
+(defn- sync-package-bases!
+  [storage definitions ns-id-map all-name->id impls primitives]
+  (if (empty? primitives)
+    (registry/sync-defs-to-storage! storage definitions ns-id-map all-name->id)
+    (let [admitted (mapcat (fn [{:keys [parsed children]}] (cons parsed children)) (vals primitives))
+          list-modules (keep :list-module (vals primitives))
+          list-rows (mapcat :records list-modules)
+          bindings (distinct (concat (mapcat :bindings admitted) (filter #(= :input-binding (:kind %)) list-rows)))]
+      (binding [input-access/*package-input-types* (merge (into {} (map (juxt :fn-id :input-type-id)) admitted)
+                                                          (into {} (keep #(when-let [input (:input-type-fn-id %)] [(:id %) input])) list-rows))]
+        (writer/with-write [storage :graph]
+                           (let [written (registry-core/sync-defs-to-storage!
+                                           storage definitions ns-id-map all-name->id
+                                           (fn [signatures]
+                                             (update-vals primitives #(primitive/checked-records % impls signatures))))]
+                             (reconcile-literal-children! storage primitives)
+                             (doseq [{:keys [fn-id id] :as row} (sort-by (comp count :scope-path) bindings)]
+                               ;; JSONB stores path UUIDs as strings. Send that
+                               ;; same representation to the version diff.
+                               (let [data (-> row (dissoc :kind) (update :target-path #(mapv str %)) (update :scope-path #(mapv str %)))]
+                                 (input-access/with-binding-write fn-id id
+                                                                  #(sp/upsert-entities storage :input-binding [data]))))
+                             written))))))
+
+
 (defn register-base-fns-from-packages!
   "Pure side-effects: sync namespaces, register type-aliases, register
    base-fn impls in the global registry, sync base-fn rows to storage.
@@ -338,6 +354,7 @@
    ;; Fail loud BEFORE any DB write if a base-fn and a fn-def share a name,
    ;; or a bare route's handler declares a wire-breaking :lambda-params.
    (validate-no-name-collisions! packages)
+   (arithmetic/assert-ledgers! packages)
    (validate-route-handler-shapes! packages)
    ;; Trusted-bootstrap batch ceiling — same rationale as the binding in
    ;; `sync-fn-entities-from-packages!` (which see): `*max-batch-size*`
@@ -345,6 +362,11 @@
    ;; ns/base-fn row in single batches and must not die as the set grows.
    (binding [sp-config/*max-batch-size* (max sp-config/*max-batch-size* 100000)]
      (let [base-fn-defs (:base-fn-defs packages)
+           primitives (primitive/declarations base-fn-defs)
+           _ (when (seq primitives)
+               (when-not (and (vs/versioned-storage? storage) (uuid? (vs/current-branch-id storage)))
+                 (throw (ex-info "Package primitive requires versioned storage" {:type :package-error/primitive-admission})))
+               (primitive/check-implementations! primitives base-fn-defs extra-base-fns))
            ;; Sync namespace entities first (creates ns hierarchy in DB)
            ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
                                            (:ns-descriptions packages))
@@ -377,14 +399,20 @@
        (register-type-aliases! (:fn-defs packages))
        (doseq [[fn-name impl] base-fns-map]
          (exec/register-base-fn! fn-name impl))
-       (let [written (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)]
+       (let [written (sync-package-bases! storage base-fn-defs ns-id-map all-name->id base-fns-map primitives)]
          ;; Include parser-emitted anonymous type rows, using the writer's
          ;; actual identities after any existing-row remap. Only trusted
          ;; package bootstrap does this; tenant sync-bundle! never does.
-         (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written))))
-       {:ns-id-map ns-id-map
-        :all-name->id all-name->id
-        :base-fns base-fns-map}))))
+         (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written)))
+         {:ns-id-map ns-id-map
+          :all-name->id all-name->id
+          :base-fns (vary-meta base-fns-map assoc
+                               ::owned/native-signatures (::registry-core/registered-signatures (meta written))
+                               ::arithmetic/scalar-comparison (when (get-in primitives [:neq :in-place-definition])
+                                                                (:neq base-fn-defs))
+                               ::owned/list-implementations (when-let [modules (seq (keep :list-module (vals primitives)))]
+                                                              (into {} (mapcat (requiring-resolve 'graphden.input.pinned-list-runtime/implementations)) modules))
+                               ::owned/primitive-input-types (primitive-input-types primitives))})))))
 
 
 (defn- ancestor-parents
@@ -1140,7 +1168,8 @@
    (sync-fn-entities-from-packages! storage packages base-fns-info nil))
   ([storage packages base-fns-info
     {:keys [skip-type-check? skip-allowlist-gate?]}]
-   (let [fn-defs (mapv #(assoc % :fn-id (records/fn-id (:namespace %) (:name %)))
+   (let [fn-defs (into [] (comp (remove primitive/literal-descendant?)
+                                (map #(assoc % :fn-id (records/fn-id (:namespace %) (:name %)))))
                        (:fn-defs packages))
          ns-id-map (or (:ns-id-map base-fns-info) {})
          extra-name->id (or (:all-name->id base-fns-info) {})
@@ -1297,7 +1326,9 @@
   ([storage package-names]
    (bootstrap-from-packages! storage package-names nil))
   ([storage package-names opts]
-   (let [packages (pkg/load-packages package-names)
+   (let [packages (if (or (some? (:primitive-input opts)) (some? (:primitive-inputs opts)))
+                    (pkg/load-packages package-names opts)
+                    (pkg/load-packages package-names))
          base-fns-info (register-base-fns-from-packages! storage packages)
          fns (sync-fn-entities-from-packages! storage packages base-fns-info opts)]
      (assoc base-fns-info :fn-rows fns))))

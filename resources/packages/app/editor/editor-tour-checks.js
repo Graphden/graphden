@@ -42,9 +42,61 @@ function _tourFindFn(name) {
 function _tourFnForCheck(check) {
   if (!check['owned?']) return _tourFindFn(check.name);
   if (typeof _tourState === 'undefined' || !_tourPrincipalMatches(_tourState)) return null;
-  const created = _tourState?.created?.find(
-    row => row.type === 'fn' && row.name === check.name && row.id && row.receipt === 'created');
-  return created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
+  const parentId = check['lesson-branch?'] ? _tourLesson()?.['template-id'] : null;
+  const created = check['lesson-branch?'] ? _tourStructuredChild(_tourState, parentId)
+    : _tourState?.created?.find(row => row.type === 'fn' && row.name === check.name
+      && row.id && row.receipt === 'created');
+  const fn = created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
+  if (check['lesson-branch?'] && ((fn?.['namespace-id'] ?? null) !== created?.['namespace-id']
+      || fn?.['parent-ids']?.length !== 1 || fn['parent-ids'][0] !== parentId)) return null;
+  return fn;
+}
+
+function _tourStructuredInputPath(check) {
+  const {path, state} = check;
+  if (!Array.isArray(path) || !path.length || path.length > 64
+      || !path.every(part => typeof part === 'string' && part.length)) return false;
+  const fn = _tourFnForCheck(check);
+  if (!fn || fn.id !== selectedFnId) return false;
+  const input = window.gdStructuredInputFor?.(fn.id);
+  if (input?.status !== 'available' || !Array.isArray(input.fields) || !Array.isArray(input.occupied)) return false;
+  if (check['run?'] && input['run-available'] !== true) return false;
+  if (check.selector && !_tourDomVisible(check.selector)) return false;
+
+  const samePath = candidate => Array.isArray(candidate) && candidate.length === path.length
+    && path.every((name, index) => candidate[index] === name);
+  const occupied = input.occupied.filter(field => samePath(field?.path));
+  let remaining = input;
+  for (const name of path) {
+    if (!remaining) break;
+    if (!Array.isArray(remaining.fields)) return false;
+    const matches = remaining.fields.filter(field => field?.name === name);
+    if (matches.length > 1) return false;
+    remaining = matches[0];
+  }
+  if (state === 'remaining') {
+    return !Object.hasOwn(check, 'version-id') && !occupied.length
+      && remaining?.kind === 'input-field'
+      && (check['record?'] === true ? Array.isArray(remaining.fields) : !Object.hasOwn(remaining, 'fields'))
+      && remaining.type != null && samePath(remaining['bind-path']);
+  }
+  const expectedReferenceInputs = check['reference-inputs?'] === true;
+  if (state !== 'occupied' || occupied.length !== 1
+      || (expectedReferenceInputs ? remaining?.kind !== 'reference-inputs' : !!remaining)) return false;
+  const field = occupied[0];
+  return field.type != null && typeof field['binding-id'] === 'string' && !!field['binding-id']
+    && typeof field['version-id'] === 'string' && !!field['version-id']
+    && (!Object.hasOwn(check, 'version-id') || field['version-id'] === check['version-id']);
+}
+
+function _tourJsonEquals(actual, expected) {
+  if (actual === expected) return true;
+  if (!actual || !expected || typeof actual !== 'object' || typeof expected !== 'object'
+    || Array.isArray(actual) !== Array.isArray(expected)) return false;
+  const keys = Object.keys(expected);
+  return Object.keys(actual).length === keys.length && keys.every(
+    key => Object.hasOwn(actual, key) && _tourJsonEquals(actual[key], expected[key]),
+  );
 }
 
 // Rename views and their persisted source bindings share an identity even
@@ -236,7 +288,7 @@ function _tourCheckPasses(check) {
       case 'selected': {
         if (typeof selectedFnId === 'undefined' || !selectedFnId) return false;
         const sel = lookups?.fnMap ? lookups.fnMap.get(selectedFnId) : null;
-        return !!(sel && sel.name === check.name);
+        return !!(sel && sel.name === check.name && (!check['fn-id'] || sel.id === check['fn-id']));
       }
       case 'on-branch': {
         // Branch context IS the URL param; switching reloads the page and
@@ -302,6 +354,7 @@ function _tourCheckPasses(check) {
                     && String(b.value) === String(check.value));
         });
       }
+      case 'structured-input-path': return _tourStructuredInputPath(check);
       case 'ui-component': return window.gdTourUIComponentCheck?.(check) || false;
       case 'expanded': {
         // "the card of fn `name` is unfolded to at least `depth`" — read
@@ -396,10 +449,15 @@ function _tourCheckPasses(check) {
         // results and rendered text for scalars. Submitting clears the host, so an
         // earlier result cannot complete a step while the new run is pending.
         if (!_tourDomVisible('.execute-popover.visible .execute-result-pane')) return false;
+        if (Object.hasOwn(check, 'name')) {
+          const fn = _tourFnForCheck(check);
+          const host = document.querySelector('.execute-popover.visible .execute-result-host');
+          if (!fn || fn.id !== selectedFnId || host?.gdExecutionFnId !== fn.id) return false;
+        }
         const raw = document.querySelector(
           '.execute-popover.visible .execute-result-host .execute-result-raw pre');
         if (!Object.hasOwn(check, 'value')) return false;
-        if (raw) return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+        if (raw) return _tourJsonEquals(JSON.parse(raw.textContent), check.value);
         // The production scalar pane has no Raw details; it renders the
         // primitive directly. This proves the displayed value, not its type:
         // numeric 2 and text "2" share that markup. Shaped results use raw JSON.

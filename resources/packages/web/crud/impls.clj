@@ -12,6 +12,7 @@
     [graphden.crud.entities.list :as entity-list]
     [graphden.crud.fn-execution.lookup :as fn-exec-lookup]
     [graphden.crud.request :as request]
+    [graphden.crud.structured-input :as structured-input]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
@@ -178,6 +179,15 @@
                    entities/impl-visible?)))
 
 
+(defbase structured-input-contract
+  [fn-id]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)
+        row (when fn-id (sp/read-entity storage :fn fn-id))]
+    (when (and (:input-type-fn-id row) (entities/impl-visible? row))
+      (structured-input/read-input storage fn-id false))))
+
+
 (defbase all-rich-types
   []
   ;; Same as the `:graph-*` reads: `rich-types-with-type-rows` calls
@@ -300,6 +310,7 @@
    :fn-unread-bindings      fn-unread-bindings
    :strip-hidden-impl {:impl strip-hidden-impl :taint-propagate? true}
    :fn-impl-visible? fn-impl-visible?
+   :structured-input-contract {:impl structured-input-contract :taint-propagate? true}
    :all-rich-types all-rich-types
    :fn-names-with-tag fn-names-with-tag
    :query-ref-many-owners query-ref-many-owners

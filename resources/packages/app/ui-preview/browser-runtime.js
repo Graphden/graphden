@@ -62,7 +62,11 @@
     if (Array.isArray(value) || value instanceof LazySequence) {
       const items = []; for (const item of value) items.push(child(item)); return ['vector', items];
     }
-    if (value instanceof Map) return ['map', [...value].map(([k, v]) => [child(mapKey(k)), child(v)])];
+    if (value instanceof Map) {
+      const entries = [];
+      for (const [k, v] of value) entries.push([child(mapKey(k)), child(v)]);
+      return ['map', entries];
+    }
     throw new Error('Unsupported graph value');
   }
   function encode(value, nodeLimit = 50000) { return encodeValue(value, {nodes: nodeLimit}, 0); }
@@ -89,6 +93,25 @@
     }
   }
   const force = (value) => value instanceof Thunk ? value.force() : value;
+  // A structured input is an immutable Map view. Presence, key iteration
+  // and size need no values. The other Map operations consume only the
+  // entries they visit and use the same invocation-local cells as lookup.
+  class DeferredRecord extends Map {
+    constructor(fields) {
+      super();
+      for (const [key, cell] of fields) super.set(key, cell);
+    }
+    get(key) { return force(super.get(key)); }
+    *entries() { for (const key of this.keys()) yield [key, this.get(key)]; }
+    *values() { for (const key of this.keys()) yield this.get(key); }
+    [Symbol.iterator]() { return this.entries(); }
+    forEach(callback, self) {
+      for (const [key, value] of this) callback.call(self, value, key, this);
+    }
+    set() { throw new Error('Cannot mutate a browser input record'); }
+    delete() { throw new Error('Cannot mutate a browser input record'); }
+    clear() { throw new Error('Cannot mutate a browser input record'); }
+  }
   class LazySequence {
     constructor(items) { this.items = items; }
     *[Symbol.iterator]() { for (const item of this.items) yield force(item); }
@@ -400,8 +423,117 @@
     operationBudgets.set(token, state);
     return token;
   }
+  function routeStructured(fields, supplied, slots, tick, remaining, root, extras = null, keyType = null) {
+    const record = root
+      ? supplied && typeof supplied === 'object' && !Array.isArray(supplied) && !(supplied instanceof Map)
+      : supplied instanceof Map;
+    if (!record) throw new Error('Expected a graph input record');
+    const byKey = new Map(fields.map((field) => [root ? field.name : decode(field.key), field]));
+    const keys = root ? Object.keys(supplied) : supplied.keys();
+    for (const key of keys) {
+      tick();
+      const field = byKey.get(key);
+      if (!field) {
+        if (!extras || (keyType !== 'any' && !(key instanceof Keyword))) throw new Error('Unknown graph input field');
+        if (!Number.isSafeInteger(key)) mapKey(key);
+        if (!remaining && supplied instanceof DeferredRecord) {
+          extras.set(key, new Thunk(() => supplied.get(key)));
+        } else {
+          const value = supplied.get(key);
+          if (remaining) encodeValue(value, remaining, 0);
+          extras.set(key, value);
+        }
+        continue;
+      }
+      // Internal callback inputs already belong to graph evaluation.
+      // Retain deferred leaves and validate them only when the callback reads.
+      if (!remaining && !field.fields && supplied instanceof DeferredRecord) {
+        slots.set(field.slot, new Thunk(() => supplied.get(key)));
+        continue;
+      }
+      const value = root ? supplied[key] : supplied.get(key);
+      if (field.fields) {
+        const extras = (field.whole === true || field.whole === 'any') && field.slot ? new Map() : null;
+        routeStructured(field.fields, value, slots, tick, remaining, false, extras, field.whole);
+        if (field.slot) slots.set(field.slot, extras);
+      } else {
+        if (remaining) encodeValue(value, remaining, 0);
+        slots.set(field.slot, value);
+      }
+    }
+  }
+  function structuredPresence(input, slots, tick, inherited) {
+    const present = new Set();
+    const hasSource = (source) => present.has(source) || inherited?.has(source);
+    for (const rule of input.presence) {
+      tick();
+      if (rule.kind === 'always' || (rule.kind === 'supplied' && slots.has(rule.id))
+          || (rule.kind === 'supplied-record' && (slots.has(rule.id) || rule.sources.some(hasSource)))
+          || (rule.kind === 'any-present' && rule.sources.some(hasSource))) {
+        present.add(rule.id);
+      }
+    }
+    for (const id of input.required) if (!present.has(id)) throw new Error('Missing graph input field');
+    for (const rule of input.presence) {
+      if (slots.has(rule.id) && rule['required-fields']?.some((id) => !present.has(id))) {
+        throw new Error('Missing graph input field');
+      }
+    }
+    return present;
+  }
+  function matchesPrimitiveInput(value, type) {
+    switch (type) {
+      case 'any': return true;
+      case 'jsonb': return value === null || typeof value === 'boolean' || typeof value === 'number'
+          || typeof value === 'string' || Array.isArray(value) || value instanceof Map;
+      case 'null': return value === null;
+      case 'bool': return typeof value === 'boolean';
+      case 'text': return typeof value === 'string';
+      case 'int':
+      case 'numeric': return Number.isSafeInteger(value);
+      case 'keyword': return value instanceof Keyword;
+      default: return false;
+    }
+  }
+  function matchesInput(value, type, tick) {
+    if (typeof type === 'string') return matchesPrimitiveInput(value, type);
+    if (Array.isArray(type?.anyOf)) return type.anyOf.some((candidate) => matchesPrimitiveInput(value, candidate));
+    if (Array.isArray(type?.recordKeys) && value instanceof Map) {
+      for (const key of value.keys()) {
+        tick();
+        if (type.keyType !== 'any' && !(key instanceof Keyword)) return false;
+      }
+      return type.recordKeys.every(([ns, name]) => {
+        tick();
+        return value.has(keyword(name, ns));
+      });
+    }
+    if (type?.listOf && (Array.isArray(value) || value instanceof LazySequence)) {
+      if (type.listOf === 'any') return true;
+      for (const item of value) {
+        tick();
+        if (!matchesInput(item, type.listOf, tick)) return false;
+      }
+      return true;
+    }
+    if (Array.isArray(type?.mapOf) && value instanceof Map) {
+      const [keyType, valueType] = type.mapOf;
+      for (const [key, item] of value) {
+        tick();
+        if (!matchesInput(key, keyType, tick) || !matchesInput(item, valueType, tick)) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+  function checkedInput(value, type, tick) {
+    if (!matchesInput(value, type, tick)) throw new Error('Value does not match the required graph input type');
+    return value;
+  }
   function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {
-    if (plan.format !== 1 || plan.primitiveAbi !== 1) throw new Error('Unsupported browser graph format');
+    if ((plan.format !== 1 && plan.format !== 2) || plan.primitiveAbi !== 1) {
+      throw new Error('Unsupported browser graph format');
+    }
     if (!Number.isSafeInteger(valueNodeLimit) || valueNodeLimit < 1 || valueNodeLimit > 200000) {
       throw new Error('Invalid browser graph value limit');
     }
@@ -418,12 +550,15 @@
       const id = plan.entries[entry] || entry;
       const input = plan.inputs[id];
       if (!input || !functions.has(id)) throw new Error('Unknown browser graph entry');
-      const accepted = new Set(input.accepted);
-      for (const name of Object.keys(supplied)) if (!accepted.has(name)) throw new Error('Unknown graph argument: ' + name);
-      for (const name of input.required) if (!Object.hasOwn(supplied, name)) throw new Error('Missing graph argument: ' + name);
       const root = {slots: new Map(), names: new Map()};
-      for (const [name, value] of Object.entries(supplied)) { encode(value, valueNodeLimit); root.names.set(name, value); }
-      for (const {name, slots} of input.destinations) if (Object.hasOwn(supplied, name)) for (const slot of slots) root.slots.set(slot, supplied[name]);
+      const structured = plan.format === 2 ? input.structured : null;
+      if (!structured) {
+        const accepted = new Set(input.accepted);
+        for (const name of Object.keys(supplied)) if (!accepted.has(name)) throw new Error('Unknown graph argument: ' + name);
+        for (const name of input.required) if (!Object.hasOwn(supplied, name)) throw new Error('Missing graph argument: ' + name);
+        for (const [name, value] of Object.entries(supplied)) { encode(value, valueNodeLimit); root.names.set(name, value); }
+        for (const {name, slots} of input.destinations) if (Object.hasOwn(supplied, name)) for (const slot of slots) root.slots.set(slot, supplied[name]);
+      }
       checkOperationDeadline(shared);
       let remaining = operationLimit;
       const cache = new WeakMap();
@@ -436,6 +571,42 @@
           shared.sampled = 0;
           checkOperationDeadline(shared);
         }
+      }
+      if (structured) {
+        const { slots } = root;
+        routeStructured(structured.fields, supplied, slots, tick, {nodes: valueNodeLimit}, true);
+        root.frame = id;
+        root.present = structuredPresence(structured, slots, tick);
+      }
+      let open = true;
+      const available = (address, frame) => address === undefined
+        || frame.present?.has(address) || frame.parent?.present?.has(address);
+      function assertLiveCallback() {
+        if (!open) throw new Error('Graph callback is outside its invocation');
+      }
+      function checkedClosure(value, parent, records) {
+        const invoke = (item) => {
+          assertLiveCallback();
+          const slots = new Map();
+          if (records.length) {
+            for (const {fields, slot} of records) {
+              tick();
+              routeStructured(fields, item, slots, tick, null, false);
+              slots.set(slot, null);
+            }
+          } else {
+            for (const slot of value.slots) {
+              tick();
+              slots.set(slot, item);
+            }
+          }
+          const frame = {slots, names: new Map(), parent, frame: value.fn,
+            present: structuredPresence(value, slots, tick, parent.present)};
+          return call(value.fn, frame);
+        };
+        return new GraphClosure(invoke, () => {
+          throw new Error('Graph callback is outside its invocation');
+        }, valueNodeLimit);
       }
       function closure(value, frame) {
         const captured = {slots: new Map(frame.slots), names: new Map(frame.names)};
@@ -467,12 +638,63 @@
         }, valueNodeLimit);
       }
       function expr(value, frame) {
+        if (frame.parent) assertLiveCallback();
         tick();
         switch (value.kind) {
           case 'literal': return decode(value.value);
+          case 'supplied':
+            if (!structured) throw new Error('Unsupported browser expression');
+            return checkedInput(force(frame.slots.get(value.slot)), value.type, tick);
+          case 'supplied-default': {
+            if (!structured || frame.parent) throw new Error('Unsupported browser expression');
+            if (!Array.isArray(value.fallback) || !['nil', 'string'].includes(value.fallback[0])) {
+              throw new Error('Invalid browser field default');
+            }
+            const input = frame.slots.has(value.slot) ? frame.slots.get(value.slot) : decode(value.fallback);
+            return checkedInput(input, value.type, tick);
+          }
+          case 'validate':
+            if (!structured) throw new Error('Unsupported browser expression');
+            return checkedInput(expr(value.expr, frame), value.type, tick);
+          case 'optional-rename':
+            if (!structured || typeof value.present !== 'string') throw new Error('Unsupported browser expression');
+            return available(value.present, frame) ? expr(value.expr, frame) : null;
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
+          case 'record': {
+            if (plan.format !== 2 || !Array.isArray(value.fields) || value.fields.length > valueNodeLimit) {
+              throw new Error('Invalid browser input record');
+            }
+            const extras = value.wholeSlot ? frame.slots.get(value.wholeSlot) : null;
+            const fields = new Map(extras || []);
+            for (const field of value.fields) {
+              tick();
+              if (!available(field.present, frame)) continue;
+              if (typeof field?.expr?.kind !== 'string') throw new Error('Invalid browser input field');
+              const key = mapKey(decodeValue(field.key, {nodes: 1}, 0));
+              if (fields.has(key)) throw new Error('Duplicate browser input field');
+              fields.set(key, new Thunk(() => expr(field.expr, frame)));
+            }
+            return new DeferredRecord(fields);
+          }
           case 'closure': return closure(value, frame);
+          case 'checked-closure': {
+            if (!structured || frame.parent || !Array.isArray(value.slots)
+                || value.slots.length > operationLimit
+                || new Set(value.slots).size !== value.slots.length
+                || value.slots.some(slot => typeof slot !== 'string')) {
+              throw new Error('Invalid checked browser callback');
+            }
+            const records = value.records ?? (value.record ? [value.record] : []);
+            if (!Array.isArray(records) || records.length > operationLimit
+                || (value.records && value.record)
+                || (records.length && value.slots.length)
+                || records.some(record => typeof record?.slot !== 'string' || !Array.isArray(record.fields))
+                || new Set(records.map(record => record.slot)).size !== records.length) {
+              throw new Error('Invalid checked browser callback record');
+            }
+            return checkedClosure(value, frame, records);
+          }
           case 'server': return new GraphClosure(item => {
             if (typeof serverCall !== 'function') throw new Error('Server call transport is unavailable');
             return serverCall(value.descriptor, item);
@@ -490,6 +712,13 @@
       }
       function call(fnId, incoming) {
         tick();
+        if (structured) {
+          const owner = functions.get(fnId)?.frame;
+          if (owner !== undefined && owner !== incoming.frame) {
+            if (!incoming.parent || owner !== incoming.parent.frame) throw new Error('Invalid browser input frame');
+            incoming = incoming.parent;
+          }
+        }
         let byFunction = cache.get(incoming);
         if (!byFunction) { byFunction = new Map(); cache.set(incoming, byFunction); }
         if (byFunction.has(fnId)) return byFunction.get(fnId).force();
@@ -520,8 +749,12 @@
             frame.names.set(binding.name, value);
             for (const slot of binding.routes || []) frame.slots.set(slot, value);
           }
-          const args = new Map(fn.args.map((arg) => [arg.name, new Thunk(() =>
-            expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame))]));
+          const args = new Map();
+          for (const arg of fn.args) {
+            if (available(arg.present, frame)) {
+              args.set(arg.name, new Thunk(() => expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame)));
+            }
+          }
           const operation = primitives.get(fn.primitive);
           if (!operation) throw new Error('Missing browser primitive: ' + fn.primitive);
           try { return operation((name) => args.has(name) ? args.get(name).force() : null, tick); }
@@ -530,9 +763,13 @@
         byFunction.set(fnId, result);
         return result.force();
       }
-      const result = call(id, root);
-      checkOperationDeadline(shared);
-      return result;
+      try {
+        const result = call(id, root);
+        checkOperationDeadline(shared);
+        return result;
+      } finally {
+        open = false;
+      }
     }
     return {run};
   }

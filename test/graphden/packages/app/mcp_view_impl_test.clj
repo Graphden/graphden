@@ -12,6 +12,9 @@
     [clojure.edn :as edn]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.input.access :as access]
+    [graphden.packages.records.ids :as ids]
+    [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga]))
 
 
@@ -99,3 +102,35 @@
       (let [data (json/parse-string (tool! "describe-fn" {:name "web-server"}) true)]
         (is (= "web-server" (:name data)) "the contract is still answered")
         (is (= [] (:unread-bindings data)))))))
+
+
+(deftest describe-fn-uses-the-viewer-safe-structured-contract
+  (let [storage (:storage ga/*bootstrap*)
+        text-id (ids/primitive-fn-id :text)
+        fn-name "mcp-structured-profile"
+        args {:name fn-name}
+        describe (fn [] (json/parse-string (tool! "describe-fn" args) true))]
+    (binding [access/*offline?* true]
+      (let [input (:id (sp/create-entity storage :fn {:name "mcp-structured-input"}))
+            user-type (:id (sp/create-entity storage :fn {:name "mcp-structured-user"}))
+            root (:id (sp/create-entity storage :fn {:name fn-name :input-type-fn-id input :return-type-fn-id text-id}))
+            user-id (:id (sp/create-entity storage :slot {:name "user" :type-fn-id user-type}))
+            name-id (:id (sp/create-entity storage :slot {:name "name" :type-fn-id text-id}))
+            email-id (:id (sp/create-entity storage :slot {:name "email" :type-fn-id text-id :required true}))]
+        (sp/create-entities storage :fn-slot
+                            [{:fn-id input :slot-id user-id :position 0}
+                             {:fn-id user-type :slot-id name-id :position 0}
+                             {:fn-id user-type :slot-id email-id :position 1}])
+        (sp/create-entity storage :input-binding {:fn-id root :scope-path [] :target-path [user-id name-id]
+                                                  :expression-kind "value" :value-present true :value "already supplied"})
+        (let [surface (:structured-input (describe))]
+          (is (= "available" (:status surface)))
+          (is (= "user" (get-in surface [:fields 0 :name])))
+          (is (= [{:kind "input-field" :name "email" :type "text" :required true :required-now? true}]
+                 (get-in surface [:fields 0 :fields])))
+          (is (not (contains? surface :occupied))))
+        (with-filter* (hide-named fn-name)
+          (fn []
+            (let [data (describe)]
+              (is (= fn-name (:name data)))
+              (is (not (contains? data :structured-input))))))))))

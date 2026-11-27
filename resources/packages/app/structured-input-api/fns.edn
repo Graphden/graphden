@@ -1,0 +1,24 @@
+{:namespace "app.structured-input"
+ :description "Fixture-gated structured input command transport."
+ :fns
+ [{:name :_structured-input-command
+   :description "Run a structured input preview or a version-checked mutation in the request context."
+   :args {:phase {:type :text} :request {:type :ring-request-shape}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_structured-input-mcp-command
+   :description "Run a structured input command on an explicitly selected working branch."
+   :args {:request {:type :ring-request-shape} :command {:type :keyword-map}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_structured-input-preview-handler
+   :lambda-params [:request]
+   :parent :json-envelope-response
+   :args {:envelope {:parent :_structured-input-command :args {:phase "preview"}}}}
+
+  {:name :_structured-input-apply-handler
+   :lambda-params [:request]
+   :parent :json-envelope-response
+   :args {:envelope {:parent :_structured-input-command :args {:phase "apply"}}}}]}

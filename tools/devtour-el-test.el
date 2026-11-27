@@ -99,11 +99,11 @@ costs a search, but it should not be stale right after a bake)."
 
 (ert-deftest devtour-visit-puts-point-on-the-form ()
   (devtour--load)
-  (dolist (i (list 0 7 (/ (length devtour--steps) 2) (1- (length devtour--steps))))
-    (let* ((step (aref devtour--steps i))
-           (buf (devtour--visit step)))
-      (with-current-buffer buf
-        (should (looking-at-p (regexp-quote (plist-get step :head))))))))
+  (dolist (step (append devtour--steps nil))
+    (dolist (hint (list step (plist-put (copy-sequence step) :line 1)))
+      (let ((buf (devtour--visit hint)))
+        (with-current-buffer buf
+          (should (looking-at-p (regexp-quote (plist-get step :head)))))))))
 
 (ert-deftest devtour-annotation-finds-the-step-at-point ()
   (devtour--load)

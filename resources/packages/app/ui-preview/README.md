@@ -638,3 +638,18 @@ including after a caller timeout. The browser lifetime exposes loading, ready,
 error and cancelled states, and discards replies from an older root or session,
 including replies whose JSON parsing finishes late. Cancellation stops waiting;
 it does not promise to undo a completed mutation. No automatic retry is made.
+
+## Structured record expressions
+
+In browser graph format 2, a `record` expression carries ordered
+`{key, expr}` fields. Each key is a wire-encoded string or keyword and each
+expression is evaluated once on demand within its invocation. An omitted
+field stays absent. A field that returns nil or false stays present. Keys
+and size are available before any field is evaluated; iteration and wire
+encoding consume values. Format 1 rejects a `record` expression.
+
+The offline exporter lowers checked graphs into format 2. A named input is
+routed through the emitted residual field tree. Nested records use keyword
+keys. A presence rule is evaluated without reading values, and primitive
+type checks run when a supplied field is read. The production exporter uses
+format 1.

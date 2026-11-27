@@ -18,6 +18,7 @@
    from graph schema (replaced by slot/fn-slot/binding/binding-list-item)."
   (:require
     [graphden.schema.graph.schema :as gds]
+    [graphden.schema.input.schema :as input]
     [graphden.schema.protocol.protocol :as ds]))
 
 
@@ -637,7 +638,8 @@
   "Per-versioned-entity derivation inputs: which base fields stay on the
    identity row, the pinned mirror-column uuids, mirror-only tweaks."
   {:fn {:identity-fields #{:namespace-id :parent-ids :org-id :branch-local?}
-        :uuids {:name fn-version-name-field-uuid
+        :uuids {:input-type-fn-id input/input-type-version-uuid
+                :name fn-version-name-field-uuid
                 :description fn-version-description-field-uuid
                 :constraint fn-version-constraint-field-uuid
                 :base-fn-id fn-version-base-fn-id-field-uuid
@@ -649,7 +651,8 @@
    :fn-slot {:identity-fields #{:org-id}
              :uuids {:fn-id fn-slot-version-fn-id-field-uuid
                      :slot-id fn-slot-version-slot-id-field-uuid
-                     :position fn-slot-version-position-field-uuid}
+                     :position fn-slot-version-position-field-uuid
+                     :input-default #uuid "bb8e2ba4-4d4a-48e0-bb5c-641ca6d6b061"}
              ;; Bounded source reads find candidates by owner on ANY version.
              ;; Demoted refs need explicit indexes on the version table.
              :tweaks {:fn-id {:indexed? true}}}
@@ -695,7 +698,10 @@
 (def ^:private mirror-fields
   "Derived field maps for the four `-version` entities — built once at
    load from the base maps + `mirror-config`."
-  {:fn-version
+  {:input-binding-version
+   (derive-version-fields :input-binding input/binding-fields
+                          input/mirror-config input/version-framework)
+   :fn-version
    (derive-version-fields
      :fn gds/fn-fields (mirror-config :fn)
      {:fn-id {:uuid fn-version-fn-id-field-uuid
@@ -786,12 +792,13 @@
 ;; =============================================================================
 
 (def versioned-entities
-  #{:branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
+  #{:input-binding-version :branch :branch-merge :branch-approval :branch-comment :fn-version :fn-slot-version
     :binding-version :binding-list-item-version})
 
 
 (def version-entity-for
-  {:fn               :fn-version
+  {:input-binding    :input-binding-version
+   :fn               :fn-version
    :fn-slot          :fn-slot-version
    :binding          :binding-version
    :binding-list-item :binding-list-item-version
@@ -799,7 +806,8 @@
 
 
 (def version-id-field-for
-  {:fn               :fn-id
+  {:input-binding    :input-binding-id
+   :fn               :fn-id
    :fn-slot          :fn-slot-id
    :binding          :binding-id
    :binding-list-item :item-id
@@ -816,7 +824,7 @@
   (let [mirror (get version-entity-for base)
         id-field (get version-id-field-for base)]
     (into #{}
-          (remove (conj framework-fields id-field))
+          (remove (into (conj framework-fields id-field) (when (= base :input-binding) [:merge-edge-id :merge-source-version-id :merge-selected-version-id])))
           (keys (get mirror-fields mirror)))))
 
 
@@ -889,7 +897,8 @@
       ;; branch-merge
       ;; -----------------------------------------------------------------
       (ds/add-entity :branch-merge branch-merge-entity-uuid
-                     {:source-branch-id {:uuid branch-merge-source-branch-id-field-uuid
+                     {:input-versions-materialized? {:uuid #uuid "ee720934-cfbb-4dfe-912e-e2b1dbc2f291" :type :bool :nullable? true}
+                      :source-branch-id {:uuid branch-merge-source-branch-id-field-uuid
                                          :type :ref :ref-entity :branch}
                       :source-timestamp {:uuid branch-merge-source-timestamp-field-uuid
                                          :type :timestamptz}
@@ -952,6 +961,10 @@
       ;; The base's `:indexed?` on :name rides along: check-fn-name-
       ;; collision! finds its candidate set on fn-version.name.
       ;; -----------------------------------------------------------------
+      (ds/add-entity :input-binding-version input/version-entity-uuid
+                     (mirror-fields :input-binding-version))
+      (ds/add-constraint :input-binding-version
+                         {:type :unique :fields [:input-binding-id :branch-id :created-at]})
       (ds/add-entity :fn-version fn-version-entity-uuid
                      (mirror-fields :fn-version))
       (ds/add-constraint :fn-version

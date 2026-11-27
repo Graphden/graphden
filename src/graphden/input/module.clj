@@ -1,0 +1,390 @@
+(ns graphden.input.module
+  "Offline v2 source reader/export. Contexts are resolved by the caller, not
+   inferred from a global registry. This SOURCE API accepts name-derived UUIDs;
+   it does not solve arbitrary DB-owned identity migration or type checking."
+  (:require
+    [graphden.input.core :as input]
+    [graphden.input.format :as format]
+    [graphden.input.list-records :as list-records]
+    [graphden.input.rows :as rows]
+    [graphden.input.scoped-source :as scoped]
+    [graphden.input.source-annotations :as annotations]
+    [graphden.input.source-rich-types :as rich]
+    [graphden.input.syntax :as syntax]
+    [graphden.packages.rebase :as rebase]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]))
+
+
+(def ^:private type-keys
+  [:type :refine :list :union :map :tuple :variant :marker :fn-type])
+
+
+(defn- reject!
+  [code]
+  (throw (ex-info "Invalid structured input module"
+                  {:type :input/invalid-module :code code})))
+
+
+(defn- type-only?
+  [definition]
+  (and (not (or (:parent definition) (:parents definition)))
+       (some #(contains? definition %) type-keys)))
+
+
+(defn- field-configuration?
+  [[path spec]]
+  (and (vector? path) (seq path) (every? simple-keyword? path)
+       (map? spec) (every? #{:type :description} (keys spec))
+       (or (not (contains? spec :description)) (string? (:description spec)))
+       (or (not (contains? spec :type)) (format/configuration-type? (:type spec)) (rich/callable-shape? (:type spec)) (rich/closed-callable-shape? (:type spec)))))
+
+
+(defn- validate-source!
+  [module]
+  (format/require-v2! module)
+  (when (some #(contains? module %) [:args :configure])
+    (reject! :unsupported-module-form))
+  (when-not (and (or (nil? (:namespace module)) (string? (:namespace module)))
+                 (vector? (:fns module)))
+    (reject! :invalid-module-shape))
+  (doseq [definition (:fns module)]
+    (when-not (and (map? definition) (simple-keyword? (:name definition)))
+      (reject! :invalid-definition-identity))
+    (when (and (contains? definition :namespace)
+               (not= (or (:namespace definition) "") (or (:namespace module) "")))
+      (reject! :definition-namespace-mismatch))
+    (when (some #(contains? definition %) [:args :input-format])
+      (reject! :unsupported-definition-form))
+    (when (and (contains? definition :configure)
+               (not (and (map? (:configure definition)) (every? field-configuration? (:configure definition)))))
+      (reject! :unsupported-field-configuration))
+    (when (and (type-only? definition) (some #(contains? definition %) [:input :bind :configure]))
+      (reject! :type-definition-input)))
+  (when-not (= (count (:fns module)) (count (set (map :name (:fns module)))))
+    (reject! :duplicate-definition)))
+
+
+(defn- declaration-record
+  [record]
+  (when-not (and (map? record) (uuid? (:id record))
+                 (case (:kind record)
+                   :fn (and (or (nil? (:parent-ids record))
+                                (and (vector? (:parent-ids record)) (every? uuid? (:parent-ids record))))
+                            (every? #(or (nil? (get record %)) (uuid? (get record %)))
+                                    [:input-type-fn-id :return-type-fn-id :base-fn-id :element-fn-id]))
+                   :slot (and (string? (:name record)) (uuid? (:type-fn-id record))
+                              (or (nil? (:source-slot-id record)) (uuid? (:source-slot-id record))))
+                   :fn-slot (and (uuid? (:fn-id record)) (uuid? (:slot-id record))
+                                 (nat-int? (:position record)))
+                   false))
+    (reject! :invalid-declaration-record))
+  record)
+
+
+(defn unique-records
+  "Shared declaration rows can repeat identically; an identity cannot describe
+   two different rows. Binding identities remain global within their table."
+  [records]
+  (:rows
+    (reduce (fn [{:keys [seen] :as acc} record]
+              (let [key [(:kind record) (:id record)]]
+                (if-let [prior (get seen key)]
+                  (if (= prior record) acc (reject! :conflicting-record-identity))
+                  (-> acc (assoc-in [:seen key] record) (update :rows conj record)))))
+            {:seen {} :rows []} records)))
+
+
+(defn- declared-contract
+  [contract]
+  (let [contract (input/input-contract contract)]
+    (doseq [node (tree-seq #(contains? % :fields) :fields contract)]
+      (when (some #(contains? node %) [:state :binding :bindable? :required-now?])
+        (reject! :residual-contract-forbidden))
+      (when-not (every? #(uuid? (:id %)) (:fields node))
+        (reject! :invalid-field-identity)))
+    contract))
+
+
+(defn- context
+  [definition context-for]
+  (let [ctx (context-for definition)
+        owner (ids/fn-id (:namespace definition) (:name definition))
+        declarations (:declaration-records ctx)]
+    (when-not (and (map? ctx) (= owner (:fn-id ctx))
+                   (or (not (contains? ctx :scope)) (= [owner []] (:scope ctx)))
+                   (vector? declarations) (map? (:origin-ledger ctx)))
+      (reject! :invalid-definition-context))
+    (let [declarations (unique-records (mapv declaration-record declarations))
+          own (first (filter #(and (= :fn (:kind %)) (= owner (:id %))) declarations))]
+      (when-not own (reject! :missing-owner-declaration))
+      (if (type-only? definition)
+        (do
+          (when (or (:input-type-fn-id own) (:input-type-id ctx) (:contract ctx))
+            (reject! :type-definition-context))
+          (assoc ctx :declaration-records declarations))
+        (do
+          (when-not (and (= [owner []] (:scope ctx))
+                         (uuid? (:input-type-id ctx))
+                         (= (:input-type-id ctx) (:input-type-fn-id own))
+                         (map? (:name->id ctx))
+                         (every? (fn [[ref id]] (and (keyword? ref) (uuid? id))) (:name->id ctx))
+                         (ifn? (:binding-id ctx)))
+            (reject! :invalid-input-context))
+          (assoc ctx :declaration-records declarations :contract (declared-contract (:contract ctx))))))))
+
+
+(defn- binding-row
+  [configuration [[[owner scope-path] path] {:keys [binding-id expression]}]]
+  (rows/normalize
+    (merge {:kind :input-binding :id binding-id :fn-id owner
+            :scope-path scope-path :target-path path}
+           (select-keys (get configuration path) [:type-override-fn-id :description])
+           (case (:kind expression)
+             :value {:expression-kind "value" :value-present true :value (:value expression)}
+             :projection {:expression-kind "projection" :value-present false
+                          :projection-scope-path (second (:scope expression)) :projection-path (:path expression)}
+             :ref {:expression-kind "ref" :value-present false :ref-fn-id (:fn-id expression)}
+             (reject! :unsupported-binding-expression)))))
+
+
+(defn- resolve-configuration
+  [{:keys [contract scope resolve-config-type self-pin declaration-records binding-id field-annotations binding-descriptions named-projection-type-id]} state [names {:keys [type] :as spec}]]
+  (let [path (:path (input/resolve-address contract scope names))
+        expression (get-in state [[scope path] :expression])
+        callable-id (when (and (rich/closed-callable-shape? type) (= :projection (:kind expression)) (= scope (:scope expression)))
+                      (rich/projected-callable-id (first scope) path (:path expression) contract
+                                                  (group-by :id declaration-records) type (or named-projection-type-id {})))]
+    (cond
+      (and (not (contains? state [scope path])) (get field-annotations names))
+      (let [annotation (get field-annotations names)]
+        (when-not (and (= spec (annotations/configuration annotation))
+                       (= path (:target-path annotation) (get-in annotation [:row :target-path]))
+                       (= (binding-id scope path) (get-in annotation [:row :id]))
+                       (= (first scope) (get-in annotation [:row :fn-id])))
+          (reject! :unverified-field-annotation))
+        [names annotation])
+
+      (and (rich/callable-shape? type) (nil? callable-id))
+      (let [owner (some #(when (= (first scope) (:id %)) %) declaration-records)
+            field (some #(when (= path [(:id %)]) %) (:fields contract))]
+        (when (contains? state [scope path]) (reject! :self-pin-requires-free-field))
+        (when-not (and (= type (:type self-pin)) (= (binding-id scope path) (get-in self-pin [:row :id]))
+                       (rich/exact-self-pin? owner field (assoc self-pin :type type) (group-by :id declaration-records)))
+          (reject! :unverified-callable-self-pin))
+        [names self-pin])
+      :else
+      (do
+        (when-not (or (contains? spec :type) (contains? spec :description)) (reject! :unverified-field-annotation))
+        (when-not (contains? state [scope path]) (reject! :configuration-requires-bound-field))
+        (when (contains? spec :description)
+          (when-not (= {:description (:description spec) :target-path path :binding-id (binding-id scope path)}
+                       (get binding-descriptions names))
+            (reject! :unverified-field-annotation)))
+        (when (and (contains? spec :type) (nil? callable-id) (not (ifn? resolve-config-type))) (reject! :configuration-type-resolver-required))
+        (let [resolved (cond
+                         callable-id {:type type :type-override-fn-id callable-id}
+                         (contains? spec :type) (resolve-config-type type))]
+          (when-not (or callable-id (not (contains? spec :type))
+                        (and (format/configuration-type? (:type resolved)) (uuid? (:type-override-fn-id resolved))))
+            (reject! :unresolved-configuration-type))
+          [names (merge (select-keys resolved [:type :type-override-fn-id])
+                        (select-keys spec [:description]) {:target-path path})])))))
+
+
+(declare ^:private parse-definition)
+
+
+(defn- normalize-inline-origin
+  [body origin module-namespace normalize-ref]
+  (let [resolve-ref #(normalize-ref module-namespace %)
+        parents (or (:parents origin) [(:parent origin)])]
+    (when-not (every? #(keyword? (resolve-ref %)) parents)
+      (reject! :unresolved-inline-parent))
+    (doseq [form (vals (:bind body))]
+      (when (and (keyword? form) (resolve-ref form))
+        (reject! :inline-binding-origin-mismatch))
+      (when (and (vector? form) (= :ref (first form)) (keyword? (second form))
+                 (not (keyword? (resolve-ref (second form)))))
+        (reject! :unresolved-inline-reference)))
+    (rebase/rewrite-references origin #(or (resolve-ref %) %))))
+
+
+(defn- inline-site
+  [{:keys [contract scope scoped-inputs]} field position]
+  (if (vector? field)
+    (let [{:keys [source-path row]} (get scoped-inputs field)
+          field-name (peek source-path)
+          path (:target-path row)]
+      (when-not (and (nil? position) (= [:args field-name] source-path)
+                     (simple-keyword? field-name) (= field-name (peek field))
+                     (vector? path) (= 1 (count path)) (uuid? (first path))
+                     (= "ref" (:expression-kind row)) (uuid? (:ref-fn-id row)))
+        (reject! :unsupported-scoped-inline-declaration))
+      {:legacy-field field-name :path path :target-id (:ref-fn-id row)})
+    {:legacy-field field :path (:path (input/resolve-address contract scope [field]))}))
+
+
+(defn- inline-definition
+  [source module-namespace ctx {:keys [normalize-inline-parent] :as options} [field position expression]]
+  (when (and (vector? expression) (= :ref (first expression)) (map? (second expression)))
+    (let [body (second expression)
+          origin (format/inline-origin body)]
+      (when-not (and (= 2 (count expression)) origin (or (:parent source) (:parents source)))
+        (reject! :unsupported-inline-declaration))
+      (when-not (ifn? normalize-inline-parent) (reject! :inline-parent-resolver-required))
+      (let [{:keys [legacy-field path target-id]} (inline-site ctx field position)
+            normalized (normalize-inline-origin body origin module-namespace normalize-inline-parent)
+            host (cond-> [(:name source) legacy-field] (some? position) (conj position))
+            named (parse/inline-declaration normalized host module-namespace)
+            child (merge (dissoc named :args) (select-keys body [:bind :input :configure]))]
+        (when (and target-id (not= target-id (ids/fn-id module-namespace (:name named))))
+          (reject! :scoped-inline-origin-mismatch))
+        [(cond-> path (some? position) (conj position))
+         (assoc (parse-definition child module-namespace options) :inline-body body)]))))
+
+
+(defn- inline-sites
+  [[field form]]
+  (if (and (vector? form) (= :list-builder (first form)) (vector? (get-in form [1 :items])))
+    (map-indexed #(vector field %1 %2) (get-in form [1 :items]))
+    [[field nil form]]))
+
+
+(defn- inline-definitions
+  [source module-namespace ctx options]
+  (let [entries (into [] (comp (mapcat inline-sites)
+                               (keep (partial inline-definition source module-namespace ctx options)))
+                      (when (map? (:bind source)) (:bind source)))
+        definitions (into (sorted-map) entries)]
+    (when-not (= (count entries) (count definitions))
+      (reject! :duplicate-inline-site))
+    definitions))
+
+
+(defn- list-inline-at
+  [inlines]
+  (reduce-kv (fn [result [field position] child]
+               (if (some? position) (assoc-in result [[field] position] child) result))
+             {} inlines))
+
+
+(defn- list-builders
+  [source {:keys [contract scope] :as ctx}]
+  (into (sorted-map)
+        (keep (fn [[name form]]
+                (when (and (vector? form) (= :list-builder (first form)))
+                  (let [path (:path (input/resolve-address contract scope [name]))
+                        field (some #(when (= (first path) (:id %)) %) (:fields contract))]
+                    [path (list-records/parse-contribution ctx field form)]))))
+        (when (map? (:bind source)) (:bind source))))
+
+
+(defn- parse-definition
+  [source module-namespace {:keys [context-for] :as options}]
+  (let [definition (assoc source :namespace module-namespace)
+        ctx (context definition context-for)
+        common {:source source :namespace module-namespace :fn-id (:fn-id ctx)
+                :declaration-records (:declaration-records ctx) :origin-ledger (:origin-ledger ctx)}]
+    (if (type-only? definition)
+      common
+      (let [bind (get source :bind {})
+            local (scoped/local-form bind)
+            local-source (assoc source :bind local)
+            inlines (inline-definitions source module-namespace ctx options)
+            ctx (assoc ctx :inline-at inlines :list-inline-at (list-inline-at inlines))
+            builders (list-builders local-source ctx)
+            expression (syntax/parse-expression (:contract ctx) (:scope ctx) local (assoc ctx :list-at builders))
+            state (list-records/locate-contributions (input/bind-input (:contract ctx) {} (:scope ctx) expression)
+                                                     (:scope ctx) builders)
+            routes (scoped/parse-bindings (assoc ctx :authored-configurations (:configure source)) state bind)
+            local-configs (into {} (keep (fn [[path :as entry]]
+                                           (when (= 1 (count path)) (resolve-configuration ctx state entry))))
+                                (:configure source))
+            configs (into local-configs
+                          (keep (fn [[path spec]]
+                                  (when (< 1 (count path))
+                                    (scoped/parse-annotation (assoc ctx :parsed-scoped-bindings routes) state path spec))))
+                          (:configure source))
+            by-path (into {} (map (juxt :target-path identity)) (vals local-configs))
+            bindings (mapv (partial binding-row by-path) (sort-by (comp pr-str key) state))]
+        (assoc common :input-type-id (:input-type-id ctx) :contract (:contract ctx)
+               :expression expression :binding-state (scoped/binding-state state routes)
+               :bindings (into (into bindings (keep (fn [[path spec]] (when-not (contains? routes path) (:row spec)))) configs)
+                               (map :row) (vals routes))
+               :configurations configs :scoped-inputs routes
+               :inline-definitions inlines :list-builders builders)))))
+
+
+(defn- definition-records
+  [parsed]
+  (concat (:declaration-records parsed) (:bindings parsed)
+          (mapcat list-records/authored-records (vals (:list-builders parsed)))
+          (mapcat definition-records (vals (:inline-definitions parsed)))))
+
+
+(defn parse-module-v2
+  "Parse an explicitly versioned module against caller-verified DECLARED input
+   contexts. Each callback receives the original definition with module
+   namespace attached. Contexts supply source-derived :fn-id, :scope [id []],
+   :input-type-id, :contract, resolved :name->id, :binding-id, declaration rows
+   and an opaque :origin-ledger. For direct inline refs, :normalize-inline-parent
+   resolves semantic refs in the child to their canonical legacy spelling,
+   and context-for also receives the derived child declaration. Type-only
+   contexts need no callable input.
+
+   Returns authored declaration/input-binding rows only. Origin ledgers and
+   rich :input declarations are retained; no refs execute and no records are
+   written. This does not establish type compatibility or residual interfaces.
+   All definitions and rows validate before a result can be returned."
+  [module {:keys [context-for] :as options}]
+  (validate-source! module)
+  (when-not (ifn? context-for) (reject! :context-provider-required))
+  (let [definitions (mapv #(parse-definition % (:namespace module) options) (:fns module))
+        records (unique-records (mapcat definition-records definitions))
+        owners (map :fn-id (mapcat #(tree-seq :inline-definitions (comp vals :inline-definitions) %) definitions))]
+    (when-not (= (count owners) (count (set owners))) (reject! :duplicate-definition))
+    (rows/state (filter #(= :input-binding (:kind %)) records))
+    {:input-format 2 :module (dissoc module :fns) :definitions definitions :records records}))
+
+
+(defn- id->name
+  [names]
+  ;; Prefer explicit qualification, then lexical order; never depend on map
+  ;; iteration order when both bare and qualified spellings name the same fn.
+  (reduce (fn [index [ref id]] (if (contains? index id) index (assoc index id ref)))
+          {} (sort-by (fn [[ref _]] [(if (qualified-keyword? ref) 0 1) (str ref)]) names)))
+
+
+(defn- emit-definition
+  [parsed context-for]
+  (let [{module-namespace :namespace :keys [source]} parsed
+        ctx (context (assoc source :namespace module-namespace) context-for)]
+    (when-not (= (select-keys parsed [:fn-id :input-type-id :contract :declaration-records :origin-ledger])
+                 (select-keys ctx [:fn-id :input-type-id :contract :declaration-records :origin-ledger]))
+      (reject! :export-context-drift))
+    (if (contains? source :bind)
+      (let [names (id->name (:name->id ctx))
+            local (syntax/emit-expression (:contract ctx) (:expression parsed)
+                                          {:scope (:scope ctx) :id->name names
+                                           :list-at (:list-builders parsed) :inline-at (:inline-definitions parsed)
+                                           :list-inline-at (list-inline-at (:inline-definitions parsed))})]
+        (assoc source :bind (scoped/emit-bindings local (:scoped-inputs parsed) names)))
+      source)))
+
+
+(defn emit-module-v2
+  "Export validated offline output using the same frozen identities. Reparse
+   verifies callback-produced binding origins and row contents before returning
+   the source. Formatting/comments belong to the separate CST writer."
+  [parsed {:keys [context-for] :as options}]
+  (when-not (and (= 2 (:input-format parsed)) (map? (:module parsed))
+                 (vector? (:definitions parsed)) (ifn? context-for))
+    (reject! :invalid-export))
+  (let [module (assoc (:module parsed) :fns (mapv #(emit-definition % context-for) (:definitions parsed)))
+        reparsed (parse-module-v2 module options)]
+    (when-not (and (= (:records parsed) (:records reparsed))
+                   (= (mapv #(select-keys % [:configurations :inline-definitions :list-builders]) (:definitions parsed))
+                      (mapv #(select-keys % [:configurations :inline-definitions :list-builders]) (:definitions reparsed))))
+      (reject! :export-origin-drift))
+    module))

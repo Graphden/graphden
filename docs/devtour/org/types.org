@@ -7,9 +7,347 @@ Type expressions, compatibility, inference, and secret markings.
 
 after: executor
 
-[[file:index.org][index]] · ~95 min
+[[file:index.org][index]] · ~140 min
 
-* 1. primitives
+* 1. bind-input
+:PROPERTIES:
+:CUSTOM_ID: types/bind-input
+:FILE: src/graphden/input/core.clj
+:LINE: 130
+:MINS: 1.4
+:END:
+
+The structured-input transition begins with a pure binding algebra, not yet used by production execution. A partial record binds declared child fields; a whole value or reference occupies its subtree. Stable field paths reject overlapping bindings without executing references. Expected types remain available for later value/HOF classification.
+
+- source :: [[file:../../../src/graphden/input/core.clj::(defn bind-input][src/graphden/input/core.clj:130]]
+- see also :: [[file:types.org::#types/remaining-input][remaining-input]]
+- same file :: [[file:types.org::#types/remaining-input][remaining-input]]
+
+* 2. remaining-input
+:PROPERTIES:
+:CUSTOM_ID: types/remaining-input
+:FILE: src/graphden/input/core.clj
+:LINE: 185
+:MINS: 1.6
+:END:
+
+Describes locally missing fields and occupancy while retaining original rich types and constraints. Optional fields remain bindable without preventing invocation; partially filling an optional record activates its required children. Reference dependencies are returned separately: no local missing fields does not prove the whole graph is ready.
+
+- source :: [[file:../../../src/graphden/input/core.clj::(defn remaining-input][src/graphden/input/core.clj:185]]
+- same file :: [[file:types.org::#types/bind-input][bind-input]]
+- referenced from :: [[file:storage.org::#storage/validate-view!][validate-view!]], [[file:types.org::#types/bind-input][bind-input]]
+
+* 3. parse-expression
+:PROPERTIES:
+:CUSTOM_ID: types/parse-expression
+:FILE: src/graphden/input/syntax.clj
+:LINE: 78
+:MINS: 1.4
+:END:
+
+Normalizes partial record maps and explicit value/ref expressions against a supplied resolved descriptor. Literal payloads stay opaque and references remain unevaluated. The caller supplies stable binding identities and namespace-resolved reference names; this offline API is not yet connected to the production package loader.
+
+- source :: [[file:../../../src/graphden/input/syntax.clj::(defn parse-expression][src/graphden/input/syntax.clj:78]]
+
+* 4. plan-module
+:PROPERTIES:
+:CUSTOM_ID: types/plan-module
+:FILE: src/graphden/input/source.clj
+:LINE: 636
+:MINS: 3.3
+:END:
+
+Compares original source forms with a prepared legacy module to plan supported rewrites. It retains rich declarations and binding origins, while reporting unsupported list, rename, ref-scope and policy forms as explicit blockers. A completed report does not prove runtime equivalence or authorize dropping an unsupported definition.
+
+- source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:636]]
+- same file :: [[file:types.org::#types/verify-module][verify-module]]
+
+* 5. verify-module
+:PROPERTIES:
+:CUSTOM_ID: types/verify-module
+:FILE: src/graphden/input/source.clj
+:LINE: 925
+:MINS: 2.4
+:END:
+
+Derives declared input contexts for supported rewrites using the frozen package index and storage migration identities. Parses, emits and rereads v2 EDN, comparing rich declarations and authored bindings with the legacy plan. The report records verification per definition. Runtime and residual interface checks follow later.
+
+- source :: [[file:../../../src/graphden/input/source.clj::(defn verify-module][src/graphden/input/source.clj:925]]
+- same file :: [[file:types.org::#types/plan-module][plan-module]]
+- referenced from :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
+
+* 6. verify-plan
+:PROPERTIES:
+:CUSTOM_ID: types/verify-plan
+:FILE: src/graphden/input/source_certification.clj
+:LINE: 111
+:MINS: 2.6
+:END:
+
+Certifies scoped bindings and forwarded fields with trusted implementation signatures. A blocked source owner retries when its exact dependency is certified. The planner then rebuilds the requested package plan with the updated inherited field evidence.
+
+- source :: [[file:../../../src/graphden/input/source_certification.clj::(defn verify-plan][src/graphden/input/source_certification.clj:111]]
+- see also :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
+- referenced from :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
+
+* 7. index
+:PROPERTIES:
+:CUSTOM_ID: types/index
+:FILE: src/graphden/input/source_origins.clj
+:LINE: 74
+:MINS: 2.1
+:END:
+
+Matches each original owner's complete normalized inline expansion with preparation. Generated UUIDs retain their enclosing owner and exact nested or sequence path. These private source bodies are provenance, not checked runtime declarations.
+
+- source :: [[file:../../../src/graphden/input/source_origins.clj::(defn index][src/graphden/input/source_origins.clj:74]]
+
+* 8. with-certified-owner
+:PROPERTIES:
+:CUSTOM_ID: types/with-certified-owner
+:FILE: src/graphden/input/source_snapshot.clj
+:LINE: 1122
+:MINS: 1.1
+:END:
+
+Proves one owner and its dependencies as an immutable transaction. Verified parent forwarding is available before replanning inherited inputs; scoped bindings still pass the aggregate type, use-site and occupancy checks. Failure publishes no partial package.
+
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn with-certified-owner][src/graphden/input/source_snapshot.clj:1122]]
+- see also :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/verify-bindings][verify-bindings]]
+- same file :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
+- referenced from :: [[file:types.org::#types/scope-view][scope-view]]
+
+* 9. verify-bindings
+:PROPERTIES:
+:CUSTOM_ID: types/verify-bindings
+:FILE: src/graphden/input/source_scope.clj
+:LINE: 717
+:MINS: 1.0
+:END:
+
+Finds all omitted bindings in the original ledger and resolves each route against one frozen baseline. Replays the bindings together against the stock checker and verifies that the other occupied fields and all original binding identities survive.
+
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings][src/graphden/input/source_scope.clj:717]]
+- see also :: [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
+- same file :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
+- referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/with-certified-owner][with-certified-owner]]
+
+* 10. scope-view
+:PROPERTIES:
+:CUSTOM_ID: types/scope-view
+:FILE: src/graphden/input/source_joint.clj
+:LINE: 129
+:MINS: 3.0
+:END:
+
+Checks the exact boundary between one owner's two proof groups. The projected baseline must preserve all original rows except the scoped bindings and certified field links. Its declarations, memberships, contract and projection rows must match the frozen graph.
+
+- source :: [[file:../../../src/graphden/input/source_joint.clj::(defn scope-view][src/graphden/input/source_joint.clj:129]]
+- see also :: [[file:types.org::#types/with-certified-owner][with-certified-owner]], [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
+- referenced from :: [[file:types.org::#types/verify-bindings-after-forwarding][verify-bindings-after-forwarding]]
+
+* 11. verify-bindings-after-forwarding
+:PROPERTIES:
+:CUSTOM_ID: types/verify-bindings-after-forwarding
+:FILE: src/graphden/input/source_scope.clj
+:LINE: 725
+:MINS: 1.1
+:END:
+
+Replays the remaining scoped group with the verified projections still in the graph. Their occupied addresses and unique destinations must survive, and the runtime checks must remain exactly equal. The complete source round trip precedes publication.
+
+- source :: [[file:../../../src/graphden/input/source_scope.clj::(defn verify-bindings-after-forwarding][src/graphden/input/source_scope.clj:725]]
+- see also :: [[file:types.org::#types/scope-view][scope-view]], [[file:types.org::#types/verify-module][verify-module]]
+- same file :: [[file:types.org::#types/verify-bindings][verify-bindings]]
+- referenced from :: [[file:types.org::#types/scope-view][scope-view]]
+
+* 12. authored-callable-field?
+:PROPERTIES:
+:CUSTOM_ID: types/authored-callable-field?
+:FILE: src/graphden/input/source_rich_types.clj
+:LINE: 25
+:MINS: 1.4
+:END:
+
+Checks the anonymous callable row against its literal authored form and stored FK. Named argument and result leaves need a separate frozen declaration closure; alias expansion must not mint a replacement identity. Source evidence does not discharge callable field-read obligations or admit unsupported nested callback parameters.
+
+- source :: [[file:../../../src/graphden/input/source_rich_types.clj::(defn authored-callable-field?][src/graphden/input/source_rich_types.clj:25]]
+- see also :: [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]]
+
+* 13. migrate-forwarded-field
+:PROPERTIES:
+:CUSTOM_ID: types/migrate-forwarded-field
+:FILE: src/graphden/input/source_snapshot.clj
+:LINE: 918
+:MINS: 0.9
+:END:
+
+Freezes both endpoints of an authored field passed to a value-producing reference. The checker replays the exact projection and verifies that the original local field remains available. A successful replay supplies a source proposal with the scoped path and its original field identity.
+
+- source :: [[file:../../../src/graphden/input/source_snapshot.clj::(defn migrate-forwarded-field][src/graphden/input/source_snapshot.clj:918]]
+- see also :: [[file:types.org::#types/verify-module][verify-module]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
+- same file :: [[file:types.org::#types/with-certified-owner][with-certified-owner]]
+- referenced from :: [[file:types.org::#types/verify-plan][verify-plan]], [[file:types.org::#types/authored-callable-field?][authored-callable-field?]]
+
+* 14. plan-verified-module
+:PROPERTIES:
+:CUSTOM_ID: types/plan-verified-module
+:FILE: scripts/structured_input_cst.clj
+:LINE: 1025
+:MINS: 2.2
+:END:
+
+Builds replacement text only when every definition in a module has a verified source plan. Edits retain comments and literal payloads, and repeat verification on the patched text. The artifact records the original and replacement byte digests.
+
+- source :: [[file:../../../scripts/structured_input_cst.clj::(defn plan-verified-module][scripts/structured_input_cst.clj:1025]]
+- see also :: [[file:types.org::#types/stage!][stage!]]
+
+* 15. stage!
+:PROPERTIES:
+:CUSTOM_ID: types/stage!
+:FILE: scripts/structured_input_stage.clj
+:LINE: 63
+:MINS: 2.2
+:END:
+
+Checks a repository's module digests against the migration artifact, validates the replacement EDN, then publishes it with a receipt in a new staging directory. The source checkout is read-only and the artifact alone cannot enable format 2.
+
+- source :: [[file:../../../scripts/structured_input_stage.clj::(defn stage!][scripts/structured_input_stage.clj:63]]
+- referenced from :: [[file:types.org::#types/plan-verified-module][plan-verified-module]]
+
+* 16. parse-module-v2
+:PROPERTIES:
+:CUSTOM_ID: types/parse-module-v2
+:FILE: src/graphden/input/module.clj
+:LINE: 326
+:MINS: 2.1
+:END:
+
+Reads an explicitly versioned source module with caller-resolved declarations and namespace contexts. It retains authored input metadata and origin ledgers, returning validated input-binding rows without registry or storage writes. Partial required fields are legal; structural validation does not prove types or graph readiness.
+
+- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:326]]
+- same file :: [[file:types.org::#types/emit-module-v2][emit-module-v2]]
+
+* 17. emit-module-v2
+:PROPERTIES:
+:CUSTOM_ID: types/emit-module-v2
+:FILE: src/graphden/input/module.clj
+:LINE: 376
+:MINS: 1.5
+:END:
+
+Exports offline definitions using the same declared descriptors and identity callbacks. Re-parsing detects changed binding origins or declaration context. Rich declarations remain intact; source formatting and comments belong to the separate CST writer.
+
+- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:376]]
+- same file :: [[file:types.org::#types/parse-module-v2][parse-module-v2]]
+
+* 18. require-legacy!
+:PROPERTIES:
+:CUSTOM_ID: types/require-legacy!
+:FILE: src/graphden/input/format.clj
+:LINE: 550
+:MINS: 1.7
+:END:
+
+Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
+
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:550]]
+
+* 19. resolve-contract
+:PROPERTIES:
+:CUSTOM_ID: types/resolve-contract
+:FILE: src/graphden/input/descriptor.clj
+:LINE: 198
+:MINS: 1.3
+:END:
+
+Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs come from memberships; aliases retain those identities, marker/refinement obligations survive, and ambiguous union roots are rejected. This descriptor never stores generated reference dependencies or the remaining input back into the declaration.
+
+- source :: [[file:../../../src/graphden/input/descriptor.clj::(defn resolve-contract][src/graphden/input/descriptor.clj:198]]
+- referenced from :: [[file:editor.org::#editor/recordExpansionFields][recordExpansionFields]]
+
+* 20. analyze-effective-input
+:PROPERTIES:
+:CUSTOM_ID: types/analyze-effective-input
+:FILE: src/graphden/input/analysis.clj
+:LINE: 221
+:MINS: 2.9
+:END:
+
+Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope; scoped overlays must fit its target's unoccupied fields. Identity refs do not import target inputs, and callable producers expose constructor inputs. Required addresses and typed projections expose their source inputs. Metadata narrows contracts; value cycles reject. Callable plans separate invocation parameters and captures by origin. Deferred field/container obligations remain explicit. Stored-value resolvers consume their own literal argument without capturing ambient caller fields; execution remains inactive.
+
+- source :: [[file:../../../src/graphden/input/analysis.clj::(defn analyze-effective-input][src/graphden/input/analysis.clj:221]]
+- referenced from :: [[file:types.org::#types/verify-bindings][verify-bindings]], [[file:types.org::#types/migrate-forwarded-field][migrate-forwarded-field]], [[file:types.org::#types/compile-stored][compile-stored]], [[file:crud.org::#crud/read-input][read-input]], [[file:crud.org::#crud/with-plan][with-plan]]
+
+* 21. export-closed
+:PROPERTIES:
+:CUSTOM_ID: types/export-closed
+:FILE: src/graphden/input/browser.clj
+:LINE: 256
+:MINS: 1.0
+:END:
+
+Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. A checked callback runs in a fresh local frame with its enclosing cells still visible. Source authorization precedes export.
+
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:256]]
+- see also :: [[file:types.org::#types/export-named][export-named]]
+- same file :: [[file:types.org::#types/export-named][export-named]]
+
+* 22. export-named
+:PROPERTIES:
+:CUSTOM_ID: types/export-named
+:FILE: src/graphden/input/browser.clj
+:LINE: 264
+:MINS: 1.1
+:END:
+
+Includes checked named residual routes and the wire type for each supported supplied field. Browser and JVM both defer validation until the field is read. Lists validate their elements and opaque dictionaries validate keys and values as a whole field. Absent fields stay outside the record, including when an explicit nil is allowed. A supplied empty record is present. Supplying an optional record also activates its required fields.
+
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:264]]
+- same file :: [[file:types.org::#types/export-closed][export-closed]]
+- referenced from :: [[file:types.org::#types/export-closed][export-closed]]
+
+* 23. infer-use
+:PROPERTIES:
+:CUSTOM_ID: types/infer-use
+:FILE: src/graphden/input/signatures.clj
+:LINE: 346
+:MINS: 3.5
+:END:
+
+Feeds canonical scoped input facts through the existing type-rule engine using explicit implementation argument paths. Frozen registry views preserve rule lookup isolation; implementation functions never run here. Returned substitutions and proofs must join graph checking before the inferred signature can be treated as checked.
+
+- source :: [[file:../../../src/graphden/input/signatures.clj::(defn infer-use][src/graphden/input/signatures.clj:346]]
+- referenced from :: [[file:types.org::#types/resolve-closure][resolve-closure]]
+
+* 24. resolve-closure
+:PROPERTIES:
+:CUSTOM_ID: types/resolve-closure
+:FILE: src/graphden/input/stored_implementations.clj
+:LINE: 45
+:MINS: 1.5
+:END:
+
+Matches a frozen stored declaration to the host's native implementation by UUID. It checks the declared argument and return types and maps each implementation argument name to the original field ID. Only audited rules belonging to that frozen signature participate in checking the closure.
+
+- source :: [[file:../../../src/graphden/input/stored_implementations.clj::(defn resolve-closure][src/graphden/input/stored_implementations.clj:45]]
+- see also :: [[file:types.org::#types/infer-use][infer-use]]
+- referenced from :: [[file:types.org::#types/compile-stored][compile-stored]]
+
+* 25. compile-stored
+:PROPERTIES:
+:CUSTOM_ID: types/compile-stored
+:FILE: src/graphden/input/compile.clj
+:LINE: 96
+:MINS: 1.1
+:END:
+
+Runs the structured-input checker on an authorized stored snapshot and prepares a named invocation closure for the ordinary executor. The caller supplies the trusted implementations alongside their frozen signatures and owns the execution authorization boundary.
+
+- source :: [[file:../../../src/graphden/input/compile.clj::(defn compile-stored][src/graphden/input/compile.clj:96]]
+- see also :: [[file:types.org::#types/resolve-closure][resolve-closure]], [[file:types.org::#types/analyze-effective-input][analyze-effective-input]]
+
+* 26. primitives
 :PROPERTIES:
 :CUSTOM_ID: types/primitives
 :FILE: src/graphden/types/core/shapes.clj
@@ -22,7 +360,7 @@ Lists primitive value types and the special types ~:any~ and ~:never~. ~:any~ ac
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(def primitives][src/graphden/types/core/shapes.clj:23]]
 - same file :: [[file:types.org::#types/child-types][child-types]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 2. child-types
+* 27. child-types
 :PROPERTIES:
 :CUSTOM_ID: types/child-types
 :FILE: src/graphden/types/core/shapes.clj
@@ -35,7 +373,7 @@ Returns the nested types inside each compound type: records, lists, maps, tuples
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:485]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 3. well-formed?
+* 28. well-formed?
 :PROPERTIES:
 :CUSTOM_ID: types/well-formed?
 :FILE: src/graphden/types/core.clj
@@ -48,7 +386,7 @@ Validates the syntax of type expressions before later checker stages use them. C
 - source :: [[file:../../../src/graphden/types/core.clj::(defn well-formed?][src/graphden/types/core.clj:173]]
 - same file :: [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 4. assert-finite!
+* 29. assert-finite!
 :PROPERTIES:
 :CUSTOM_ID: types/assert-finite!
 :FILE: src/graphden/types/expansion.clj
@@ -60,19 +398,19 @@ Bounds source type expansion before alias resolution or variant/union normalizat
 
 - source :: [[file:../../../src/graphden/types/expansion.clj::(defn assert-finite!][src/graphden/types/expansion.clj:13]]
 
-* 5. build
+* 30. build
 :PROPERTIES:
 :CUSTOM_ID: types/build
 :FILE: src/graphden/types/validator.clj
-:LINE: 160
+:LINE: 170
 :MINS: 1.5
 :END:
 
 Builds a pure boundary validator from the same supported data declaration used by static checking. Success returns the original value. Failure reports safe path/code diagnostics without rejected contents; unsupported definitions fail construction. The companion checked-type returns the same canonical variant/alias shape used by the ensure-type return rule.
 
-- source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:160]]
+- source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:170]]
 
-* 6. native-execution
+* 31. native-execution
 :PROPERTIES:
 :CUSTOM_ID: types/native-execution
 :FILE: src/graphden/executor/capabilities.clj
@@ -84,7 +422,7 @@ A real JVM implementation proves JVM [[file:glossary.org::#term/execution-profil
 
 - source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:63]]
 
-* 7. make-union
+* 32. make-union
 :PROPERTIES:
 :CUSTOM_ID: types/make-union
 :FILE: src/graphden/types/core.clj
@@ -97,7 +435,7 @@ Normalizes a union type: flattens nested unions, removes duplicates and ~:never~
 - source :: [[file:../../../src/graphden/types/core.clj::(defn make-union][src/graphden/types/core.clj:250]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 8. desugar-variant
+* 33. desugar-variant
 :PROPERTIES:
 :CUSTOM_ID: types/desugar-variant
 :FILE: src/graphden/types/core.clj
@@ -110,7 +448,7 @@ Converts a variant declaration into a union of records whose tag field has a fix
 - source :: [[file:../../../src/graphden/types/core.clj::(defn desugar-variant][src/graphden/types/core.clj:362]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 9. subtype?
+* 34. subtype?
 :PROPERTIES:
 :CUSTOM_ID: types/subtype?
 :FILE: src/graphden/types/core.clj
@@ -124,7 +462,7 @@ Tests whether every value allowed by ~actual~ is also allowed by ~expected~. Its
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 - referenced from :: [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 10. constraint-implies?
+* 35. constraint-implies?
 :PROPERTIES:
 :CUSTOM_ID: types/constraint-implies?
 :FILE: src/graphden/types/core.clj
@@ -138,7 +476,7 @@ Checks whether one [[file:glossary.org::#term/subtype][refinement condition]] im
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 11. unify
+* 36. unify
 :PROPERTIES:
 :CUSTOM_ID: types/unify
 :FILE: src/graphden/types/core.clj
@@ -151,7 +489,7 @@ Checks whether one [[file:glossary.org::#term/subtype][refinement condition]] im
 - source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1750]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 12. strip-null
+* 37. strip-null
 :PROPERTIES:
 :CUSTOM_ID: types/strip-null
 :FILE: src/graphden/types/core.clj
@@ -164,7 +502,7 @@ Removes null from a top-level union; a type containing only null becomes ~:never
 - source :: [[file:../../../src/graphden/types/core.clj::(defn strip-null][src/graphden/types/core.clj:339]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]]
 
-* 13. taint-with-secret-if-tainted
+* 38. taint-with-secret-if-tainted
 :PROPERTIES:
 :CUSTOM_ID: types/taint-with-secret-if-tainted
 :FILE: src/graphden/types/core/shapes.clj
@@ -179,7 +517,7 @@ Marks a return type as secret when an input contains a secret and the function's
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/child-types][child-types]]
 - referenced from :: [[file:crud.org::#crud/create-secret-facts!][create-secret-facts!]]
 
-* 14. encoded-type
+* 39. encoded-type
 :PROPERTIES:
 :CUSTOM_ID: types/encoded-type
 :FILE: src/graphden/types/core/view.clj
@@ -191,7 +529,7 @@ Projects explicit encode-view results in data positions: remove only the non-hid
 
 - source :: [[file:../../../src/graphden/types/core/view.clj::(defn encoded-type][src/graphden/types/core/view.clj:7]]
 
-* 15. broad-sink-hints
+* 40. broad-sink-hints
 :PROPERTIES:
 :CUSTOM_ID: types/broad-sink-hints
 :FILE: src/graphden/types/view.clj
@@ -203,7 +541,7 @@ Reports where a [[file:glossary.org::#term/ui-view][UiView]] enters an intention
 
 - source :: [[file:../../../src/graphden/types/view.clj::(defn broad-sink-hints][src/graphden/types/view.clj:68]]
 
-* 16. classify-literal
+* 41. classify-literal
 :PROPERTIES:
 :CUSTOM_ID: types/classify-literal
 :FILE: src/graphden/types/check/literals.clj
@@ -215,20 +553,20 @@ Infers a structural type from a literal Clojure value, including collections, re
 
 - source :: [[file:../../../src/graphden/types/check/literals.clj::(defn classify-literal][src/graphden/types/check/literals.clj:39]]
 
-* 17. check-binding!
+* 42. check-binding!
 :PROPERTIES:
 :CUSTOM_ID: types/check-binding!
 :FILE: src/graphden/types/check.clj
-:LINE: 518
+:LINE: 499
 :MINS: 5.9
 :END:
 
 Checks one [[file:glossary.org::#term/binding][binding]]'s actual type against the [[file:glossary.org::#term/slot][slot]]'s expected type. It combines literal classification, [[file:glossary.org::#term/subtype][subtype]] checks, and type-variable [[file:glossary.org::#term/unification][unification]]. Since [[file:glossary.org::#term/unification][unification]] chooses substitutions rather than proving assignment direction, ~gradual/fits?~ checks the resulting direction afterward.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:518]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:499]]
 - same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 18. fits?
+* 43. fits?
 :PROPERTIES:
 :CUSTOM_ID: types/fits?
 :FILE: src/graphden/types/check/gradual.clj
@@ -240,66 +578,66 @@ Checks assignment direction after [[file:glossary.org::#term/unification][unific
 
 - source :: [[file:../../../src/graphden/types/check/gradual.clj::(defn fits?][src/graphden/types/check/gradual.clj:244]]
 
-* 19. signature-return
+* 44. signature-return
 :PROPERTIES:
 :CUSTOM_ID: types/signature-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2278
+:LINE: 2290
 :MINS: 4.1
 :END:
 
 Infers a return type from a [[file:glossary.org::#term/unification][polymorphic signature]] when there is no custom ~:return-type-rule~. It unifies declared argument types with actual types and substitutes the resulting variable values into the declared return type. Custom rules remain necessary when inference depends on literal values or registry data.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2278]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2290]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 20. rule-return
+* 45. rule-return
 :PROPERTIES:
 :CUSTOM_ID: types/rule-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2334
-:MINS: 2.5
+:LINE: 2367
+:MINS: 1.7
 :END:
 
 Chooses return-type inference for the root [[file:glossary.org::#term/base-function][base function]]: custom rule first, declared signature next, then static return type. If the root propagates [[file:glossary.org::#term/secret][secret markings]] and an input is secret, the result is wrapped accordingly.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2334]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2367]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 21. check-fn-def!
+* 46. check-fn-def!
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2608
+:LINE: 2684
 :MINS: 9.3
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2608]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2684]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
-* 22. check-all-defs!
+* 47. check-all-defs!
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2744
+:LINE: 2820
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2744]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2820]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
-* 23. record-rich-types!
+* 48. record-rich-types!
 :PROPERTIES:
 :CUSTOM_ID: types/record-rich-types!
 :FILE: src/graphden/executor/registry/core.clj
 :LINE: 448
-:MINS: 10.1
+:MINS: 10.4
 :END:
 
 Stores each function's computed argument types, return type, and [[file:glossary.org::#term/effect][effects]] in the [[file:glossary.org::#term/rich-types][rich-types registry]]. Compiler decisions, runtime checks, [[file:glossary.org::#term/secret][secret redaction]], and editor labels read this data. Writes target the active branch's registry, so checking one branch does not overwrite another branch's types.
@@ -308,15 +646,15 @@ Stores each function's computed argument types, return type, and [[file:glossary
 - see also :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:web.org::#web/all-rich-types][all-rich-types]]
 - same file :: [[file:types.org::#types/rich-type-of-id][rich-type-of-id]]
 
-* 24. rich-type-of-id
+* 49. rich-type-of-id
 :PROPERTIES:
 :CUSTOM_ID: types/rich-type-of-id
 :FILE: src/graphden/executor/registry/core.clj
-:LINE: 658
+:LINE: 662
 :MINS: 1.3
 :END:
 
 Looks up [[file:glossary.org::#term/rich-types][rich type information]] by function ID. Names may repeat across namespaces and are not a unique identity. The remaining name index supports [[file:glossary.org::#term/base-function][base functions]] and older call sites; new consumers should use IDs. See the [[file:../../../docs/adr/ADR-identity-model.md][identity model]].
 
-- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:658]]
+- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:662]]
 - same file :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]

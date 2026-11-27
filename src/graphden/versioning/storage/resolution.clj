@@ -185,7 +185,11 @@
      in `vts/mirror-config`).
    - `:slot` is intentionally absent: slots are immutable post-create
      (changing the (name, type-fn-id) pair = creating a new slot)."
-  {:fn {:version-entity :fn-version
+  {:input-binding {:version-entity :input-binding-version
+                   :version-id-field :input-binding-id
+                   :version-data-fields (vts/version-data-fields :input-binding)
+                   :candidate-bound-keys #{:fn-id :ref-fn-id :type-override-fn-id}}
+   :fn {:version-entity :fn-version
         :version-id-field :fn-id
         :version-data-fields (vts/version-data-fields :fn)
         :candidate-bound-keys #{:name :anonymous-hash :base-fn-id
@@ -240,7 +244,7 @@
    (the crud rollback replay hit exactly that once hard-deleted
    identities started being purged)."
   [version-record version-id-field]
-  (dissoc version-record :id :branch-id :change-id :change-revision
+  (dissoc version-record :id :branch-id :change-id :change-revision :merge-edge-id :merge-source-version-id :merge-selected-version-id
           :created-at :deleted-at
           version-id-field))
 
@@ -264,7 +268,7 @@
   [base-storage binding-fn-ids entity-name entity-id version-row]
   (case entity-name
     :fn entity-id
-    (:fn-slot :binding) (:fn-id version-row)
+    (:fn-slot :binding :input-binding) (:fn-id version-row)
     :binding-list-item (when-let [bid (:binding-id version-row)]
                          (if (contains? binding-fn-ids bid)
                            (get binding-fn-ids bid)
@@ -685,6 +689,9 @@
                                              (rest sorted) sorted))))
                             (group-by :source-branch-id merges))]
       (for [m merges
+            ;; Frozen input versions are target-owned rows with explicit source
+            ;; provenance. A later or backdated source edit cannot join this edge.
+            :when (not (and (= entity-name :input-binding) (:input-versions-materialized? m)))
             :let [lower (get prev-src-ts (:id m))
                   src-versions (get versions-by-branch (:source-branch-id m) [])
                   eligible (filter (fn [v]

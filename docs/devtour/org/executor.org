@@ -5,7 +5,7 @@
 
 From stored definitions to callable code and results.
 
-[[file:index.org][index]] · ~93 min
+[[file:index.org][index]] · ~87 min
 
 * 1. execute
 :PROPERTIES:
@@ -28,13 +28,13 @@ The executor compiles this description into a callable Clojure function. Referen
 :PROPERTIES:
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1591
-:MINS: 4.0
+:LINE: 1577
+:MINS: 3.9
 :END:
 
-Runs a previously compiled [[file:glossary.org::#term/graph-function][graph function]]. It first checks cancellation and any configured execution-permission guard, then binds the [[file:glossary.org::#term/effect][allowed effects]] for the call. The [[file:glossary.org::#term/compiled-registry][compiled registry]] maps function IDs to [[file:glossary.org::#term/closure][closures]]: callable Clojure functions retaining their prepared dependencies. ~execute~ looks up the [[file:glossary.org::#term/closure][closure]], translates named input into slot-ID and name keys, and calls ~(closure translated ctx)~.
+Runs a previously compiled [[file:glossary.org::#term/graph-function][graph function]]. It first checks cancellation and any configured execution-permission guard, then binds the [[file:glossary.org::#term/effect][allowed effects]] for the call. The [[file:glossary.org::#term/compiled-registry][compiled registry]] maps function IDs to [[file:glossary.org::#term/closure][closures]]: callable Clojure functions retaining their prepared dependencies. ~execute~ uses the selected closure's input ABI. Legacy closures receive name and slot-ID keys. A structured closure routes the original named input.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1591]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1577]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
@@ -112,13 +112,13 @@ Synchronizes authored function definitions into function, [[file:glossary.org::#
 :PROPERTIES:
 :CUSTOM_ID: executor/build-lookups
 :FILE: src/graphden/executor/compile/lookups.clj
-:LINE: 103
-:MINS: 7.0
+:LINE: 123
+:MINS: 6.6
 :END:
 
 Builds lookup maps for functions, [[file:glossary.org::#term/slot][slots]], [[file:glossary.org::#term/binding][bindings]], and list items, including ~:fn-map~, ~:slot-map~, and ~:bindings-by-fn~. Compiler helpers use these indexes instead of repeatedly searching the raw rows. The inheritance-chain cache records the ancestors used to resolve inherited values.
 
-- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn build-lookups][src/graphden/executor/compile/lookups.clj:103]]
+- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn build-lookups][src/graphden/executor/compile/lookups.clj:123]]
 - same file :: [[file:executor.org::#executor/root-fn][root-fn]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]], [[file:editor.org::#editor/buildLookups][buildLookups]], [[file:editor.org::#editor/export-plan][export-plan]]
 
@@ -126,13 +126,13 @@ Builds lookup maps for functions, [[file:glossary.org::#term/slot][slots]], [[fi
 :PROPERTIES:
 :CUSTOM_ID: executor/root-fn
 :FILE: src/graphden/executor/compile/lookups.clj
-:LINE: 292
+:LINE: 307
 :MINS: 2.0
 :END:
 
 Follows ~parent-ids~ to find the root [[file:glossary.org::#term/base-function][base function]], whose implementation computes the result. A composed [[file:glossary.org::#term/graph-function][graph function]] supplies inherited or overridden arguments to that implementation. These function parents are distinct from the version branches discussed later.
 
-- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:292]]
+- source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn root-fn][src/graphden/executor/compile/lookups.clj:307]]
 - same file :: [[file:executor.org::#executor/build-lookups][build-lookups]]
 
 * 10. collect-bindings
@@ -153,13 +153,13 @@ Classifies the root [[file:glossary.org::#term/slot][slots]] through ~classify-s
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-all
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1618
+:LINE: 1628
 :MINS: 4.7
 :END:
 
 Compiles functions in [[file:glossary.org::#term/topological-order][dependency order]]: a referenced function must be available before a caller uses it. The process cache is keyed by graph structure, [[file:glossary.org::#term/base-function][base-function]] implementations, and [[file:glossary.org::#term/rich-types][rich type information]]. Types affect whether a referenced function is passed as a callable or evaluated, so different type information must not share the same compiled result.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1618]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1628]]
 - see also :: [[file:executor.org::#executor/compile-fn][compile-fn]]
 - same file :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:types.org::#types/record-rich-types!][record-rich-types!]]
@@ -168,13 +168,13 @@ Compiles functions in [[file:glossary.org::#term/topological-order][dependency o
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1301
-:MINS: 9.8
+:LINE: 1328
+:MINS: 8.8
 :END:
 
 Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, [[file:glossary.org::#term/binding][bindings]] to inputs outside the root's slots, and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1301]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1328]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/compile-all][compile-all]]
@@ -183,13 +183,13 @@ Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~
 :PROPERTIES:
 :CUSTOM_ID: executor/arg-builder
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1069
-:MINS: 8.8
+:LINE: 1103
+:MINS: 8.3
 :END:
 
 Builds a [[file:glossary.org::#term/thunk][deferred computation]] for one argument. Values are constants; [[file:glossary.org::#term/free-argument][free arguments]] read caller input by [[file:glossary.org::#term/slot][slot]] ID with a name fallback; references use [[file:glossary.org::#term/thunk][thunks]] or delays; sequences compute their elements lazily. A base implementation therefore evaluates only the arguments it reads, which permits short-circuiting conditionals.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1069]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1103]]
 - see also :: [[file:executor.org::#executor/resolve-arg][resolve-arg]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/execute][execute]], [[file:executor.org::#executor/collect-bindings][collect-bindings]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-arg][resolve-arg]], [[file:executor.org::#executor/map-fn][map-fn]]
@@ -198,13 +198,13 @@ Builds a [[file:glossary.org::#term/thunk][deferred computation]] for one argume
 :PROPERTIES:
 :CUSTOM_ID: executor/resolve-impl
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 814
+:LINE: 849
 :MINS: 1.0
 :END:
 
 Finds the root [[file:glossary.org::#term/base-function][base function]]'s Clojure implementation in ~lookups[:base-fns]~ by name. A missing registration raises ~:compile/missing-impl~. This lookup connects a stored graph definition to executable host code.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:814]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:849]]
 - see also :: [[file:executor.org::#executor/defbase][defbase]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
@@ -241,13 +241,13 @@ Reads one argument: evaluates a [[file:glossary.org::#term/thunk][thunk]] when n
 :PROPERTIES:
 :CUSTOM_ID: executor/record-effect!
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1533
+:LINE: 1512
 :MINS: 2.1
 :END:
 
 An effectful primitive calls this before touching external state. It rejects an operation outside the execution's allowed effect set, then records the effect for tracing. Declaring effects for type inference is a separate responsibility; this runtime check enforces the current policy. An empty allowed set rejects every recorded effect, while nil means unrestricted execution.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1533]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1512]]
 - see also :: [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]], [[file:editor.org::#editor/evaluate][evaluate]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]], [[file:editor.org::#editor/evaluate][evaluate]]
@@ -256,13 +256,13 @@ An effectful primitive calls this before touching external state. It rejects an 
 :PROPERTIES:
 :CUSTOM_ID: executor/call-with-cache
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 706
+:LINE: 729
 :MINS: 3.1
 :END:
 
 Caches referenced-function results during one top-level execution. The key includes the referenced function ID and the relevant [[file:glossary.org::#term/free-argument][free arguments]]; a sentinel distinguishes a cached nil from a missing entry. Reusing a result avoids evaluating the same dependency repeatedly within that call.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- call-with-cache][src/graphden/executor/compile_eager.clj:706]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- call-with-cache][src/graphden/executor/compile_eager.clj:729]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 
 * 19. map-fn
@@ -294,13 +294,13 @@ Implements explicit recursion. Evaluation dependencies must be acyclic: the per-
 :PROPERTIES:
 :CUSTOM_ID: executor/hof-lambda-params
 :FILE: src/graphden/executor/compile/renames.clj
-:LINE: 1048
-:MINS: 7.2
+:LINE: 1049
+:MINS: 3.3
 :END:
 
 Determines which [[file:glossary.org::#term/free-argument][free arguments]] are callback parameters and which are captured from the caller. An explicit ~:lambda-params~ takes precedence; an empty vector [[file:glossary.org::#term/capture][captures]] every [[file:glossary.org::#term/free-argument][free argument]]. Otherwise an unambiguous structural function type supplies the parameter names. See [[file:../../../docs/CLOSURE_CAPTURE.md][closure capture]].
 
-- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn hof-lambda-params][src/graphden/executor/compile/renames.clj:1048]]
+- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn hof-lambda-params][src/graphden/executor/compile/renames.clj:1049]]
 - same file :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 - referenced from :: [[file:executor.org::#executor/ref-produces-callable?][ref-produces-callable?]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 
@@ -323,13 +323,13 @@ Distinguishes a callback from a constructor that returns a callback. A reference
 :PROPERTIES:
 :CUSTOM_ID: executor/hof-wrap
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 989
+:LINE: 1013
 :MINS: 1.8
 :END:
 
 Prepares an ordinary referenced function as a callable. The wrapper captures the current input values and execution context; its declared callback parameters receive values at each invocation. This is the runtime counterpart of ~:lambda-params~, with no separate environment object in the stored graph. Callable constructors take the evaluation path described by ~ref-produces-callable?~ instead.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- hof-wrap][src/graphden/executor/compile_eager.clj:989]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- hof-wrap][src/graphden/executor/compile_eager.clj:1013]]
 - see also :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/ref-produces-callable?][ref-produces-callable?]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 
@@ -337,13 +337,13 @@ Prepares an ordinary referenced function as a callable. The wrapper captures the
 :PROPERTIES:
 :CUSTOM_ID: executor/build-ref-renames
 :FILE: src/graphden/executor/compile/renames.clj
-:LINE: 1157
+:LINE: 1095
 :MINS: 3.9
 :END:
 
 Builds the name translation at a reference call. If a caller exposes an argument under a new name but the referenced function still uses its original name, the translation supplies the value under the referenced function's name. See the [[file:../../../docs/adr/ADR-inherited-rename-surface.md][inherited rename design]].
 
-- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn build-ref-renames][src/graphden/executor/compile/renames.clj:1157]]
+- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn build-ref-renames][src/graphden/executor/compile/renames.clj:1095]]
 - see also :: [[file:crud.org::#crud/public-free-entries][public-free-entries]]
 - same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 - referenced from :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
@@ -352,11 +352,11 @@ Builds the name translation at a reference call. If a caller exposes an argument
 :PROPERTIES:
 :CUSTOM_ID: executor/compute-rename-aliases
 :FILE: src/graphden/executor/compile/renames.clj
-:LINE: 1254
+:LINE: 1192
 :MINS: 2.9
 :END:
 
 Computes aliases for inherited rename chains that reach outside the root's own [[file:glossary.org::#term/slot][slot]] set. For example, an internal reader of ~:branch-row~ can receive input exposed publicly as ~:item~. The aliases are prepared at compile time and copied into the input map at runtime; the docstring contains a worked example.
 
-- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn compute-rename-aliases][src/graphden/executor/compile/renames.clj:1254]]
+- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn compute-rename-aliases][src/graphden/executor/compile/renames.clj:1192]]
 - same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]

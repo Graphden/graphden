@@ -7,7 +7,8 @@
    the JSON / UUID coercion helpers."
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [graphden.input.access :as input-access]))
 
 
 (defn safe-url-decode
@@ -73,7 +74,8 @@
    (or (get core-entity-types s)
        (when (and s (seq known))
          (let [kw (keyword s)]
-           (when (contains? (set known) kw) kw))))))
+           (when (and (contains? (set known) kw)
+                      (not (contains? input-access/offline-entities kw))) kw))))))
 
 
 (defn schema-entity-types

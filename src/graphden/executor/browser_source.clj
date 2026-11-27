@@ -171,9 +171,7 @@
 
 (defn- validate-owner-metadata!
   [row permission]
-  (when (and (= :bare-type permission)
-             (or (seq (:parent-ids row)) (:base-fn-id row)
-                 (:element-fn-id row) (:return-type-fn-id row) (:constraint row)))
+  (when (and (= :bare-type permission) (not (contracts/bare-primitive-owner? row)))
     (reject! :primitive-type-source-mismatch))
   (when-let [contract (:type-contract permission)]
     (when-not (contracts/matches-owner? contract row)

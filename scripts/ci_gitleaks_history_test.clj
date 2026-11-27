@@ -92,6 +92,31 @@
         (fs/delete-tree repo)))))
 
 
+(deftest only-ref-churn-retries-without-publishing-an-unstable-proof
+  (let [changed (update current :tips conj (str/join (repeat 40 "c")))
+        config-changed (assoc current :config "other-config")]
+    (doseq [[snapshots attempts expected]
+            [[[current changed changed] 2 [changed]]
+             [[current changed current] 2 []]
+             [[current config-changed] 1 []]
+             [[current changed config-changed] 2 []]]]
+      (let [observations (atom snapshots)
+            scans (atom 0)
+            published (atom [])]
+        (with-redefs [history/inputs (fn [& _]
+                                       (let [snapshot (first @observations)]
+                                         (swap! observations subvec 1)
+                                         snapshot))
+                      history/read-cache (constantly proof)
+                      history/run-gitleaks! (fn [& _] (swap! scans inc))
+                      history/write-cache! (fn [_ value] (swap! published conj (dissoc value :schema :result)))]
+          (if (seq expected)
+            (history/scan-repo! "/unused" "/unused")
+            (is (thrown? clojure.lang.ExceptionInfo (history/scan-repo! "/unused" "/unused"))))
+          (is (= attempts @scans))
+          (is (= expected @published)))))))
+
+
 (let [result (run-tests 'ci-gitleaks-history-test)]
   (when (pos? (+ (:fail result) (:error result)))
     (System/exit 1)))

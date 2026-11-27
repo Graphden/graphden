@@ -71,7 +71,7 @@
 
 
 (deftest source-fingerprint-preserves-edn-value-identity
-  (let [fingerprint #(tool 'source-fingerprint [{:args {:value {:value %}}}] {})]
+  (let [fingerprint #(tool 'source-fingerprint [{:args {:value {:value %}}}] {} "runtime")]
     (is (not= (fingerprint {:phase 1 ":phase" 2})
               (fingerprint {:phase 3 ":phase" 2})))
     (is (not= (fingerprint #{1 2}) (fingerprint [1 2])))
@@ -80,6 +80,11 @@
              (fingerprint {:a 1 :b 2}))))
     (is (= (fingerprint (array-map :a 1 :b 2))
            (fingerprint (array-map :b 2 :a 1))))))
+
+
+(deftest source-fingerprint-includes-browser-runtime-source
+  (is (not= (tool 'source-fingerprint [] {} "runtime")
+            (tool 'source-fingerprint [] {} "runtime updated"))))
 
 
 (deftest authored-builtin-source-keeps-nested-local-type-twins

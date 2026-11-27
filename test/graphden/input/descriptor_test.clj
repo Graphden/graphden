@@ -1,0 +1,137 @@
+(ns graphden.input.descriptor-test
+  (:require
+    [clojure.test :refer [deftest is]]
+    [graphden.input.context :as context]
+    [graphden.input.core :as input]
+    [graphden.input.descriptor :as descriptor]
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core :as types]))
+
+
+(defn- fixture
+  []
+  (let [[owner person root name-field left-field right-field alias-id] (repeatedly 7 random-uuid)
+        text-id (get (ids/primitive-fn-ids) :text)
+        member (fn [id] {:id (random-uuid) :slot-id id :position 0})]
+    {:owner owner :person person :root root :alias alias-id
+     :name-field name-field :left-field left-field :right-field right-field
+     :context (context/build-context
+                {:fns {owner {:id owner :input-type-fn-id root}}
+                 :fields {name-field {:id name-field :name "name" :type-fn-id text-id :required true}
+                          left-field {:id left-field :name "left" :type-fn-id alias-id :required true}
+                          right-field {:id right-field :name "right" :type-fn-id person}}
+                 :members {person [(member name-field)]
+                           root [(member left-field) (member right-field)]}
+                 :type-bodies {alias-id :test/Person}
+                 :aliases {:test/Person {:name :text}}
+                 :alias-ids {:test/Person person}})}))
+
+
+(deftest aliases-preserve-shared-field-identities-in-distinct-paths-test
+  (let [{:keys [owner context name-field left-field right-field]} (fixture)
+        contract (descriptor/resolve-contract context owner)
+        left (input/resolve-address contract [owner []] [:left :name])
+        right (input/resolve-address contract [owner []] [:right :name])]
+    (is (= [left-field name-field] (:path left)))
+    (is (= [right-field name-field] (:path right)))
+    (is (= :text (:type left)))
+    (is (= [[left-field name-field]] (:missing (input/remaining-input contract {} [owner []]))))))
+
+
+(deftest wrapped-records-retain-their-whole-value-obligations-test
+  (let [{:keys [context name-field] alias-id :alias} (fixture)
+        rich [:secret [:refine :test/Person [:present :name]]]
+        ctx (assoc-in context [:type-bodies alias-id] rich)
+        resolved (descriptor/resolve-descriptor ctx alias-id)]
+    (is (= [:secret [:refine {:name :text} [:present :name]]] (:type resolved)))
+    (is (= [name-field] (mapv :id (:fields resolved))))))
+
+
+(deftest dynamic-maps-and-unions-do-not-become-record-field-maps-test
+  (let [dictionary (random-uuid) union (random-uuid) owner (random-uuid)
+        ctx (context/build-context
+              {:type-bodies {dictionary [:map :keyword :text]
+                             union [:union {:x :text} {:x :int}]}
+               :fns {owner {:input-type-fn-id union}}})]
+    (is (not (contains? (descriptor/resolve-descriptor ctx dictionary) :fields)))
+    (is (= #{{:x :text} {:x :int}}
+           (set (:alternatives (descriptor/resolve-descriptor ctx union)))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+          (descriptor/resolve-contract ctx owner)))))
+
+
+(deftest unknown-or-recursive-types-never-degrade-to-any-test
+  (let [id (random-uuid)]
+    (doseq [snapshot [{:type-bodies {id :Missing}}
+                      {:type-bodies {id {:field :text}}}
+                      {:fns {id {:base-fn-id id}}}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+            (descriptor/resolve-descriptor (context/build-context snapshot) id))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"recursive"
+          (descriptor/resolve-descriptor
+            (context/build-context {:type-bodies {id :Loop} :aliases {:Loop [:list :Loop]}}) id)))))
+
+
+(deftest contexts-require-frozen-maps-test
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+        (context/build-context {:aliases (atom {})}))))
+
+
+(deftest executable-rows-never-supply-record-memberships-test
+  (let [{:keys [context owner root]} (fixture)]
+    (doseq [row [{:return-type-fn-id (get (ids/primitive-fn-ids) :text)}
+                 {:parent-ids [(random-uuid)]}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"could not resolve"
+            (descriptor/resolve-contract (assoc-in context [:fns root] row) owner))))))
+
+
+(deftest source-and-storage-requiredness-have-explicit-adapter-policies-test
+  (let [{:keys [context owner right-field]} (fixture)
+        right-required (fn [ctx]
+                         (->> (descriptor/resolve-contract ctx owner) :fields
+                              (filter #(= right-field (:id %))) first :required))]
+    (is (false? (right-required context)))
+    (is (true? (right-required (assoc context :field-default-required? true))))
+    (is (false? (right-required (-> context (assoc :field-default-required? true)
+                                    (assoc-in [:fields right-field :required] nil)))))))
+
+
+(deftest source-generic-types-belong-to-one-field-with-the-erased-storage-id
+  (let [root (random-uuid)
+        [generic unrelated] (repeatedly 2 random-uuid)
+        any-id (ids/primitive-fn-id :any)
+        type '[:union :null [:map a :any] [:list :any]]
+        ctx (context/build-context
+              {:type-bodies {root {:input type :opaque :any}}
+               :source-field-types {[generic any-id] type}
+               :fields {generic {:id generic :type-fn-id any-id :name "input"}
+                        unrelated {:id unrelated :type-fn-id any-id :name "opaque"}}
+               :members {root [{:slot-id generic :position 0} {:slot-id unrelated :position 1}]}})
+        fields (:fields (descriptor/resolve-descriptor ctx root))]
+    (is (= [(types/resolve-alias type) :any] (mapv :type fields)))
+    (is (= [any-id any-id] (mapv :type-id fields)))
+    (is (thrown? clojure.lang.ExceptionInfo (descriptor/resolve-descriptor (dissoc ctx :source-field-types) root)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (descriptor/resolve-descriptor (assoc-in ctx [:source-field-types [generic any-id]] '[:union :null [:list b]]) root)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (descriptor/resolve-descriptor (assoc-in ctx [:fields generic :type-fn-id] (ids/primitive-fn-id :int)) root)))))
+
+
+(deftest stored-field-defaults-require-the-declared-optional-type
+  (let [[owner input slot] (repeatedly 3 random-uuid)
+        nullable (ids/fn-id "core.refinements" :nullable-text)
+        ctx (context/build-context {:fns {owner {:input-type-fn-id input}
+                                          nullable {:constraint [:union :null :text]}}
+                                    :fields {slot {:id slot :name "label" :required false :type-fn-id nullable}}
+                                    :members {input [{:slot-id slot :position 0 :input-default {:value nil}}]}})
+        read-field #(first (:fields (descriptor/resolve-contract % owner)))]
+    (is (= {:default nil} (select-keys (read-field ctx) [:default])))
+    (let [without (update-in ctx [:members input 0] dissoc :input-default)]
+      (is (not (contains? (read-field without) :default)))
+      (is (not (contains? (read-field (assoc-in without [:fields slot :input-default] {:value "other"})) :default))))
+    (doseq [changed [(assoc-in ctx [:fields slot :required] true)
+                     (assoc-in ctx [:members input 0 :input-default] {})
+                     (assoc-in ctx [:members input 0 :input-default :value] false)
+                     (assoc-in ctx [:fns nullable :constraint] [:union :null :int])]]
+      (is (= :invalid-field-default
+             (try (read-field changed) nil (catch clojure.lang.ExceptionInfo error (:code (ex-data error)))))))))

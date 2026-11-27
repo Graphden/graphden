@@ -14,7 +14,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check.literals :as lit]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.get-in :as get-in-type]))
 
 
 ;; === Validation Helpers ===
@@ -479,7 +480,8 @@
 
 (defn merge-return-rule
   [bindings-info default-ret]
-  (let [elem-types (get-in bindings-info [:maps :elem-types])]
+  (let [{:keys [elem-types list-elements]} (:maps bindings-info)
+        elem-types (if list-elements (mapv :type list-elements) elem-types)]
     (cond
       (not (and (sequential? elem-types) (seq elem-types)))
       default-ret
@@ -511,7 +513,11 @@
 (defn select-keys-return-rule
   [bindings-info default-ret]
   (let [m-type (get-in bindings-info [:m :type])
-        ks-form (get-in bindings-info [:ks :value])
+        ks (:ks bindings-info)
+        elements (:list-elements ks)
+        ks-form (if (and elements (every? :value-present elements))
+                  (mapv #(select-keys % [:value]) elements)
+                  (:value ks))
         literal-kws (when (vector? ks-form)
                       (mapv (fn [item]
                               (when (and (map? item) (contains? item :value))
@@ -581,8 +587,14 @@
 
 (defn zipmap-return-rule
   [bindings-info default-ret]
-  (let [keys-form (get-in bindings-info [:keys :value])
-        val-elems (get-in bindings-info [:vals :elem-types])
+  (let [{keys-form :value checked-keys :list-elements} (:keys bindings-info)
+        {val-elems :elem-types checked-vals :list-elements} (:vals bindings-info)
+        keys-form (if (vector? checked-keys)
+                    (when (every? :value-present checked-keys) checked-keys)
+                    keys-form)
+        val-elems (if (vector? checked-vals)
+                    (when (every? :type checked-vals) (mapv :type checked-vals))
+                    val-elems)
         literal-kws (when (vector? keys-form)
                       (mapv (fn [item]
                               (when (and (map? item) (contains? item :value))
@@ -689,12 +701,29 @@
     :else nil))
 
 
+(defn- checked-entry-field
+  [{:keys [value-present value list-elements]}]
+  (cond
+    (and value-present (vector? value) (= 2 (count value)))
+    (entry-static-field value)
+
+    (and (vector? list-elements) (= 2 (count list-elements)))
+    (let [[key-info item-info] list-elements]
+      (when-let [key (and (:value-present key-info) (field-keyword-from-literal (:value key-info)))]
+        [key (:type item-info)]))))
+
+
 (defn pairs->map-return-rule
   [bindings-info default-ret]
-  (let [entries-form (get-in bindings-info [:entries :value])
-        fields (when (and (vector? entries-form) (seq entries-form))
-                 (mapv entry-static-field entries-form))]
-    (if (and (seq fields) (every? some? fields))
+  (let [{:keys [address value-present value list-elements]} (:entries bindings-info)
+        fields (if address
+                 ;; A structured use carries checked operand facts. The raw
+                 ;; value, when known, is data and never a registry reference.
+                 (cond
+                   (vector? list-elements) (mapv checked-entry-field list-elements)
+                   (and value-present (vector? value)) (mapv #(checked-entry-field {:value-present true :value %}) value))
+                 (when (vector? value) (mapv entry-static-field value)))]
+    (if (and (seq fields) (every? second fields))
       (into {} fields)
       default-ret)))
 
@@ -945,77 +974,9 @@
       default-ret)))
 
 
-;; --- :get-in ----------------------------------------------------------------
-;; Walk a record by literal-key path. When the path is a sequence of
-;; literal keys AND every intermediate is a record, return the
-;; deeply-nested field type. Any non-record intermediate or non-literal
-;; key falls back to default.
-;;
-;; The `:path` arg is a `:sequence`-typed slot — bindings-info has its
-;; literal items collected by check-fn-def!. We accept either a vector
-;; value (rare here, since sequence args travel through arg-chain) or
-;; fall through to default.
-
-(defn- get-in-walk
-  "Walk one non-union `t` through `segs` (a sequence of literal
-   keyword/string keys). Returns the deeply-nested type, or
-   `default-ret` on the first non-record / non-map / missing-key
-   step. `nullable?` accumulates: any `[:map K V]` intermediate
-   makes the final result nullable (key may be absent there).
-
-   Encountering a union mid-walk fans out: each member is walked
-   with the remaining segs and the results are unioned. `:null`
-   members of the union narrow to a `:null` leaf — `(get-in nil
-   anything)` is nil regardless of the path."
-  [t segs nullable? default-ret]
-  (cond
-    (empty? segs)
-    (if nullable? (types/make-union [:null t]) t)
-
-    (= :null t) :null
-
-    (types/union-type? t)
-    (->> (types/union-members t)
-         (mapv #(get-in-walk % segs nullable? default-ret))
-         types/make-union)
-
-    (types/record-type? t)
-    (let [k (field-keyword-from-literal (first segs))]
-      (if (and k (contains? t k))
-        (get-in-walk (get t k) (rest segs) nullable? default-ret)
-        default-ret))
-
-    (types/map-type? t)
-    (get-in-walk (types/map-val t) (rest segs) true default-ret)
-
-    :else default-ret))
-
-
-;; --- :get-in ----------------------------------------------------------------
-;; Walk a record by literal-key path. When the path is a sequence of
-;; literal keys AND every intermediate is a record, return the
-;; deeply-nested field type. Any non-record intermediate or non-literal
-;; key falls back to default.
-;;
-;; The `:path` arg is a `:sequence`-typed slot — bindings-info has its
-;; literal items collected by check-fn-def!. We accept either a vector
-;; value (rare here, since sequence args travel through arg-chain) or
-;; fall through to default.
-
 (defn get-in-return-rule
   [bindings-info default-ret]
-  (let [m-type    (get-in bindings-info [:map :type])
-        path-val  (get-in bindings-info [:path :value])]
-    (if (and (sequential? path-val)
-             (every? #(or (keyword? %) (string? %)) path-val))
-      ;; `nullable?` becomes true once the walk traverses a
-      ;; `[:map K V]` intermediate — the key MAY be absent there, so
-      ;; the final result is `[:union :null T]`. Records (closed,
-      ;; total) keep nullability false; navigating off a known record
-      ;; (missing field) falls through to default — the typo path
-      ;; the per-record rule already exercises.
-      (get-in-walk m-type path-val false default-ret)
-      default-ret)))
+  (get-in-type/return-type bindings-info default-ret))
 
 
 ;; === Registry ===
@@ -1034,18 +995,27 @@
   {:first {:impl first-fn :taint-propagate? true}
    :rest {:impl rest-fn :taint-propagate? true}
    :cons {:impl cons-fn :taint-propagate? true}
-   :conj {:impl conj-any-fn :return-type-rule conj-return-rule :taint-propagate? true}
-   :get {:impl get-fn :return-type-rule get-return-rule :taint-propagate? true}
-   :get-in {:impl get-in-fn :return-type-rule get-in-return-rule :taint-propagate? true}
-   :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule :taint-propagate? true}
-   :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule :taint-propagate? true}
+   :conj {:impl conj-any-fn :return-type-rule conj-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :get {:impl get-fn :return-type-rule get-return-rule
+         :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :get-in {:impl get-in-fn :return-type-rule get-in-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule
+           :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :count {:impl count-fn :taint-propagate? true}
    :empty? {:impl empty?-fn :taint-propagate? true}
    :contains? {:impl contains?-fn :taint-propagate? true}
-   :keys {:impl keys-fn :return-type-rule keys-return-rule :taint-propagate? true}
-   :vals {:impl vals-fn :return-type-rule vals-return-rule :taint-propagate? true}
-   :merge {:impl merge-fn :return-type-rule merge-return-rule :taint-propagate? true}
-   :into {:impl into-fn :return-type-rule into-return-rule :taint-propagate? true}
+   :keys {:impl keys-fn :return-type-rule keys-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :vals {:impl vals-fn :return-type-rule vals-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :merge {:impl merge-fn :return-type-rule merge-return-rule
+           :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :into {:impl into-fn :return-type-rule into-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule :taint-propagate? true}
    :range {:impl range-fn :taint-propagate? true}
    :repeat {:impl repeat-fn :taint-propagate? true}
@@ -1053,22 +1023,29 @@
    :drop {:impl drop-fn :taint-propagate? true}
    :reverse {:impl reverse-fn :taint-propagate? true}
    :sort {:impl sort-fn :taint-propagate? true}
-   :concat {:impl concat-fn :return-type-rule concat-return-rule :taint-propagate? true}
+   :concat {:impl concat-fn :return-type-rule concat-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :flatten {:impl flatten-fn :return-type-rule flatten-return-rule :taint-propagate? true}
    :distinct {:impl distinct-fn :taint-propagate? true}
-   :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule :taint-propagate? true}
-   :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule :taint-propagate? true}
-   :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule :taint-propagate? true}
-   :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule :taint-propagate? true}
+   :select-keys {:impl select-keys-fn :return-type-rule select-keys-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :zipmap {:impl zipmap-fn :return-type-rule zipmap-return-rule
+            :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :update-vals {:impl update-vals-fn :return-type-rule update-vals-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
+   :update-keys {:impl update-keys-fn :return-type-rule update-keys-return-rule
+                 :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :postwalk {:impl postwalk-fn :taint-propagate? true}
    :update-in {:impl update-in-fn
+               :local-type-rules #{:return-type-rule :slot-types-rule :nav-types-rule}
                :return-type-rule update-in-return-rule :taint-propagate? true
                :slot-types-rule update-in-slot-rule
                :nav-types-rule update-in-nav-rule}
-   :list {:impl list-fn :return-type-rule list-return-rule :taint-propagate? true}
+   :list {:impl list-fn :return-type-rule list-return-rule
+          :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :vec {:impl vec-fn :taint-propagate? true}
    :pairs->map {:impl pairs->map-fn :return-type-rule pairs->map-return-rule
-                :taint-propagate? true}
+                :local-type-rules #{:return-type-rule} :taint-propagate? true}
    :position-in {:impl position-in-fn :taint-propagate? true}
    :last {:impl last-fn :taint-propagate? true}
    :partition {:impl partition-fn :taint-propagate? true}

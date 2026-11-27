@@ -1,0 +1,692 @@
+# Structured input source transition tools
+
+These tools prepare and inspect a migration. The production package loader
+still uses the existing format; no command below rewrites installed graphs.
+Source verification covers authored declarations and bindings in the
+supported subset.
+
+## Read-only corpus report
+
+Provide every source repository explicitly, including declared package
+dependencies. Build copies and external-package mirrors are excluded:
+
+```sh
+bb --classpath src:scripts scripts/structured_input_dry_run.clj \
+  --repo core . --repo addon /path/to/addon > /tmp/input-report.edn
+```
+
+An optional `--manifest /path/to/inventory.edn` requires an exact match with a
+saved `structured_input_inventory.clj` report. The scanner checks each source
+checksum before parsing and repeats the inventory afterward. A changed source
+or repository identity invalidates the report.
+
+The report includes source identities, definition origins, counts and
+blockers. It excludes literal payloads and proposed function bodies. Exit 0
+means the analysis finished: inspect `:counts`, `:blockers` and
+`:coverage-complete?` before drawing any conclusion about migration readiness.
+`:verification :authored-source-equivalence :verified-definitions` counts the
+definitions that passed the offline comparison. Full loader, runtime and
+history equivalence are still unverified. The report is read-only.
+
+Package analysis sees only declared transitive dependencies. References in a
+successful dependency context are qualified before contexts are combined, so
+an unrelated package cannot change an existing bare name's meaning. Modules
+within one package are prepared together, allowing forward references.
+
+## Source report with implementation signatures
+
+Run this command from the trusted Graphden checkout to certify binding groups
+and unique forwarded fields that need native signatures.
+Pass the trusted package names before the first source repository.
+
+```sh
+clojure -M:dev:input-source-migration \
+  --trusted-package app --repo core . --repo addon /path/to/addon \
+  --artifact /tmp/input-migration.edn > /tmp/input-report.edn
+```
+
+The command loads implementations from the JVM classpath. It reads the
+repositories given to `--repo` as checksum-pinned source data. Each checked
+signature must match the source declaration and its original UUID. The
+planner revisits a blocked candidate when the exact dependency it needs has
+been certified. Inspect `:scope-certification` on each attempted definition
+for a verified result or the remaining proof requirement. Imported definitions
+reuse the proof from their declaring package. The report excludes proposed
+source text. The existing staging command reads the private artifact.
+
+## Semantic source planner
+
+`graphden.input.source/plan-module` accepts original definitions and the
+existing `records.parse/prepare-module` result. It preserves original rich
+forms, parsed records and binding origins in its private ledger. Log only the
+safe aggregate counts and blockers, not that ledger or the original sources.
+
+Supported rewrites currently include base argument declarations, unchanged
+type declarations, independently owned composed fields, and provable whole-value
+or reference bindings. A bound top-level field can retain a named type
+assertion or a list, map, tuple or union assertion with named leaves.
+The verifier compares the rich form as well as its storage ID, since
+different collection types can share that ID.
+
+A same-name `{:as :title :type :text :description "Document title"}` on
+an inherited `:title` field is a metadata-only binding, not a rename slot.
+When the authored type is unchanged, it becomes
+`:configure {[:title] {:type :text :description "Document title"}}`.
+The original binding UUID and description survive, and the field stays free.
+Narrowing assertions, extra policies and fields supplied through reference
+scopes still require separate evidence. The CST writer keeps annotation-only
+maps in place. For mixed argument maps it moves each original entry, including
+its comments, into the appropriate `:bind`, `:input` or `:configure` map.
+The whole module still goes through exact source replay before staging.
+
+A same-name `{:as :field}` with no type also emits an empty legacy binding
+row. Its source-backed `:configure {[:field] {}}` retains that UUID without
+adding a type assertion or occupying the field. Empty configuration without
+matching original source evidence is rejected. Exact metadata-only inline
+configurations use the same frozen row checks as named declarations.
+
+A direct anonymous binding becomes `[:ref {…}]` with a nested declaration.
+The reader uses the original namespace, host name, field and normalized
+reference spellings to reproduce each legacy child UUID. The host name of
+a nested child is the legacy synthetic name of its enclosing child. A checked
+scoped argument can also introduce an inline reference. Its certificate
+identifies the original argument key for the anonymous UUID and the separate
+target address for the binding row. The reader and emitter retain that inline
+body and refuse drift in either identity.
+The CST edit preserves the authored reference spelling and argument order.
+
+Children can bind multiple fields and contain direct inline descendants.
+A bare scalar stays bare, a bare reference `P` becomes `[:ref P]`, and a
+value wrapper `{:value x}` becomes `[:value x]`. The child declaration's
+`:legacy-forms` map records the field keys whose original spelling needs
+extra information to recover the legacy hash. `:ref-wrapper` preserves
+`{:ref P}`, and `:bare-value` preserves a bare collection treated as a
+whole value by the legacy loader. Inline children use the same
+`:configure` assertions and scalar alias projections as named
+declarations. `:type-first` preserves the original wrapper key order
+when restoring a configured binding. If the added keys would change the
+legacy declaration's iteration order, `:legacy-order` records that order.
+The reader keeps absent arguments distinct from `:bind {}` and verifies
+rows and binding origins recursively.
+
+Metadata-only inline arguments use `[:annotation original-key-order]` in
+`:legacy-forms`. `:legacy-args-order` retains the original argument order
+when annotations move to `:configure`. These source-spelling records reproduce
+the existing anonymous UUID; they do not create runtime bindings.
+
+For a renamed inline field with a description, `[:rename original-key-order]`
+retains the order of `:as`, `:description` and any authored `:type`.
+The reader recovers the alias from the projection and the metadata from
+`:configure` before checking the anonymous UUID.
+
+A type pin authored on an inline reference moves to the enclosing
+binding's `:configure`. The referenced declaration keeps its original UUID.
+For nested uses, `[:inline-type position]` records the pin's position when
+reconstructing the enclosing declaration's hash.
+
+An anonymous list item uses `[:ref {…}]` within the builder's `:items`.
+Its legacy use-site hash includes the ordinal within the original
+contribution, including when the contribution appends to an inherited list.
+Identical bodies at different positions keep distinct identities. Source
+verification checks the child's declarations and the builder's item UUID.
+The CST writer edits the original item span and retains its comments.
+Lists inside anonymous bodies use a `:list-origin` entry in `:legacy-forms`.
+It preserves the original vector or append wrapper, including key order,
+and records explicit value and reference wrappers by ordinal. Positional
+input markers reconstruct their key order from the same entry and their
+type from the anonymous function's declared input.
+
+Unsupported list origins and rename projections, referenced input scopes,
+assertions that require inline type rows and unknown binding policies
+have explicit blockers. Secret paths keep resolver semantics.
+
+`graphden.input.source/verify-module` checks each supported plan entry against
+the same prepared package context. The offline adapter lowers the actual
+v2 `:input` declaration to rows, resolves inherited fields in parent order,
+and gives the v2 reader the original binding identities and reference scope.
+Field IDs and the derived input type and membership IDs use the storage
+migration's mapping. Missing ancestor declarations, inheritance cycles and
+distinct inherited fields with the same public name produce blockers.
+
+The verifier parses, emits and rereads v2 EDN, then compares declaration rows,
+rich field contracts and authored bindings with the legacy plan. Literals
+retain collection kind and the distinction between absent and present nil.
+The adapter uses the legacy declaration lowerer temporarily. The v2 parser
+handles binding expressions and its own row validation.
+
+### Proving a reference-use address
+
+`graphden.input.source-scope/verify-binding` checks a source-plan entry whose
+only blocker is one cross-reference binding. Supply its original source path,
+a frozen v2 snapshot containing the owner's other bindings, and a function
+that calls `analyze-effective-input` with the checker for that snapshot.
+
+The verifier follows value-producing reference edges from the owner, including
+edges inherited from an ancestor. It finds the legacy slot UUID in all declared use scopes,
+including occupied uses. The unique occurrence must have a free public
+input route, and the reference, field and binding identities must match
+the legacy rows. Reanalysis on a private snapshot checks the new binding
+and each pre-existing occupied address. The result contains the scoped row
+and its source and public paths. Keep this result private like the plan.
+`source-snapshot/migrate-binding` consumes that certificate and returns the
+source plan entry after a v2 parse, emit and reparse against the original
+legacy rows. Without a checked frozen closure the planner retains its blocker.
+
+A field of a named result record can have the same name as a constructor
+input. The legacy parser may target the result type's field UUID even when
+the public input surface displays the constructor's field under that name.
+The verifier rejects that substitution. Repeated uses of the same target
+slot also require a separate migration rule.
+
+The offline `graphden.input.source-snapshot/package-index` accepts original
+forms and the prepared package including visible dependencies. Pass the index,
+owner UUID, and frozen base-function registry entries to
+`source-snapshot/verify-binding`. It omits the one candidate binding from
+a private baseline, verifies reachable declarations through the v2 reader and
+uses their field IDs as implementation argument paths. The stage 4 signature
+engine and directional checker run before and after adding the scoped row.
+Single-parent closures can also retain a source-declared type variable or a
+collection of primitive and variable types when the exact field UUID and its
+storage type agree. This preserves a rich field whose storage FK also occurs
+on an unrelated `:any` field. A declaration gap identifies the dependency UUID and source
+blocker codes. A package can migrate each candidate independently once its
+frozen closure includes the implementation signatures it requires.
+
+For a named union, the frozen context keeps the declaration UUID in
+`:alias-ids`, the original ordered constraint in `:fns`, and the source name,
+namespace, member vector and available file path in `:type-origins`. The v2
+reader checks those members against the original and prepared declarations.
+The checker normalizes members for semantic comparisons. For example,
+`:nullable-text` admits null and text, and `:hiccup-node` also admits integers,
+floats, booleans and lists. A union with an unresolved named member requires
+further declaration evidence. A known literal must fit a union member. A
+reference whose return is too broad retains its runtime validation obligation.
+
+An explicit value `{:value V :literal? true}` lowers to `[:value V]`
+in a scalar binding or a list item. The writer compares the original
+rows, copies the payload span and keeps comments around the marker.
+An anonymous definition also records the marker's order so its UUID
+derives from the original body.
+
+A named record with bare primitive fields can also supply a typed projection.
+The snapshot retains its original field map and checks every slot and membership
+against the record UUID, ordinal, field name and primitive type UUID. A
+projection pin must still join the authored alias, the original target binding
+and the declared record UUID. The checker reports any missing implementation
+signature separately. If an admitted rule exposes incompatible runtime-check
+obligations whose intersection is not represented, `projection-readiness`
+retains its source routes in an incomplete diagnostic view with signature
+coverage false. The executable certificate still refuses the same gap.
+An optional argument with no effective binding appears
+in `:free-arguments` and has no value key in the ABI facts. An explicit nil has `:value nil` and
+`:value-present true` and is bound. Both forms retain their authored source
+when the implementation returns the same record member type. Wrapped field
+policies and nested record declarations require additional evidence.
+
+A scalar rename can project a direct or inherited field when the legacy
+alias slot points at the declaring field's UUID. Its input declaration keeps
+the prepared type expression, including type variables. Supported pins retain
+the original binding UUID and a separate `:configure` assertion. Ambiguous
+names, conflicting pins and occupied ancestor fields remain diagnostics.
+
+For a legacy `{:as :handler :ref :assoc-handler}`, the occupied outer slot
+and the public callee reader can have distinct UUIDs. The checked source
+planner follows a direct value reference to a callee with one free reader.
+It compares the effective argument, environment, name translation and public
+surface before emitting the reference. Its migration ledger retains the
+original alias slot and membership, their occupied address and the callee
+reader's scoped address. A persisted override of the occupied alias can
+replace the outer value, while a source binding to the callee reader supplies
+the inner value. Database migration must resolve each original binding UUID.
+
+An authored `:description` on a scalar rename belongs to its original binding,
+not the new alias slot. The planner keeps it under `:configure` at the original
+destination alongside any type assertion. The reader requires the exact
+source-backed description, target path and binding UUID before adding that
+metadata to the projection row. Changing or moving the description fails the
+source comparison. The CST writer retains its original string bytes and comments.
+
+Descendants may bind the alias slot through a common inheritance root. Each
+declaring ancestor's local projection must account for the stored source-slot
+link. Ancestor rows must occupy distinct slot addresses across the lineage.
+This includes diamonds whose two arms share one declaration. Binding the
+projected destination directly, competing inherited bindings and multiple
+implementation roots retain diagnostics. At each reference use, a supplied
+alias carries the consuming binding's original UUID and its scoped address in
+`:source-binding` on the analyzer's projection route.
+
+An owned field's legacy source-slot link can also target a deeper value-reference
+input. All such fields on one owner must be proved and rewritten together. The
+frozen analyzer identifies one occurrence for each destination UUID and checks
+every reference edge, the source/destination types and existing occupancy. The
+local fields keep their UUIDs, positions and authored metadata; explicit scoped
+projections replace only their implicit source-slot links. Repeated destination
+uses, incomplete groups and unsupported reference modes remain blocked.
+
+Rich-field validation obligations remain explicit. A forwarding proof may remove
+a destination's field-read check only when an identical check remains on its
+original source field; other obligations must survive unchanged. This source
+equivalence proof does not establish execution support for those checks.
+
+An authored callable field retains the anonymous type UUID computed from its
+literal `[:fn ...]` form. Qualification or alias expansion must not replace that
+identity. The source ledger must contain the exact callable row; named argument
+and result types independently require their complete frozen declaration rows.
+An erased primitive `:fn` FK cannot supply this evidence.
+
+Named record fields may retain supported collection and union forms erased by
+storage when their original declaration, FK and complete field memberships
+agree. The descriptor uses that source witness with the existing type rules;
+this does not change union normalization or discharge runtime obligations.
+A named atomic dictionary callback has a legacy/canonical execution regression.
+A named record callback with a nested parameter route still fails explicitly
+with `:callback-parameter-shape-required`, even after its source transaction and
+analysis succeed. Record callback lowering is a separate compiler obligation.
+
+A generic plain-map input, optionally unioned with null, can retain a named
+record or dictionary value-reference result when the stock frozen checker
+solves its complete expected type. The source proof checks the original base
+argument, slot FK, named return owner, unique reference use and unchanged
+field-read evidence. Unresolved variables, callable contents, changed identities
+and missing runtime checks remain blocked. The shipped `update-in` callbacks
+are frozen by their original function identities after differential path,
+null and default tests; callback bodies and argument mapping are unchanged.
+This proves source equivalence for the checked route, not execution support
+for every surrounding callback graph.
+
+Audited native type callbacks run with the frozen signature view. A callback
+that introduces a named type records `:graphden.input/type-aliases` in its
+metadata, mapping the returned label to its qualified source declaration.
+For example, the conditional's positive/non-negative literal refinements use
+the `core.refinements` UUIDs. The snapshot verifies those declarations and
+rejects absent or conflicting aliases instead of reading process-wide policy.
+
+Named list types require source and row evidence too. For `:list T`, the
+snapshot checks the type-only owner, its element FK and its exact implicit
+`:items` slot/membership. The element must resolve through the declaration's
+namespace to a primitive or another verified named type. Executable functions,
+changed memberships and unverified origins are rejected. Compound inline
+elements still require separate evidence; an erased element FK cannot supply
+their authored shape.
+
+An authored generic scalar or `:never` return can use the legacy `:any` FK
+only when the source form, physical FK and frozen implementation signature
+agree. The snapshot retains this return by function UUID and FK; the ordinary
+checker still checks each use. Return variables share the implementation's
+use scope and argument substitution before the declared-return check. Two
+uses of `const` can therefore return different concrete types without sharing
+a type variable. An unrelated FK or implementation return remains an error.
+
+An authored rename pin uses the prepared package's namespace-resolved type
+definitions. The planner checks finite expansion, known source leaves, marker
+preservation and directional subtyping. The existing unifier can instantiate
+the inherited generic contract, for example `[:list a]` to `[:list :uuid]`;
+the result must be closed and still accept the actual pin by subtyping.
+Repeated variables must retain their correlation: a map's keys and values
+cannot independently instantiate the same variable to different types.
+Both named pins and inline collection pins retain their exact source form,
+alias slot UUID, inherited target UUID and physical override FK. Unknown
+references, recursive aliases and unsupported declarations remain blocked.
+
+Frozen analysis records a rich projection pin by its binding UUID and physical
+FK. This keeps an inline list's element type when legacy storage uses the
+shared `:sequence` identity. Only the exact projection row and its authored
+alias type can supply this witness. Metadata restores it for that binding and
+then runs the ordinary subtype/marker checker; runtime obligations and missing
+checker coverage remain explicit.
+
+`source-snapshot/projection-readiness` returns the analyzer's scoped routes,
+binding UUIDs, directional proofs, runtime obligations and signature coverage.
+Missing implementation evidence or a custom rule's missing signature view
+produces an incomplete result with a diagnostic. For example, a rename of
+`core.collections/get`'s generic collection input can have a verified route
+and a deferred field-read obligation while its return rule needs that view.
+A named dictionary can supply its field type to this analysis when the
+verified original declaration and stored type UUID agree on a homogeneous
+map with primitive key and value types. Other named bodies still require
+their own declaration and field-identity evidence.
+
+Run the focused JVM tests with `bb wt test --focus graphden.input.source-scope-test
+--focus graphden.input.source-snapshot-test`.
+
+A base argument's documenting `:value` annotation remains a free input;
+conversion does not create a new binding or runtime default. Frozen source
+analysis retains that annotation after checking the original declaration and
+field type UUID; it does not add an occupied input. Existing implementation
+fallback behavior is preserved. Ordinary fields named
+`value`, `ref` or `default` do not introduce new control semantics.
+
+For a direct descendant of the reviewed Ring `:query-param` with a fixed
+parameter name, the offline planner checks the original graph, the literal
+writer and the native functions. Its V2 input is a single required
+`:request` of type `:ring-request-shape`. Calling the compiled owner with
+`{:request ring-request}` uses the same request for the string-key lookup,
+keyword-key lookup and raw query-string fallback. Both lookup paths have a
+fixed length. The owner keeps its original UUID and declared `:nullable-text`
+return type. Middleware can supply other values at runtime. The planner
+keeps old reader UUIDs in the receipt for differential checks.
+
+## Expression grammar and source edits
+
+`graphden.input.syntax/parse-expression` accepts a resolved descriptor,
+existing input scope, authoring expression and frozen identity context:
+
+```clojure
+{:user {:name "Alice" :email [:ref :lookup-email]}
+ :options [:value {:ref "ordinary data"}]}
+```
+
+Maps fill declared record fields partially. Literal collections use an
+explicit value wrapper; bare scalar keywords are literal values. References
+are explicit and remain unevaluated. The expected field type is retained for
+later value/HOF dispatch. The caller supplies binding origins and a resolved
+namespace context; a global bare-name index is insufficient.
+
+A vector key in a composed `:bind` names a public input reached through a
+checked chain of value-producing references. For example,
+`{:left [:ref :demo/reader] [:left :deep] [:value "text"]}` supplies the
+reader's `:deep` input. Each preceding path component identifies one reference
+use. The reader checks the original binding UUID, leaf slot, reference edges
+and owner lineage against the prepared context. The writer currently handles
+one scoped legacy binding with a literal or named reference per owner.
+Repeated occurrences of the same legacy slot remain ambiguous.
+
+The Babashka `structured-input-cst` helper converts supported planner entries
+into exact source edits. It can rename argument keys, wrap literal/ref leaves
+and change an old single-operator map to a vector expression. Independently owned
+composed fields move to `:input` while inherited bindings move to `:bind`.
+Same-line trailing comments follow their values, standalone comments precede
+the next field, and declaration ordering retains original slot positions.
+Verified inherited renames emit an explicit projection. A field in a referenced
+graph requires a proven use-site address. Other entry moves fail explicitly. Literal contents are
+kept verbatim.
+
+For example, `{:x {:ref :query :type :text}}` becomes
+`:bind {:x [:ref :query]}` and `:configure {[:x] {:type :text}}`. The path
+identifies the field, while the expression and its type assertion share one
+binding identity. The CST edit carries the original type token and its
+comments to the configuration entry.
+
+Tracked CST positions locate original text slices. Applying the slices
+preserves comments, CRLF, Unicode and multiline string payloads without
+rendering the whole syntax tree again. `plan` checks source and target
+checksums; `apply-text` returns text only. A second application to the exact
+target is a no-op, and a stale or inconsistent patch is rejected.
+
+## Offline version 2 module reader
+
+`graphden.input.module/parse-module-v2` accepts a module map and
+`{:context-for resolver}`. The module must carry `:input-format 2`:
+
+```clojure
+{:input-format 2
+ :namespace "orders"
+ :fns [{:name :invoice
+        :parent :invoice-template
+        :bind {:customer {:name "Alice"}
+               :options [:value {:ref "ordinary data"}]}}]}
+```
+
+The resolver receives each original definition with its module namespace
+attached. It must provide a frozen, verified context:
+
+| Context key | Required meaning |
+| --- | --- |
+| `:fn-id` | UUID from `records.ids/fn-id` for the source namespace/name |
+| `:scope` | `[fn-id []]`, the definition's root input occurrence |
+| `:input-type-id` | UUID matching the owner's `:input-type-fn-id` declaration |
+| `:contract` | Resolved **declared** input descriptor, with UUID field identities |
+| `:name->id` | Namespace-resolved keyword → UUID map, without ambiguous sentinels |
+| `:binding-id` | Pure `(fn [scope field-id-path] ...)` returning the preserved origin UUID |
+| `:declaration-records` | Validated declaration rows, including the owner `:fn` row |
+| `:origin-ledger` | Opaque provenance map retained with the parsed definition |
+| `:resolve-config-type` | Resolve a configured field's type to its canonical `:type` form and `:type-override-fn-id` UUID in the module's frozen namespace context |
+
+Type-only declarations require their source owner, declaration rows and origin
+ledger, with no callable contract. A shared input-type declaration already in
+the resolver's frozen graph need not be repeated in the returned records.
+This source API deliberately requires name-derived owner UUIDs; migration of
+arbitrary database-owned identities needs a separate provenance adapter.
+
+The result contains `:module` metadata, `:definitions` with original `:source`,
+declared `:contract`, parsed `:expression`, `:binding-state`, `:bindings` and
+origin ledger, plus combined `:records`. Rich `:input` declarations and top-level
+definition metadata are retained. The reader validates structural shapes,
+addresses, binding origins and occupancy before returning any result. The
+offline source verifier supplies a resolver for migrated declarations. The
+general reader also accepts frozen contexts for independently authored v2
+fixtures.
+
+Missing required fields are allowed in a partial definition. Documented default
+values remain annotations. This structural validation does **not** prove value
+or ref type compatibility, graph readiness, or value/HOF/callable dispatch.
+Resolving declarations, inheritance and names belongs to the caller; union
+arms are never chosen by this reader.
+
+`emit-module-v2` accepts the parsed result and the same context options. It
+emits explicit partial/value/ref syntax, preserves declarations and metadata,
+and reparses to verify declaration and binding-origin stability. Formatting
+and comments remain the responsibility of the CST writer. Parsed output and
+origin ledgers can contain literal payloads; do not print them in summary logs.
+
+The production loader accepts only absent or explicit version 1 headers.
+It rejects version 2, unknown headers and top-level definition `:input`, `:bind`
+or `:configure` keys before any implementation in the resolved package closure
+is evaluated. Legacy arguments and literal maps may still use those names.
+Preflight snapshots package metadata and every module's parsed source per load
+call; processing consumes that same snapshot without rereading source files.
+
+## List contribution migration
+
+The offline field migrator accepts a sequence append from original source and
+its prepared binding and item rows. It can emit this constructor expression:
+
+```edn
+[:list-builder {:items [[:ref :app/load-row] [:value :status] [:value nil]]
+                :tail :open}]
+```
+
+Items retain their original binding UUID and position-derived item UUID. Each
+single-parent contribution gets a separate builder and optional tail field.
+A descendant append binds its builder to the previous tail's use-site address.
+A closed contribution binds an empty vector to its own tail. Repeated refs keep
+their target UUIDs and run through the existing sequence item compiler, which
+applies the receiving base function's delay policy and shared call cache.
+
+A frozen package closure can analyze a single builder fragment containing
+literals and named references at a field of type `[:list T]`, where `T` is
+`:any`, `:bool`, `:int`, `:numeric`, `:text` or a verified named union over
+primitives and their collections. It rebuilds the generated rows,
+takes each argument path from its stored membership, and retains the receiving
+field's exact list type for the tail and return. The existing signature checker
+checks each operand and its referenced function. Finite nested list elements
+are retained recursively: `concat.colls` has `[:list [:list :any]]`, so each
+generated operand has `[:list :any]`, while its tail and return keep the outer
+list. Nested type variables and other nested constructors remain unsupported.
+The analysis reports runtime
+obligations for dynamically typed values. Type variables, other named element
+types, positional projections, inline items and inherited chains need additional
+signature evidence.
+
+The package dry run reports these field proofs under
+`:verification :list-builders`. It counts edges linked to their source origins
+and field splices reparsed from checksummed modules. The offline v2 module
+reader materializes the first append to an unoccupied field as a callable with
+ordinary input bindings. It reconstructs all items, the owner edge and the
+optional seal from those records and compares them with their source origins.
+The dry run counts a whole list definition under `:reparsed-definitions` only
+after parsing the actual CST bytes and repeating the legacy/v2 comparison.
+Each subsequent append resolves against the frozen previous fragments and
+binds the prior open tail at its use site. The child module emits only its
+own new callable and input rows. An append following a closed tail fails.
+`graphden.input.list-records/recover-use` reconstructs one verified chain
+from the combined module rows and rejects unexpected writes into that use.
+Independent field declarations, assertions and a supported scalar rename can
+coexist with list contributions. Unsupported item annotations, inline items and
+ambiguous or missing ancestry have separate diagnostics.
+
+An item `{:as :label}` declares an optional owner input and becomes
+`[:project [:label]]` inside the builder. The projected operand keeps the
+legacy item UUID. Its binding belongs to the contributing owner, uses the full
+builder occurrence path and reads the owner's original field UUID. This also
+applies to an explicit `:type` with named or supported collection leaves.
+Fields use their original membership positions. Repeated reads use separate
+item UUIDs. The JVM resolves the original owner slot before reading it at the
+consumer's demand point.
+
+An occurrence with its own documentation or an explicit optional flag can
+carry that policy as the last projection argument, for example
+`[:project [:label] {:description "Display label" :required false}]`.
+The same item UUID stores the description and required flag on its scoped
+projection row. Other occurrences can read the same owner field with a
+different description. The owner field keeps its original optional contract.
+Legacy `:required true` on an item retains
+`:positional-list-annotation-required` because the old parser does not
+make that owner input mandatory.
+
+## Complete source module patch
+
+`structured-input-cst/plan-verified-module` inserts or updates
+`:input-format 2` when every definition in the original file has an authored
+proof. It replays the splice, reads the rewritten EDN, and checks every
+rewritten definition against the same frozen context before returning a
+checksum-bound patch. Comments, line endings and untouched literal bytes
+stay in the original source representation. Files with blocked entries can
+still be inventoried and diagnosed by the dry-run.
+
+Pass `--artifact PATH` to the dry-run CLI to save these module patches into
+a new EDN artifact. Each patch carries its source and target checksums,
+replacement text and reversible edits. Use an artifact path outside the
+source repos. The artifact contains authored literals and stays private.
+Standard output still contains only the sanitized dry-run report.
+The artifact can be partial while definitions are blocked.
+
+Materialize the verified replacements for one repository in a new directory:
+
+```sh
+bb --classpath src:scripts scripts/structured_input_stage.clj \
+  /path/migration.edn core /path/core-checkout /path/staged-core
+```
+
+The command checks the original bytes, the version-2 module header and the
+definition ledger before publishing the directory. The staging receipt lists
+the verified output checksums and blocked modules. The source checkout
+remains intact.
+
+`graphden.input.package-execution/compile-staged-module` can replay one staged
+file offline. Supply the file's bytes and the expected checksum from its
+trusted staging receipt, the original legacy module and prepared package
+index, frozen implementation signatures and implementations, and the
+caller's visible executable UUIDs. The reader checks SHA-256 over the exact
+bytes before decoding one UTF-8 EDN form. All definitions must preserve their
+authored source meaning and declaration identities. The requested root must
+belong to the staged module. Its compiled closure checks executable visibility
+and uses the same staged forms in the checked JVM path.
+
+This still depends on legacy preparation and explicit package visibility.
+Production activation requires resolving packages, imports and visibility
+from version-2 source and selecting its compiler in the loader. Import,
+storage migration and registration are separate operations.
+
+`compile-staged-primitive` prepares one independent root directly from the
+pinned version-2 file. It derives the declaration and field UUIDs from the
+authored name and input fields through the shared storage row emitter. The
+caller supplies the visible root, frozen signature and implementation. This
+path accepts scalar primitive input and output declarations. Inheritance,
+binding expressions, configuration and richer types require additional
+preparation and report explicit blockers.
+
+`compile-staged-literal-root` covers a composed function with one visible
+primitive parent declared in the same pinned module. Each flat
+`[:value scalar]` binding derives its UUID from the owner and its inherited
+field. Checked execution exposes the remaining fields, including an empty
+input record when every field is bound. An omitted or empty binding map
+exposes every parent field. The seam blocks inherited or external
+parents, configuration, extra declarations and references.
+
+### Defaults in pinned record inputs
+
+A scalar field can declare `{:type [:union :null :text] :required false
+:default "Ada"}`. Each direct member of a pinned record input can declare
+its own optional nullable-text fallback. Other members of that record must
+have scalar primitive types. The operator pin and the independently registered native
+ABI must agree with the record shape.
+
+The owner’s top-level input membership carries a nested fallback as
+`{:target-path ["<member slot UUID>"] :value "Ada"}`. Two inputs of the
+same record type can supply different fallbacks. For two or more fallback
+values the same membership stores `{:members [...]}` containing those
+path/value entries in ascending UUID string order. The reader rejects the
+whole group if a path repeats or fails validation. A member omitted from
+the group has no fallback. A present entry whose `:value` is nil supplies
+an explicit nil fallback. The shared record supplies field identities and types.
+
+The JVM keeps an omitted optional record absent. When a caller supplies
+the record, its omitted optional member can take its fallback. An explicit
+nil retains its value. A named browser entry can export this fallback for a
+public optional record supplied directly in the root invocation. The exporter checks the
+authorizing owner, its input type, the shared record and the nullable
+member type against the visible frozen snapshot. It matches the member
+path and fallback on the owner's input membership. A missing or changed
+membership, a shared-member default, or a callback-local record yields
+`:browser-field-default-unsupported`. Execution still requires a
+browser-supported primitive.
+
+## Focused verification
+
+```sh
+bb structured-input-inventory-test
+bb structured-input-cst-test
+bb structured-input-dry-run-test
+bb structured-input-module-test
+```
+
+The JVM suites `graphden.input.core-test`, `graphden.input.syntax-test`,
+`graphden.input.source-test` and `graphden.input.module-test` cover binding laws,
+expression interpretation, legacy semantic classification and offline module
+round trips. `graphden.packages.input-format-test` verifies the production
+boundary and preflight using tiny synthetic packages. These focused checks do
+not replace the native landing gate or whole-corpus execution comparison.
+
+## Enclosing source owners and dependency proof transactions
+
+`source-origins/index` records the original enclosing owner and source path of
+parser-generated inline declarations. It repeats the parser's normalization
+and expansion and compares the complete result with preparation. Nested
+bodies retain their immediate owner; sequence positions participate in their
+existing identities. A value-wrapped map remains opaque. Duplicate original
+owners cannot supply a unique witness. These private entries contain source
+payloads and must not be printed in diagnostics.
+
+A closure may request a generated child before reaching its enclosing owner,
+including when a scoped binding is temporarily omitted for proof. The child
+can then be checked independently using its exact original body. It still
+requires the ordinary authored-source round trip; the provenance index does
+not itself certify its rows. Repeated closure entries must agree on rows,
+resolved expressions, origins and rich declaration metadata. Alternate scalar
+spelling in the already verified `:bind` source and its enclosing inline-body
+wrapper do not change this evidence; child declarations are compared recursively.
+Generated names remain internal and are never added to authored modules.
+
+`source-snapshot/with-certified-owner` proves inherited projections and
+scoped bindings in one immutable dependency transaction. Each declaring
+owner must pass its existing forwarding or rename checks before replanning
+the descendant. Scoped additions retain the aggregate type, reference-use
+and occupancy checks. An occupied ancestor input, ambiguous occurrence,
+cyclic proof dependency or unsupported blocker aborts the transaction; no
+partial package is returned. This is offline source evidence, not proof of
+runtime equivalence or authorization to activate the new loader.
+
+One owner may also contain both direct local forwarding declarations and
+scoped bindings. Its projection group is proved first with the scoped values
+omitted. The full original reference origins must agree with that reduced
+owner, so omission cannot hide a competing reference. Before the scope replay,
+`source-joint/scope-view` checks every remaining legacy row, declaration,
+membership and projection against the verified baseline and frozen snapshot.
+The projection rows stay in the graph; adding the scoped values must preserve
+their occupancy, unique destinations and all runtime obligations. Only a full
+round trip of the combined source proposal publishes the owner and its parent
+forwarding links. The existing forwarding type admission still applies:
+callable declarations require their exact authored origin, and a declaration
+that narrows an inherited field without a unique reference destination cannot
+be recast as a forwarding route.

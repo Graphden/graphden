@@ -16,7 +16,7 @@
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.registry.core :as reg]
     [graphden.packages.records.ids :as ids]
-    [graphden.types.core :as types]))
+    [graphden.types.reference :as reference]))
 
 
 ;; Binding-row shape predicates. Single source of truth for "what kind
@@ -232,7 +232,7 @@
    This dispatch only chooses evaluation versus wrapping; it grants no
    permission to consume a secret as a plain value."
   [ref-fn-id lookups]
-  (some? (types/callable-signature (effective-return-type ref-fn-id lookups))))
+  (reference/produces-callable? (effective-return-type ref-fn-id lookups)))
 
 
 (defn- lazy-seq-arg-names
@@ -353,11 +353,13 @@
 
 (defn- own-fn-of-slot
   "Return the fn-id that OWNS `slot-id` via fn-slot junction, or nil."
-  [slot-id {:keys [fn-slots-by-fn]}]
-  (some (fn [[fid junctions]]
-          (when (some #(= slot-id (:slot-id %)) junctions)
-            fid))
-        fn-slots-by-fn))
+  [slot-id {:keys [fn-by-slot fn-slots-by-fn]}]
+  (if fn-by-slot
+    (get fn-by-slot slot-id)
+    (some (fn [[fid junctions]]
+            (when (some #(= slot-id (:slot-id %)) junctions)
+              fid))
+          fn-slots-by-fn)))
 
 
 (defn- collect-env-bindings*

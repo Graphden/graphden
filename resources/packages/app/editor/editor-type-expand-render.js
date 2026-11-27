@@ -50,6 +50,27 @@ function isTypeExpandable(rich) {
   return false;
 }
 
+// IDs connect native disclosure controls to their clipped panel bodies.
+function inlineTypePanelId(path) {
+  return 'inline-type-' + encodeURIComponent(path);
+}
+
+// Use only the scoped snapshot's record membership. An inferred record may
+// have no matching declaration, so retain all the resolved fields in that case.
+function recordExpansionFields(rich, shape, typeId) {
+  const type = lookups?.fnMap?.get(typeId);
+  if (type?.role === 'record' && (!type.name || rich === type.name)) {
+    const members = lookups.fnSlotsByFn?.get(typeId) || [];
+    const fields = members.map(member => lookups.slotMap?.get(member['slot-id']));
+    const names = new Set(fields.map(field => field?.name));
+    if (names.size === fields.length && names.size === Object.keys(shape).length
+        && fields.every(field => field && Object.hasOwn(shape, field.name))) {
+      return fields.map(field => ({name: field.name, type: shape[field.name], declaration: field}));
+    }
+  }
+  return Object.entries(shape).map(([name, type]) => ({name, type}));
+}
+
 // Render one mini-chip wrapped in a row that may carry a left
 // affordance (field-name / tag) plus a recursive child slot. Returns
 // the row element.
@@ -71,7 +92,7 @@ function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
   // expandable chip. parentAncestors is a Set<string> threaded
   // through from renderInlineExpansionInto; missing → empty.
   const ancestors = parentAncestors || new Set();
-  const richName = (typeof rich === 'string') ? rich : null;
+  const richName = (typeof rich === 'string' && !editContext?.inputDescriptor) ? rich : null;
   const isCycle = !!(richName && ancestors.has(richName));
 
   const chip = document.createElement('span');
@@ -88,7 +109,7 @@ function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
     return row;
   }
   const nativeTitle = 'Type: ' + formatTypeHint(rich);
-  const expandable = isTypeExpandable(rich);
+  const expandable = editContext?.inputDescriptor ? editContext.inputDescriptor.fields.length > 0 : isTypeExpandable(rich);
   const mark = expandable ? window.gdAppendTypeControlMark(chip,
     expandedTypePaths.has(path) ? '▾' : '▸') : null;
   const display = () => ({label: shortTypeLabel(rich), title: 'Type: ' + formatTypeHumanReadable(rich)});
@@ -103,9 +124,12 @@ function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
   if (expandable) {
     chip.classList.add('type-inline-chip-expandable');
     chip.setAttribute('role', 'button');
-    chip.setAttribute('aria-label', nativeTitle);
+    const fieldLabel = editContext?.fieldLabel;
+    chip.setAttribute('aria-label', fieldLabel ? fieldLabel + ' — ' + nativeTitle : nativeTitle);
     chip.setAttribute('tabindex', '0');
     chip.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
+    slot.id = inlineTypePanelId(path);
+    chip.setAttribute('aria-controls', slot.id);
     chip.style.cursor = 'pointer';
     // For a named child type (e.g. `ring-request-shape`), thread the
     // name through so the recursive panel can show that type's
@@ -391,6 +415,11 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     host.appendChild(content);
     host = content;
   }
+  if (c.inputDescriptor) {
+    appendStructuredInputFields(host, path, c);
+    appendOccupiedStructuredInputs(host, path, c);
+    return;
+  }
   // Human-readable description from the type-row's `description`
   // field — surfaces author intent without taking a popover detour
   // through the `i` badge.
@@ -584,11 +613,69 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       return;
     }
   }
-  if (typeof effective === 'object' && effective !== null) {
-    Object.entries(effective).forEach(([k, v]) => {
-      host.appendChild(buildInlineTypeRow(k, v, path + '/f/' + k, c.ancestorTypes, childEdit([k])));
-    });
+  if (typeKindLabel(effective) === 'Record') {
+    const typeId = c.arg ? argRecordTypeId(c.arg) : c.recordTypeId;
+    for (const field of recordExpansionFields(rich, effective, typeId)) {
+      const {name, type, declaration} = field;
+      const label = declaration && !declaration.required ? name + ' (optional)' : name;
+      host.appendChild(buildInlineTypeRow(label, type, path + '/f/' + encodeURIComponent(name), c.ancestorTypes,
+        {...childEdit([name]), fieldLabel: label, recordTypeId: declaration?.['type-fn-id']}));
+    }
   }
+}
+
+function appendStructuredInputFields(host, path, {inputDescriptor, ancestorTypes, structuredBind}) {
+  for (const field of inputDescriptor.fields) {
+    const label = field.required === false ? field.name + ' (optional)' : field.name;
+    const type = field.fields ? (field.kind === 'reference-inputs' ? 'Reference inputs' : 'Record') : field.type;
+    const row = buildInlineTypeRow(label, type, path + '/input/' + encodeURIComponent(field.name), ancestorTypes,
+      {fieldLabel: label, inputDescriptor: field.fields ? field : null, structuredBind});
+    const bindPath = field['bind-path'];
+    if (structuredBind && Array.isArray(bindPath) && bindPath.length) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'arg-type-chip';
+      button.textContent = 'Bind';
+      button.setAttribute('aria-label', 'Bind ' + bindPath.join('.'));
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (structuredBind.isCurrent()) openStructuredInputPopover(button, structuredBind, 'bind', {path: bindPath, type: field.type});
+      });
+      row.insertBefore(button, row.querySelector('.type-inline-child'));
+    }
+    host.appendChild(row);
+  }
+}
+
+function appendOccupiedStructuredInputs(host, path, {inputDescriptor, ancestorTypes, structuredBind}) {
+  if (!structuredBind || !inputDescriptor.occupied?.length) return;
+  const group = document.createElement('div');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', 'Bound inputs');
+  const heading = document.createElement('strong');
+  heading.textContent = 'Bound inputs';
+  group.appendChild(heading);
+  for (const field of inputDescriptor.occupied) {
+    if (!Array.isArray(field.path) || !field.path.length || !field['binding-id'] || !field['version-id'] || field.type == null) continue;
+    const label = field.path.join('.');
+    const row = buildInlineTypeRow(label, field.type, path + '/occupied/' + field['binding-id'], ancestorTypes);
+    for (const [action, verb] of [['edit', 'Edit'], ['remove', 'Remove']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'arg-type-chip';
+      button.textContent = verb;
+      button.setAttribute('aria-label', verb + ' ' + label);
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (structuredBind.isCurrent()) openStructuredInputPopover(button, structuredBind, action, {
+          path: field.path, type: field.type, bindingId: field['binding-id'], versionId: field['version-id'],
+        });
+      });
+      row.insertBefore(button, row.querySelector('.type-inline-child'));
+    }
+    group.appendChild(row);
+  }
+  host.appendChild(group);
 }
 
 // ---------- Rename fn-type arg (T4.1) --------------------------------

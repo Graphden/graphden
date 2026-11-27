@@ -32,9 +32,11 @@
     [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
+    [graphden.crud.structured-authoring :as authoring]
     [graphden.crud.type-check :as tc]
     [graphden.crud.validation :as validation]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.access :as input-access]
     [graphden.packages.records :as records]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
@@ -71,12 +73,14 @@
 
 (defn list-entities
   [entity-type where ctx]
+  (input-access/assert-public-access! (keyword entity-type))
   (vec (sp/query-entities (request/require-storage ctx)
                           (keyword entity-type) (or where {}))))
 
 
 (defn get-entity
   [entity-type id ctx]
+  (input-access/assert-public-access! (keyword entity-type))
   (sp/read-entity (request/require-storage ctx) (keyword entity-type) id))
 
 
@@ -130,6 +134,7 @@
 
 (defn- reject-generic-audit-write!
   [entity-type]
+  (input-access/assert-public-access! entity-type)
   (when (contains? immutable-operational-entities entity-type)
     (throw (ex-info "Audit records can only be written by their domain operation"
                     {:type :authz/forbidden :entity-type entity-type}))))
@@ -137,6 +142,7 @@
 
 (defn- assert-write-valid!
   [storage entity-type data proven-acyclic?]
+  (authoring/assert-public-input! entity-type data)
   (when-let [rej (or (when (= entity-type :fn)
                        (secret-leaf-capability-rej storage data))
                      (validation/write-rej storage entity-type data proven-acyclic?))]
@@ -186,7 +192,9 @@
                                           ;; close a cycle. Keep every other write guard.
                                           (assert-write-valid! storage et data
                                                                (or proven-acyclic? generated-fn-id?))
-                                          (sp/create-entity storage et (dissoc data :_admin-secret-create)))))]
+                                          (if (= :fn et)
+                                            (authoring/create! ctx storage (dissoc data :_admin-secret-create))
+                                            (sp/create-entity storage et (dissoc data :_admin-secret-create))))))]
         (when publish? (publish-write! ctx storage et result))
         result))))
 
@@ -232,6 +240,7 @@
                                                              (merge (select-keys (sp/read-entity storage et id) ks)
                                                                     (assoc data :id id))
                                                              (assoc data :id id))]
+                                            (authoring/assert-parent-update! storage et id data)
                                             (assert-write-valid! storage et check-data false)
                                             (sp/update-entity storage et id data)))))]
         (when publish? (publish-write! ctx storage et (assoc result :id id)))
@@ -521,13 +530,16 @@
    Projects to `:id` — leaving the whole record in `:created` makes
    the NOTIFY emitter stringify the map and the listener's
    `UUID/fromString` throws \"UUID string too large\"."
-  [storage entity-type entity-data type-str]
+  [ctx storage {:keys [entity-type entity-data type-str form-data]}]
   (let [cap-rej (when (= entity-type :fn)
                   (secret-leaf-capability-rej storage entity-data))]
     (cond
       cap-rej {:error (:reason cap-rej) :write-rejection {:kind :secret-leaf}}
       :else (try
-              {:created (:id (sp/create-entity storage entity-type entity-data))}
+              (authoring/assert-public-input! entity-type form-data)
+              {:created (:id (if (= :fn entity-type)
+                               (authoring/create! ctx storage entity-data)
+                               (sp/create-entity storage entity-type entity-data)))}
               (catch Exception e
                 (log-write-failure! e "create-entity" entity-type entity-data)
                 ;; The error's HTTP status comes from the central map —
@@ -719,7 +731,7 @@
    just-created row is deleted and the diagnostic message comes back
    as `{:error …}` (a 400 on the wire); the guarantee must not rest
    on the derived diagnostics store (docs/SECRETS.md)."
-  [{:keys [entity-type type-str form-data entity-data]} ctx]
+  [{:keys [entity-type type-str form-data entity-data] :as parsed} ctx]
   (let [storage (request/require-storage ctx)
         rename-source-slot-id (:slot-id entity-data)
         entity-data (normalize-binding-slot storage entity-type entity-data)
@@ -731,7 +743,7 @@
                         pkg-reason {:error pkg-reason :write-rejection {:kind :package}}
                         rename-rej {:error (:reason rename-rej) :write-rejection {:kind :validation :status (:http-status rename-rej)}}
                         rej {:error (:reason rej) :write-rejection {:kind :validation}}
-                        :else (try-create-or-error storage entity-type entity-data type-str))]
+                        :else (try-create-or-error ctx storage (assoc parsed :entity-data entity-data)))]
     (if (:created create-result)
       ;; The renamed-view slot lands BEFORE the type check. The checker
       ;; reconstructs the fn-def from storage, and a rename it cannot see
@@ -844,7 +856,9 @@
                   (secret-leaf-capability-rej storage entity-data))
                 (when entity-data (validation/write-rej storage entity-type check-data)))
         updated (when-not (or pkg-reason rej)
-                  (try (sp/update-entity storage entity-type id-uuid entity-data)
+                  (try (authoring/assert-public-input! entity-type form-data)
+                       (authoring/assert-parent-update! storage entity-type id-uuid entity-data)
+                       (sp/update-entity storage entity-type id-uuid entity-data)
                        (catch Exception e
                          (log-write-failure! e "update-entity" entity-type id-uuid entity-data)
                          ;; Surface a write-rejection reason when the storage

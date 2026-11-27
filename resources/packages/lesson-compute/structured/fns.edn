@@ -1,0 +1,6 @@
+{:input-format 2
+ :namespace "lesson-compute.structured"
+ :fns [{:name :lesson-computed-greeting
+        :input {:profile {:type {:name :text} :required true}
+                :style {:type {:suffix :text :callback [:fn {:string :text} :text #{}]} :required true}}
+        :return-type :text}]}

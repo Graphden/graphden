@@ -18,6 +18,7 @@
     [babashka.process :as p]
     [ci-fast]
     [ci-priority-core :as priority]
+    [ci-priority-handoff :as handoff]
     [ci-proc]
     [ci-report]
     [ci-resume]
@@ -594,8 +595,7 @@
 
 (defn- assert-candidate!
   [initial]
-  (let [current {:sha (ci-resume/git-output "rev-parse" "HEAD")
-                 :worktree-status (ci-resume/git-output "status" "--porcelain" "--untracked-files=normal")}]
+  (let [current (ci-resume/checkout-candidate)]
     (when-not (ci-report/stable-candidate? initial current)
       (throw (ex-info "CI requires one unchanged committed candidate; commit edits and rerun"
                       {:initial-sha (:sha initial) :current-sha (:sha current)})))))
@@ -614,16 +614,18 @@
   (let [;; The check set + its metadata (bb task, timeout, group, relevant
         ;; paths) come from the registry in `scripts/checks.edn`; `--groups`
         ;; narrows it, `--since` diff-scopes it, `--skip` force-skips.
-        {selected-checks :run scoped :scoped manual :manual since :since}
+        {selected-checks :run scoped :scoped manual :manual since :since :as selection}
         (select-checks *command-line-args*)
-        candidate {:sha (ci-resume/git-output "rev-parse" "HEAD")
-                   :worktree-status (ci-resume/git-output "status" "--porcelain" "--untracked-files=normal")}
-        hints (select-keys (priority/plan (priority/changed-paths since)
-                                          (priority/manual-hints (System/getenv "GRAPHDEN_CI_FIRST_TESTS")))
-                           [:unit :unit-layers :unit-manual :integration :integration-layers])
+        candidate (ci-resume/checkout-candidate)
+        report-path (ci-report-path)
+        hints (handoff/ci-hints {:candidate candidate
+                                 :scope (ci-select/scope selection)
+                                 :manual (priority/manual-hints (System/getenv "GRAPHDEN_CI_FIRST_TESTS"))
+                                 :path (when report-path
+                                         (some-> (System/getenv "GRAPHDEN_RESUME_OUT") (str ".priority.edn")))
+                                 :digest (when report-path (System/getenv "GRAPHDEN_CI_PRIORITY_DIGEST"))})
         checks (mapv #(assoc % :extra-env {"GRAPHDEN_CI_SINCE" (or since "")
                                            "GRAPHDEN_CI_PRIORITY_HINTS" (pr-str hints)}) selected-checks)
-        report-path (ci-report-path)
         proof? (or report-path (not-any? #{"--groups"} *command-line-args*))
         ;; An old green receipt must not survive a crash in a new invocation.
         _ (when report-path

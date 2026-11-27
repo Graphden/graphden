@@ -50,7 +50,7 @@ function checkIn(state, check) {
     gdSharedViewsCached: () => state.views || [],
     gdEmptyFilters: () => ({kinds: [], problems: [], namespaces: [], exclude: [], uses: [], effects: [], unused: false, name: '', views: []}),
     expansionState: state.expansionState || new Map(),
-    window: { location: { search: state.search || '' } },
+    window: { location: { search: state.search || '' }, gdStructuredInputFor: state.structuredInputFor },
     URLSearchParams,
     document: {
       // A hit may carry the element itself (`{ value: 'add' }` for a form
@@ -135,6 +135,67 @@ function withFn(extra) {
     },
   }, extra || {});
 }
+
+test('structured input checks observe the current checked root without changing its fields', () => {
+  const path = Object.freeze(['profile', 'name']);
+  const leaf = Object.freeze({kind: 'input-field', name: 'name', type: 'text', 'bind-path': path});
+  const remaining = Object.freeze({status: 'available', occupied: Object.freeze([]), fields: Object.freeze([
+    Object.freeze({name: 'profile', fields: Object.freeze([leaf])}),
+  ])});
+  const field = Object.freeze({path, type: 'text', 'binding-id': 'own-binding', 'version-id': 'version-1'});
+  const occupied = Object.freeze({status: 'available', fields: Object.freeze([]), occupied: Object.freeze([field])});
+  let projection = remaining;
+  const state = withFn({selectedFnId: FN.id, structuredInputFor: id => id === FN.id ? projection : null});
+  const check = Object.freeze({kind: 'structured-input-path', name: FN.name, path, state: 'remaining'});
+  const before = JSON.stringify([projection, check]);
+  assert(checkIn(state, check), 'checked own nested bind path is remaining');
+  assert(!checkIn(state, {...check, state: 'occupied'}), 'a free field is not an occupied binding');
+  assert(!checkIn(state, {...check, path: ['profile.name']}), 'a dotted field name is a different address');
+  assert(!checkIn({...state, selectedFnId: 'other'}, check), 'a retained projection cannot pass for a different selection');
+  assert(JSON.stringify([projection, check]) === before, 'a negative check leaves the projected and requested paths intact');
+
+  const bound = Object.freeze({...check, state: 'occupied', 'version-id': field['version-id']});
+  projection = occupied;
+  assert(checkIn(state, bound), 'checked occupied path carries its current version');
+  assert(!checkIn(state, check), 'an occupied field is no longer remaining');
+  assert(!checkIn(state, {...bound, 'version-id': 'obsolete'}), 'an obsolete version cannot complete the step');
+  assert(checkIn(state, bound), 'the rejected stale check has not changed the binding');
+  projection = {...occupied, fields: remaining.fields};
+  assert(!checkIn(state, bound) && !checkIn(state, check), 'contradictory evidence cannot pass either state');
+  projection = {...occupied, fields: [{name: 'profile', type: 'text'}]};
+  assert(!checkIn(state, bound), 'a scalar ancestor cannot coexist with the occupied descendant');
+  projection = {...occupied, occupied: [field, field]};
+  assert(!checkIn(state, bound), 'duplicate occupied versions are ambiguous');
+  projection = {...remaining, status: 'unavailable'};
+  assert(!checkIn(state, check), 'unavailable analysis fails closed');
+  projection = {...remaining, occupied: undefined};
+  assert(!checkIn(state, check), 'a partial projection cannot complete the step');
+  projection = {...remaining, fields: [{name: 'profile', fields: [{...leaf, 'bind-path': undefined}]}]};
+  assert(!checkIn(state, check), 'a visible label alone is not a checked bind path');
+
+  const profilePath = ['profile'];
+  const whole = {kind: 'input-field', name: 'profile', type: {name: 'text'}, fields: [leaf], 'bind-path': profilePath};
+  const wholeCheck = {...check, path: profilePath, 'record?': true};
+  projection = {...remaining, fields: [whole]};
+  assert(checkIn(state, wholeCheck), 'an explicitly bindable record can complete a whole-record step');
+  assert(!checkIn(state, {...wholeCheck, 'record?': false}), 'record offers do not satisfy legacy leaf-only steps');
+  projection = {...remaining, fields: [{...whole, 'bind-path': undefined}]};
+  assert(!checkIn(state, wholeCheck), 'a group without the server Bind offer cannot complete the step');
+  projection = {...occupied, occupied: [{...field, type: whole.type, path: profilePath}]};
+  assert(checkIn(state, {...wholeCheck, state: 'occupied'}), 'a whole binding removes its record from the residual projection');
+  assert(!checkIn(state, check), 'a bound whole record leaves no descendant Bind offer');
+  projection = {...projection, fields: [{kind: 'reference-inputs', name: 'profile', fields: [whole]}]};
+  assert(checkIn(state, {...wholeCheck, state: 'occupied', 'reference-inputs?': true}),
+    'a checked occupied record may expose the input surface of its reference');
+  assert(!checkIn(state, {...wholeCheck, state: 'occupied'}),
+    'the ordinary occupied check still rejects other surfaces at that path');
+
+  projection = occupied;
+  const legacy = {kind: 'binding-value', name: FN.name, slot: SLOT.name, value: 'Ada'};
+  assert(!checkIn(state, legacy), 'a v2 occupied path cannot satisfy the legacy literal check');
+  state.lookups.bindingsByFn.set(FN.id, [{'slot-id': SLOT.id, value: 'Ada'}]);
+  assert(checkIn(state, legacy), 'legacy literal checks still use their v1 row');
+});
 
 // --- cases ------------------------------------------------------------------
 
@@ -473,6 +534,26 @@ test('result-value verifies the current result, including the values in its rows
   assert(!checkIn(state('not JSON'), first), 'an invalid result does not pass');
   assert(!checkIn({}, first), 'no result does not pass');
   assert(!checkIn(state('["tick"]'), {kind: 'result-value'}), 'a missing expected value does not pass');
+});
+
+test('a named result-value requires the selected execution and compares record fields by name', () => {
+  const pane = '.execute-popover.visible .execute-result-pane';
+  const host = '.execute-popover.visible .execute-result-host';
+  const raw = host + ' .execute-result-raw pre';
+  const fn = {id: 'profile-root', name: 'tutorial-structured-profile'};
+  const check = {kind: 'result-value', name: fn.name, value: {profile: {name: 'Ada', ids: ['42', '7']}}};
+  const state = {selectedFnId: fn.id, lookups: {fnMap: new Map([[fn.id, fn]])},
+    dom: {[pane]: true, [host]: {gdExecutionFnId: fn.id},
+      [raw]: {textContent: '{"profile":{"ids":["42","7"],"name":"Ada"}}'}}};
+  assert(checkIn(state, check), 'field order has no effect on record equality');
+  assert(!checkIn({...state, selectedFnId: 'other'}, check), 'selection must match the named function');
+  state.dom[host].gdExecutionFnId = 'other';
+  assert(!checkIn(state, check), 'another function returning the same record cannot satisfy the check');
+  state.dom[host].gdExecutionFnId = fn.id;
+  state.dom[raw].textContent = '{"profile":{"ids":["7","42"],"name":"Ada"}}';
+  assert(!checkIn(state, check), 'nested array order is significant');
+  state.dom[raw].textContent = '{"profile":{"ids":["42","7"],"name":"Ada","extra":true}}';
+  assert(!checkIn(state, check), 'an extra record field is significant');
 });
 
 test('successful Run checks reject errors and wrong deterministic results', () => {

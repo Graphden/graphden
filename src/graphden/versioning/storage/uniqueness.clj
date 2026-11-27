@@ -320,6 +320,9 @@
    `branch-id` is kept in the signature for the callers' symmetry."
   [_branch-id entity-name row]
   (case entity-name
+    ;; Offline v2 conservatively serializes all input edits: an ancestor
+    ;; binding can close a descendant definition on a different owner.
+    :input-binding "structured-input-bindings"
     :binding-list-item (some->> (:binding-id row) (str "item|"))
     :fn (when (:name row)
           (str "fn-name|" (:namespace-id row) "|" (:name row)))

@@ -1164,30 +1164,9 @@
 
    `nil` / `{}` args short-circuit."
   [fn-id args lookups]
-  (if (or (nil? args) (empty? args))
-    args
-    (let [entries (surface/surface-entries fn-id lookups)
-          ;; Index by BOTH the public (renamed) name and the walker's
-          ;; raw name — `{:body v}` and `{:content v}` land in the
-          ;; same slot (ADR-inherited-rename-surface).
-          by-name (reduce (fn [acc e]
-                            (cond-> (update acc (:ext-name e)
-                                            (fnil conj []) e)
-                              (:source-name e)
-                              (update (:source-name e)
-                                      (fnil conj []) e)))
-                          {}
-                          entries)]
-      (reduce-kv
-        (fn [acc arg-name v]
-          (let [matches (get by-name arg-name)]
-            (if (empty? matches)
-              (assoc acc arg-name v)
-              (reduce (fn [m e] (assoc m (:slot-id e) v))
-                      (assoc acc arg-name v)
-                      matches))))
-        {}
-        args))))
+  (if (seq args)
+    (surface/translate-arguments (surface/surface-entries fn-id lookups) args)
+    args))
 
 
 ;; =============================================================================
@@ -1588,6 +1567,13 @@
 ;; Execute
 ;; =============================================================================
 
+(defn named-input-closure
+  "Mark a compiled closure that routes the original named input itself.
+   The legacy compiler's closures use translate-named-args by default."
+  [closure]
+  (vary-meta closure assoc ::named-input? true))
+
+
 (defn execute
   "Invoke `fn-id` via the compiled registry. `named-args` is a `{arg-name
    value}` map using the outermost external arg names (rename-aware).
@@ -1627,18 +1613,17 @@
             (if (= 1 (count args))
               (fn-id (first (vals args)))
               (fn-id args)))
-          (let [reg (registry ctx)
-                closure (or (get reg fn-id) (throw-not-compiled! ctx fn-id))
-                ;; Translate caller's name-keyed args into the dual-key
-                ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
-                ;; the name half covers env-binding / lambda-arg / rename-
-                ;; alias paths that still flow under name keys today.
-                translated (translate-named-args fn-id (or named-args {})
-                                                 (lookups-for-ctx ctx))]
-            ;; compile-eager closure signature: `(fn [free-args ctx])`.
-            ;; Child callables are captured at compile time — `reg`
-            ;; is no longer needed by the runtime.
-            (closure translated ctx)))))))
+          (let [[prepared-id prepared] (::named-root ctx)
+                closure (if (and prepared (= fn-id prepared-id))
+                          prepared
+                          (or (get (registry ctx) fn-id) (throw-not-compiled! ctx fn-id)))
+                args (or named-args {})
+                ;; The checked structured closure owns its named surface.
+                ;; Legacy readers need the slot-ID companions as well.
+                args (if (::named-input? (meta closure))
+                       args
+                       (translate-named-args fn-id args (lookups-for-ctx ctx)))]
+            (closure args ctx)))))))
 
 
 (defn execute-by-name

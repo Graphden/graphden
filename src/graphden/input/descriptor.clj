@@ -1,0 +1,253 @@
+(ns graphden.input.descriptor
+  "Resolve declared rich types and their stored field identities together.
+   Structural data is a view of the existing type system, not another checker."
+  (:require
+    [graphden.input.context :as context]
+    [graphden.input.core :as input]
+    [graphden.input.field-default :as field-default]
+    [graphden.input.format :as format]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.types :as records]
+    [graphden.types.core :as types]
+    [graphden.types.expansion :as expansion]))
+
+
+(def ^:private primitive-ids (ids/primitive-fn-ids))
+
+
+(def ^:private primitive-by-id
+  (into {} (map (fn [[name id]] [id name])) primitive-ids))
+
+
+(def ^:dynamic ^:private *remaining-nodes* nil)
+
+
+(defn- consume-node!
+  []
+  (when (neg? (vswap! *remaining-nodes* dec))
+    (context/reject! :type-expansion-budget {})))
+
+
+(defn- field-rows
+  [{:keys [fields members]} type-id]
+  (mapv (fn [membership]
+          (if-let [field (get fields (:slot-id membership))]
+            (assoc field :input-default (:input-default membership))
+            (context/reject! :missing-field {:type-id type-id :field-id (:slot-id membership)})))
+        (sort-by (juxt :position (comp str :id)) (get members type-id))))
+
+
+(declare ^:private type-body)
+
+
+(defn- stored-body
+  [{:keys [fns members] :as ctx} type-id seen]
+  (let [row (get fns type-id)
+        resolve-type #(type-body ctx % seen)]
+    (cond
+      (get primitive-by-id type-id) (get primitive-by-id type-id)
+      (or (:return-type-fn-id row) (seq (:parent-ids row)))
+      (context/reject! :executable-is-not-record-type {:type-id type-id})
+      (:base-fn-id row) (let [base (resolve-type (:base-fn-id row))]
+                          (if-some [constraint (:constraint row)] [:refine base constraint] base))
+      (:element-fn-id row) [:list (resolve-type (:element-fn-id row))]
+      (vector? (:constraint row)) (:constraint row)
+      (contains? members type-id)
+      (into {} (map (fn [field] [(keyword (:name field)) (resolve-type (:type-fn-id field))]))
+            (field-rows ctx type-id))
+      :else (context/reject! :missing-type-body {:type-id type-id}))))
+
+
+(defn- type-body
+  [{:keys [type-bodies] :as ctx} type-id seen]
+  (consume-node!)
+  (when (or (contains? seen type-id) (>= (count seen) 64))
+    (context/reject! :recursive-type {:type-id type-id}))
+  (let [source (if (contains? type-bodies type-id)
+                 (get type-bodies type-id)
+                 (stored-body ctx type-id (conj seen type-id)))
+        _ (expansion/assert-finite! source)
+        source (if (and (vector? source) (= :variant (first source)))
+                 (or (types/desugar-variant source)
+                     (context/reject! :invalid-variant {:type-id type-id})) source)
+        resolved (types/resolve-alias source)]
+    (when-not (types/well-formed? resolved)
+      (context/reject! :invalid-type-body {:type-id type-id}))
+    resolved))
+
+
+(defn- structural-base
+  [rich]
+  (cond
+    (types/refine-type? rich) (recur (types/refine-base rich))
+    (types/marker-type? rich) (recur (types/marker-inner rich))
+    :else rich))
+
+
+(defn- membership-owner
+  [{:keys [fns members type-bodies alias-ids] :as ctx} type-id seen]
+  (when (contains? seen type-id)
+    (context/reject! :recursive-type {:type-id type-id}))
+  (if (contains? members type-id)
+    type-id
+    (when-let [base-id (or (:base-fn-id (get fns type-id))
+                           (get alias-ids (structural-base (get type-bodies type-id))))]
+      (membership-owner ctx base-id (conj seen type-id)))))
+
+
+(declare ^:private resolve-node)
+
+
+(defn stored-source-type?
+  "A frozen field declaration may retain generic collection shapes erased
+   to a primitive by storage. Its leaves and actual FK must be accounted for."
+  ([type field-type-id] (stored-source-type? type field-type-id {}))
+  ([type field-type-id named-ids]
+   (and (format/collection-type? #(or (types/primitive? %) (= :never %) (types/type-var? %)
+                                      (uuid? (get named-ids %))) type)
+        (or (not (keyword? type)) (contains? primitive-ids type) (= :never type) (uuid? (get named-ids type)))
+        (= field-type-id (records/resolve-type-ref type named-ids)))))
+
+
+(defn source-return-shape?
+  "Verify the authored leaves of a stored structural return. Inline record
+   fields can themselves be supported collections of known declarations."
+  [type named-ids]
+  (binding [types/*type-aliases-override* (atom {})]
+    (expansion/assert-finite! type))
+  (letfn [(leaf?
+            [value]
+            (or (types/primitive? value) (types/type-var? value) (= :never value)
+                (uuid? (get named-ids value))
+                (and (types/record-type? value) (seq value)
+                     (every? simple-keyword? (keys value))
+                     (every? (partial format/collection-type? leaf?) (vals value)))))]
+    (format/collection-type? leaf? type)))
+
+
+(defn stored-source-return-type?
+  "Check a frozen return against its physical FK and independently verified
+   named type IDs. Legacy collections can erase nested record types."
+  [type type-id named-ids]
+  (or (stored-source-type? type type-id named-ids)
+      (and (vector? type) (contains? #{:list :map :tuple :union} (first type))
+           (source-return-shape? type named-ids)
+           (= type-id (records/resolve-type-ref type named-ids)))))
+
+
+(defn- declared-field-node
+  [ctx type-id field source seen]
+  (let [field-type-id (:type-fn-id field)
+        node (resolve-node ctx field-type-id seen)
+        witnessed (get (:source-field-types ctx) [(:id field) field-type-id])]
+    (if (and (some? witnessed) (not= source (:type node)) (contains? (:type-bodies ctx) type-id)
+             (= source (types/resolve-alias witnessed)) (stored-source-return-type? witnessed field-type-id (:alias-ids ctx)))
+      (cond-> {:type-id field-type-id :type source}
+        (types/union-type? source) (assoc :alternatives (vec (types/union-members source))))
+      node)))
+
+
+(defn- record-fields
+  [ctx type-id rich seen]
+  (let [owner (or (membership-owner ctx type-id #{})
+                  (context/reject! :missing-field-identities {:type-id type-id}))
+        fields (field-rows ctx owner)
+        names (mapv #(keyword (:name %)) fields)
+        ids (mapv :id fields)]
+    (when-not (and (= (set names) (set (keys rich)))
+                   (= (count names) (count (set names)))
+                   (= (count ids) (count (set ids))) (every? uuid? ids))
+      (context/reject! :field-identity-mismatch {:type-id type-id}))
+    (mapv (fn [field]
+            (let [name (keyword (:name field))
+                  child (declared-field-node ctx type-id field (get rich name) seen)]
+              (when-not (= (get rich name) (:type child))
+                (context/reject! :field-type-mismatch {:type-id type-id :field-id (:id field)}))
+              (merge (if-some [envelope (:input-default field)]
+                       (field-default/apply-envelope field child envelope (= type-id owner (::input-owner ctx)))
+                       child)
+                     (select-keys field [:description])
+                     {:id (:id field) :name name
+                      :required (if (contains? field :required)
+                                  (boolean (:required field))
+                                  (:field-default-required? ctx))}))) fields)))
+
+
+(defn- resolve-node
+  [ctx type-id seen]
+  (when (or (contains? seen type-id) (>= (count seen) 64))
+    (context/reject! :recursive-type {:type-id type-id}))
+  (let [rich (type-body ctx type-id #{})
+        structural (structural-base rich)]
+    (cond-> {:type rich :type-id type-id}
+      (types/record-type? structural)
+      (assoc :fields (record-fields ctx type-id structural (conj seen type-id)))
+      (types/union-type? structural)
+      (assoc :alternatives (vec (types/union-members structural))))))
+
+
+(defn resolve-descriptor
+  "Keep markers/refinements on :type while exposing record fields by stable
+   identity. Dictionaries remain atomic. Unions retain alternatives and have
+   no guessed :fields; partial union selection belongs to the typed analyzer."
+  [ctx type-id]
+  (binding [*remaining-nodes* (volatile! 10000)]
+    (context/call-with-types ctx #(resolve-node ctx type-id #{}))))
+
+
+(defn resolve-contract
+  "Resolve one stored declaration, never the previously computed residual.
+   Parent composition and referenced availability are separate analysis steps."
+  [ctx fn-id]
+  (let [type-id (get-in ctx [:fns fn-id :input-type-fn-id])
+        descriptor (when type-id (resolve-descriptor (assoc ctx ::input-owner type-id) type-id))]
+    (when-not descriptor (context/reject! :missing-input-contract {:fn-id fn-id}))
+    (when (:alternatives descriptor)
+      (context/reject! :ambiguous-record-input {:fn-id fn-id :type-id type-id}))
+    (input/input-contract descriptor)))
+
+
+(defn find-node
+  "Find a resolved descriptor node by identity, or nil if the path is absent."
+  [descriptor path]
+  (reduce (fn [node id] (some #(when (= id (:id %)) %) (:fields node))) descriptor path))
+
+
+(defn node-at
+  "Read a resolved descriptor node by stable field-ID path."
+  [descriptor path]
+  (or (find-node descriptor path) (context/reject! :unknown-field {:path path})))
+
+
+(defn- record-body
+  [rich fields]
+  (cond
+    (types/refine-type? rich)
+    [:refine (record-body (types/refine-base rich) fields) (types/refine-constraint rich)]
+    (types/marker-type? rich) [(types/marker-tag rich) (record-body (types/marker-inner rich) fields)]
+    (types/record-type? rich) (into {} (map (juxt :name :type)) fields)
+    :else (context/reject! :atomic-field {})))
+
+
+(defn update-node
+  "Update an addressed node and rebuild ancestor rich record types, preserving
+   their whole-record wrappers. Does not infer or replace any field identity."
+  [descriptor path f]
+  (if (empty? path)
+    (f descriptor)
+    (let [id (first path)
+          _ (node-at descriptor [id])
+          fields (mapv #(if (= id (:id %)) (update-node % (subvec path 1) f) %) (:fields descriptor))]
+      (assoc descriptor :fields fields :type (record-body (:type descriptor) fields)))))
+
+
+(defn read-type-at
+  "Type of a field read, retaining content markers from its containers through
+   the existing type-rule taint propagator. Whole-record constraints remain
+   obligations on the container rather than invented constraints on the leaf."
+  [descriptor path]
+  (if (empty? path)
+    (:type descriptor)
+    (types/taint-with-secret-if-tainted
+      {:container {:type (:type descriptor)}}
+      (read-type-at (node-at descriptor [(first path)]) (subvec path 1)))))

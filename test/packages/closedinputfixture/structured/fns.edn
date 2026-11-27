@@ -1,0 +1,6 @@
+{:input-format 2
+ :namespace "closedinputfixture.structured"
+ :fns [{:name :fixture-closed-apply-text
+        :input {:payload {:type {:item :text :callback [:fn {:string :text} :text #{}]}
+                          :required true}}
+        :return-type :text}]}

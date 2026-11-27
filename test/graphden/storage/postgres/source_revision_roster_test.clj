@@ -11,7 +11,7 @@
   (let [tables (roster/tables (versioned/build-schema (malli/create-builder)))]
     (doseq [table ["fn" "fn_version" "fn_parent_ids" "slot" "fn_slot"
                    "fn_slot_version" "binding" "binding_version" "binding_list_item"
-                   "binding_list_item_version" "ns" "branch" "branch_merge"
+                   "binding_list_item_version" "input_binding" "input_binding_version" "ns" "branch" "branch_merge"
                    "resource_override" "resource_override_version"]]
       (is (contains? tables table) table))
     (is (not (contains? tables "graphden_source_revision")))

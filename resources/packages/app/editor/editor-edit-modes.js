@@ -58,7 +58,7 @@ document.addEventListener('keydown', (e) => {
   closeInlineEdit();
 });
 
-function closeInlineEdit() {
+function closeInlineEdit({restoreFocus = false} = {}) {
   stopInlineEditAnchorObservation?.();
   stopInlineEditAnchorObservation = null;
   if (inlineEditOutsideHandler) {
@@ -69,7 +69,7 @@ function closeInlineEdit() {
     const el = inlineEditEl;
     const anchor = inlineEditAnchor;
     const closed = inlineEditClosed;
-    const hadFocus = el.contains(document.activeElement);
+    const hadFocus = restoreFocus || el.contains(document.activeElement);
     inlineEditEl = null;
     inlineEditAnchor = null;
     inlineEditClosed = null;
@@ -131,13 +131,15 @@ function openInlineEditPopover(opts) {
   const save = document.createElement('button');
   save.type = 'button';
   save.className = 'arg-value-edit-btn';
-  save.textContent = 'Save';
+  if (opts.saveDanger) save.classList.add('arg-value-edit-btn-danger');
+  save.textContent = opts.saveLabel || 'Save';
   // A CHOOSER stage (bind literal | bind fn-ref) commits nothing — a
   // Save button there was inert and read as "something is missing"
   // (tutorial finding). `noSave` renders Cancel only.
   if (opts.noSave) save.style.display = 'none';
   const doSave = async () => {
     if (opts.noSave || inlineEditEl !== el || save.disabled) return;
+    const hadFocus = el.contains(document.activeElement);
     save.disabled = true;
     cancel.disabled = true;
     errorEl.classList.remove('visible');
@@ -148,13 +150,16 @@ function openInlineEditPopover(opts) {
     // Cancel disabled with no message.
     let res;
     try {
-      res = await opts.doSave(control);
+      res = await opts.doSave(control, el);
     } catch (err) {
       res = { ok: false, error: 'Save failed: ' + (err?.message || 'network error') };
     }
     const ok = (res === true) || !!res?.ok;
     if (ok) {
-      if (inlineEditEl === el) closeInlineEdit();
+      if (inlineEditEl === el) {
+        // Disabling the focused submit button may have moved focus to body.
+        closeInlineEdit({restoreFocus: hadFocus && document.activeElement === document.body});
+      }
       if (typeof opts.onSaved === 'function') {
         try { await opts.onSaved(); }
         catch (error) {

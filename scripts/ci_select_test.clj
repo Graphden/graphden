@@ -70,6 +70,27 @@
         "the tour's three reading paths are all baked from tour.edn")))
 
 
+(deftest commit-metadata-is-checked-once-in-the-first-wave
+  (doseq [changed [#{} #{"docs/example.md"} #{"src/graphden/input/core.clj"}]]
+    (let [selected (:run (ci-select/partition-checks real-registry {:changed changed}))
+          batches (ci-select/canonical-batches real-registry selected)
+          names-in (fn [waves] (map :name (mapcat identity (mapcat batches waves))))]
+      (is (= 1 (count (filter #{"commitlint"} (names-in [:affected])))))
+      (is (not-any? #{"commitlint"} (names-in [:pre :priority :test :post-test]))))))
+
+
+(deftest markdownlint-runs-once-in-the-affected-wave
+  (doseq [changed [nil #{"docs/example.md"} #{".markdownlint-cli2.jsonc"}]]
+    (let [selected (:run (ci-select/partition-checks real-registry {:changed changed}))
+          batches (ci-select/canonical-batches real-registry selected)
+          occurrences (for [[wave checks] batches
+                            check (mapcat identity checks)
+                            :when (= "markdownlint" (:name check))]
+                        [wave (:bb check)])]
+      (is (= [[:affected "markdownlint"]] occurrences))))
+  (is (not (contains? (run-names #{"src/graphden/input/core.clj"}) "markdownlint"))))
+
+
 (deftest public-contract-guard-runs-before-the-full-suites
   (let [selected (run-names #{"resources/packages/registry/marketplace/fns.edn"})
         batches (ci-select/canonical-batches real-registry real-registry)
@@ -195,6 +216,14 @@
         batches (ci-select/canonical-batches real-registry selected)]
     (is (some #{"builtin-plans-sync"} (map :name (mapcat identity (:priority batches)))))
     (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
+
+
+(deftest stale-browser-runtime-assets-fail-in-the-first-wave
+  (let [selected (:run (ci-select/partition-checks
+                         real-registry {:changed #{"resources/packages/app/ui-preview/browser-runtime.js"}}))
+        batches (ci-select/canonical-batches real-registry selected)]
+    (is (some #{"builtin-runtime-fingerprint"} (map :name (mapcat identity (:affected batches)))))
+    (is (some #{"builtin-plans-sync"} (map :name (mapcat identity (:priority batches)))))))
 
 
 (deftest source-codec-instrumentation-runs-before-broad-suites

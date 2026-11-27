@@ -50,25 +50,32 @@
 
 (defn- compile-list
   [t path seen]
-  (let [check (compile-type (types/list-elem t) (conj path :element) seen)]
+  (let [element (types/list-elem t)
+        check (when-not (= :any element) (compile-type element (conj path :element) seen))]
     (fn [value p]
       (if (sequential? value)
-        (into [] (mapcat (fn [[i v]] (check v (conj p i)))) (map-indexed vector value))
+        (if check
+          (into [] (mapcat (fn [[i v]] (check v (conj p i)))) (map-indexed vector value))
+          [])
         (error p :type-mismatch)))))
 
 
 (defn- compile-map
   [t path seen]
   (let [key-check (compile-type (types/map-key t) (conj path :key) seen)
-        val-check (compile-type (types/map-val t) (conj path :value) seen)]
+        value-type (types/map-val t)
+        val-check (when-not (= :any value-type) (compile-type value-type (conj path :value) seen))]
     (fn [value p]
       (if (map? value)
         ;; Dynamic keys may themselves be secret input. Use entry positions,
-        ;; not key contents, in diagnostics.
-        (into [] (mapcat (fn [[i [k v]]]
-                           (concat (key-check k (conj p i :key))
-                                   (val-check v (conj p i :value)))))
-              (map-indexed vector value))
+        ;; not key contents, in diagnostics. Untyped values need no reads.
+        (if val-check
+          (into [] (mapcat (fn [[i [k v]]]
+                             (concat (key-check k (conj p i :key))
+                                     (val-check v (conj p i :value)))))
+                (map-indexed vector value))
+          (into [] (mapcat (fn [[i key]] (key-check key (conj p i :key))))
+                (map-indexed vector (keys value))))
         (error p :type-mismatch)))))
 
 
@@ -87,13 +94,16 @@
   [t path seen]
   (let [c (types/refine-constraint t)
         check (compile-type (types/refine-base t) path seen)]
-    (when-not (or (nil? c) (constraint-supported? c)) (unsupported! path))
-    (fn [value p]
-      (let [base-errors (check value p)]
-        (cond
-          (seq base-errors) base-errors
-          (or (nil? c) (true? (literals/literal-satisfies-refinement? value c))) []
-          :else (error p :refinement-mismatch))))))
+    (if (or (nil? c) (= [:any] c))
+      check
+      (do
+        (when-not (constraint-supported? c) (unsupported! path))
+        (fn [value p]
+          (let [base-errors (check value p)]
+            (cond
+              (seq base-errors) base-errors
+              (true? (literals/literal-satisfies-refinement? value c)) []
+              :else (error p :refinement-mismatch))))))))
 
 
 (defn- compile-type

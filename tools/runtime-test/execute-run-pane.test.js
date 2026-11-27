@@ -22,6 +22,10 @@ const { createDocument, MiniElement } = require('./mini-dom');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
   'app', 'editor', 'editor-execute.js'), 'utf8');
+const STRUCTURED = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
+  'app', 'editor', 'editor-execute-inputs.js'), 'utf8');
+const FORMS = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
+  'web', 'runtime', 'graphden-forms.js'), 'utf8');
 
 let fails = 0;
 let passes = 0;
@@ -76,6 +80,7 @@ function boot({ effects = false } = {}) {
     console, Promise, JSON,
     document: doc,
     window: {},
+    dereferenceType: type => type,
     API: { api_execute: '/api/execute', api_execute_id: (id) => '/api/execute/' + id,
            api_execute_id_cancel: (id) => '/api/execute/' + id + '/cancel' },
     lookups: { fnMap: new Map([['A', { id: 'A' }], ['B', { id: 'B' }]]) },
@@ -128,6 +133,10 @@ function boot({ effects = false } = {}) {
     },
   });
   ctx.__shell = { slots: ['x'], effects };
+  const collectSlot = ctx.collectFormValue;
+  vm.runInContext(FORMS, ctx);
+  ctx.collectFormValue = collectSlot;
+  vm.runInContext(STRUCTURED, ctx);
   vm.runInContext(SRC, ctx);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
   const resolveForm = (fnId, value) => formWaits.get(fnId).shift()({ ok: true, value });
@@ -138,6 +147,152 @@ function boot({ effects = false } = {}) {
 }
 
 (async () => {
+  console.log(' structured form submits only checked names and preserves false, null and empty text');
+  {
+    const t = boot();
+    MiniElement.prototype.focus = function focus() { this.setAttribute('data-focused', 'true'); };
+    const leaf = (name, type, required = false) =>
+      ({kind: 'input-field', name, type, required, 'required-now?': required});
+    let descriptor = {kind: 'input-record', status: 'available', 'run-available': true, fields: [
+      {kind: 'input-field', name: 'profile', required: true, 'required-now?': true, fields: [
+        leaf('id', 'int', true), leaf('active', 'bool'), leaf('extra', ['union', 'null', 'text']), leaf('name', 'text'),
+      ]},
+      {kind: 'input-field', name: 'config', required: true, 'required-now?': true, fields: []},
+    ]};
+    const [installing, install] = t.hold();
+    t.ctx.ensureSubtreeFor = () => installing;
+    t.ctx.gdStructuredInputFor = id => id === 'A' ? descriptor : null;
+    const pending = t.ctx.gdMountRunPane('A');
+    await t.flush();
+    assert(!t.doc.querySelector('.execute-popover.visible'), 'pane waits for matching subtree');
+    install(true);
+    await pending;
+    const run = t.doc.querySelector('.execute-run-btn');
+    const status = t.doc.querySelector('[role="status"]');
+    const [id, includeName, name] = t.doc.querySelectorAll('fieldset input');
+    const active = t.doc.querySelector('fieldset select');
+    const extra = t.doc.querySelector('fieldset textarea');
+    assert(!t.doc.querySelector('[data-slot-id]'), 'v2 replaces flat slot hosts');
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 0 && status.textContent.includes('profile.id'), 'missing required value blocks POST');
+    assert(id.getAttribute('aria-invalid') === 'true' && id.getAttribute('data-focused') === 'true', 'invalid field is focused');
+    id.value = '42';
+    extra.value = 'bad JSON';
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 0 && status.textContent.includes('profile.extra'), 'invalid JSON blocks POST');
+    extra.value = 'null';
+    active.value = 'false';
+    includeName.checked = true;
+    includeName.dispatch('change');
+    assert(name.value === '', 'included optional text may be explicitly empty');
+    run.click();
+    await t.flush();
+    assert(JSON.stringify(t.posts[0]?.args) === '{"profile":{"id":42,"active":false,"extra":null,"name":""},"config":{}}',
+      'structured values are serialized without losing presence');
+    t.ctx.__releasePost();
+    await t.flush();
+    includeName.checked = false;
+    includeName.dispatch('change');
+    active.value = '';
+    extra.value = '';
+    run.click();
+    await t.flush();
+    assert(JSON.stringify(t.posts[1]?.args) === '{"profile":{"id":42},"config":{}}', 'unticked and blank optional fields are omitted');
+    t.ctx.__releasePost();
+    await t.flush();
+    descriptor = {...descriptor};
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 2 && run.disabled, 'an obsolete descriptor cannot submit');
+  }
+
+  console.log(' v2 without verified Run has no flat fallback');
+  {
+    const t = boot();
+    t.ctx.gdStructuredInputFor = () => ({kind: 'input-record', status: 'available', fields: []});
+    await t.ctx.gdMountRunPane('A');
+    const run = t.doc.querySelector('.execute-run-btn');
+    assert(run.disabled && !t.doc.querySelector('[data-slot-id]'), 'unavailable v2 hides the legacy fields and disables Run');
+    run.click();
+    await t.flush();
+    assert(t.posts.length === 0, 'disabled v2 cannot submit');
+  }
+
+  console.log(' structured Repeat restores atomically against a fresh authorized snapshot');
+  {
+    const t = boot();
+    const body = t.doc.createElement('div');
+    t.doc.body.appendChild(body);
+    const basis = {'branch-id': 'branch', 'graph-hash': 'same-source', slots: {profile: 'profile-slot', config: 'config-slot'}};
+    const descriptor = {kind: 'input-record', status: 'available', 'run-available': true, 'run-repeat': basis, fields: [
+      {kind: 'input-field', name: 'profile', required: true, 'required-now?': true, fields: [
+        {kind: 'input-field', name: 'id', type: 'int', required: true, 'required-now?': true},
+        {kind: 'input-field', name: 'active', type: 'bool', required: false, 'required-now?': false},
+      ]},
+      {kind: 'input-field', name: 'config', required: false, 'required-now?': false, fields: []},
+    ]};
+    const form = t.ctx.mountStructuredRunInputs(body, descriptor);
+    const input = body.querySelector('input');
+    const dropdown = body.querySelector('select');
+    const includeConfig = body.querySelectorAll('input').at(-1);
+    assert(!Object.hasOwn(form.read() || {}, 'config'), 'untouched optional record is absent');
+    const row = {id: 'run', 'fn-id': 'A', 'branch-id': 'branch', 'graph-hash': 'same-source', status: 'succeeded',
+      args: [{'slot-id': 'profile-slot', value: {id: 42, active: false}, items: []},
+        {'slot-id': 'config-slot', value: {}, items: []}]};
+    let saved = row;
+    let fresh = descriptor;
+    let current = true;
+    let historyWait = Promise.resolve();
+    t.ctx.API.api_graph_entities = '/api/graph/entities';
+    t.ctx.authFetch = async url => {
+      if (url.startsWith('/api/graph/entities?')) {
+        return t.res({fns: [{id: 'A', 'structured-input': fresh}]});
+      }
+      await historyWait;
+      return t.res(saved);
+    };
+    const repeat = t.ctx.makeStructuredRepeat('A', descriptor, form, () => current);
+    await repeat('run');
+    assert(input.value === '42' && dropdown.value === 'false', 'exact saved nested values restored');
+    assert(t.posts.length === 0, 'restoring never submits an execution');
+    assert(includeConfig.checked && JSON.stringify(form.read().config) === '{}',
+      'Repeat preserves an explicitly empty optional record');
+    includeConfig.checked = false;
+    assert(!Object.hasOwn(form.read(), 'config'), 'the empty record can be omitted again');
+    input.value = '7';
+    for (const drift of [
+      {...row, 'fn-id': 'other'},
+      {...row, 'branch-id': 'other'},
+      {...row, 'graph-hash': 'old'},
+      {...row, status: 'failed'},
+      {...row, 'tainted?': true},
+      {...row, args: [{...row.args[0], 'slot-id': 'unknown-slot'}]},
+      {...row, args: [{...row.args[0], value: {id: 99, occupied: 'private'}}]},
+    ]) {
+      saved = drift;
+      await repeat('run');
+      assert(input.value === '7' && dropdown.value === 'false', 'stale, hidden or invalid history leaves draft unchanged');
+    }
+    saved = row;
+    fresh = {...descriptor, 'run-repeat': {...basis, 'graph-hash': 'new-source'}};
+    await repeat('run');
+    assert(input.value === '7', 'a changed authorized subtree blocks Repeat');
+    fresh = descriptor;
+    const [wait, release] = t.hold();
+    historyWait = wait;
+    const pending = repeat('run');
+    input.value = '8';
+    body.dispatch('input');
+    release();
+    await pending;
+    assert(input.value === '8', 'a new draft edit wins while history is in flight');
+    current = false;
+    await repeat('run');
+    assert(input.value === '8', 'an old pane cannot restore history');
+  }
+
   console.log(' summary Enter keeps native disclosure; text input Enter still submits');
   {
     const t = boot();

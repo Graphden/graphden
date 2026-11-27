@@ -283,13 +283,13 @@ Builds an offline graph of evaluated reference uses. Each use has a binding-ID s
 :PROPERTIES:
 :CUSTOM_ID: types/export-closed
 :FILE: src/graphden/input/browser.clj
-:LINE: 247
+:LINE: 249
 :MINS: 1.0
 :END:
 
 Lowers the checked input IR to browser format 2 for closed pure graphs. A field address keeps one lazy result per invocation, shared by every projection. A checked callback runs in a fresh local frame with its enclosing cells still visible. Source authorization precedes export.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:247]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-closed][src/graphden/input/browser.clj:249]]
 - see also :: [[file:types.org::#types/export-named][export-named]]
 - same file :: [[file:types.org::#types/export-named][export-named]]
 
@@ -297,13 +297,13 @@ Lowers the checked input IR to browser format 2 for closed pure graphs. A field 
 :PROPERTIES:
 :CUSTOM_ID: types/export-named
 :FILE: src/graphden/input/browser.clj
-:LINE: 255
+:LINE: 257
 :MINS: 1.1
 :END:
 
 Includes checked named residual routes and the wire type for each supported supplied field. Browser and JVM both defer validation until the field is read. Lists validate their elements and opaque dictionaries validate keys and values as a whole field. Absent fields stay outside the record, including when an explicit nil is allowed. A supplied empty record is present. Supplying an optional record also activates its required fields.
 
-- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:255]]
+- source :: [[file:../../../src/graphden/input/browser.clj::(defn export-named][src/graphden/input/browser.clj:257]]
 - same file :: [[file:types.org::#types/export-closed][export-closed]]
 - referenced from :: [[file:types.org::#types/export-closed][export-closed]]
 

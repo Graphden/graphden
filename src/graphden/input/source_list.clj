@@ -7,6 +7,7 @@
     [graphden.input.list-records :as list-records]
     [graphden.input.migration :as migration]
     [graphden.input.source-annotations :as annotations]
+    [graphden.input.source-context :as source-context]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -92,7 +93,11 @@
   (let [rows (group-by :kind records)
         owner (:fn-id definition)
         matching (filter #(and (= owner (:fn-id %)) (= target (:slot-id %))) (:binding rows))]
-    (when (some #(and (:source-slot-id %) (or (= target (:source-slot-id %)) (= target (:id %))))
+    (when (some (fn [{:keys [id source-slot-id]}]
+                  (and source-slot-id
+                       (or (= target source-slot-id) (= target id))
+                       (not (and (= target id)
+                                 (= source-slot-id (get-in context [::source-context/forwarded-parent-links owner id]))))))
                 (:slot rows))
       (reject! :list-projection-required))
     (when-let [[binding & more] (seq matching)]

@@ -124,7 +124,7 @@
   [{:keys [code source-path]}]
   (when (and (vector? source-path) (< 2 (count source-path)))
     (case code
-      :ref-scope-required (let [sites (argument-sites source-path)
+      (:ref-scope-required :list-projection-required) (let [sites (argument-sites source-path)
                                 [field-end end] (peek sites)]
                             (when (and (next sites) (= field-end end)) sites))
       :inherited-projection-required (when (= :args (peek source-path))
@@ -138,6 +138,16 @@
   [{:keys [source-path] :as blocker}]
   (when-let [[_ end] (first (blocked-sites blocker))]
     (subvec source-path 0 end)))
+
+
+(defn list-forwarding-paths
+  "Identify a list constructor blocked only at the original forwarding link
+   for that exact argument. The existing parent proof must resolve it."
+  [blockers]
+  (into #{} (keep (fn [[path issues]]
+                    (when (= #{:list-builder-required :list-projection-required} (set (map :code issues)))
+                      path)))
+        (group-by :source-path blockers)))
 
 
 (defn inline-list-paths

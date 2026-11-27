@@ -22,12 +22,12 @@
            (every? #(= :field-projection-required (:code %)) blockers))
       [id (mapv argument-field blockers)]
       :else
-      (let [paths (into #{} (mapcat origins/inline-list-paths) blockers)]
+      (let [paths (into (origins/list-forwarding-paths blockers) (mapcat origins/inline-list-paths) blockers)]
         (when (every? (fn [{:keys [code source-path] :as blocker}]
                         (or (origins/inline-binding-path blocker)
                             (case code
                               :inherited-projection-required (= [:args] source-path)
-                              :list-builder-required (contains? paths source-path)
+                              (:list-builder-required :list-projection-required) (contains? paths source-path)
                               (:ref-scope-required :field-projection-required) (argument-field blocker)
                               false)))
                       blockers)

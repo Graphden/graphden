@@ -963,3 +963,17 @@
         full (runtimes originals (ids/fn-id "fixture" :difference-complete))]
     (is (= 15 ((:canonical part) {:nums {:tail [2]}})))
     (is (= 11 ((:canonical full) {}) ((:legacy full) {})))))
+
+
+(deftest an-inherited-list-builder-feeds-its-certified-forwarded-field
+  (let [source (into (declarations "packages/core/strings/fns.edn" #{:str :str-trim})
+                     [{:namespace "forwarded-list" :name :wrapper :parent :str-trim
+                       :args {:string :str :parts {:type [:list :any]}}}
+                      {:namespace "forwarded-list" :name :parts :parent :wrapper
+                       :args {:parts ["  first" " second "]}}])
+        root (ids/fn-id "forwarded-list" :parts)
+        compile-certified (fn [package id roots implementations]
+                            (execution/compile-package (snapshot/with-certified-owner package id roots)
+                                                       id roots implementations))
+        {:keys [legacy canonical]} (runtimes source root compile-certified)]
+    (is (= "first second" (legacy {}) (canonical {})))))

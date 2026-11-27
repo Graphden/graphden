@@ -814,7 +814,9 @@
         {:keys [fields paths]} (joint/groups original)
         reduced-package (omit-arguments package owner (mapv second paths))
         baseline-entry (plan-entry reduced-package owner)
-        _ (joint/check-full-reference-origins! (:prepared package) original (:prepared reduced-package) baseline-entry)
+        full-prepared (readers/prepare (:prepared package) owner roots)
+        reduced-prepared (readers/prepare (:prepared reduced-package) owner roots)
+        _ (joint/check-full-reference-origins! full-prepared original reduced-prepared baseline-entry)
         projected (migrate-forwarded-fields reduced-package owner fields roots)
         baseline (assoc-in reduced-package [:closure-baselines owner] projected)
         targets (keep :ref-fn-id (filter #(= :binding (:kind %)) (get-in original [:legacy :records])))
@@ -859,13 +861,15 @@
 
 (defn- inherited-candidate?
   [blockers]
-  (and (some #(= :inherited-projection-required (:code %)) blockers)
-       (every? (fn [{:keys [code source-path]}]
-                 (if (= :inherited-projection-required code)
-                   (= [:args] source-path)
-                   (and (#{:ref-scope-required :field-projection-required} code)
-                        (= 2 (count source-path)) (= :args (first source-path)))))
-               blockers)))
+  (let [list-paths (origins/list-forwarding-paths blockers)]
+    (and (some #(= :inherited-projection-required (:code %)) blockers)
+         (every? (fn [{:keys [code source-path]}]
+                   (if (= :inherited-projection-required code)
+                     (= [:args] source-path)
+                     (and (= 2 (count source-path)) (= :args (first source-path))
+                          (or (#{:ref-scope-required :field-projection-required} code)
+                              (list-paths source-path)))))
+                 blockers))))
 
 
 (declare certify-owner)

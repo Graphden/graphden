@@ -818,6 +818,48 @@
     (is (= {:status :already-applied :text target} (cst/apply-text patch target)))))
 
 
+(deftest verified-shared-inputs-are-inserted-with-their-projections
+  (let [text (str "{:namespace \"web.ring-adapter\" :fns [{:name :uri-segment-after :parent :if "
+                  ":args {:marker ; preserve field comment\r\n {:type :text} :test true}}]}")
+        source (assoc (first (:fns (edn/read-string text))) :namespace "web.ring-adapter")
+        owner (ids/fn-id "web.ring-adapter" :uri-segment-after)
+        marker (ids/slot-id owner :marker)
+        legacy {:records [{:kind :fn-slot :fn-id owner :slot-id marker :position 0 :id (ids/fn-slot-id owner marker)}]
+                :arguments [{:kind :declaration :source-path [:args :marker] :spec {:type :text}}
+                            {:kind :binding :source-path [:args :test] :expression [:value true]}]}
+        fields [[:request :ring-request-shape "web.ring-adapter" (ids/slot-id (ids/fn-id "web.ring-adapter" :ring-request) :request)]
+                [:limit :nullable-int "core.refinements" (ids/slot-id (ids/fn-id "core.strings" :str-split) :limit)]]
+        expanded
+        (reduce (fn [result [position [field type module prior]]]
+                  (let [id (ids/slot-id owner field)
+                        reads (mapv (fn [branch]
+                                      (let [edge (ids/binding-id owner (ids/slot-id owner branch))
+                                            address [[owner [edge]] [prior]]]
+                                        {:address address :public-path [branch field] :edges [{:binding-id edge}] :source-names [field]
+                                         :row {:id (ids/binding-id edge prior) :scope-path [edge] :target-path [prior]
+                                               :projection-path [id] :expression-kind "projection"}}))
+                                    [:test :then :else])]
+                    (-> result
+                        (update :records into [{:kind :slot :id id :name (name field) :type-fn-id (ids/fn-id module type) :required false :description nil}
+                                               {:kind :fn-slot :id (ids/fn-slot-id owner id) :fn-id owner :slot-id id :position position}])
+                        (update :arguments conj {:kind :declaration :source-path [:args field] :spec {:type type :required false}
+                                                 :source-slot-id prior :forwarded-certificates reads}))))
+                legacy (map vector [1 2] fields))
+        target (assoc (dissoc source :args)
+                      :input {:marker {:type :text} :request {:type :ring-request-shape :required false} :limit {:type :nullable-int :required false}}
+                      :bind (into {:test [:value true]} (for [branch [:test :then :else] [field] fields]
+                                                          [[branch field] [:project [field]]])))
+        entry {:identity owner :source source :proposed target :status :supported :kind :composed
+               :verification :authored-source-equivalent :legacy legacy :implicit-legacy expanded}
+        verify (fn [[entry]] (when (= target (:proposed entry)) [entry]))
+        patch (cst/plan-verified-module text [entry] verify)]
+    (is (= (dissoc target :namespace) (first (:fns (edn/read-string (:target-text patch))))))
+    (is (str/includes? (:target-text patch) "; preserve field comment\r\n"))
+    (is (= :already-applied (:status (cst/apply-text patch (:target-text patch)))))
+    (is (= :planner-ledger-mismatch
+           (reason #(cst/plan-verified-module text [(update-in entry [:implicit-legacy :records] pop)] verify))))))
+
+
 (deftest metadata-only-self-pin-preserves-comments-and-the-original-callable-shape
   (let [text "{:namespace \"x\" :fns [{:name :put :args {:value :any} :return-type :any}\r\n{:name :put-fn :parent :put :args {:value ; target\r\n {:type [:fn {:arg b} c] :as ; identical name\r\n :value}}}]}"
         defs (:fns (edn/read-string text))

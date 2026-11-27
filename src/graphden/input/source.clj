@@ -916,7 +916,7 @@
 
 (defn- verify-shared-inputs
   [{:keys [context] :as environment} {id :identity :keys [source legacy implicit-legacy] :as definition}]
-  (surface/check-original! context id source)
+  ((requiring-resolve 'graphden.input.source-legacy-readers/check-shared-input!) context id source)
   (when-not (surface/exact-additions? id legacy implicit-legacy)
     (throw (ex-info "Shared input view changed legacy rows" {:code :unproved-shared-input})))
   (let [expanded (surface/declare-fields (get-in environment [:definition-by-id id]))

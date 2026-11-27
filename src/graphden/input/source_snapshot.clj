@@ -1061,7 +1061,7 @@
 (defn- shared-uri-forwarding
   [package owner fields roots original]
   (let [prepared (assoc (:prepared package) ::readers/frozen-roots roots)
-        _ (surface/check-original! prepared owner (:source original))
+        _ (readers/check-shared-input! prepared owner (:source original))
         expanded (surface/declare-fields (get-in package [:declarations owner]))
         declarations (assoc (:declarations package) owner expanded)
         normalized (-> package

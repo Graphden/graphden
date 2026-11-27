@@ -12,6 +12,7 @@
     [graphden.input.source-annotations :as annotations]
     [graphden.input.source-list :as source-list]
     [graphden.input.source-rich-types :as rich]
+    [graphden.input.source-surface :as surface]
     [graphden.packages.records.ids :as ids]
     [rewrite-clj.node :as node]
     [rewrite-clj.zip :as z]
@@ -411,15 +412,18 @@
 
 
 (defn- partition-composed-edit
-  [source starts loc {:keys [definition path declarations position-inputs operators forwarded-bindings scoped-paths copied-bindings]}]
+  [source starts loc {:keys [definition path declarations position-inputs operators forwarded-bindings
+                             scoped-paths copied-bindings shared-inputs]}]
   (when-not (and (= [:args] path) (or (key-loc loc :parent) (key-loc loc :parents))
                  (not-any? #(key-loc loc %) [:input :bind :configure])
                  (vector? declarations) (= (count declarations) (count (set declarations)))
                  (or (nil? forwarded-bindings) (map? forwarded-bindings))
+                 (or (nil? shared-inputs) (= shared-inputs (:args (surface/declare-fields {}))))
                  (every? (fn [[target expression]]
                            (and (vector? target) (<= 2 (count target)) (every? simple-keyword? target)
                                 (= [:project [(peek target)]] expression)
-                                (some #{(peek target)} declarations))) forwarded-bindings)
+                                (or (some #{(peek target)} declarations)
+                                    (contains? shared-inputs (peek target))))) forwarded-bindings)
                  (map? operators) (not-any? (set declarations) (keys operators))
                  (or (nil? scoped-paths)
                      (and (map? scoped-paths)
@@ -428,8 +432,8 @@
                  (or (nil? copied-bindings) (copied-bindings? copied-bindings)))
     (refuse :invalid-field-partition {:definition definition}))
   (let [args (value-at loc path)
-        input? (or (seq declarations) (seq position-inputs))
-        extra-fields (map (fn [[field spec]] (str (pr-str field) " " (pr-str spec))) position-inputs)
+        extra-fields (map (fn [[field spec]] (str (pr-str field) " " (pr-str spec))) (concat position-inputs shared-inputs))
+        input? (or (seq declarations) (seq extra-fields))
         key-edit (rename-edit source starts loc definition path (if input? :input :bind))
         map-span (node-edit source starts args identity)
         annotation-fields (into #{} (keep (fn [[field {:keys [op]}]]
@@ -471,7 +475,7 @@
     {:start (:start key-edit) :end (:end map-span)
      :before (subs source (:start key-edit) (:end map-span))
      :after (str (:after key-edit) (subs source (:end key-edit) (:start map-span))
-                 (when input? (str "{" (str/join ordered) (when (and (seq declarations) (seq position-inputs)) " ")
+                 (when input? (str "{" (str/join ordered) (when (and (seq declarations) (seq extra-fields)) " ")
                                    (str/join " " extra-fields) "}"))
                  (when (and input? (seq binds)) " :bind ")
                  (when (seq binds) (str "{" (str/join binds) "}"))
@@ -956,7 +960,7 @@
    The semantic planner owns reference resolution. Ref spellings are retained;
    value payloads and the proposed form must agree exactly with its ledger.
    The caller binds this entry to the original file snapshot before calling plan."
-  [{:keys [source proposed status kind legacy blockers]}]
+  [{owner-id :identity :keys [source proposed status kind legacy implicit-legacy blockers]}]
   (when-not (and (= :supported status) (empty? blockers) (map? source) (map? proposed)
                  (keyword? (:name source))
                  (not-any? #(contains? source %) [:input :bind :configure]))
@@ -1004,7 +1008,15 @@
       (do (when-not (= source proposed) (refuse :planner-ledger-mismatch {})) [])
 
       :composed
-      (composed-entry-operations source proposed legacy annotations has-args? rename)
+      (if implicit-legacy
+        (let [expanded (surface/declare-fields source)
+              fields (:args (surface/declare-fields {}))
+              [op & more] (composed-entry-operations expanded proposed implicit-legacy annotations has-args? rename)]
+          (when-not (and (surface/exact-additions? owner-id legacy implicit-legacy)
+                         (= :partition-composed-args (:op op)) (empty? more))
+            (refuse :planner-ledger-mismatch {}))
+          [(-> op (update :declarations #(filterv (complement (set (keys fields))) %)) (assoc :shared-inputs fields))])
+        (composed-entry-operations source proposed legacy annotations has-args? rename))
 
       (refuse :unsupported-source-entry {}))))
 

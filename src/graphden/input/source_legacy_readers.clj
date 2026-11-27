@@ -7,6 +7,7 @@
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as registry]
     [graphden.input.source-forward :as forward]
+    [graphden.input.source-surface :as shared]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
 
@@ -223,3 +224,36 @@
                       ::forward/value-edge? (partial value-edge? compiler roots))
          graph (assoc ::forward/named-leaf-readers (partial named-leaf-readers graph incoming compiler roots))))
      prepared)))
+
+
+(defn check-shared-input!
+  "Authenticate the two free V1 readers, their types and all compiler writes
+   reachable from this owner before introducing explicit forwarding fields."
+  [prepared owner source]
+  (let [graph (owner-index prepared owner)
+        roots (::frozen-roots prepared)]
+    (when-not (and (= shared/uri-reader owner) (seq roots)
+                   (not-any? #(contains? (:args source) (first %)) shared/fields))
+      (throw (ex-info "Missing original public input" {:type :input/source-surface :code :unproved-shared-input})))
+    (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
+              registry/*per-org-rich-override* (atom {})]
+      (let [public (surface/surface-entries owner graph)
+            frees (renames/deep-free-ext-entries owner graph)]
+        (doseq [[field module reader type-module type required] shared/fields
+                :let [id (ids/slot-id (ids/fn-id module reader) field)
+                      expected {:id id :name (name field) :type-fn-id (ids/fn-id type-module type) :required required}
+                      entries #(filterv (fn [entry] (= field (:ext-name entry))) %)]]
+          (when-not (and (= expected (select-keys (get-in graph [:slot-map id]) (keys expected)))
+                         (= [id] (mapv :slot-id (entries public)) (mapv :slot-id (entries frees)))
+                         (every?
+                           (fn [callee]
+                             (and (not-any? #(or (= field (:env-name %)) (= id (:slot-id %)))
+                                            (bindings/collect-env-bindings callee graph))
+                                  (every? #(or (not= :free (:kind %)) (= id (lookups/effective-reader-slot-id callee (:slot-id %) graph)))
+                                          (entries (bindings/collect-bindings callee graph)))
+                                  (every? (fn [{:keys [ref-id]}]
+                                            (let [changes (when ref-id (renames/build-ref-renames ref-id callee graph))]
+                                              (not-any? #{field} (concat (keys changes) (vals changes)))))
+                                          (bindings/collect-bindings callee graph))))
+                           (keys (:fn-map graph))))
+            (throw (ex-info "Ambiguous original public input" {:type :input/source-surface :code :unproved-shared-input}))))))))

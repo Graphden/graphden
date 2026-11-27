@@ -314,10 +314,16 @@
 
 (defn- closure
   [package roots resolve-named signatures]
-  (loop [pending (mapv #(vector % package) roots) entries {}]
-    (if-let [[id inherited] (peek pending)]
-      (if (contains? entries id)
+  (loop [pending (mapv #(vector % package true) roots) entries {}]
+    (if-let [[id inherited root?] (peek pending)]
+      (cond
+        (and (not root?) (get-in package [:query-lookups id :terminal-proof?]))
+        (reject! :closed-owner-proof-required id)
+
+        (contains? entries id)
         (recur (pop pending) entries)
+
+        :else
         (let [provider (declaration-provider package inherited id signatures)
               added (closure-entries (declaration-package provider id) id resolve-named)
               parents (mapcat (fn [{:keys [owner record-parents]}]

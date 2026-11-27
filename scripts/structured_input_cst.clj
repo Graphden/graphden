@@ -898,7 +898,7 @@
                [:query-lookup-header :args (:args source) (:input proposed)]
                [:query-lookup-bind :args (:args source) (:bind proposed)]]))
 
-      :query-lookup-inline
+      (:query-lookup-inline :response-signature-test)
       (do
         (when-not (and (= (dissoc source :args) (dissoc proposed :bind)) (map? (:bind proposed)))
           (refuse :planner-ledger-mismatch {:definition (:name source)}))

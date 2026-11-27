@@ -877,7 +877,7 @@
                         (get-in after [:public-input :routes source-names :completion-type]))]
       (or (and (= [:value-type :field-read] [kind trigger])
                (or (= :any expected-type) (and (types/list-type? expected-type) unchanged?)
-                   (and unchanged? (= [:union :null [:map :keyword :any]] expected-type)
+                   (and unchanged? (contains? #{[:map :any :any] [:union :null [:map :keyword :any]]} expected-type)
                         (= expected-type (get-in after [:public-input :bindings address :reference :actual-type]))
                         (= :projection (get-in after [:public-input :bindings address :reference :mode])))))
           (and unchanged? (container-check? after check)

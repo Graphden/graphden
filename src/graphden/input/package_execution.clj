@@ -12,6 +12,7 @@
     [graphden.input.metadata :as metadata]
     [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
+    [graphden.input.response-signature :as response-signature]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
     [graphden.packages.records.ids :as ids]
@@ -108,7 +109,8 @@
   (if-let [expansion (or (query/cached package root roots)
                          (query/prepare package root roots)
                          (query-inline/prepare package root roots)
-                         (form-query/prepare package root roots))]
+                         (form-query/prepare package root roots)
+                         (response-signature/prepare package root roots))]
     (compile-normalized expansion root implementations)
     (let [frozen (snapshot/freeze-source-analysis package [root] roots)]
       (compile-frozen frozen (check-legacy-invocation frozen root false) implementations))))
@@ -147,7 +149,8 @@
                           (let [id (ids/fn-id (:namespace legacy-module) name)]
                             (if (query/cached p id roots)
                               p
-                              (or (query/certify p id roots) (query/certify p id roots query-inline/prepare) (query/certify p id roots form-query/prepare) p))))
+                              (or (query/certify p id roots) (query/certify p id roots query-inline/prepare) (query/certify p id roots form-query/prepare)
+                                  (query/certify p id roots response-signature/prepare) p))))
                         package (:fns legacy-module))
         package (snapshot/with-staged-module package legacy-module module)]
     (when-not (contains? (:staged-proposals package) root)

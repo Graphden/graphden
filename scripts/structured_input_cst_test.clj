@@ -949,10 +949,11 @@
 (deftest enclosing-query-replaces-args-with-the-verified-bind
   (let [source {:name :has-id? :parent :equal? :args {:a {:parent :query-param} :b "match"}}
         proposed {:name :has-id? :parent :equal? :bind {:a [:ref :_query-child] :b [:value "match"]}}
-        text (pr-str {:namespace "fixture" :fns [source]})
-        operations (cst/entry-operations {:status :supported :kind :query-lookup-inline :source source :proposed proposed})
-        result (cst/plan text {:namespace "fixture" :operations operations})]
-    (is (= proposed (first (:fns (edn/read-string (:target-text result))))))))
+        text (pr-str {:namespace "fixture" :fns [source]})]
+    (doseq [kind [:query-lookup-inline :response-signature-test]]
+      (let [operations (cst/entry-operations {:status :supported :kind kind :source source :proposed proposed})
+            result (cst/plan text {:namespace "fixture" :operations operations})]
+        (is (= proposed (first (:fns (edn/read-string (:target-text result))))))))))
 
 
 (let [{:keys [fail error]} (run-tests 'structured-input-cst-test)]

@@ -96,6 +96,9 @@
         (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
                          :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
             (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))
+            (and (= :read op) (= [:map :any :any] expected)
+                 (= {:mode :projection :actual-type expected}
+                    (select-keys (get-in analysis [:scopes scope :bindings address :reference]) [:mode :actual-type])))
             (and (types/union-type? expected)
                  (contains? #{#{:input-stream :jsonb} #{:null [:map :keyword :any]} #{:null [:map :any :any]} #{:null [:map :any :any] [:list :any]}}
                             (set (types/union-members expected))))

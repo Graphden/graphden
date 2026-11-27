@@ -9,6 +9,7 @@
     [graphden.input.generated-source :as generated]
     [graphden.input.package-execution :as execution]
     [graphden.input.query-lookup-package :as query]
+    [graphden.input.response-signature :as response]
     [graphden.input.source-certification :as certification]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.packages.loader :as loader]
@@ -243,3 +244,43 @@
         (is (= :staged-function-not-visible
                (rejection #(execution/compile-staged-module package owner roots impls
                                                             (update receipt :visible-fn-ids disj (ids/fn-id "core.collections" :update-vals))))))))))
+
+
+(deftest closed-response-assertion-replays-the-staged-graph-and-its-original-producer
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            types/*type-aliases-override* (atom {})]
+    (let [name :not-modified-response-is-304
+          owner (ids/fn-id "web.tests" name)
+          forms (conj (source {"core/collections" #{:vec :get :get-in :assoc}
+                               "core/refinements" #{:path-segment :http-status :text-map :positive-int :non-negative-int}
+                               "core/logic" #{:assert-eq :coalesce :const}
+                               "core/system" #{:ring-response-shape :_ring-response--w-headers :_ring-response--w-status :ring-response}
+                               "web/response" #{:not-modified-response}
+                               "web/tests" #{:_wt-resp-sig name}})
+                      {:name :caller :namespace "web.tests" :parent :const :args {:value name}})
+          sources (parse/prepare-module forms {} {})
+          original (some #(when (= name (:name %)) %) forms)
+          {:keys [fn-defs base-fn-defs]} (loader/load-packages ["web"])
+          _ (sync/register-type-aliases! fn-defs)
+          impls (into {} (for [{:keys [name] module-ns :namespace} forms :let [base (get base-fn-defs name)] :when base
+                               :let [id (ids/fn-id module-ns name)]]
+                           (do (registry/record-rich-types! id name base) [id (:impl base)])))
+          roots (:by-id @registry/*rich-types-override*)
+          proof (certification/verify-plan sources forms {} roots)
+          package (:package proof)
+          {:keys [proposed generated-ids] :as expansion} (get-in package [:query-lookups owner])
+          legacy {:namespace "web.tests" :fns [(dissoc original :namespace)]}
+          content (generated/emit package [owner] roots)
+          stage (assoc (pinned-stage (assoc legacy :input-format 2 :fns [(dissoc proposed :namespace)]))
+                       :visible-fn-ids (set (keys (:declarations package))) :legacy-module legacy
+                       :generated-source (assoc content :owner-ids [owner]))
+          compiled (execution/compile-staged-module package owner roots impls stage)]
+      (is (= :response-signature-test (get-in package [:closure-baselines owner :kind])))
+      (is (every? uuid? (map (:proof expansion) [:response-reader :normalized-reader :response-producer :normalized-producer])))
+      (is (= 3 (count (set generated-ids))))
+      (is (= :closed-owner-proof-required
+             (rejection #(snapshot/freeze-source-analysis package [(ids/fn-id "web.tests" :caller)] roots))))
+      (is (= [304 nil nil ""] ((:invoke compiled) {} {})))
+      (is (nil? (response/prepare package owner (dissoc roots (ids/fn-id "core.logic" :coalesce)))))
+      (is (nil? (response/prepare (assoc-in package [:originals owner 0 :args :actual :args :resp :args :body] :external)
+                                  owner roots))))))

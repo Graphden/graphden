@@ -4,6 +4,7 @@
     [graphden.input.form-query :as form-query]
     [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
+    [graphden.input.response-signature :as response-signature]
     [graphden.input.source :as source]
     [graphden.input.source-legacy-readers :as legacy-readers]
     [graphden.input.source-origins :as origins]
@@ -44,6 +45,7 @@
     {:package (or (query/certify package id roots)
                   (query/certify package id roots query-inline/prepare)
                   (query/certify package id roots form-query/prepare)
+                  (query/certify package id roots response-signature/prepare)
                   (cond
                     (= :joint field) (snapshot/with-certified-owner package id roots)
                     field (snapshot/with-migrated-forwarding package id field roots)

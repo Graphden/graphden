@@ -4,6 +4,7 @@
     [graphden.input.migration :as migration]
     [graphden.input.query-lookup-inline :as query-inline]
     [graphden.input.query-lookup-package :as query]
+    [graphden.input.response-signature :as response-signature]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]
     [graphden.input.staged-module :as staged]
@@ -39,11 +40,12 @@
 (defn- check-owner
   [package owner roots]
   (let [package (if (query/cached package owner roots) package
-                  (or (query/certify package owner roots) (query/certify package owner roots query-inline/prepare)))
+                    (or (query/certify package owner roots) (query/certify package owner roots query-inline/prepare)
+                        (query/certify package owner roots response-signature/prepare)))
         expansion (query/cached package owner roots)
         {:keys [generated-ids]} expansion
         kind (get-in package [:closure-baselines owner :kind])]
-    (when-not (and (#{:query-lookup :query-lookup-inline} kind)
+    (when-not (and (#{:query-lookup :query-lookup-inline :response-signature-test} kind)
                    (seq generated-ids) (every? uuid? generated-ids)
                    (= (count generated-ids) (count (set generated-ids))))
       (reject! :generated-source-owner-required))

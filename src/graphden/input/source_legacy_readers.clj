@@ -6,7 +6,6 @@
     [graphden.executor.compile.renames :as renames]
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as registry]
-    [graphden.input.legacy-use :as legacy-use]
     [graphden.input.source-forward :as forward]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]))
@@ -72,7 +71,7 @@
   (when (seq roots)
     (binding [registry/*rich-types-override* (atom {:by-id roots :by-name {}})
               registry/*per-org-rich-override* (atom {})]
-      (legacy-use/select-binding graph owner))))
+      ((requiring-resolve 'graphden.input.legacy-use/select-binding) graph owner))))
 
 
 (defn- value-edge?

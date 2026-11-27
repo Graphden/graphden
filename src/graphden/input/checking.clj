@@ -19,7 +19,7 @@
     {:status :deferred :reason :capture-analysis-required :substitution substitution}
     (nil? check-expression)
     {:status :deferred :reason :type-checker-required :substitution substitution}
-    (and (#{:text :uuid} guarded-read-type) (= expected-type guarded-read-type) (= :value (:mode reference))
+    (and (#{:text :uuid :int} guarded-read-type) (= expected-type guarded-read-type) (= :value (:mode reference))
          (= #{:null guarded-read-type} (set (types/union-members (:actual-type reference)))))
     (let [proof (check-expression {:address address :expected expected-type :actual guarded-read-type
                                    :expression expression :substitution substitution})]

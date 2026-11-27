@@ -129,3 +129,47 @@
          (= builder-id origin-fn-id) (= ref-fn-id target-fn-id)
          (= name (keyword (str "item-" position)))
          (= from [[root (conj prefix list-binding)] [(ids/slot-id builder-id name)]]))))
+
+
+(def ^:private add-id (ids/fn-id "core.arithmetic" :add))
+
+
+(defn check-index-operand
+  "A native two-operand addition demands a number when read. Retain the
+   index producer's nullable result and check the authored integer assertion
+   at its exact list operand. A skipped addition still reads neither operand."
+  [ctx implementations graph path]
+  (let [node (get-in graph [:scopes path])
+        builder (:fn-id node)
+        {:keys [items owner-id target-id binding-id] :as fragment} (get-in ctx [:source-list-fragments builder])]
+    (if (and (seq path) (= target-id (ids/slot-id add-id :nums)) (= 2 (count items))
+             (= binding-id (peek path))
+             (= (builder/origin owner-id target-id)
+                (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id])))
+      (let [parent-path (pop path)
+            root (:fn-id graph)
+            parent (get-in graph [:scopes parent-path])
+            abi (get implementations (:fn-id parent))
+            edge (get-in parent [:bindings [[root parent-path] [target-id]]])
+            operand (fn [{:keys [position]}]
+                      (get-in node [:bindings [[root path] [(ids/slot-id builder (keyword (str "item-" position)))]]]))
+            item (some #(when (= :ref (:kind %)) %) items)
+            literal (some #(when (= :value (:kind %)) %) items)
+            entry (operand item)
+            proof (get-in node [:metadata-proofs (:id item)])]
+        (if (and (= add-id (first (:declaration-order parent)) (:base-fn-id abi) (get-in abi [:root-entry :fn-id]))
+                 (= {:nums [:list :numeric]} (get-in abi [:root-entry :args]))
+                 (= [target-id] (get-in abi [:argument-paths :nums])) (= #{} (get-in abi [:root-entry :effects]))
+                 (= binding-id (:binding-id edge)) (= owner-id (:origin-fn-id edge))
+                 (= {:kind :ref :fn-id builder} (:expression edge))
+                 (= (:id literal) (:binding-id (operand literal)))
+                 (integer? (:value literal)) (= {:kind :value :value (:value literal)} (:expression (operand literal)))
+                 (= :int (:type item) (:expected-type entry))
+                 (= {:kind :ref :fn-id (:fn-id item)} (:expression entry))
+                 (= :value (get-in entry [:reference :mode]))
+                 (= #{:int :null} (set (types/union-members (get-in entry [:reference :actual-type]))))
+                 (= :checked (:status proof)) (= (:id item) (:binding-id entry) (:binding-id proof))
+                 (= (:address entry) (:address proof)))
+          (assoc-in graph [:scopes path :bindings (:address entry) :guarded-read-type] :int)
+          graph))
+      graph)))

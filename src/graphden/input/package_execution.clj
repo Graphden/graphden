@@ -55,7 +55,7 @@
   "Append remains open for composition. At V1 invocation the final unused
    zipmap continuation contributes no items. Specialize only an unresolved
    public tail of that exact generated use, then rerun the ordinary checker.
-   Staged modules specialize only tails beneath an explicitly checked dictionary read."
+   Numeric additions with an asserted index also have an ordinary empty V1 continuation."
   [{:keys [context options]} root staged?]
   (let [checked (analysis/analyze-effective-input context root options)
         producers (when staged? (checked-dictionary-producers checked))
@@ -63,18 +63,21 @@
                    (for [{:keys [name kind type required whole-bindable? origin-field-id address]}
                          (when (= :checked (:status checked)) (vals (get-in checked [:public-input :routes])))
                          :when (and (= :input-field kind) (= :tail name) (false? required) whole-bindable?
-                                    (types/list-type? type) (types/type-var? (types/list-elem type)))
+                                    (types/list-type? type))
                          :let [[scope path] address
                                node (get-in checked [:scopes (second scope)])
                                id (:fn-id node)
                                {:keys [owner-id target-id tail] :as fragment} (get-in context [:source-list-fragments id])
                                abi (:signature-source node)]
-                         :when (and (= :open tail) (zipmap-list-slots target-id) (uuid? owner-id)
+                         :when (and (= :open tail) (uuid? owner-id)
                                     (= id (:builder-id fragment) (:base-fn-id abi))
                                     (= owner-id (get-in abi [:generated-list :owner-id]))
-                                    (true? (get-in abi [:generated-list :infer-return?]))
                                     (= path [origin-field-id] [(:tail-id fragment)] (get-in abi [:argument-paths :tail]))
-                                    (or (not staged?) (some #(= % (vec (take (count %) (second scope)))) producers))
+                                    (or (and (zipmap-list-slots target-id) (types/type-var? (types/list-elem type))
+                                             (true? (get-in abi [:generated-list :infer-return?]))
+                                             (or (not staged?) (some #(= % (vec (take (count %) (second scope)))) producers)))
+                                        (and (= [:list :numeric] type) (false? (get-in abi [:generated-list :infer-return?]))
+                                             (some #(= :int (:guarded-read-type %)) (vals (:bindings node)))))
                                     (= (builder/origin owner-id target-id)
                                        (select-keys fragment [:owner-id :target-id :binding-id :builder-id :tail-id])))]
                      [scope (builder/empty-tail-binding fragment)]))]

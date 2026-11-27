@@ -88,6 +88,17 @@
                 resolved))) names (if (vector? source) source (:append source))))
 
 
+(defn- checked-position-operand?
+  [{:keys [defs-by-name name->id]} producer declared target type form]
+  (and (= :int type)
+       (= target (ids/slot-id (ids/fn-id "core.arithmetic" :add) :nums))
+       (= (ids/fn-id "core.collections" :position-in) (:fn-id (first (ordered-ancestry producer defs-by-name))))
+       (= (ids/fn-id "core.refinements" :nullable-int) (get name->id declared))
+       (= [:null :int] (:union (get defs-by-name declared)))
+       (= 2 (count (items form)))
+       (some #(integer? (if (map? %) (:value %) %)) (items form))))
+
+
 (defn- contribution
   [{:keys [name->id] :as context} definition records original-for target field]
   (let [rows (group-by :kind records)
@@ -117,7 +128,8 @@
                           producer (get (:defs-by-name context) name)
                           declared (when producer
                                      (some :return-type (reverse (ordered-ancestry producer (:defs-by-name context)))))]
-                      (when-not (and producer (or (= :any declared) (= type declared)))
+                      (when-not (and producer (or (= :any declared) (= type declared)
+                                                  (checked-position-operand? context producer declared target type form)))
                         (reject! :list-reference-type-evidence-required))))
                 inlines (inline-items context original definition field form)
                 form (replace-inline-items form inlines)

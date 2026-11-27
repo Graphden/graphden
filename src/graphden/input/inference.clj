@@ -6,6 +6,7 @@
     [graphden.input.checking :as checking]
     [graphden.input.conditional-reads :as conditional-reads]
     [graphden.input.context :as context]
+    [graphden.input.list-signature :as list-signature]
     [graphden.input.projections :as projections]
     [graphden.input.resolvers :as resolvers]
     [graphden.input.signatures :as signatures]
@@ -89,6 +90,7 @@
                        (:dependencies graph))
         graph (if incoming (resolvers/bind-argument graph incoming) graph)
         graph (conditional-reads/install graph path implementations (::conditional-reads/baseline-readers ctx))
+        graph (list-signature/check-index-operand ctx implementations graph path)
         node (get-in graph [:scopes path])
         scope [(:fn-id graph) path]
         result (signatures/infer-use ctx graph scope (get implementations (:fn-id node)) infer-signature)

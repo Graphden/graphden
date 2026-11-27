@@ -1777,3 +1777,32 @@
           (is (= value (canonical {:test {:value {:token "guard input"}} :then {:data {:token value}}})))))
       (let [failure (try (build :text) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
         (is (= [:types/check-failed :type-mismatch] ((juxt :type :reason) failure)))))))
+
+
+(deftest staged-addition-checks-a-nullable-index-at-its-authored-item
+  (let [originals (into (declarations "packages/core/collections/fns.edn" #{:position-in})
+                        (concat (declarations "packages/core/arithmetic/fns.edn" #{:add})
+                                (declarations "packages/core/refinements/fns.edn" #{:nullable-int})
+                                [{:namespace "fixture" :name :find-position :parent :position-in
+                                  :args {:coll {:value [3 5]} :value {:as :needle}}}
+                                 {:namespace "fixture" :name :advance :parent :add
+                                  :args {:nums [{:ref :find-position :type :int} 1]}}]))
+        root (ids/fn-id "fixture" :advance)
+        compile-staged (fn [{:keys [prepared]} owner roots impls]
+                         (let [{:keys [package plan]} (certification/verify-plan prepared originals {} roots)
+                               entry (first (filter #(= owner (:identity %)) (:definitions plan)))
+                               legacy {:namespace "fixture" :fns [(dissoc (:source entry) :namespace)]}
+                               staged (assoc legacy :input-format 2 :fns [(dissoc (:proposed entry) :namespace)])]
+                           (execution/compile-staged-module package owner roots impls
+                                                            (staged-options legacy staged (set (keys (:declarations package)))))))]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! originals)
+      (let [{:keys [analysis legacy canonical]} (runtimes originals root compile-staged)
+            paths (keys (get-in analysis [:public-input :routes]))
+            [needle & more] (filter #(= :needle (peek %)) paths)]
+        (is (and (some? needle) (empty? more)))
+        (is (not-any? #(= :tail (peek %)) paths))
+        (is (= 2 (legacy {:needle 5}) (canonical (assoc-in {} needle 5))))
+        (is (= :execution-error/type-mismatch
+               (try (canonical (assoc-in {} needle 7)) nil
+                    (catch clojure.lang.ExceptionInfo failure (:type (ex-data failure))))))))))

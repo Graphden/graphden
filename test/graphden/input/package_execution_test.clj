@@ -1567,6 +1567,33 @@
     (is (= :unsupported-reference-use (get-in result [:blocked owner :code])) (pr-str (:blocked result)))))
 
 
+(deftest filtering-on-a-direct-capture-preserves-its-named-input
+  (let [source (into (declarations "packages/app/execution/fns.edn"
+                                   #{:_sp-matches-on-current :_sp-on-current?-cb :_sp-svc-row-branch-id
+                                     :_sp-matches :_sp-row-matches-fn?-cb :_sp-svc-row-fn-id})
+                     (concat (declarations "packages/core/hof/fns.edn" #{:filter})
+                             (declarations "packages/core/logic/fns.edn" #{:equal?})
+                             (declarations "packages/core/collections/fns.edn" #{:get})))
+        root (ids/fn-id "app.execution" :_sp-matches-on-current)
+        compile-owner (fn [package id roots implementations]
+                        (let [certified (:package (certification/verify-plan (:prepared package) source {} roots))]
+                          (is (= :authored-source-equivalent (get-in certified [:closure-baselines id :verification])))
+                          (execution/compile-package certified id roots implementations)))
+        {:keys [canonical legacy]} (runtimes source root compile-owner)
+        first-row {:fn-id "a" :branch-id "main" "original" false 3 :additional}
+        second-row {:fn-id "b" :branch-id "main"}
+        other-branch {:fn-id "a" :branch-id "topic"}
+        rows [first-row second-row other-branch nil]]
+    (doseq [[id branch services expected] [["a" "main" rows [first-row]] ["a" "topic" rows [other-branch]]
+                                           ["b" "main" rows [second-row]] ["c" "main" rows []] ["a" "main" [] []]]]
+      (is (= expected (legacy {:fn-id id :current-branch-id branch :enriched-services services})
+             (canonical {:pred {:current-branch-id branch} :coll {:pred {:fn-id id} :enriched-services services}}))))
+    (is (= :execution-error/type-mismatch
+           (try (canonical {:pred {:current-branch-id "main"} :coll {:pred {:fn-id "a"} :enriched-services [42]}})
+                nil
+                (catch clojure.lang.ExceptionInfo failure (:type (ex-data failure))))))))
+
+
 (deftest native-lookup-reads-a-record-through-the-identity
   (let [source (into (declarations "packages/core/collections/fns.edn" #{:get})
                      (concat (declarations "packages/core/logic/fns.edn" #{:const})

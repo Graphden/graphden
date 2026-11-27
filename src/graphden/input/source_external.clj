@@ -51,7 +51,7 @@
 
 
 (defn- original-call-site?
-  [graph snapshot {:keys [from binding-id target-fn-id]} address {:keys [parameters call-sites external-captures]}]
+  [graph snapshot {:keys [from to binding-id target-fn-id]} address {:keys [parameters call-sites external-captures]}]
   (when-let [readers (:source-callback-readers snapshot)]
     (let [[[_ caller-path] [slot :as fields]] from
           {:keys [positional captured] original-parameters :parameters}
@@ -69,7 +69,9 @@
            (= (count call-sites) (count positional-uses)) (= positional positional-uses)
            ;; One env name can supply multiple physical callback readers. A
            ;; single scoped write must cover the complete translated reader set.
-           (simple-keyword? name) (= name (peek value-path))
+           (simple-keyword? name)
+           (or (= name (peek value-path))
+               (and (= [] value-path) (= to (first address))))
            (= address target) (empty? others)
            (= [slot-id] (into [] (keep (fn [[id spelling]] (when (= name spelling) id))) captured))))))
 
@@ -78,8 +80,12 @@
   [expected callable original-use?]
   (and (types/fn-type? callable)
        (or (= callable expected)
-           (and original-use? (types/fn-type? expected) (= :any (types/fn-ret expected))
-                (= expected (assoc callable 2 :any))))))
+           (and original-use? (types/fn-type? expected)
+                (= (types/fn-args expected) (types/fn-args callable))
+                (= (types/fn-effects expected) (types/fn-effects callable))
+                (or (= (types/fn-ret expected) (types/fn-ret callable)) (= :any (types/fn-ret expected)))
+                (or (= (types/fn-execution expected) (types/fn-execution callable))
+                    (and (= :unknown (types/fn-execution expected)) (set? (types/fn-execution callable))))))))
 
 
 (defn captured-input?
@@ -111,7 +117,8 @@
     (every? (fn [[from edges]]
               (let [old (get-in before [:closures from])
                     new (get-in after [:closures from])
-                    targets (set (map :captured-input edges))
+                    readers (set (map :captured-input edges))
+                    targets (into #{} (filter #(get-in by-address [% :row :expression-kind])) readers)
                     remaining (remove #(contains? targets (:target %)) (:external-captures old))
                     installed (:external-captures new)
                     extras (remove (set remaining) installed)
@@ -120,7 +127,7 @@
                     certificate (get by-address target)
                     bound (get-in after [:public-input :bindings from])
                     original-bound (get-in before [:public-input :bindings from])]
-                (and (every? by-address targets) (= :graph-callable (get-in bound [:reference :mode]))
+                (and (every? by-address readers) (= :graph-callable (get-in bound [:reference :mode]))
                      (true? (get-in bound [:reference :capture-resolved?]))
                      (= (:expected-type original-bound) (:expected-type bound))
                      (= (:callable-type old) (get-in bound [:reference :callable-type]))

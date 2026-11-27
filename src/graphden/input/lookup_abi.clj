@@ -114,33 +114,39 @@
       (independent-key-domain node variable expected (first path) (first native-path)))))
 
 
-(defn single-collection-inputs
-  "A private map-key binder has no relationship with any other argument or
-   result. Reify it at the sole public projection of that native collection."
-  [analysis expressions scopes]
+(defn- single-reader-inputs
+  [expressions reader-domain]
   (let [readers (group-by (comp :source val) (filter #(= :read (:op (val %))) expressions))]
     (reduce-kv (fn [result [scope path :as source] {:keys [op type]}]
                  (if-let [domain (when (and (= :supplied op) (= 1 (count path))
                                             (types/type-any? types/type-var? type) (empty? (get readers [scope []])))
                                    (let [[[address] & others] (get readers source)]
                                      (when (and address (empty? others))
-                                       (projected-collection-domain analysis scopes source type address))))]
+                                       (reader-domain source type address))))]
                    (update result source assoc :type domain :declared-collection-type type)
                    result))
                expressions expressions)))
 
 
+(defn single-collection-inputs
+  "Reify the private map-key binder at the sole projection of a native lookup."
+  [analysis expressions scopes]
+  (single-reader-inputs expressions (partial projected-collection-domain analysis scopes)))
+
+
 (def ^:private collection-returns
-  {:first '[:union :null a] :reverse '[:list a] :sort-by '[:list a] :group-by '[:map b [:list a]]})
+  {:first '[:union :null a] :reverse '[:list a] :sort-by '[:list a] :group-by '[:map b [:list a]] :filter '[:list a]})
 
 
-(defn- ordered-abi
+(defn- collection-abi
   [analysis scope]
   (let [{:keys [base-fn-id root-entry argument-paths]} (get-in analysis [:scopes (second scope) :signature-source])
         {:keys [name args return]} root-entry
         keyed? (#{:sort-by :group-by} name)
-        module (if keyed? "core.hof" "core.collections")
-        expected (cond-> '{:coll [:list a]} keyed? (assoc :key-fn '[:fn {:item a} b #{} :unknown]))]
+        module (if (or keyed? (= :filter name)) "core.hof" "core.collections")
+        expected (cond-> '{:coll [:list a]}
+                   keyed? (assoc :key-fn '[:fn {:item a} b #{} :unknown])
+                   (= :filter name) (assoc :pred '[:fn {:item a} :bool #{} :unknown]))]
     (when (and (contains? collection-returns name) (= module (:namespace root-entry))
                (= (ids/fn-id module name) base-fn-id (:fn-id root-entry))
                (= expected args) (= (collection-returns name) return) (= #{} (:effects root-entry))
@@ -148,22 +154,25 @@
       {:name name :paths argument-paths})))
 
 
-(defn ordered-lookup-items
-  "Follow native operations that retain element values through sorting or
-   reversal to the key callback. Reuse the runtime domain proved for its
+(defn lookup-item-list-type
+  "Follow native operations that retain element values to a key or
+   predicate callback. Reuse the runtime domain proved for its
    sole native lookup reader, retaining the list and per-element checks."
   [analysis expressions closures [scope path] expected]
   (when (types/list-type? expected)
     (loop [scope scope
            path path]
-      (let [{:keys [name paths]} (ordered-abi analysis scope)
+      (let [{:keys [name paths]} (collection-abi analysis scope)
             address [scope path]
             item (types/list-elem expected)
             edge (get expressions address)]
-        (when (and name (= path (:coll paths)) (= :invoke (:op edge))
+        (when (and name (= path (:coll paths))
+                   (or (= :invoke (:op edge))
+                       (and (= :filter name) (= :read (:op edge))
+                            (= scope (first (:source edge))) (= :supplied (get-in expressions [(:source edge) :op]))))
                    (= expected (get-in analysis [:scopes (second scope) :bindings address :expected-type])))
-          (if (#{:sort-by :group-by} name)
-            (let [callback (get closures [scope (:key-fn paths)])
+          (if-let [callback-path (or (:key-fn paths) (:pred paths))]
+            (let [callback (get closures [scope callback-path])
                   [site & others] (:call-sites callback)
                   reader (get expressions (:address site))]
               (when (and (= [:item] (:parameters callback)) (= :item (:name site)) (empty? others)
@@ -171,7 +180,20 @@
                          (= item (get (types/fn-args (:type callback)) :item)))
                 [:list (:type reader)]))
             (let [child (:scope edge)
-                  next-abi (ordered-abi analysis child)]
+                  next-abi (collection-abi analysis child)]
               (when (and (#{:reverse :sort-by} (:name next-abi))
                          (= expected (get-in analysis [:scopes (second child) :signature :return])))
                 (recur child (get-in next-abi [:paths :coll]))))))))))
+
+
+(defn single-list-inputs
+  "A list supplied directly to a single native filter has the same item
+   domain as that filter's positional lookup reader."
+  [analysis expressions closures]
+  (if (seq closures)
+    (single-reader-inputs
+      expressions
+      (fn [[scope] type [reader-scope :as address]]
+        (when (and (= scope reader-scope) (types/list-type? type) (= type (get-in expressions [address :type])))
+          (lookup-item-list-type analysis expressions closures address type))))
+    expressions))

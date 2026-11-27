@@ -149,6 +149,28 @@
       (is (= :callback-outside-invocation (rejection-code callback))))))
 
 
+(deftest exception-handler-inputs-have-fresh-nonforcing-memo-keys
+  (let [definitions {:root {:input {:handler [:fn {:exception :any} :text #{}]} :return [:list :text]
+                            :bindings {[:handler] {:ref :explain :id :on-error}}}
+                     :explain {:input {:exception :any} :return :text}}
+        first-error (proxy [Exception] ["first"]
+                      (hashCode [] (throw (AssertionError. "Hashed a callback exception"))))
+        second-error (ex-info "second" {})
+        calls (atom [])
+        functions {:root (fn [args _]
+                           (let [handler (runtime/resolve-arg args :handler)]
+                             [(handler first-error) (handler second-error)]))
+                   :explain (fn [args _]
+                              (let [e (runtime/resolve-arg args :exception)]
+                                (swap! calls conj e)
+                                (ex-message e)))}
+        {:keys [closure]} (compiled definitions functions)]
+    (is (= ["first" "second"] (invoke closure)))
+    (is (= 2 (count @calls)))
+    (is (identical? first-error (first @calls)))
+    (is (identical? second-error (second @calls)))))
+
+
 (deftest authored-callable-parameter-can-be-read-inside-a-reference
   (let [definitions {:root {:input {:callback [:fn {:item :text} :text #{}]} :return :text
                             :bindings {[:callback] {:ref :child :id :callback-use}}}

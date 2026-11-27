@@ -78,6 +78,12 @@
               _ (when-not (or active? detachable?) (check-callback-lifetime! (:lifetime frame) scope))
               _ (executor/check-cancel!)
               [supplied input-sources] (callback-supplies plan args)
+              ;; A handler's exception is opaque to memoization. Its cell is
+              ;; shared by reference throughout this callback invocation.
+              input-sources (into (or input-sources {})
+                                  (keep (fn [[address value]]
+                                          (when (instance? Exception value)
+                                            [address (input/value-cell value)]))) supplied)
               parent (when active? frame)
               ctx (if parent ctx (eager/independent-invocation-context ctx))
               local (instantiate-frame (:ir frame) (:validators frame) scope supplied input-sources parent ctx)]

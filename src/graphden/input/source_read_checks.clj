@@ -72,3 +72,33 @@
                        (and (= owner root) (<= (count prefix) (count path))
                             (= prefix (subvec path 0 (count prefix))) (installed-literal? after c))) certificates)
                (context/call-with-types snapshot #(types/subtype? actual expected-type)))))))
+
+
+(defn projected-reference
+  "Match an unchanged deferred projection from :any to the supplied value
+   reference. The caller still verifies the target's independently inferred
+   return before transporting the new check."
+  [before after by-address old current]
+  (let [{:keys [address expected-type]} current
+        original (binding-at before address)
+        projected (binding-at after address)
+        {:keys [scope path kind]} (:expression projected)
+        source [scope path]
+        {:keys [row] :as certificate} (get by-address source)
+        bound (binding-at after source)
+        use-scope [(first scope) (conj (second scope) (:id row))]
+        target (:ref-fn-id row)
+        edge {:from source :to use-scope :binding-id (:id row) :target-fn-id target :mode :value}
+        reason (fn [graph] ((juxt :status :reason) (get-in graph [:proofs address])))]
+    (when (and (field-read? current) (= old (assoc current :expected-type :any)) (not= :any expected-type)
+               (= [:deferred :runtime-type-obligation] (reason before) (reason after))
+               (uuid? (:binding-id projected)) (= :projection kind (get-in projected [:reference :mode]))
+               (= (select-keys original [:binding-id :origin-fn-id :expression :expected-type :reference])
+                  (select-keys projected [:binding-id :origin-fn-id :expression :expected-type :reference]))
+               (= :any (:expected-type projected)) certificate (uuid? target)
+               (= (:id row) (:binding-id bound))
+               (= :value (get-in bound [:reference :mode])) (= {:kind :ref :fn-id target} (:expression bound))
+               (some #{edge} (:dependencies after))
+               (= target (get-in after [:scopes (second use-scope) :fn-id]))
+               (= expected-type (get-in bound [:reference :actual-type]) (get-in after [:scopes (second use-scope) :signature :return])))
+      [target use-scope])))

@@ -473,6 +473,17 @@
         certificate))))
 
 
+(defn- projected-check
+  [snapshot analyze before after by-address current old]
+  (when-let [replacement (get current (:id old))]
+    (when-let [[target use-scope] (reads/projected-reference before after by-address old replacement)]
+      (let [graph (checked-graph analyze snapshot target true)
+            returned (get-in graph [:scopes [] :signature :return])
+            renaming (when (types/type-any? types/type-var? returned) (nested-binders graph after use-scope))]
+        (when (= (:expected-type replacement) (type-at-use renaming returned))
+          replacement)))))
+
+
 (defn- preserves-scoped-checks?
   [snapshot analyze before after certificates]
   (let [current (set (:obligations after))
@@ -493,7 +504,13 @@
                                            (not (contains? current check)))))
                             (map #(update % :expected-type (partial types/resolve (:substitution after)))))
                       original))
-        prior (into #{} (remove #(and (not (current %)) (reads/discharged? snapshot before after certificates %))) prior)]
+        by-address (into {} (map (juxt :address identity)) certificates)
+        by-id (into {} (map (juxt :id identity)) current)
+        prior (into #{} (keep (fn [check]
+                                (cond
+                                  (current check) check
+                                  (reads/discharged? snapshot before after certificates check) nil
+                                  :else (or (projected-check snapshot analyze before after by-address by-id check) check)))) prior)]
     (or (= prior current)
         (and (every? current prior)
              (let [ref-checks (into prior (mapcat #(reference-field-checks snapshot analyze before after %)) certificates)

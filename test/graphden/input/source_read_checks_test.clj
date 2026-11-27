@@ -53,3 +53,32 @@
                      (assoc-in after [:scopes [edge-id] :bindings literal :binding-id] (random-uuid))
                      (assoc-in after [:dependencies 0 :target-fn-id] (random-uuid))]]
       (is (not (verify changed))))))
+
+
+(deftest an-unchanged-projection-must-read-the-supplied-reference-itself
+  (let [[owner field row-id projected-field projection-id target] (repeatedly 6 random-uuid)
+        source [[owner []] [field]]
+        dest [[owner []] [projected-field]]
+        used [owner [row-id]]
+        row {:id row-id :ref-fn-id target}
+        certificate {:address source :row row}
+        expected [:map :keyword :text]
+        old (check-at dest :any)
+        current (check-at dest expected)
+        projection {:binding-id projection-id :expression {:kind :projection :scope (first source) :path [field]}
+                    :expected-type :any :reference {:mode :projection}}
+        before {:proofs {dest {:status :deferred :reason :runtime-type-obligation}}
+                :scopes {[] {:bindings {dest projection}}}}
+        after (-> before
+                  (assoc :dependencies [{:from source :to used :target-fn-id target :binding-id row-id :mode :value}])
+                  (assoc-in [:scopes [row-id]] {:fn-id target :signature {:return expected}})
+                  (assoc-in [:scopes [] :bindings source] {:binding-id row-id :expression {:kind :ref :fn-id target}
+                                                           :reference {:mode :value :actual-type expected}}))
+        prove #(reads/projected-reference before % {source certificate} old current)]
+    (is (= [target used] (prove after)))
+    (doseq [g [(assoc-in after [:scopes [row-id] :signature :return] :any)
+               (assoc-in after [:scopes [] :bindings dest :expression :path] [projected-field])
+               (assoc-in after [:proofs dest :status] :checked)
+               (assoc-in after [:dependencies 0 :target-fn-id] (random-uuid))
+               (assoc-in after [:scopes [] :bindings source :binding-id] (random-uuid))]]
+      (is (nil? (prove g))))))

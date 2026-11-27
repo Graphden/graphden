@@ -20,6 +20,8 @@
   (:import
     (java.io
       StringWriter)
+    (java.nio.charset
+      StandardCharsets)
     (java.nio.file
       Files)
     (java.security
@@ -191,6 +193,23 @@
           source-modules)))
 
 
+(defn- generated-patch
+  [{:keys [repository name]} package module-patches entries emit]
+  (let [paths (into #{} (comp (filter #(= :verified (:status %))) (map :path)) module-patches)
+        selected (into (sorted-map)
+                       (keep (fn [{:keys [identity source]}]
+                               (let [path (:source-file source)]
+                                 (when (and (paths path) (get-in package [:query-lookups identity :generated-ids]))
+                                   [identity path]))))
+                       entries)]
+    (when (seq selected)
+      (let [owners (vec (keys selected))
+            {:keys [bytes sha256]} (emit package owners)]
+        {:repository repository :package name :owners owners
+         :module-paths (vec (into (sorted-set) (vals selected)))
+         :sha256 sha256 :text (String. ^bytes bytes StandardCharsets/UTF_8)}))))
+
+
 (defn- capture-legacy
   [{:keys [fn-defs name->id] :as prepared} exports]
   (let [parse-definition (fn [definition]
@@ -212,13 +231,17 @@
 
 
 (defn- prepared-state
-  [package dependencies prepared {:keys [emit? verify-scopes legacy-graph]} proofs]
+  [package dependencies prepared {:keys [emit? verify-scopes legacy-graph emit-generated]} proofs]
   (let [original (:source-definitions package)
         proofs (cond-> proofs legacy-graph (assoc :legacy-graph legacy-graph))
-        {:keys [context plan certified blocked source-proof]} (if verify-scopes
-                                                                (verify-scopes prepared original proofs)
-                                                                {:context prepared
-                                                                 :plan (source/verify-module (source/plan-module original prepared) prepared)})
+        verified (if verify-scopes
+                   (verify-scopes prepared original proofs)
+                   {:context prepared
+                    :plan (source/verify-module (source/plan-module original prepared) prepared)})
+        {:keys [context plan certified blocked source-proof] verified-package :package} verified
+        patches (when emit? (module-patches package (:definitions plan) context))
+        products (when (and emit? emit-generated)
+                   (generated-patch package verified-package patches (:definitions plan) emit-generated))
         verification (list-probe/verify-package (:read-source package) (:definitions plan) context)
         summaries (mapv (fn [{id :identity :as entry}]
                           (let [diagnostic (get blocked id)]
@@ -232,7 +255,8 @@
              :blockers (into (vec (mapcat :blockers summaries))
                              (map #(assoc % :repository (:repository package) :package (:name package)))
                              (:blockers verification))}
-      emit? (assoc :module-patches (module-patches package (:definitions plan) context))
+      emit? (assoc :module-patches patches)
+      products (assoc :generated-patch products)
       source-proof (assoc :source-proof source-proof))))
 
 
@@ -314,7 +338,7 @@
                                    {:dependencies (if (and (vector? (:dependencies package))
                                                            (every? string? (:dependencies package)))
                                                     (:dependencies package) :unsupported)}
-                                   (dissoc state :exports :source-proof :module-patches)))) packages)
+                                   (dissoc state :exports :source-proof :module-patches :generated-patch)))) packages)
         orphan-blockers (vec (for [repository (:repositories manifest)
                                    file (:modules-without-package repository)]
                                {:code :module-without-package :repository (:label repository) :file file}))
@@ -369,7 +393,8 @@
       (when-not (= manifest after)
         (throw (ex-info "Inventory changed during planning" {:code :source-drift})))
       {:report (summary manifest packages states)
-       :modules (into [] (mapcat :module-patches) (vals states))})))
+       :modules (into [] (mapcat :module-patches) (vals states))
+       :generated-source (into [] (keep :generated-patch) (vals states))})))
 
 
 (defn dry-run

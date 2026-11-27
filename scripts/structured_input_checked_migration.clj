@@ -2,6 +2,7 @@
   "Offline EDN migration with the trusted checkout's implementation signatures."
   (:require
     [graphden.executor.registry.core :as registry]
+    [graphden.input.generated-source :as generated]
     [graphden.input.source-certification :as certification]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
@@ -41,7 +42,8 @@
   (let [pinned (when manifest (inventory/read-edn manifest (slurp manifest)))
         roots (trusted-signatures packages)
         options {:legacy-leaves? true
-                 :verify-scopes #(certification/verify-plan %1 %2 %3 roots)}]
+                 :verify-scopes #(certification/verify-plan %1 %2 %3 roots)
+                 :emit-generated #(generated/emit %1 %2 roots)}]
     (if artifact
       (let [result (dry/migration-artifact repositories pinned options)]
         (dry/write-artifact! artifact result)

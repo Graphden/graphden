@@ -6,6 +6,7 @@
     [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]
+    [graphden.input.source :as input-source]
     [graphden.packages.records.ids :as ids]
     [graphden.types.core.shapes :as shapes]
     [structured-input-cst :as cst]
@@ -350,6 +351,37 @@
                   (:blockers report)))))))
 
 
+(deftest artifact-exports-generated-source-only-for-emitted-modules
+  (with-repository
+    (fn [root roots]
+      (let [owner (ids/fn-id "example" :id)
+            other (ids/fn-id "example" :unsupported)
+            supported-path "resources/packages/example/main/fns.edn"
+            snapshots (atom [])
+            verify (fn [context definitions _]
+                     {:context context
+                      :plan (update (input-source/verify-module (input-source/plan-module definitions context) context)
+                                    :definitions
+                                    (fn [entries]
+                                      (mapv #(cond-> % (= other (:identity %))
+                                                     (assoc :status :blocked :verification nil)) entries)))
+                      :package {:query-lookups {owner {:generated-ids [(random-uuid)]}
+                                                other {:generated-ids [(random-uuid)]}}}})
+            bytes (byte-array [49])
+            options {:verify-scopes verify
+                     :emit-generated (fn [_ owners]
+                                       (swap! snapshots conj owners)
+                                       {:bytes bytes :sha256 (ids/digest-hex "SHA-256" "1")})}]
+        (package! root "example" []
+                  [["main" "example" [identity-fn]]
+                   ["unsupported" "example" [{:name :unsupported :parent :id :args {:x {:value "inside"}}}]]])
+        (let [artifact (dry/migration-artifact roots nil options)]
+          (is (= [[owner]] @snapshots))
+          (is (= [[owner]] (mapv :owners (:generated-source artifact))))
+          (is (= [[supported-path]] (mapv :module-paths (:generated-source artifact))))
+          (is (nil? (get-in artifact [:report :packages 0 :generated-patch]))))))))
+
+
 (deftest verified-artifact-is-staged-without-touching-source
   (with-repository
     (fn [root roots]
@@ -357,6 +389,15 @@
       (fs/with-temp-dir [destination {:prefix "structured-stage-test-"}]
                         (let [module-path "resources/packages/example/main/fns.edn"
                               artifact (dry/migration-artifact roots nil)
+                              parent (get-in artifact [:report :packages 0 :definitions 0 :identity])
+                              generated {:artifact-format 1 :owners [{:owner-id parent}]
+                                         :modules [{:namespace "example" :input-format 2
+                                                    :fns [{:name :generated :input {:x :any}}]}]}
+                              text (pr-str generated)
+                              checksum (ids/digest-hex "SHA-256" text)
+                              artifact (assoc artifact :generated-source
+                                              [{:repository "fixture" :package "example" :owners [parent]
+                                                :module-paths [module-path] :sha256 checksum :text text}])
                               source (fs/path root module-path)
                               original (slurp (str source))
                               output (fs/path destination "verified")
@@ -366,6 +407,12 @@
                           (is (= 2 (:input-format staged)))
                           (is (= [{:name :id :input {:x :any} :return-type :any}] (:fns staged)))
                           (is (= [module-path] (mapv :path (:staged receipt))))
+                          (is (= [{:path "generated-structured-input/example.edn" :sha256 checksum :owners [parent]}]
+                                 (:generated-source receipt)))
+                          (is (= text (slurp (str (fs/path output "generated-structured-input/example.edn")))))
+                          (is (thrown? clojure.lang.ExceptionInfo
+                                (stage/stage! (assoc-in artifact [:generated-source 0 :sha256] "bad")
+                                              "fixture" root rejected)))
                           (is (= original (slurp (str source))))
                           (is (thrown? clojure.lang.ExceptionInfo (stage/stage! artifact "fixture" root output)))
                           (is (thrown? clojure.lang.ExceptionInfo

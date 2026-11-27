@@ -391,6 +391,13 @@ UUID, original source path, enclosing owner, root owner and source digest.
 The verifier independently resolves the child at that site before replay.
 Original module files and their inventory retain their own declaration lists.
 
+The checked migration CLI includes generated declarations for owners whose
+whole source modules have verified replacements. The staging command writes
+each package's sidecar to `generated-structured-input/<package>.edn` and records
+its path, checksum and original owner UUIDs in the receipt's `:generated-source`.
+The same staging operation rechecks the published module paths and sidecar
+bytes before opening the output directory to consumers.
+
 ## Expression grammar and source edits
 
 `graphden.input.syntax/parse-expression` accepts a resolved descriptor,

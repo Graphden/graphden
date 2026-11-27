@@ -286,6 +286,38 @@
             (types/map-type? collection) (types/map-key collection)))))
 
 
+(def ^:private coalesce-id (ids/fn-id "core.logic" :coalesce))
+
+
+(defn- projected-nullable-type
+  [node scope facts argument]
+  (let [address [scope [(ids/slot-id coalesce-id argument)]]
+        {:keys [expression reference expected-type]} (get-in node [:bindings address])
+        [from path :as source] (:source reference)]
+    (when (and (= address (get-in facts [:bindings-info argument :address]))
+               (= :projection (:kind expression) (:mode reference))
+               (= scope from) (= source ((juxt :scope :path) expression))
+               (= expected-type (:actual-type reference)
+                  (:type (descriptor/find-node (:configured-contract node) path)))
+               (some #{:null} (types/union-members expected-type))
+               (every? #{:null :bool :text :keyword :int :numeric} (types/union-members expected-type)))
+      expected-type)))
+
+
+(defn- projected-coalesce-signature
+  [root-entry node scope implementation-scope renaming facts]
+  (let [v (variables/type-in-scope implementation-scope 'a)
+        arms [:union :null v]
+        value (projected-nullable-type node scope facts :value)
+        fallback (projected-nullable-type node scope facts :default)]
+    ;; Both frozen rename sources constrain the same implementation variable.
+    ;; The native return rule still computes nullability from both operands.
+    (if (and value (= value fallback) (= "core.logic" (:namespace root-entry)) (= :coalesce (:name root-entry))
+             (not (contains? renaming v)) (= v (:return root-entry)) (= {:value arms :default arms} (:args root-entry)))
+      (assoc root-entry :args {:value value :default value})
+      root-entry)))
+
+
 (defn- projected-lookup-signature
   "The native lookup has one private key variable, used only in its map arm.
    A record admits extra keys of any type. A homogeneous map supplies its
@@ -329,7 +361,9 @@
         _ (check-rule-type! root-entry (:bindings-info facts))
         result (infer-signature
                  (assoc facts :fn-id (:fn-id node)
-                        :root-entry (projected-lookup-signature root-entry node scope implementation-scope renaming facts)
+                        :root-entry (if (= coalesce-id (:fn-id root-entry))
+                                      (projected-coalesce-signature root-entry node scope implementation-scope renaming facts)
+                                      (projected-lookup-signature root-entry node scope implementation-scope renaming facts))
                         :signature-view (frozen-view ctx graph base-fn-id root-entry)
                         :declaration declaration))
         signature (-> result

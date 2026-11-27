@@ -1164,3 +1164,26 @@
         (doseq [value [nil false "found" 0]
                 :let [args {:request (assoc request :query-params {"q" value}) :param-name "q"}]]
           (is (= value (legacy args) (canonical args))))))))
+
+
+(deftest coalesce-replays-both-projected-nullable-operands
+  (let [source (into (declarations "packages/core/refinements/fns.edn" #{:nullable-text})
+                     (concat (declarations "packages/core/logic/fns.edn" #{:coalesce :const})
+                             (declarations "packages/core/collections/fns.edn" #{:get})
+                             [{:namespace "fixture" :name :choose-text :parent :coalesce
+                               :args {:value {:as :first-text :type :nullable-text}
+                                      :default {:as :last-text :type :nullable-text}}}
+                              {:namespace "fixture" :name :read-choice :parent :get
+                               :args {:coll {:as :choices :type [:map :keyword :any]}
+                                      :key {:value :q} :default nil}}
+                              {:namespace "fixture" :name :fallback-choice :parent :const
+                               :args {:value {:as :last-option :type :nullable-text}}}
+                              {:namespace "fixture" :name :choose-read :parent :choose-text
+                               :args {:first-text :read-choice :last-text :fallback-choice}}]))
+        id (ids/fn-id "fixture" :choose-read)]
+    (binding [types/*type-aliases-override* (atom {})]
+      (sync/register-type-aliases! source)
+      (let [{:keys [canonical legacy]} (runtimes source id)]
+        (doseq [[a b expected] [[nil nil nil] [nil "b" "b"] ["a" "b" "a"]]]
+          (is (= expected (legacy {:choices {:q a} :last-option b})
+                 (canonical {:first-text {:choices {:q a}} :last-text {:last-option b}}))))))))

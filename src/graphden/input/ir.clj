@@ -30,6 +30,8 @@
     (or (contains? #{:any :null :bool :text :int :float :decimal :numeric
                      :keyword :uuid :timestamptz :bytes :jsonb [:list :any]} expected)
         (and (= [:map :keyword :any] expected) (#{:invoke :literal :read} op))) expected
+    (and (types/union-type? expected) (seq (types/union-members expected))
+         (every? #{:null :bool :text :int :numeric :keyword} (types/union-members expected))) expected
     ;; A checked literal or producer can select a concrete arm without
     ;; interpreting variables in the other arms. Keep the check at the read.
     (types/union-type? expected)

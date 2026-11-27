@@ -339,5 +339,6 @@
            ((juxt :type-override-fn-id :ref-fn-id) row)))
     (is (= fragments (:fragments (recover (reverse records)))))
     (is (= :unsupported-list-reference-type
-           (reason #(recover (map (fn [r] (cond-> r (= (:id r) (:id row))
-                                             (assoc :type-override-fn-id (:id row)))) records)))))))
+           (reason #(recover (map (fn [r]
+                                    (cond-> r (= (:id r) (:id row))
+                                            (assoc :type-override-fn-id (:id row)))) records)))))))

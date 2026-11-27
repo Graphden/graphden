@@ -51,10 +51,10 @@
 
 (defn referenced-record-source
   "Follow a checked value reference through the native identity to its record projection."
-  [graph [[root use] _] {:keys [binding-id expected-type expression reference]}]
+  [graph [[root use-path] _] {:keys [binding-id expected-type expression reference]}]
   (when (and (= :ref (:kind expression)) (= :value (:mode reference)) (uuid? binding-id)
              (= expected-type (:actual-type reference)))
-    (let [path (conj use binding-id)
+    (let [path (conj use-path binding-id)
           node (get-in graph [:scopes path])]
       (when (= (:fn-id expression) (:fn-id node))
         (identity-record-source node [[root path] value-path] expected-type)))))

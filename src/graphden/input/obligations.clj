@@ -80,9 +80,9 @@
   [by-id {:keys [id expected-type] :as incoming}]
   (if-let [{prior :expected-type :as existing} (get by-id id)]
     (cond
-      (some #(check-implies? % expected-type) (cons prior (:additional-types existing))) by-id
-      (and (= :field-read (:trigger incoming))
-           (reference/same-unary-contract? prior expected-type)) by-id
+      (or (some #(check-implies? % expected-type) (cons prior (:additional-types existing)))
+          (and (= :field-read (:trigger incoming))
+               (reference/same-unary-contract? prior expected-type))) by-id
       (check-implies? expected-type prior)
       (assoc by-id id (cond-> incoming
                         (:additional-types existing) (assoc :additional-types (:additional-types existing))))

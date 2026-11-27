@@ -102,4 +102,4 @@
     (is (= [:cell :any (get-in first-frame [:cells address])] (:body first-key)))
     (is (= [:read :any (:body first-key)] (:copy first-key)))
     (is (not= first-key (get (memo/scope-keys (make-frame)) scope)))
-    (is (= 2 (.available stream)))))
+    (is (= 2 (ByteArrayInputStream/.available stream)))))

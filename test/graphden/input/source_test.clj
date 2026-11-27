@@ -700,7 +700,7 @@
         duplicate (assoc-in child [:args :name :as] :profile-id)]
     (is (= :authored-source-equivalent (:verification entry)) (pr-str (:blockers entry)))
     (is (= (own-slots (get-in entry [:legacy :records])) migrated-slots))
-    (is (= 0 (get migrated-slots (ids/slot-id owner :context))))
+    (is (zero? (get migrated-slots (ids/slot-id owner :context))))
     (is (= #{[[(ids/slot-id parent-id :identifier)] [(ids/slot-id owner :profile-id)]]
              [[(ids/slot-id parent-id :name)] [(ids/slot-id owner :profile-name)]]}
            binding-paths))

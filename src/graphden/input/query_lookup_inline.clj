@@ -6,6 +6,7 @@
     [graphden.input.legacy-use :as legacy-use]
     [graphden.input.migration :as migration]
     [graphden.input.query-lookup-package :as query]
+    [graphden.input.source :as source-plan]
     [graphden.input.source-legacy-readers :as readers]
     [graphden.input.source-origins :as origins]
     [graphden.input.source-snapshot :as snapshot]
@@ -148,6 +149,8 @@
                      distinct (sort-by (juxt :namespace :name)) vec)
           prepared (parse/prepare-module forms {} {})
           normalized (-> (snapshot/package-index prepared forms)
+                         (cond-> (simple-keyword? reference)
+                           (update :prepared source-plan/with-local-reference child reference))
                          (assoc :legacy-graph (readers/owner-index prepared child))
                          (snapshot/with-certified-owner child native)
                          (assoc :legacy-graph (readers/owner-index prepared owner)))

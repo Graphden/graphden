@@ -97,13 +97,9 @@
 
 
 (defn- ref-index
-  [{names :name->id}]
-  (into {}
-        (keep (fn [[ref id]]
-                (when (qualified-keyword? ref)
-                  (let [bare (keyword (name ref))]
-                    [id (if (and (= "" (namespace ref)) (= id (get names bare))) bare ref)]))))
-        names))
+  [context]
+  (into {} (keep (fn [[ref id]] (when (qualified-keyword? ref) [id ref])))
+        (:name->id context)))
 
 
 (defn with-reference-index
@@ -119,6 +115,18 @@
     (if (and refs (identical? names (:name->id context)))
       refs
       (ref-index context))))
+
+
+(defn with-local-reference
+  "Use an EDN-readable name for one generated declaration in its checked module."
+  [context id local]
+  (let [names (:name->id context)]
+    (when-not (and (uuid? id) (simple-keyword? local)
+                   (= id (get names local) (get names (keyword "" (name local)))))
+      (throw (ex-info "Generated local reference does not resolve to its original UUID"
+                      {:type :input/source-verification :code :unproved-local-reference :fn-id id})))
+    (vary-meta context assoc ::reference-index
+               {:names names :refs (assoc (reference-index context) id local)})))
 
 
 (defn- binding-expression
@@ -486,7 +494,8 @@
           names (into {} (keep (fn [{:keys [source-path scope-certificate]}]
                                  (when scope-certificate [(:public-path scope-certificate) (second source-path)]))) arguments)
           copies (into {} (mapcat (fn [{:keys [scope-certificate scoped-literal-copies]}]
-                                    (map #(vector (:public-path %) (:public-path scope-certificate)) scoped-literal-copies))) arguments)]
+                                    (for [copy scoped-literal-copies]
+                                      [(:public-path copy) (:public-path scope-certificate)]))) arguments)]
       (when (and (or (seq names) legacy-leaf)
                  (migration/same-edn? (normalize-source original context)
                                       (normalize-source (:source certificate) context)))

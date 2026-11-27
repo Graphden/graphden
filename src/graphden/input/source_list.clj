@@ -6,6 +6,7 @@
     [graphden.input.list-positions :as positions]
     [graphden.input.list-records :as list-records]
     [graphden.input.migration :as migration]
+    [graphden.input.source-annotations :as annotations]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
@@ -97,26 +98,31 @@
     (when-let [[binding & more] (seq matching)]
       (when (seq more) (reject! :ambiguous-list-binding))
       (let [original (original-for definition)
-            item-rows (filter #(= (:id binding) (:binding-id %)) (:binding-list-item rows))]
+            item-rows (filter #(= (:id binding) (:binding-id %)) (:binding-list-item rows))
+            annotation (when (and (not (:list-append binding)) (not (:list-closed binding)) (empty? item-rows))
+                         (annotations/annotation context original records field))]
         (when-not (contains? (:args original) field) (reject! :list-source-origin-required))
-        (let [form (get-in original [:args field])
-              inlines (inline-items context original definition field form)
-              form (replace-inline-items form inlines)
-              typed? #(and (positions/marker? %) (contains? % :type))
-              normalize (fn [item]
-                          (if (typed? item)
-                            (update item :type rebase/rewrite-type-references
-                                    (fn [ref] (parse/normalize-ref ref name->id (:namespace original))))
-                            item))
-              prepared (cond
-                         (not-any? typed? (if (vector? form) form (:append form))) form
-                         (vector? form) (mapv normalize form)
-                         :else (update form :append #(mapv normalize %)))
-              fragment (builder/source-fragment binding item-rows prepared (field-names name->id (:namespace original) form))
-              anchors (when (some :source-id (:items fragment)) (positions/inputs owner rows name->id))]
-          (when-not (every? (set (map :id (vals anchors))) (keep :source-id (:items fragment)))
-            (reject! :positional-list-field-mismatch))
-          {:fragment fragment :inline-items inlines})))))
+        (when-not (and (= [target] (:target-path annotation))
+                       (= (:id binding) (get-in annotation [:row :id]))
+                       (nil? (:generic-parent-alias annotation)))
+          (let [form (get-in original [:args field])
+                inlines (inline-items context original definition field form)
+                form (replace-inline-items form inlines)
+                typed? #(and (positions/marker? %) (contains? % :type))
+                normalize (fn [item]
+                            (if (typed? item)
+                              (update item :type rebase/rewrite-type-references
+                                      (fn [ref] (parse/normalize-ref ref name->id (:namespace original))))
+                              item))
+                prepared (cond
+                           (not-any? typed? (if (vector? form) form (:append form))) form
+                           (vector? form) (mapv normalize form)
+                           :else (update form :append #(mapv normalize %)))
+                fragment (builder/source-fragment binding item-rows prepared (field-names name->id (:namespace original) form))
+                anchors (when (some :source-id (:items fragment)) (positions/inputs owner rows name->id))]
+            (when-not (every? (set (map :id (vals anchors))) (keep :source-id (:items fragment)))
+              (reject! :positional-list-field-mismatch))
+            {:fragment fragment :inline-items inlines}))))))
 
 
 (defn- materialize

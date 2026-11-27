@@ -308,3 +308,21 @@
         entry (peek (:definitions (source/plan-module defs (parse/prepare-module defs {} {}))))]
     (is (= #{:positional-list-annotation-required :list-builder-required} (set (map :code (:blockers entry)))))
     (is (nil? (:proposed entry)))))
+
+
+(deftest inherited-list-metadata-keeps-a-single-contribution
+  (let [declarations [{:namespace "demo" :name :consume :args {:items {:type [:list :text]}} :return-type :any}
+                      {:namespace "demo" :name :described :parent :consume
+                       :args {:items {:as :items :type [:list :text] :description "Display order."}}}
+                      {:namespace "demo" :name :contribution :parent :described :args {:items ["first"]}}]
+        replay (fn [definitions]
+                 (let [context (parse/prepare-module definitions {} {})]
+                   (:definitions (source/verify-module (source/plan-module definitions context) context))))
+        [_ parent child] (replay declarations)
+        parent-description (get-in parent [:proposed :configure [:items] :description])
+        fragments (get-in child [:legacy :arguments 0 :list-builder :fragments])
+        changed (assoc-in declarations [1 :args :items :type] [:list :int])]
+    (is (= "Display order." parent-description))
+    (is (= :authored-source-equivalent (:verification child)))
+    (is (= [["first"]] (mapv #(mapv :value (:items %)) fragments)))
+    (is (= :unsupported-list-binding (get-in (peek (replay changed)) [:legacy :arguments 0 :list-builder :blocker])))))
